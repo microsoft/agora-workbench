@@ -32,8 +32,6 @@ the workflow pauses interactively whenever the model issues a `HelpResponse`.
 | `search_backend` | `type[ToolSearchBackend] \| None` | `None` | Tool-search backend *class* (not instance). Defaults to `BM25ToolSearchBackend`. |
 | `context_providers` | `list \| None` | `None` | Extra MAF `BaseContextProvider` instances to register with the executor. |
 | `middleware` | `list \| None` | `None` | Extra MAF middleware instances to register with the executor. |
-| `enable_toolmaker` | `bool` | `False` | Add the `create_tool_from_repo` dynamic-tool-creation tool. |
-| `toolmaker_llm` | `str \| None` | same as `llm` | Model used by the ToolMaker sub-agent. |
 
 ### Quick start
 
@@ -85,8 +83,6 @@ Use `ModularAgent` when you need to:
 | `search_backend` | `type[ToolSearchBackend] \| None` | `None` | Tool-search backend *class*. Ignored when `search_tool_factory` is supplied. Defaults to `BM25ToolSearchBackend`. |
 | `context_providers` | `list \| None` | `None` | Initial MAF `BaseContextProvider` instances. Applied before `context_provider_modulator`. |
 | `middleware` | `list \| None` | `None` | Initial MAF middleware instances. Applied before `middleware_modulator`. |
-| `enable_toolmaker` | `bool` | `False` | Add the `create_tool_from_repo` dynamic-tool-creation tool. |
-| `toolmaker_llm` | `str \| None` | same as `llm` | Model used by the ToolMaker sub-agent when `enable_toolmaker=True`. |
 
 #### ModularAgent-only hooks (keyword-only)
 
@@ -232,19 +228,6 @@ agent = ModularAgent(
 tools, errors = agent._build_tools()
 if errors:
     raise RuntimeError(f"Tool setup failed: {errors}")
-```
-
-#### Attach a sub-agent as a tool
-
-```python
-from tools.toolmaker import create_toolmaker_function
-
-agent = ModularAgent(
-    llm="gpt-4o",
-    sub_agent_tool_factories=[
-        lambda: create_toolmaker_function(llm="gpt-4o", max_iterations=200),
-    ],
-)
 ```
 
 #### Run in autopilot mode (no user interaction)

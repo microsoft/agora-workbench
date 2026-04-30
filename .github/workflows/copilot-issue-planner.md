@@ -77,7 +77,7 @@ src is the active development target in a monorepo (`agora/`). It combines LLM-d
   - **Client (agent) side**: pass the user's bearer token through `auth` functions (e.g., `create_entra_token_provider`). Never instantiate credentials directly.
   - **MCP (server) side**: validate the incoming token and exchange it via OBO flow in `code_execution.code_execution.auth`. Never bypass OBO by calling `AzureCliCredential` directly in server code.
 - **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.live`; async tests use `asyncio_mode = "strict"`
-- **Test paths**: `auth/tests/`, `tools/tests/`, `data_lake/tests/`, `agent_bot/agora/tests/`, `agent_bot/plan_then_execute/tests/`, `agent_bot/toolmaker/tests/`, `planning/tests/`, `middleware/tests/`, `context_managers/tests/`, `domains/tests/` (covered by `pyproject.toml`); `code_execution/tests/` (run via `code_execution/pytest.ini`)
+- **Test paths**: `auth/tests/`, `tools/tests/`, `data_lake/tests/`, `agent_bot/agora/tests/`, `agent_bot/plan_then_execute/tests/`, `planning/tests/`, `middleware/tests/`, `context_managers/tests/`, `domains/tests/` (covered by `pyproject.toml`); `code_execution/tests/` (run via `code_execution/pytest.ini`)
   - Root `conftest.py` provides shared fixtures: `mock_environment_variables`, `mock_chat_client`, `mock_chat_agent`
 - **Dependency layering** (three tiers, imports flow downward only):
   1. **`auth/`** — the base layer; imports from nothing inside the repo.
