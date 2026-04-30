@@ -1,7 +1,0 @@
-# Local example tools package
-/app/domains/example/server/tools
-
-# Data science packages
-pandas>=2.0.0
-numpy>=1.24.0
-matplotlib>=3.7.0

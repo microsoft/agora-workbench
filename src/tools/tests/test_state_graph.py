@@ -25,41 +25,7 @@ from code_execution import StateTransition, ToolDefinition
 
 def _collect_domain_states() -> dict[str, set[str]]:
     """Return {domain_prefix: {token, ...}} for all registered domain Enums."""
-    states: dict[str, set[str]] = {}
-
-    from domains.powergrid.states import PowergridState
-
-    states["powergrid"] = {s.value for s in PowergridState}
-
-    from domains.gis.states import GisState
-
-    states["gis"] = {s.value for s in GisState}
-
-    from domains.office.states import OfficeState
-
-    states["office"] = {s.value for s in OfficeState}
-
-    from domains.openlca.states import OpenlcaState
-
-    states["openlca"] = {s.value for s in OpenlcaState}
-
-    from domains.process.states import ProcessState
-
-    states["process"] = {s.value for s in ProcessState}
-
-    from domains.foundry.states import FoundryState
-
-    states["foundry"] = {s.value for s in FoundryState}
-
-    from domains.example.states import ExampleState
-
-    states["example"] = {s.value for s in ExampleState}
-
-    from domains.latex.states import LatexState
-
-    states["latex"] = {s.value for s in LatexState}
-
-    return states
+    return {}
 
 
 def _all_valid_tokens() -> set[str]:
@@ -72,19 +38,7 @@ def _all_valid_tokens() -> set[str]:
 
 def _collect_domain_state_affordances() -> dict[str, list[str]]:
     """Return {state_token: [affordance, ...]} across all domains with a states module."""
-    import importlib
-
-    mapping: dict[str, list[str]] = {}
-    domains = _collect_domain_states()
-    for domain_name in domains:
-        try:
-            mod = importlib.import_module(f"domains.{domain_name}.states")
-            raw = getattr(mod, "STATE_AFFORDANCES", {})
-            for state_enum, phrases in raw.items():
-                mapping[state_enum.value] = phrases
-        except (ImportError, AttributeError):
-            pass
-    return mapping
+    return {}
 
 
 def _tools_with_transitions(tools: list[ToolDefinition]) -> list[ToolDefinition]:

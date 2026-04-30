@@ -1,1 +1,0 @@
-"""Vitrimer Tg simulation tools."""

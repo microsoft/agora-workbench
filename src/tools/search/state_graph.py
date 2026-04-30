@@ -9,15 +9,13 @@ rather than *which API to call*.
 
 The graph is built from three sources:
 
-1. Domain state enums and affordances (``domains/*/states.py``)
-2. Tool state transitions (via :func:`build_tool_list`)
-3. Skill state annotations (``states`` field in SKILL.md frontmatter)
+1. Tool state transitions (via :func:`build_tool_list`)
+2. Skill state annotations (``states`` field in SKILL.md frontmatter)
 """
 
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import json
 import logging
 import re
@@ -35,27 +33,8 @@ from tools.search.build_tool_list import ToolInfo
 LOGGER = logging.getLogger(__name__)
 
 
-def _locate_package_dir(dotted_path: str) -> Path:
-    """Locate a package's directory via the Python import system.
-
-    Uses :func:`importlib.util.find_spec` to resolve the filesystem location
-    of *dotted_path* (a module or package), then returns its parent directory.
-    For a package ``__init__.py`` the parent *is* the package directory.
-    For a module inside a package (e.g. ``domains.domain_registry``) the
-    parent is the enclosing package directory.
-
-    This avoids fragile ``Path(__file__).parent.parent...`` chains.
-    """
-    spec = importlib.util.find_spec(dotted_path)
-    if spec is None or spec.origin is None:
-        raise ImportError(f"Cannot locate '{dotted_path}'; is the package on sys.path?")
-    return Path(spec.origin).resolve().parent
-
-
-# Resolve the domains/ directory via the import system.  We anchor on
-# ``domains.domain_registry`` because ``domains`` is a namespace package
-# (no ``__init__.py``) whose spec has no ``origin``.
-_DOMAINS_DIR = _locate_package_dir("domains.domain_registry")
+# Path to the domains/ directory (may not exist if domains have been removed).
+_DOMAINS_DIR = Path(__file__).resolve().parent.parent.parent / "domains"
 
 
 # ============================================================================
