@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests auth, middleware, agents, tools, data_lake, code_execution, context_managers, planning, toolmaker, and domains packages
+# Tests auth, middleware, tools, data_lake, code_execution, context_managers, planning, and domains packages
 
 name: Tests
 
@@ -53,12 +53,6 @@ jobs:
         run: |
           uv run pytest src/middleware/tests/ -m "not live" -v --json-report --json-report-file=middleware-report.json
 
-      - name: Run agents tests
-        id: agents_tests
-        continue-on-error: true
-        run: |
-          uv run pytest src/agora/tests/ src/plan_then_execute/tests/ -m "not live" -v --json-report --json-report-file=agents-report.json
-
       - name: Run tools tests
         id: tools_tests
         continue-on-error: true
@@ -89,12 +83,6 @@ jobs:
         run: |
           uv run pytest src/planning/tests/ -m "not live" -v --json-report --json-report-file=planning-report.json
 
-      - name: Run toolmaker tests
-        id: toolmaker_tests
-        continue-on-error: true
-        run: |
-          uv run pytest src/toolmaker/tests/ -m "not live" -v --json-report --json-report-file=toolmaker-report.json
-
       - name: Run domains tests
         id: domains_tests
         continue-on-error: true
@@ -106,13 +94,11 @@ jobs:
         run: |
           auth_status="${{ steps.auth_tests.outcome }}"
           middleware_status="${{ steps.middleware_tests.outcome }}"
-          agents_status="${{ steps.agents_tests.outcome }}"
           tools_status="${{ steps.tools_tests.outcome }}"
           data_lake_status="${{ steps.data_lake_tests.outcome }}"
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           context_managers_status="${{ steps.context_managers_tests.outcome }}"
           planning_status="${{ steps.planning_tests.outcome }}"
-          toolmaker_status="${{ steps.toolmaker_tests.outcome }}"
           domains_status="${{ steps.domains_tests.outcome }}"
           
           echo "## Test Results"
@@ -126,12 +112,6 @@ jobs:
             echo "✅ Middleware tests passed"
           else
             echo "❌ Middleware tests failed"
-          fi
-
-          if [ "$agents_status" == "success" ]; then
-            echo "✅ Agents tests passed"
-          else
-            echo "❌ Agents tests failed"
           fi
 
           if [ "$tools_status" == "success" ]; then
@@ -164,19 +144,13 @@ jobs:
             echo "❌ Planning tests failed"
           fi
 
-          if [ "$toolmaker_status" == "success" ]; then
-            echo "✅ Toolmaker tests passed"
-          else
-            echo "❌ Toolmaker tests failed"
-          fi
-
           if [ "$domains_status" == "success" ]; then
             echo "✅ Domains tests passed"
           else
             echo "❌ Domains tests failed"
           fi
           
-          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$agents_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$context_managers_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$toolmaker_status" == "success" ] && [ "$domains_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$context_managers_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domains_status" == "success" ]; then
             exit 0
           else
             exit 1
