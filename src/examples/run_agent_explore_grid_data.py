@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from dotenv import load_dotenv
 
 # ── Logging setup ──────────────────────────────────────────────

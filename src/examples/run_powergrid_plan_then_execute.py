@@ -10,7 +10,7 @@ via ``SkillsProvider``; domain skills are discovered on demand via
 """
 
 import asyncio
-from agent_bot.plan_then_execute import PlanThenExecuteAgent
+from plan_then_execute import PlanThenExecuteAgent
 from dotenv import load_dotenv
 from log_config import setup_logging
 

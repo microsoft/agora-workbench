@@ -53,7 +53,7 @@ Read **every** file in each group.
 
 ```bash
 echo "=== Agent system prompts ==="
-find src/agent_bot -name '*.jinja' -type f | sort
+find src/agora src/plan_then_execute src/toolmaker src/gui -name '*.jinja' -type f | sort
 ```
 
 ### Domain-specific prompts

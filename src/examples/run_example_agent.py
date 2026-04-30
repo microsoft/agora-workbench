@@ -10,7 +10,7 @@ management tools for each registered server.
 """
 
 import asyncio
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from dotenv import load_dotenv
 from log_config import setup_logging
 

@@ -19,8 +19,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from agent_bot.toolmaker import ToolMakerAgent
-from agent_bot.toolmaker.tests.blind_validator import run_blind_tests
+from toolmaker import ToolMakerAgent
+from toolmaker.tests.blind_validator import run_blind_tests
 from dotenv import load_dotenv
 
 

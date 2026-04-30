@@ -1,7 +1,7 @@
 ---
 description: >
   Weekly divergence report comparing the four agent implementations under
-  src/agent_bot/ (agora, gui, plan_then_execute, toolmaker) to
+  src/ (agora, gui, plan_then_execute, toolmaker) to
   surface improvements that could propagate across agents. Opens an issue
   with findings categorised by severity and dimension.
 on:
@@ -32,7 +32,7 @@ engine: copilot
 # Agent Divergence Report
 
 You are an expert code analyst that compares the four agent implementations
-under `src/agent_bot/` to detect innovation propagation
+under `src/` to detect innovation propagation
 opportunities. The goal is **not** to make the agents identical — some
 differences are intentional (GUI needs streaming, PlanThenExecute has
 multi-stage workflows, ToolMaker has a four-phase build workflow). The goal is to surface improvements in one agent
@@ -52,7 +52,7 @@ specific dimension requires them.
 
 ```bash
 echo "=== Agent source files overview ==="
-find src/agent_bot -type f \( -name '*.py' -o -name '*.jinja' \) \
+find src/agora src/plan_then_execute src/toolmaker src/gui -type f \( -name '*.py' -o -name '*.jinja' \) \
   | grep -v __pycache__ | sort
 ```
 
@@ -82,16 +82,16 @@ Look for:
 
 ```bash
 echo "=== Response models: agora ==="
-cat src/agent_bot/agora/response_models.py
+cat src/agora/response_models.py
 echo ""
 echo "=== Response models: gui ==="
-cat src/agent_bot/gui/response_models.py
+cat src/gui/response_models.py
 echo ""
 echo "=== Response models: plan_then_execute ==="
-cat src/agent_bot/plan_then_execute/response_models.py
+cat src/plan_then_execute/response_models.py
 echo ""
 echo "=== Response models: toolmaker ==="
-cat src/agent_bot/toolmaker/models.py
+cat src/toolmaker/models.py
 ```
 
 ### Dimension 2 — Executor Patterns
@@ -105,26 +105,26 @@ strategies, history providers, token budgets), and how tools are wired.
 
 ```bash
 echo "=== Executor: agora ==="
-cat src/agent_bot/agora/executors.py
+cat src/agora/executors.py
 echo ""
 echo "=== Executor: plan_then_execute ==="
-cat src/agent_bot/plan_then_execute/executors.py
+cat src/plan_then_execute/executors.py
 echo ""
 echo "=== Executor: toolmaker ==="
-cat src/agent_bot/toolmaker/executors.py
+cat src/toolmaker/executors.py
 echo ""
 echo "=== Agent entry points ==="
 echo "--- agora/agent.py ---"
-cat src/agent_bot/agora/agent.py
+cat src/agora/agent.py
 echo ""
 echo "--- gui/agent.py ---"
-cat src/agent_bot/gui/agent.py
+cat src/gui/agent.py
 echo ""
 echo "--- plan_then_execute/agent.py ---"
-cat src/agent_bot/plan_then_execute/agent.py
+cat src/plan_then_execute/agent.py
 echo ""
 echo "--- toolmaker/agent.py ---"
-cat src/agent_bot/toolmaker/agent.py
+cat src/toolmaker/agent.py
 ```
 
 ### Dimension 3 — Skill Integration
@@ -137,10 +137,10 @@ prompts vs code.
 echo "=== Skill references across agents ==="
 grep -rn --include='*.py' --include='*.jinja' \
   -iE 'skill|SkillsProvider|SkillAware' \
-  src/agent_bot/agora/ \
-  src/agent_bot/gui/ \
-  src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
+  src/agora/ \
+  src/gui/ \
+  src/plan_then_execute/ \
+  src/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -154,10 +154,10 @@ patterns.
 echo "=== Tool setup patterns ==="
 grep -rn --include='*.py' \
   -iE 'tool_proxy|ToolProxy|mcp_tool|MCPTool|tool_config|ToolConfig|get_tools|setup_tools|tool_filter' \
-  src/agent_bot/agora/ \
-  src/agent_bot/gui/ \
-  src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
+  src/agora/ \
+  src/gui/ \
+  src/plan_then_execute/ \
+  src/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -169,7 +169,7 @@ one agent but absent from others.
 
 ```bash
 echo "=== Prompt templates ==="
-for f in $(find src/agent_bot -name '*.jinja' -type f | sort); do
+for f in $(find src/agora src/plan_then_execute src/toolmaker src/gui -name '*.jinja' -type f | sort); do
   echo ""
   echo "========== $f =========="
   cat "$f"
@@ -189,10 +189,10 @@ Compare compaction strategies used by each agent. Look for:
 echo "=== Compaction strategy references ==="
 grep -rn --include='*.py' \
   -iE 'compaction|SlidingWindow|Summarization|TokenBudget|ToolResult.*Strategy' \
-  src/agent_bot/agora/ \
-  src/agent_bot/gui/ \
-  src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
+  src/agora/ \
+  src/gui/ \
+  src/plan_then_execute/ \
+  src/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -205,10 +205,10 @@ agents.
 echo "=== Error handling patterns ==="
 grep -rn --include='*.py' \
   -iE 'except |retry|fallback|raise |try:|error_handler|on_error' \
-  src/agent_bot/agora/ \
-  src/agent_bot/gui/ \
-  src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
+  src/agora/ \
+  src/gui/ \
+  src/plan_then_execute/ \
+  src/toolmaker/ \
   2>/dev/null | grep -v __pycache__ | grep -v 'test'
 ```
 

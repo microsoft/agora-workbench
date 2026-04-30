@@ -76,7 +76,7 @@ def _discover_skills() -> list[dict]:
     Uses the same directory layout and depth limit as the agent framework's
     SkillsProvider to ensure the panel shows exactly what the agent can load.
     """
-    from agent_bot.gui.agent import _discover_skill_paths
+    from gui.agent import _discover_skill_paths
 
     active_servers = _get_active_server_names()
     skill_paths = _discover_skill_paths()

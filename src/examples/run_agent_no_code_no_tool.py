@@ -19,7 +19,7 @@ Tool-learning middleware is included:
 """
 
 import asyncio
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from auth.auth import create_azure_credential
 from dotenv import load_dotenv
 from log_config import setup_logging

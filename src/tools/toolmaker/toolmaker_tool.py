@@ -264,7 +264,7 @@ def create_toolmaker_function(
                 f"Do NOT call create_tool_from_repo again without user confirmation."
             )
 
-        from agent_bot.toolmaker import ToolMakerAgent
+        from toolmaker import ToolMakerAgent
 
         LOGGER.info(f"Creating tool from repo: {repo_url}")
         LOGGER.info(f"Tool description: {tool_description}")
@@ -336,7 +336,7 @@ def create_toolmaker_function(
 
                     # Load the MCP tool into the executor's base tools so
                     # it persists across agent runs within this session.
-                    from agent_bot.toolmaker.models import ToolPersistence
+                    from toolmaker.models import ToolPersistence
 
                     if base_tools is not None and impl_state.persistence != ToolPersistence.UNDECIDED:
                         _load_new_mcp_tool(

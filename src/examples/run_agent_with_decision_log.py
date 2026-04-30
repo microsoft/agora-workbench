@@ -20,7 +20,7 @@ import logging
 import os
 
 from agent_framework.azure import AzureOpenAIChatClient
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from auth import create_entra_token_provider
 from dotenv import load_dotenv
 from log_config import setup_logging

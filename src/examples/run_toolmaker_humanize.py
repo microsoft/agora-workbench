@@ -22,7 +22,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from agent_bot.toolmaker import ToolMakerAgent
+from toolmaker import ToolMakerAgent
 from dotenv import load_dotenv
 
 

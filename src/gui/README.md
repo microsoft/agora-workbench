@@ -107,7 +107,7 @@ Annotations are included automatically with the next chat message — you do not
 
 The GUI currently includes a persistent shared/default **Experience** store:
 
-- Shared file: `agent_bot/gui/experiences/default.md`
+- Shared file: `gui/experiences/default.md`
 - Backend (`gui/experience.py`) stores Markdown preferences/lessons in this single file and serves APIs listed above.
 - Agent integration: `ExperienceContextProvider` reads this shared file each turn and injects it into agent instructions.
 - Frontend integration: `ExperiencePanel` lets users:
@@ -132,7 +132,7 @@ Use cases:
 - Inspect location features not represented in vector/tabular fields
 - Diagnose user-reported map issues by capturing the exact current view
 
-Prompt guidance in `agent_bot/gui/prompts/system_prompt.jinja` explicitly tells the agent to use `capture_map_view` selectively (when visual context matters) and prefer vector/tabular data when sufficient.
+Prompt guidance in `gui/prompts/system_prompt.jinja` explicitly tells the agent to use `capture_map_view` selectively (when visual context matters) and prefer vector/tabular data when sufficient.
 
 ### Export map (`/api/export-map`)
 

@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from agent_bot.gui import GUIAgent
+from gui.agent import GUIAgent
 
 LOGGER = logging.getLogger(__name__)
 

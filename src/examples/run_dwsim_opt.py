@@ -10,7 +10,7 @@ on demand via ``query_state_graph`` and loaded with ``load_skill``.
 """
 
 import asyncio
-from agent_bot.plan_then_execute import PlanThenExecuteAgent
+from plan_then_execute import PlanThenExecuteAgent
 from dotenv import load_dotenv
 from log_config import setup_logging
 

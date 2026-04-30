@@ -18,7 +18,7 @@ Usage:
 import asyncio
 import logging
 
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from dotenv import load_dotenv
 
 
@@ -29,7 +29,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logging.getLogger("tools.toolmaker").setLevel(logging.INFO)
-logging.getLogger("agent_bot.toolmaker").setLevel(logging.INFO)
+logging.getLogger("toolmaker").setLevel(logging.INFO)
 
 agent = AgoraAgent(
     llm="gpt-5.1_2025-11-13",

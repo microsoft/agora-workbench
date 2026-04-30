@@ -26,7 +26,7 @@ _user_locks: dict[str, asyncio.Lock] = {}
 _locks_mutex = asyncio.Lock()
 _MAX_LOCK_ENTRIES = 256
 
-EXPERIENCES_DIR = Path(__file__).resolve().parents[1] / "agent_bot" / "gui" / "experiences"
+EXPERIENCES_DIR = Path(__file__).resolve().parents[1] / "gui" / "experiences"
 EXPERIENCES_DIR.mkdir(exist_ok=True)
 
 DEFAULT_USER = "default"

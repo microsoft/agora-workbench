@@ -19,7 +19,7 @@ For a production-quality result, increase ntotal to ~4000.
 
 import asyncio
 
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from dotenv import load_dotenv
 from log_config import setup_logging
 

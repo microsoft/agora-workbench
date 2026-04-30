@@ -30,7 +30,9 @@ Key capabilities:
 
 ```
 src/
-├── agent_bot/          # Agent implementations
+├── agora/              # Agent implementations
+│   ├── plan_then_execute/  # Plan-then-execute agent
+│   └── toolmaker/          # Toolmaker agent
 │   ├── agora/          # AgoraAgent (standalone, no BaseAgent inheritance)
 │   ├── gui/            # GUIAgent for the interactive map GUI
 │   ├── plan_then_execute/  # PlanThenExecuteAgent variant
@@ -106,7 +108,7 @@ Copy `.env.example` to `.env` and configure credentials. See the comments in tha
 
 ```python
 import asyncio
-from agent_bot.agora import AgoraAgent
+from agora import AgoraAgent
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -147,7 +149,7 @@ agent = AgoraAgent(
 These are appended to the built-in providers (history, compaction, experience, skills).
 
 ```python
-from agent_bot.gui.agent import GUIAgent
+from gui.agent import GUIAgent
 from middleware import DecisionLogChatMiddleware, DecisionLogContextProvider
 from middleware.decision_log import DecisionLog
 
@@ -167,7 +169,7 @@ agent = GUIAgent(
 
 See:
 
-- [`src/agent_bot/gui/README.md`](src/agent_bot/gui/README.md) for GUIAgent architecture and tool behavior.
+- [`src/gui/README.md`](src/gui/README.md) for GUIAgent architecture and tool behavior.
 - [`src/gui/README.md`](src/gui/README.md) for frontend/backend endpoints.
 
 ## Development
@@ -249,7 +251,7 @@ The Toolmaker allows `AgoraAgent` to **dynamically create, build, test, and regi
 
 ### How it works
 
-`ToolMakerAgent` (`agent_bot/toolmaker/`) runs a four-phase workflow:
+`ToolMakerAgent` (`toolmaker/`) runs a four-phase workflow:
 
 | Phase | Name | Description |
 |:---:|---|---|
@@ -283,7 +285,7 @@ You can also run `ToolMakerAgent` standalone to interactively create and registe
 
 ```python
 import asyncio
-from agent_bot.toolmaker import ToolMakerAgent
+from toolmaker import ToolMakerAgent
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -370,7 +372,7 @@ For full details and payload shapes, see [`src/code_execution/README.md`](src/co
 
 ### GUI Experience system and map capture
 
-- Persistent per-user experience is stored in `agent_bot/gui/experiences/default.md`, auto-updated from conversations, and injected into every GUI session.
+- Persistent per-user experience is stored in `gui/experiences/default.md`, auto-updated from conversations, and injected into every GUI session.
 - GUI backend experience endpoints:
   - `GET /api/experience`
   - `PUT /api/experience`
@@ -488,7 +490,7 @@ This repository uses [GitHub Copilot agentic workflows](https://github.com/githu
 | **Daily Repo Status** (`daily-repo-status.md`) | Runs on a daily schedule and on manual `workflow_dispatch` | Creates a GitHub issue summarizing recent repository activity — open issues, PRs, code changes, and actionable recommendations for maintainers. Issues are labeled `report` and `daily-status`. |
 | **Copilot Issue Planner** (`copilot-issue-planner.md`) | Triggered when an issue is labeled `needs-spec`, or when a contributor comments `/plan` on an issue | Generates a structured implementation plan (summary, assumptions, checklist, risks, definition of done) as a comment on the issue. Useful for scoping work before starting development. |
 | **Update Docs** (`update-docs.md`) | Runs on schedule and on manual `workflow_dispatch` | Scans for documentation gaps and opens issues describing areas that need updates. |
-| **Agent Divergence Report** (`agent-divergence-report.md`) | Runs weekly on Tuesday and on manual `workflow_dispatch` | Compares the agent implementations under `agent_bot/` and opens an issue highlighting improvements that could propagate across agents. Issues are labeled `agent-divergence`. |
+| **Agent Divergence Report** (`agent-divergence-report.md`) | Runs weekly on Tuesday and on manual `workflow_dispatch` | Compares the agent implementations under `agora/`, `plan_then_execute/`, `toolmaker/` and opens an issue highlighting improvements that could propagate across agents. Issues are labeled `agent-divergence`. |
 
 ## Access
 

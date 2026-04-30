@@ -57,7 +57,7 @@ jobs:
         id: agents_tests
         continue-on-error: true
         run: |
-          uv run pytest src/agent_bot/agora/tests/ src/agent_bot/plan_then_execute/tests/ -m "not live" -v --json-report --json-report-file=agents-report.json
+          uv run pytest src/agora/tests/ src/plan_then_execute/tests/ -m "not live" -v --json-report --json-report-file=agents-report.json
 
       - name: Run tools tests
         id: tools_tests
@@ -93,7 +93,7 @@ jobs:
         id: toolmaker_tests
         continue-on-error: true
         run: |
-          uv run pytest src/agent_bot/toolmaker/tests/ -m "not live" -v --json-report --json-report-file=toolmaker-report.json
+          uv run pytest src/toolmaker/tests/ -m "not live" -v --json-report --json-report-file=toolmaker-report.json
 
       - name: Run domains tests
         id: domains_tests
