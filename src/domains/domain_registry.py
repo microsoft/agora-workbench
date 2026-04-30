@@ -7,13 +7,10 @@ Provides a clean separation between the generic MCP tools layer
 
 Architecture:
     domains/domain_registry.yaml  →  DomainRegistry (this module)
-                                         ↑
-                                    agent_bot/  reads from here
                                          ↓
                                     tools/ stays domain-agnostic
 
-The tools/ layer should NOT import this module.  It is intended
-for use by the agent layer (agent_bot/) which sits above both.
+The tools/ layer should NOT import this module.
 """
 
 import logging

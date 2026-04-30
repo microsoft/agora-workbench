@@ -50,14 +50,14 @@ that a coding agent (or developer) can directly execute.
 
 ## Project context
 
-src is the active development target in a monorepo (`agora/`). It combines LLM-driven workflows with isolated MCP (Model Context Protocol) code execution servers.
+src is the active development target. It combines LLM-driven workflows with isolated MCP (Model Context Protocol) code execution servers.
 
 ### Key architecture
 
 | Layer | Location | Purpose |
 |---|---|---|
 | **Auth** | `src/auth/` | Shared authentication helpers: Entra token providers and credential utilities |
-| **Agents** | `src/agent_bot/` | Concrete agent implementations and alternate orchestration strategies |
+| **Agents** | `src/` | Concrete agent implementations and alternate orchestration strategies |
 | **Tools** | `src/tools/` | Tool discovery, registration, and runtime selection for MCP-served tools |
 | **Domains** | `src/domains/` | Domain-specific MCP servers, tool registries, and system prompts (one sub-folder per domain) |
 | **Code execution** | `src/code_execution/` | Sandboxed Python execution infrastructure — server framework, session lifecycle, and Docker packaging |
@@ -77,12 +77,12 @@ src is the active development target in a monorepo (`agora/`). It combines LLM-d
   - **Client (agent) side**: pass the user's bearer token through `auth` functions (e.g., `create_entra_token_provider`). Never instantiate credentials directly.
   - **MCP (server) side**: validate the incoming token and exchange it via OBO flow in `code_execution.code_execution.auth`. Never bypass OBO by calling `AzureCliCredential` directly in server code.
 - **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.live`; async tests use `asyncio_mode = "strict"`
-- **Test paths**: `auth/tests/`, `tools/tests/`, `data_lake/tests/`, `agent_bot/agora/tests/`, `agent_bot/plan_then_execute/tests/`, `planning/tests/`, `middleware/tests/`, `context_managers/tests/`, `domains/tests/` (covered by `pyproject.toml`); `code_execution/tests/` (run via `code_execution/pytest.ini`)
+- **Test paths**: `auth/tests/`, `tools/tests/`, `data_lake/tests/`, `planning/tests/`, `middleware/tests/`, `context_managers/tests/`, `domains/tests/` (covered by `pyproject.toml`); `code_execution/tests/` (run via `code_execution/pytest.ini`)
   - Root `conftest.py` provides shared fixtures: `mock_environment_variables`, `mock_chat_client`, `mock_chat_agent`
 - **Dependency layering** (three tiers, imports flow downward only):
   1. **`auth/`** — the base layer; imports from nothing inside the repo.
   2. **Foundation packages** (`code_execution/`, `tools/`, `data_lake/`) — may import from `auth/` but not from each other or from higher layers.
-  3. **Application packages** (`agent_bot/`, `domains/`) — may import from `auth/` and any foundation package, but never the reverse.
+  3. **Application packages** (``, `domains/`) — may import from `auth/` and any foundation package, but never the reverse.
 
 ### Adding a new domain
 New domains follow the `domains/example/` reference implementation:

@@ -2,14 +2,13 @@
 FastAPI backend for the GIS Agent GUI.
 
 Provides:
-- POST /api/chat       — SSE endpoint: streams tool-call events, then final response + map state
+- POST /api/chat       — SSE endpoint: streams map state after chat
 - GET  /api/map-state  — current map state (layers, view)
 - GET  /api/layers/{f} — serve a GeoJSON layer file
-- POST /api/reset      — reset agent session
+- POST /api/reset      — reset session
 - GET  /api/export-map  — export map as standalone HTML
 
-The agent saves GeoJSON files + map_state.json to the maps/ directory.
-The React frontend renders them with react-leaflet.
+The React frontend renders map layers with react-leaflet.
 
 Launch:
     cd AgoraAgentMAF
@@ -27,7 +26,6 @@ from fastapi import Request as FastAPIRequest
 from rio_tiler.errors import TileOutsideBounds
 from dotenv import load_dotenv
 
-from .agent_lifecycle import reset_agent
 from .map_state import invalidate_map_state
 from .map_capture import fulfill_capture_request
 from .chat import router as chat_router
@@ -128,10 +126,9 @@ async def tile_outside_bounds_handler(request, exc):
 
 @app.post("/api/reset")
 async def reset():
-    await reset_agent()
     invalidate_map_state()
     _close_log_file()
-    _ensure_log_file()  # new log file for the new session's background init
+    _ensure_log_file()
     return {"status": "ok", "map_state": None}
 
 

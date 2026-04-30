@@ -30,10 +30,6 @@ Key capabilities:
 
 ```
 src/
-├── agent_bot/          # Agent implementations
-│   ├── agora/          # AgoraAgent (standalone, no BaseAgent inheritance)
-│   ├── gui/            # GUIAgent for the interactive map GUI
-│   └── plan_then_execute/  # PlanThenExecuteAgent variant
 ├── auth/               # Agent-side credentials (ChainedTokenCredential)
 ├── middleware/         # Pluggable conversation middleware
 ├── tools/              # Tool search, MCP server registry, tool catalog
@@ -53,8 +49,7 @@ src/
 │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
 ├── data_lake/          # Artifact registry, sync pipeline, Purview integration
 │   └── utilities/      # Standalone helpers: update_purview_entity, list_artifact_registry
-├── gui/                # GIS agent GUI (FastAPI backend + React/Vite frontend)
-├── examples/           # Example agent run scripts
+├── gui/                # GIS map GUI (FastAPI backend + React/Vite frontend)
 ├── server_registry.yaml    # MCP server configurations
 └── pyproject.toml
 ```
@@ -100,63 +95,6 @@ uv sync --group dev  # include dev tools (pytest, pre-commit, jupyter)
 
 Copy `.env.example` to `.env` and configure credentials. See the comments in that file for available settings.
 
-### Running an Agent
-
-```python
-import asyncio
-from agent_bot.agora import AgoraAgent
-from dotenv import load_dotenv
-
-load_dotenv()
-
-agent = AgoraAgent(
-    domain_prompt_path="domains/example/domain_prompt/example.jinja",
-    llm="gpt-4o",
-)
-
-async def main():
-    async with agent:
-        result = await agent.go("Your query here")
-        print(result.text)
-
-asyncio.run(main())
-```
-
-MCP server tools (`execute_code`, session management) are auto-discovered from `server_registry.yaml` at startup — no manual tool registration is required. Start the MCP server first (see `code_execution/docker/`), then run one of the scripts in `examples/`.
-
-## GUIAgent
-
-`GUIAgent` powers the interactive map UI (`gui/`). In addition to core tool wiring, it supports caller-supplied context and middleware injection:
-
-- `context_providers: Optional[list]`
-- `middleware: Optional[list]`
-
-These are appended to the built-in providers (history, compaction, experience, skills).
-
-```python
-from agent_bot.gui.agent import GUIAgent
-from middleware import DecisionLogChatMiddleware, DecisionLogContextProvider
-from middleware.decision_log import DecisionLog
-
-decision_log = DecisionLog()
-chat_middleware = DecisionLogChatMiddleware(
-    decision_log=decision_log,
-    agent_name="gui",
-    chat_client=...,  # small synthesis model client
-)
-
-agent = GUIAgent(
-    llm="gpt-4o",
-    context_providers=[DecisionLogContextProvider(decision_log, chat_middleware=chat_middleware)],
-    middleware=[chat_middleware],
-)
-```
-
-See:
-
-- [`src/agent_bot/gui/README.md`](src/agent_bot/gui/README.md) for GUIAgent architecture and tool behavior.
-- [`src/gui/README.md`](src/gui/README.md) for frontend/backend endpoints.
-
 ## Development
 
 ```bash
@@ -167,16 +105,6 @@ uv run pytest src/code_execution/tests/   # code execution tests
 # Lint and format
 uv run pre-commit run --all-files
 ```
-
-## Context Management
-
-Conversation history is managed automatically by the MAF-native `CompactionProvider` registered inside each `BaseLLMExecutor`. The compaction pipeline applies three strategies in order:
-
-1. **Tool-result compaction** — truncates verbose tool outputs, keeping only the most recent tool-call group verbatim.
-2. **LLM summarization** — condenses older turns via an LLM call when the conversation exceeds a threshold length.
-3. **Sliding window** — retains a fixed number of recent message groups as a hard cap.
-
-No manual configuration is required — the pipeline is wired automatically when an executor initialises its MAF `Agent`.
 
 ## Tool Discovery
 
@@ -277,13 +205,8 @@ Session capacity is enforced as **rejection** (HTTP 429 with `error_type: max_se
 
 For full details and payload shapes, see [`src/code_execution/README.md`](src/code_execution/README.md).
 
-### GUI Experience system and map capture
+### GUI map capture
 
-- Persistent per-user experience is stored in `agent_bot/gui/experiences/default.md`, auto-updated from conversations, and injected into every GUI session.
-- GUI backend experience endpoints:
-  - `GET /api/experience`
-  - `PUT /api/experience`
-  - `POST /api/experience/summarize`
 - GUI includes `capture_map_view` for visual map screenshots; frontend capture relies on `html2canvas`.
 
 ## Data Lake
@@ -397,7 +320,7 @@ This repository uses [GitHub Copilot agentic workflows](https://github.com/githu
 | **Daily Repo Status** (`daily-repo-status.md`) | Runs on a daily schedule and on manual `workflow_dispatch` | Creates a GitHub issue summarizing recent repository activity — open issues, PRs, code changes, and actionable recommendations for maintainers. Issues are labeled `report` and `daily-status`. |
 | **Copilot Issue Planner** (`copilot-issue-planner.md`) | Triggered when an issue is labeled `needs-spec`, or when a contributor comments `/plan` on an issue | Generates a structured implementation plan (summary, assumptions, checklist, risks, definition of done) as a comment on the issue. Useful for scoping work before starting development. |
 | **Update Docs** (`update-docs.md`) | Runs on schedule and on manual `workflow_dispatch` | Scans for documentation gaps and opens issues describing areas that need updates. |
-| **Agent Divergence Report** (`agent-divergence-report.md`) | Runs weekly on Tuesday and on manual `workflow_dispatch` | Compares the agent implementations under `agent_bot/` and opens an issue highlighting improvements that could propagate across agents. Issues are labeled `agent-divergence`. |
+| **Agent Divergence Report** (`agent-divergence-report.md`) | Runs weekly on Tuesday and on manual `workflow_dispatch` | Compares agent implementations and opens an issue highlighting improvements. Issues are labeled `agent-divergence`. |
 
 ## Access
 
