@@ -30,7 +30,7 @@ from agent_framework import (
     response_handler,
 )
 
-from context_managers.compaction import SkillAwareToolCompactionStrategy
+from compaction import SkillAwareToolCompactionStrategy
 
 from .response_models import (
     AgentResponse,

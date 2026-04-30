@@ -31,7 +31,7 @@ from agent_framework import (
     TokenBudgetComposedStrategy,
 )
 
-from context_managers.compaction import SkillAwareToolCompactionStrategy
+from compaction import SkillAwareToolCompactionStrategy
 from agent_framework.azure import AzureOpenAIChatClient
 
 from auth import create_entra_token_provider

@@ -1,4 +1,4 @@
-"""Tests for context_managers.compaction.SkillAwareToolCompactionStrategy."""
+"""Tests for compaction.SkillAwareToolCompactionStrategy."""
 
 import pytest
 
@@ -11,7 +11,7 @@ from agent_framework._compaction import (
 )
 from agent_framework._types import Content
 
-from context_managers.compaction import SkillAwareToolCompactionStrategy
+from compaction import SkillAwareToolCompactionStrategy
 
 
 def _make_tool_group(call_id: str, tool_name: str, result: str) -> list[Message]:
