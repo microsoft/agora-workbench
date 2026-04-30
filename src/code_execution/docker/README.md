@@ -10,7 +10,6 @@ Multi-stage Docker builds for the code execution servers. Each server shares a c
 | `powergrid-server` | Power grid (PyPSA, HiGHS GPU) | 8001 |
 | `process-server` | Process simulation (IDAES) | 8002 |
 | `foundry-server` | Azure AI Foundry | 8003 |
-| `dwsim-server` | DWSIM chemical simulation | 8004 |
 | `gis-server` | Geospatial analysis (GIS) | 8006 |
 | `office-server` | Office document processing | 8007 |
 | `openlca-server` | Life cycle assessment (LCA) | 8008 |

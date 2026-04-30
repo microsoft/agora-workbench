@@ -252,64 +252,6 @@ COPY --chown=appuser:appuser domains/process/states.py /app/domains/process/stat
 CMD ["python", "-m", "domains.process.server.process_server"]
 
 # ============================================================================
-# Stage: DWSIM server
-# ============================================================================
-FROM base AS dwsim-server
-
-# System package installations require root
-USER root
-
-ARG MICROSOFT_REPO_DEB_SHA256=8434dcb8c346dc95fbd63dbece056c343704590b58b6a5c323d39acf52bf0b48
-ARG DWSIM_DEB_SHA256=52c041b1d659ea26e22750e8b7045c7bc68d3d95f6384abe28d07d967eafa20c
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends wget gpg apt-transport-https && \
-    wget https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb && \
-    echo "${MICROSOFT_REPO_DEB_SHA256}  /tmp/packages-microsoft-prod.deb" | sha256sum -c - && \
-    dpkg -i /tmp/packages-microsoft-prod.deb && \
-    rm -f /tmp/packages-microsoft-prod.deb && \
-    # Workaround: Microsoft's repo signing key uses SHA1, which sqv rejects since
-    # 2026-02-01. The .deb integrity is verified by SHA256 checksum above, so we
-    # mark this specific repo as trusted to bypass the broken GPG signature check.
-    sed -i 's|^deb \[|deb [trusted=yes |; s|^deb http|deb [trusted=yes] http|' /etc/apt/sources.list.d/microsoft-prod.list && \
-    # Enable 'contrib' component — coinor-libipopt3 (IPOPT solver) lives there.
-    sed -i 's/Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends dotnet-runtime-8.0 libgdiplus coinor-libipopt3 && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN curl -fL -o /tmp/dwsim.deb \
-    https://github.com/DanWBR/dwsim/releases/download/v9.0.5/dwsim_9.0.5-amd64.deb && \
-    echo "${DWSIM_DEB_SHA256}  /tmp/dwsim.deb" | sha256sum -c - && \
-    dpkg-deb -x /tmp/dwsim.deb /tmp/dwsim-pkg && \
-    test -f /tmp/dwsim-pkg/usr/local/bin/dwsim || (echo "Expected file not found: /tmp/dwsim-pkg/usr/local/bin/dwsim" && exit 1) && \
-    test -d /tmp/dwsim-pkg/usr/local/lib/dwsim || (echo "Expected directory not found: /tmp/dwsim-pkg/usr/local/lib/dwsim" && exit 1) && \
-    mkdir -p /usr/local/bin /usr/local/lib && \
-    cp -a /tmp/dwsim-pkg/usr/local/bin/dwsim /usr/local/bin/dwsim && \
-    cp -a /tmp/dwsim-pkg/usr/local/lib/dwsim /usr/local/lib/dwsim && \
-    rm -rf /tmp/dwsim.deb /tmp/dwsim-pkg
-
-# DWSIM's .deb was built for Debian 12 (Bookworm) where IPOPT was coinor-libipopt1v5
-# and installed to /usr/lib/libipopt.so.1.  On Debian 13 (Trixie) the package is
-# coinor-libipopt3, which installs to /usr/lib/x86_64-linux-gnu/libipopt.so.3.
-# Fix the stale symlink so DWSIM can find the solver at runtime.
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libipopt.so.3 /usr/local/lib/dwsim/libIpopt39.so
-
-# Make System.Drawing.Common.dll (shipped by DWSIM) discoverable by the .NET runtime.
-RUN ln -sf /usr/local/lib/dwsim/System.Drawing.Common.dll \
-    "$(find /usr/share/dotnet/shared/Microsoft.NETCore.App/8.0.* -maxdepth 0 | head -1)/System.Drawing.Common.dll"
-
-ENV DWSIM_PATH="/usr/local/lib/dwsim/"
-
-# Copy DWSIM server code
-COPY --chown=appuser:appuser domains/dwsim/server /app/domains/dwsim/server
-COPY --chown=appuser:appuser domains/dwsim/__init__.py /app/domains/dwsim/__init__.py
-COPY --chown=appuser:appuser domains/dwsim/states.py /app/domains/dwsim/states.py
-
-USER appuser
-CMD ["python", "-m", "domains.dwsim.server.dwsim_server"]
-
-# ============================================================================
 # Stage: Foundry server (wraps Azure AI Foundry built-in tools as MCP)
 # ============================================================================
 FROM base AS foundry-server

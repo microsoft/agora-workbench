@@ -44,7 +44,6 @@ src/
 │   │   └── skills/     # Domain skills (grid-converter: PJM N-1 study → PyPSA network)
 │   ├── process/        # Process simulation (IDAES, Pyomo)
 │   ├── foundry/        # Azure AI Foundry integration
-│   ├── dwsim/          # DWSIM chemical process simulation
 │   ├── gis/            # Geospatial analysis (GeoPandas, Shapely, Rasterio, Folium)
 │   ├── vitrimer_tg_sim/# Vitrimer Tg estimation via EMC + LAMMPS
 │   ├── vitrimer_vae/   # Vitrimer inverse design via HierVAE + BO
@@ -74,7 +73,6 @@ Some domains ship **skills** — curated knowledge packages that teach the agent
 | `powergrid` | `domains.powergrid.server.powergrid_server` | Grid analysis and optimization |
 | `process` | `domains.process.server.process_server` | Process simulation tooling |
 | `foundry` | `domains.foundry.server.foundry_server` | Azure AI Foundry integration |
-| `dwsim` | `domains.dwsim.server.dwsim_server` | DWSIM-backed process workflows |
 | `gis` | `domains.gis.server.gis_server` | Geospatial workflows used by GUI |
 | `office` | `domains.office.server.office_server` | Office document processing |
 | `openlca` | `domains.openlca.server.openlca_server` | OpenLCA workflows |

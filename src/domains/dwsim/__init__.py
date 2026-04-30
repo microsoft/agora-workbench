@@ -1,1 +1,0 @@
-"""DWSIM domain package."""

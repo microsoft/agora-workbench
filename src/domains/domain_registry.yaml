@@ -28,9 +28,6 @@ domains:
     domain_prompt_path: domains/foundry/domain_prompt/foundry.jinja
   gis:
     domain_prompt_path: domains/gis/domain_prompt/gis.jinja
-  dwsim:
-    tool_registry_module: domains.dwsim.server.tool_registry
-    tool_registry_function: create_dwsim_tool_registry
   openlca:
     tool_registry_module: domains.openlca.server.tool_registry
     tool_registry_function: create_openlca_tool_registry
