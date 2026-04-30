@@ -25,6 +25,21 @@ router = APIRouter()
 # Match the agent framework's discovery depth.
 _MAX_SEARCH_DEPTH = 2
 
+_DOMAINS_DIR = Path(__file__).resolve().parent.parent / "domains"
+_PLANNING_SKILLS_DIR = Path(__file__).resolve().parent.parent / "planning" / "skills"
+
+
+def _discover_skill_paths(domains_dir: Path = _DOMAINS_DIR) -> list[str]:
+    paths: list[str] = []
+    if domains_dir.is_dir():
+        for child in sorted(domains_dir.iterdir()):
+            skills_dir = child / "skills"
+            if skills_dir.is_dir():
+                paths.append(str(skills_dir))
+    if _PLANNING_SKILLS_DIR.is_dir():
+        paths.append(str(_PLANNING_SKILLS_DIR))
+    return paths
+
 
 # ---------------------------------------------------------------------------
 # Skill discovery
@@ -76,8 +91,6 @@ def _discover_skills() -> list[dict]:
     Uses the same directory layout and depth limit as the agent framework's
     SkillsProvider to ensure the panel shows exactly what the agent can load.
     """
-    from agent_bot.gui.agent import _discover_skill_paths
-
     active_servers = _get_active_server_names()
     skill_paths = _discover_skill_paths()
     results: list[dict] = []

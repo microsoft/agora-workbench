@@ -26,7 +26,7 @@ _user_locks: dict[str, asyncio.Lock] = {}
 _locks_mutex = asyncio.Lock()
 _MAX_LOCK_ENTRIES = 256
 
-EXPERIENCES_DIR = Path(__file__).resolve().parents[1] / "agent_bot" / "gui" / "experiences"
+EXPERIENCES_DIR = Path(__file__).resolve().parents[1] / "gui" / "experiences"
 EXPERIENCES_DIR.mkdir(exist_ok=True)
 
 DEFAULT_USER = "default"
@@ -131,74 +131,8 @@ async def update_experience(req: ExperienceUpdateRequest) -> ExperienceResponse:
 
 @router.post("/api/experience/summarize")
 async def summarize_experience(req: SummarizeRequest) -> ExperienceResponse:
-    """Summarize a conversation into experience entries and merge them."""
-    from .agent_lifecycle import get_agent
+    """Summarize a conversation into experience entries and merge them.
 
-    if not req.messages:
-        raise HTTPException(status_code=400, detail="No messages to summarize")
-
-    # Format the conversation for the summarizer
-    conversation = "\n".join(
-        f"{'User' if m.get('role') == 'user' else 'Agent'}: {m.get('content', '')}"
-        for m in req.messages
-        if m.get("content", "").strip()
-    )
-
-    lock = await _get_user_lock(DEFAULT_USER)
-    async with lock:
-        existing = read_experience()
-
-        prompt = f"""Analyze the following conversation between a user and a GIS map agent.
-Extract reusable preferences, patterns, lessons, and instructions that should be
-remembered for future sessions. Focus on:
-
-- Map styling preferences (colors, point sizes, basemap choices, label preferences)
-- Data handling patterns (preferred file formats, column mappings, data sources)
-- Analysis workflows the user frequently requests
-- Communication style preferences
-- Domain-specific knowledge or terminology the user expects
-- Lessons learned from mistakes or corrections during the conversation
-
-{f'''Here is the user's existing experience file. Apply these rules:
-- PRESERVE existing entries that are not contradicted by the conversation.
-- UPDATE entries that the conversation contradicts or refines (e.g., if the
-  user used to prefer blue points but now asks for red, update the preference).
-- ADD new insights from the conversation that are not already covered.
-- REMOVE entries only if the conversation explicitly says to stop doing something.
-
---- EXISTING EXPERIENCE ---
-{existing}
---- END EXISTING EXPERIENCE ---''' if existing else "There is no existing experience file yet."}
-
---- CONVERSATION ---
-{conversation}
---- END CONVERSATION ---
-
-Output ONLY the updated experience file in Markdown format. Use clear headings and
-bullet points. Keep it concise — this will be injected into every future session's
-user-message context block, so brevity matters. If there is nothing new worth
-remembering from this conversation, return the existing content unchanged (or empty
-if none existed)."""
-
-        try:
-            agent = await get_agent()
-            # Use the agent's underlying LLM client directly
-            from agent_framework import Message as AFMessage
-
-            response = await agent._client.get_response(
-                [
-                    AFMessage(role="system", text="You are a helpful assistant that extracts reusable preferences and lessons from conversations."),
-                    AFMessage(role="user", text=prompt),
-                ],
-                stream=False,
-            )
-            new_content = response.text.strip() if response.text else existing
-        except Exception:
-            LOGGER.exception("Failed to summarize experience")
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to summarize experience.",
-            )
-
-        write_experience(new_content)
-    return ExperienceResponse(content=new_content)
+    Agent integration has been removed; this endpoint is not yet implemented.
+    """
+    raise HTTPException(status_code=501, detail="Experience summarization is not available.")
