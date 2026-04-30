@@ -76,8 +76,6 @@ class AgoraAgent:
         context_providers: Optional[list] = None,
         middleware: Optional[list] = None,
         skill_paths: Optional[list[str]] = None,
-        enable_toolmaker: bool = False,
-        toolmaker_llm: Optional[str] = None,
     ):
         """
         Initialize the agent.
@@ -102,12 +100,6 @@ class AgoraAgent:
                 files that will be auto-advertised via ``SkillsProvider``.
                 Defaults to ``[]`` (no auto-advertised skills).  Pass
                 planning skill paths here when attaching planning tools.
-            enable_toolmaker: If True, adds the create_tool_from_repo tool that allows
-                the agent to dynamically create new domain tools from GitHub repositories
-                using the ToolMaker agent. The agent will ask the user for a repo URL
-                before invoking ToolMaker.
-            toolmaker_llm: Model name for the ToolMaker agent. Defaults to the main
-                agent's llm if not specified.
         """
         # Domain prompt paths — seeded with initial prompt, extended by MCP discovery
         self._loaded_domain_prompts: list[str] = []
@@ -116,10 +108,6 @@ class AgoraAgent:
 
         self._search_backend_cls = search_backend
         self._user_token = user_token
-
-        # Toolmaker initialization
-        self.enable_toolmaker = enable_toolmaker
-        self.toolmaker_llm = toolmaker_llm or llm
 
         # Extra context providers passed through to the MAF Agent
         self._context_providers: list = context_providers or []
@@ -138,7 +126,6 @@ class AgoraAgent:
         # Render system prompt from Jinja template
         self.system_prompt = render_system_prompt(
             domain_prompt_path=domain_prompt_path,
-            enable_toolmaker=enable_toolmaker,
         )
 
         self.max_iterations = max_iterations
@@ -241,7 +228,6 @@ class AgoraAgent:
         if self._loaded_domain_prompts:
             self.system_prompt = render_system_prompt(
                 domain_prompt_paths=list(self._loaded_domain_prompts),
-                enable_toolmaker=self.enable_toolmaker,
             )
             LOGGER.info("Rendered system prompt with domain prompts: %s", self._loaded_domain_prompts)
 
@@ -328,23 +314,6 @@ class AgoraAgent:
             )
             self._llm_executor = llm_executor
             self._tool_build_errors = tool_errors
-
-            # Add toolmaker tool if enabled — created after the executor so it can
-            # share the executor's mutable tool-loading state (retrieved_tools, flags).
-            if self.enable_toolmaker:
-                try:
-                    from tools.toolmaker import create_toolmaker_function
-
-                    toolmaker_tool = create_toolmaker_function(
-                        llm=self.toolmaker_llm,
-                        max_iterations=self.max_iterations,
-                        base_tools=llm_executor.base_tools,
-                    )
-                    llm_executor.base_tools.append(toolmaker_tool)
-                except Exception as e:
-                    msg = f"Failed to create toolmaker tool: {e}"
-                    LOGGER.error(msg)
-                    self._tool_build_errors.append(msg)
 
         solution_handler = SolutionHandlerExecutor()
         continue_handler = ContinueHandlerExecutor()

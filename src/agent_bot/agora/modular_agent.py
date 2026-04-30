@@ -121,19 +121,6 @@ class ModularAgent:
             Example: ``[DecisionLogChatMiddleware()]``.
             Default: ``None`` (empty list).
 
-        enable_toolmaker (bool):
-            When ``True``, a ``create_tool_from_repo`` tool is appended to the
-            agent's tool list.  This allows the agent to synthesise and deploy
-            new domain tools at runtime from a public GitHub repository using
-            the :class:`~agent_bot.toolmaker.ToolMakerAgent` sub-agent.
-            Default: ``False``.
-
-        toolmaker_llm (str | None):
-            Deployment name for the model used *inside* the ToolMaker
-            sub-agent.  Defaults to the same model as ``llm`` when not
-            specified.  Only relevant when ``enable_toolmaker=True``.
-            Default: ``None``.
-
         autopilot (bool):
             When ``True``, the agent never pauses for user input.  Any
             ``HelpResponse`` or ``request_info`` pause from the workflow is
@@ -250,8 +237,6 @@ class ModularAgent:
         search_backend: Optional[Type["ToolSearchBackend"]] = None,
         context_providers: Optional[list] = None,
         middleware: Optional[list] = None,
-        enable_toolmaker: bool = False,
-        toolmaker_llm: Optional[str] = None,
         *,
         autopilot: bool = False,
         tool_modulator: Optional[Callable[[list], list | None]] = None,
@@ -275,9 +260,6 @@ class ModularAgent:
         self._search_backend_cls = search_backend
         self._user_token = user_token
 
-        self.enable_toolmaker = enable_toolmaker
-        self.toolmaker_llm = toolmaker_llm or llm
-
         self._context_providers: list = context_providers or []
         self._middleware: list = middleware or []
 
@@ -287,7 +269,6 @@ class ModularAgent:
 
         self.system_prompt = render_system_prompt(
             domain_prompt_path=domain_prompt_path,
-            enable_toolmaker=enable_toolmaker,
         )
 
         self.max_iterations = max_iterations
@@ -462,7 +443,6 @@ class ModularAgent:
         if self._loaded_domain_prompts:
             self.system_prompt = render_system_prompt(
                 domain_prompt_paths=list(self._loaded_domain_prompts),
-                enable_toolmaker=self.enable_toolmaker,
             )
 
         # 3. Search tool.
@@ -572,21 +552,6 @@ class ModularAgent:
             )
             self._llm_executor = llm_executor
             self._tool_build_errors = tool_errors
-
-            if self.enable_toolmaker:
-                try:
-                    from tools.toolmaker import create_toolmaker_function
-
-                    toolmaker_tool = create_toolmaker_function(
-                        llm=self.toolmaker_llm,
-                        max_iterations=self.max_iterations,
-                        base_tools=llm_executor.base_tools,
-                    )
-                    llm_executor.base_tools.append(toolmaker_tool)
-                except Exception as e:
-                    msg = f"Failed to create toolmaker tool: {e}"
-                    LOGGER.error(msg)
-                    self._tool_build_errors.append(msg)
 
         solution_handler = SolutionHandlerExecutor()
         continue_handler = ContinueHandlerExecutor()

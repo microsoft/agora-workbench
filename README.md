@@ -33,13 +33,11 @@ src/
 ├── agent_bot/          # Agent implementations
 │   ├── agora/          # AgoraAgent (standalone, no BaseAgent inheritance)
 │   ├── gui/            # GUIAgent for the interactive map GUI
-│   ├── plan_then_execute/  # PlanThenExecuteAgent variant
-│   └── toolmaker/      # ToolMakerAgent: four-phase agent for dynamic tool creation
+│   └── plan_then_execute/  # PlanThenExecuteAgent variant
 ├── auth/               # Agent-side credentials (ChainedTokenCredential)
 ├── middleware/         # Pluggable conversation middleware
 ├── tools/              # Tool search, MCP server registry, tool catalog
-│   ├── search/         # search_tools backends (BM25, Azure AI Search)
-│   └── toolmaker/      # create_tool_from_repo FunctionTool for AgoraAgent integration
+│   └── search/         # search_tools backends (BM25, Azure AI Search)
 ├── domains/            # Domain-specific servers and tools
 │   ├── example/        # Reference implementation
 │   ├── powergrid/      # Power grid analysis (PyPSA, PyPower, HiGHS)
@@ -125,17 +123,6 @@ asyncio.run(main())
 ```
 
 MCP server tools (`execute_code`, session management) are auto-discovered from `server_registry.yaml` at startup — no manual tool registration is required. Start the MCP server first (see `code_execution/docker/`), then run one of the scripts in `examples/`.
-
-To enable the [Toolmaker](#toolmaker) capability — which allows the agent to create new tools at runtime from a GitHub repository — pass `enable_toolmaker=True`:
-
-```python
-agent = AgoraAgent(
-    domain_prompt_path="domains/example/domain_prompt/example.jinja",
-    llm="gpt-4o",
-    enable_toolmaker=True,
-    toolmaker_llm="gpt-4o",  # optional; defaults to the main llm
-)
-```
 
 ## GUIAgent
 
@@ -242,84 +229,6 @@ cd src/code_execution/deploy
 ```
 
 See [`src/code_execution/deploy/README.md`](src/code_execution/deploy/README.md) for infrastructure setup and environment variables (`ACA_*`).
-
-## Toolmaker
-
-The Toolmaker allows `AgoraAgent` to **dynamically create, build, test, and register new domain tools at runtime** from any public GitHub repository. When the agent encounters a task that no existing tool can handle, it invokes the Toolmaker as a sub-agent to synthesize and deploy a new MCP domain server.
-
-### How it works
-
-`ToolMakerAgent` (`agent_bot/toolmaker/`) runs a four-phase workflow:
-
-| Phase | Name | Description |
-|:---:|---|---|
-| 1 | **Exploration** | Explores the GitHub repo and collaboratively builds a `TaskSpec` (tool name, arguments, return type, example invocations) |
-| 2 | **Build & Test** | Generates domain server code, builds a Docker image, runs tests, and iterates until all tests pass |
-| 3 | **User Decision** | Asks whether to keep the tool as _reusable_ (registered permanently) or _session-only_ (no registration) |
-| 4 | **Registration** | (reusable path only) Registers the new domain in `server_registry.yaml` and related config files |
-
-When `ToolMakerAgent` is invoked as a sub-agent of `AgoraAgent`, it still runs the full workflow above. In particular, Phase 3 lets the user choose whether the generated tool should be kept as _reusable_ or _session-only_; Phase 4 only runs if the reusable path is selected.
-
-### Enabling Toolmaker in AgoraAgent
-
-Pass `enable_toolmaker=True` to `AgoraAgent`. The agent gains a `create_tool_from_repo` tool and will automatically invoke it when it cannot satisfy a request with existing tools.
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `enable_toolmaker` | `bool` | `False` | Adds the `create_tool_from_repo` tool to the agent |
-| `toolmaker_llm` | `str` | same as `llm` | Model used by the ToolMaker sub-agent |
-
-```python
-agent = AgoraAgent(
-    llm="gpt-4o",
-    enable_toolmaker=True,
-    toolmaker_llm="gpt-4o",  # optional: use a different model for ToolMaker
-)
-```
-
-### Using ToolMakerAgent directly
-
-You can also run `ToolMakerAgent` standalone to interactively create and register a new domain server:
-
-```python
-import asyncio
-from agent_bot.toolmaker import ToolMakerAgent
-from dotenv import load_dotenv
-
-load_dotenv()
-
-agent = ToolMakerAgent(llm="gpt-4o", max_iterations=500)
-
-async def main():
-    async with agent:
-        result = await agent.go(
-            "Create a tool from https://github.com/zopefoundation/roman "
-            "that converts integers to Roman numeral strings."
-        )
-        print(result.text)
-
-asyncio.run(main())
-```
-
-### Tool interface (`tools/toolmaker/toolmaker_tool.py`)
-
-`create_toolmaker_function()` returns a MAF `FunctionTool` that wraps the ToolMaker sub-agent. Key parameters:
-
-| Parameter | Default | Description |
-|---|---|---|
-| `llm` | `"gpt-5.1_2025-11-13"` | Model for the ToolMaker workflow |
-| `max_iterations` | `500` | Maximum LLM iterations across all phases |
-| `input_handler` | auto-resolve | `async (question, context) -> str` callback for mid-workflow prompts; defaults to a non-blocking auto-resolver |
-| `base_tools` | `None` | Mutable list of the executor's tools; newly created MCP tools are appended here so they persist across agent turns |
-
-### Examples
-
-| Script | Description |
-|---|---|
-| [`examples/run_agent_with_toolmaker.py`](src/examples/run_agent_with_toolmaker.py) | AgoraAgent with `enable_toolmaker=True`; creates a Roman numeral tool on demand |
-| [`examples/run_aurora_toolmaker.py`](src/examples/run_aurora_toolmaker.py) | Creates a weather prediction tool from Microsoft's Aurora foundation model |
-| [`examples/run_toolmaker_humanize.py`](src/examples/run_toolmaker_humanize.py) | Standalone ToolMakerAgent wrapping the `humanize` library |
-| [`examples/run_toolmaker_roman.py`](src/examples/run_toolmaker_roman.py) | Standalone ToolMakerAgent with blind-test validation |
 
 ## Code Execution
 
