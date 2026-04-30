@@ -1567,10 +1567,10 @@ def create_dwsim_tool_registry() -> "ToolRegistry":
                 produces={S.FLOWSHEET_EXISTS, S.FLOWSHEET_SOLVED},  # type: ignore[arg-type]
             ),
             affordances=[
-                "convert COCO flowsheet to DWSIM",
+                "translate COCO flowsheet to DWSIM",
                 "import FSD file",
                 "migrate COCO simulation",
-                "FSD to DWSIM conversion",
+                "FSD export to DWSIM",
             ],
             return_spec=[
                 ReturnSpec(name="success", type=bool, description="Whether the conversion completed."),
