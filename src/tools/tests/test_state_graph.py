@@ -27,10 +27,6 @@ def _collect_domain_states() -> dict[str, set[str]]:
     """Return {domain_prefix: {token, ...}} for all registered domain Enums."""
     states: dict[str, set[str]] = {}
 
-    from domains.dwsim.states import DwsimState
-
-    states["dwsim"] = {s.value for s in DwsimState}
-
     from domains.powergrid.states import PowergridState
 
     states["powergrid"] = {s.value for s in PowergridState}
@@ -91,14 +87,6 @@ def _collect_domain_state_affordances() -> dict[str, list[str]]:
     return mapping
 
 
-def _load_dwsim_tools() -> list[ToolDefinition]:
-    """Load all DWSIM tool definitions."""
-    from domains.dwsim.server.tool_registry import create_dwsim_tool_registry
-
-    registry = create_dwsim_tool_registry()
-    return list(registry.tools)
-
-
 def _tools_with_transitions(tools: list[ToolDefinition]) -> list[ToolDefinition]:
     """Filter to tools that have at least one state token declared."""
     return [t for t in tools if t.state_transition.requires or t.state_transition.produces]
@@ -118,148 +106,11 @@ class TestStateVocabulary:
     """Verify all state tokens are registered in domain Enums."""
 
     @pytest.mark.unit
-    def test_state_tokens_are_registered(self):
-        """Every token in any ToolDefinition.state_transition must belong to a domain Enum."""
-        valid = _all_valid_tokens()
-        tools = _load_dwsim_tools()
-        unknown: list[tuple[str, str]] = []
-        for t in tools:
-            for token in t.state_transition.requires | t.state_transition.produces:
-                if token not in valid:
-                    unknown.append((t.name, token))
-        assert not unknown, f"Unregistered state tokens: {unknown}"
-
-    @pytest.mark.unit
     def test_state_tokens_are_domain_prefixed(self):
         """State tokens should follow the 'domain.state_name' convention."""
         valid = _all_valid_tokens()
         for token in valid:
             assert "." in token, f"State token '{token}' is missing a domain prefix"
-
-
-# ---------------------------------------------------------------------------
-# Graph structural invariants
-# ---------------------------------------------------------------------------
-
-
-class TestStateGraph:
-    """Validate structural integrity of the state graph."""
-
-    @pytest.mark.unit
-    def test_no_orphan_required_states(self):
-        """Every required state must be produced by at least one tool."""
-        tools = _load_dwsim_tools()
-        all_produced: set[str] = set()
-        all_required: set[str] = set()
-        for t in tools:
-            all_produced |= t.state_transition.produces
-            all_required |= t.state_transition.requires
-        orphans = all_required - all_produced
-        assert not orphans, f"States required but never produced: {orphans}"
-
-    @pytest.mark.unit
-    def test_no_unreachable_states(self):
-        """From root states (no prerequisites), all produced states should be reachable."""
-        tools = _load_dwsim_tools()
-        annotated = _tools_with_transitions(tools)
-        if not annotated:
-            pytest.skip("No tools with state transitions")
-
-        # Build adjacency: for each tool, produces are reachable from requires
-        all_states: set[str] = set()
-        for t in annotated:
-            all_states |= t.state_transition.requires | t.state_transition.produces
-
-        # Root tools: those with empty requires (or all requires are empty)
-        reachable: set[str] = set()
-        changed = True
-        while changed:
-            changed = False
-            for t in annotated:
-                if t.state_transition.requires <= reachable or not t.state_transition.requires:
-                    new = t.state_transition.produces - reachable
-                    if new:
-                        reachable |= new
-                        changed = True
-
-        unreachable = all_states - reachable
-        # Filter to only states that are produced (not merely required)
-        all_produced = set()
-        for t in annotated:
-            all_produced |= t.state_transition.produces
-        unreachable_produced = unreachable & all_produced
-        assert not unreachable_produced, f"Produced states unreachable from roots: {unreachable_produced}"
-
-    @pytest.mark.unit
-    def test_dwsim_has_state_transitions(self):
-        """The DWSIM domain should have tools with state transitions."""
-        tools = _load_dwsim_tools()
-        annotated = _tools_with_transitions(tools)
-        assert len(annotated) >= 20, f"Expected at least 20 DWSIM tools with state transitions, got {len(annotated)}"
-
-
-# ---------------------------------------------------------------------------
-# Affordance coverage & quality
-# ---------------------------------------------------------------------------
-
-
-class TestAffordances:
-    """Validate affordance coverage and quality."""
-
-    @pytest.mark.unit
-    def test_all_annotated_tools_have_affordances(self):
-        """Every tool with state transitions should have >= 2 effective affordances."""
-        tools = _load_dwsim_tools()
-        state_affs = _collect_domain_state_affordances()
-        insufficient: list[tuple[str, int]] = []
-        for t in _tools_with_transitions(tools):
-            # Compute effective affordances (state-derived + tool-specific)
-            effective: list[str] = []
-            for token in t.state_transition.produces:
-                effective.extend(state_affs.get(token, []))
-            effective.extend(t.affordances)
-            if len(set(effective)) < 2:
-                insufficient.append((t.name, len(set(effective))))
-        assert not insufficient, f"Tools with < 2 effective affordances: {insufficient}"
-
-    @pytest.mark.unit
-    def test_affordances_unique_within_domain(self):
-        """No two tools in the same domain should share identical affordance strings."""
-        tools = _load_dwsim_tools()
-        seen: dict[str, str] = {}
-        duplicates: list[tuple[str, str, str]] = []
-        for t in tools:
-            for aff in t.affordances:
-                key = aff.strip().lower()
-                if key in seen and seen[key] != t.name:
-                    duplicates.append((aff, t.name, seen[key]))
-                seen[key] = t.name
-        assert not duplicates, f"Duplicate affordances: {duplicates}"
-
-    @pytest.mark.unit
-    def test_affordances_add_search_value(self):
-        """Each tool-specific affordance should contribute at least one novel token."""
-        tools = _load_dwsim_tools()
-        low_value: list[tuple[str, str]] = []
-        for t in tools:
-            desc_tokens = _tokenize(t.name + " " + t.description)
-            for aff in t.affordances:
-                aff_tokens = _tokenize(aff)
-                novel = aff_tokens - desc_tokens
-                if not novel:
-                    low_value.append((t.name, aff))
-        assert not low_value, f"Affordances that add no novel search tokens beyond the description: {low_value}"
-
-    @pytest.mark.unit
-    def test_state_affordances_cover_all_states(self):
-        """Every DWSIM state enum value should have at least one affordance phrase."""
-        from domains.dwsim.states import DwsimState, STATE_AFFORDANCES
-
-        missing = []
-        for state in DwsimState:
-            if state not in STATE_AFFORDANCES or not STATE_AFFORDANCES[state]:
-                missing.append(state.value)
-        assert not missing, f"States with no affordances: {missing}"
 
 
 # ---------------------------------------------------------------------------
@@ -309,18 +160,19 @@ class TestCatalogStateTransitions:
     @pytest.mark.unit
     def test_catalog_entry_includes_state_transition(self):
         """Catalog entries for tools with transitions should include state_transition."""
-
-        # Build a minimal catalog entry using the server's serialization logic.
-        tools = _load_dwsim_tools()
-        annotated = _tools_with_transitions(tools)
-        assert annotated, "Expected at least one DWSIM tool with state transitions"
-
-        # Simulate what server.py does — build a catalog entry dict.
-        td = annotated[0]
+        td = ToolDefinition(
+            name="solve_flowsheet",
+            description="Solve a simulation flowsheet",
+            module="test.module",
+            state_transition=StateTransition(
+                requires=frozenset({"sim.flowsheet_exists"}),
+                produces=frozenset({"sim.flowsheet_solved"}),
+            ),
+        )
         entry: dict = {
             "name": td.name,
             "description": td.description,
-            "server_name": "dwsim",
+            "server_name": "simulation",
         }
         if td.state_transition.requires or td.state_transition.produces:
             entry["state_transition"] = {
@@ -366,13 +218,13 @@ class TestPipelinePropagation:
         ti = ToolInfo(
             name="test_tool",
             description="desc",
-            server_name="dwsim",
+            server_name="simulation",
             affordances=("a",),
-            state_requires=("dwsim.flowsheet_exists",),
-            state_produces=("dwsim.flowsheet_solved",),
+            state_requires=("sim.flowsheet_exists",),
+            state_produces=("sim.flowsheet_solved",),
         )
-        assert ti.state_requires == ("dwsim.flowsheet_exists",)
-        assert ti.state_produces == ("dwsim.flowsheet_solved",)
+        assert ti.state_requires == ("sim.flowsheet_exists",)
+        assert ti.state_produces == ("sim.flowsheet_solved",)
 
     @pytest.mark.unit
     def test_tool_info_defaults_empty(self):
@@ -390,14 +242,14 @@ class TestPipelinePropagation:
 
         r = ToolSearchResult(
             name="test",
-            server_name="dwsim",
+            server_name="simulation",
             description="desc",
             execution_type="mcp",
-            state_requires=["dwsim.flowsheet_exists"],
-            state_produces=["dwsim.flowsheet_solved"],
+            state_requires=["sim.flowsheet_exists"],
+            state_produces=["sim.flowsheet_solved"],
         )
-        assert r.state_requires == ["dwsim.flowsheet_exists"]
-        assert r.state_produces == ["dwsim.flowsheet_solved"]
+        assert r.state_requires == ["sim.flowsheet_exists"]
+        assert r.state_produces == ["sim.flowsheet_solved"]
 
     @pytest.mark.unit
     def test_search_result_defaults_empty(self):
@@ -423,17 +275,17 @@ class TestPipelinePropagation:
         tools = [
             ToolInfo(
                 name="solve_flowsheet",
-                description="Solve a DWSIM flowsheet",
-                server_name="dwsim",
-                state_requires=("dwsim.flowsheet_exists",),
-                state_produces=("dwsim.flowsheet_solved", "dwsim.results_available"),
+                description="Solve a simulation flowsheet",
+                server_name="simulation",
+                state_requires=("sim.flowsheet_exists",),
+                state_produces=("sim.flowsheet_solved", "sim.results_available"),
             ),
         ]
         backend = BM25ToolSearchBackend(tools)
         results = await backend.search("solve flowsheet", top=1)
         assert len(results) == 1
-        assert results[0].state_requires == ["dwsim.flowsheet_exists"]
-        assert set(results[0].state_produces) == {"dwsim.flowsheet_solved", "dwsim.results_available"}
+        assert results[0].state_requires == ["sim.flowsheet_exists"]
+        assert set(results[0].state_produces) == {"sim.flowsheet_solved", "sim.results_available"}
 
 
 # ---------------------------------------------------------------------------
@@ -452,42 +304,49 @@ class TestStateGraphQueryTool:
             ToolInfo(
                 name="search_compounds",
                 description="Search compound database",
-                server_name="dwsim",
-                state_produces=("dwsim.compounds_available",),
+                server_name="sim",
+                state_produces=("sim.compounds_available",),
             ),
             ToolInfo(
                 name="create_flowsheet",
                 description="Create a flowsheet",
-                server_name="dwsim",
-                state_requires=("dwsim.compounds_available",),
-                state_produces=("dwsim.flowsheet_exists",),
+                server_name="sim",
+                state_requires=("sim.compounds_available",),
+                state_produces=("sim.flowsheet_exists",),
             ),
             ToolInfo(
                 name="add_mixer",
                 description="Add a mixer",
-                server_name="dwsim",
-                state_requires=("dwsim.flowsheet_exists",),
-                state_produces=("dwsim.flowsheet_exists",),
+                server_name="sim",
+                state_requires=("sim.flowsheet_exists",),
+                state_produces=("sim.flowsheet_exists",),
             ),
             ToolInfo(
                 name="solve_flowsheet",
                 description="Solve the flowsheet",
-                server_name="dwsim",
-                state_requires=("dwsim.flowsheet_exists",),
-                state_produces=("dwsim.flowsheet_solved",),
+                server_name="sim",
+                state_requires=("sim.flowsheet_exists",),
+                state_produces=("sim.flowsheet_solved",),
             ),
         ]
-        return StateGraph(tools)
+        graph = StateGraph(tools)
+        # Inject synthetic domain states so overview() can find them
+        graph._domain_states["sim"] = {
+            "sim.compounds_available": "COMPOUNDS_AVAILABLE",
+            "sim.flowsheet_exists": "FLOWSHEET_EXISTS",
+            "sim.flowsheet_solved": "FLOWSHEET_SOLVED",
+        }
+        return graph
 
     @pytest.mark.unit
-    def test_overview_returns_dwsim_domain(self):
+    def test_overview_returns_domain(self):
         graph = self._make_graph()
-        result = graph.overview("dwsim")
+        result = graph.overview("sim")
         assert "domains" in result
-        dwsim = result["domains"][0]
-        assert dwsim["domain"] == "dwsim"
-        assert len(dwsim["states"]) > 0
-        assert len(dwsim["edges"]) > 0
+        sim = result["domains"][0]
+        assert sim["domain"] == "sim"
+        assert len(sim["states"]) > 0
+        assert len(sim["edges"]) > 0
 
     @pytest.mark.unit
     def test_overview_all_domains(self):
@@ -495,23 +354,23 @@ class TestStateGraphQueryTool:
         result = graph.overview()
         assert "domains" in result
         domain_names = {d["domain"] for d in result["domains"]}
-        assert "dwsim" in domain_names
+        assert "sim" in domain_names
 
     @pytest.mark.unit
     def test_from_state_returns_tools(self):
         graph = self._make_graph()
-        result = graph.from_state("dwsim.flowsheet_exists")
-        assert result["state"] == "dwsim.flowsheet_exists"
+        result = graph.from_state("sim.flowsheet_exists")
+        assert result["state"] == "sim.flowsheet_exists"
         tool_names = {t["name"] for t in result["tools_from_here"]}
         assert "add_mixer" in tool_names
         assert "solve_flowsheet" in tool_names
-        assert "dwsim.flowsheet_solved" in result["next_states"]
+        assert "sim.flowsheet_solved" in result["next_states"]
 
     @pytest.mark.unit
     def test_from_state_escape_hatch(self):
         """When no tools transition from a state, a hint should mention execute_*_code."""
         graph = self._make_graph()
-        result = graph.from_state("dwsim.flowsheet_solved")
+        result = graph.from_state("sim.flowsheet_solved")
         # flowsheet_solved has no tools requiring it in our test data
         assert "hint" in result
         assert "execute_" in result["hint"]
@@ -519,7 +378,7 @@ class TestStateGraphQueryTool:
     @pytest.mark.unit
     def test_path_finds_route(self):
         graph = self._make_graph()
-        result = graph.path("dwsim.compounds_available", "dwsim.flowsheet_solved")
+        result = graph.path("sim.compounds_available", "sim.flowsheet_solved")
         assert result["path"] is not None
         assert len(result["path"]) == 2  # compounds→flowsheet→solved
         assert result["path"][0]["tool"] == "create_flowsheet"
@@ -528,7 +387,7 @@ class TestStateGraphQueryTool:
     @pytest.mark.unit
     def test_path_no_route_escape_hatch(self):
         graph = self._make_graph()
-        result = graph.path("dwsim.flowsheet_solved", "dwsim.compounds_available")
+        result = graph.path("sim.flowsheet_solved", "sim.compounds_available")
         assert result["path"] is None
         assert "hint" in result
         assert "execute_" in result["hint"]
@@ -538,40 +397,14 @@ class TestStateGraphQueryTool:
         graph = self._make_graph()
         result = graph.tool_lookup("create_flowsheet")
         assert result["name"] == "create_flowsheet"
-        assert "dwsim.compounds_available" in result["requires"]
-        assert "dwsim.flowsheet_exists" in result["produces"]
+        assert "sim.compounds_available" in result["requires"]
+        assert "sim.flowsheet_exists" in result["produces"]
 
     @pytest.mark.unit
     def test_tool_lookup_not_found(self):
         graph = self._make_graph()
         result = graph.tool_lookup("nonexistent_tool")
         assert "error" in result
-
-    @pytest.mark.unit
-    def test_overview_includes_skills(self):
-        """Overview should include skills with state annotations."""
-        graph = self._make_graph()
-        result = graph.overview("dwsim")
-        dwsim = result["domains"][0]
-        # Skills are discovered from the filesystem, so we check that
-        # DWSIM skills with states annotations are included
-        if dwsim["skills"]:
-            for skill in dwsim["skills"]:
-                assert "name" in skill
-                assert "states" in skill
-                assert len(skill["states"]) >= 2
-
-    @pytest.mark.unit
-    def test_from_state_includes_relevant_skills(self):
-        """from_state should surface skills whose state range overlaps."""
-        graph = self._make_graph()
-        result = graph.from_state("dwsim.flowsheet_exists")
-        # If skills are found, they should overlap with flowsheet_exists
-        if "relevant_skills" in result:
-            for skill in result["relevant_skills"]:
-                assert "dwsim.flowsheet_exists" in skill["states"] or any(
-                    s in result["next_states"] for s in skill["states"]
-                )
 
 
 # ---------------------------------------------------------------------------
@@ -623,49 +456,3 @@ class TestSkillFrontmatter:
             if len(skill["states"]) < 2:
                 too_few.append((skill["name"], len(skill["states"])))
         assert not too_few, f"Skills with fewer than 2 states: {too_few}"
-
-    @pytest.mark.unit
-    def test_skill_state_range_is_connected(self):
-        """The state range declared by a skill should be reachable in the tool graph."""
-        from tools.search.state_graph import StateGraph
-        from tools.search.build_tool_list import ToolInfo
-
-        # Build graph from real DWSIM tools
-        tools_defs = _load_dwsim_tools()
-        tool_infos = [
-            ToolInfo(
-                name=td.name,
-                description=td.description,
-                server_name=td.server_name or "dwsim",
-                state_requires=tuple(td.state_transition.requires),
-                state_produces=tuple(td.state_transition.produces),
-            )
-            for td in tools_defs
-            if td.state_transition.requires or td.state_transition.produces
-        ]
-        graph = StateGraph(tool_infos)
-
-        # Build a set of co-produced state pairs (produced together by one tool)
-        co_produced: set[frozenset[str]] = set()
-        for td in tools_defs:
-            prods = td.state_transition.produces
-            if len(prods) > 1:
-                for a in prods:
-                    for b in prods:
-                        if a != b:
-                            co_produced.add(frozenset({a, b}))
-
-        skills = self._discover_skills_with_states()
-        disconnected: list[tuple[str, str, str]] = []
-        for skill in skills:
-            states = skill["states"]
-            if len(states) >= 2:
-                entry, exit_ = states[0], states[-1]
-                if entry == exit_:
-                    continue
-                # Connected if: path exists OR states are co-produced
-                path = graph._find_path(entry, exit_)
-                are_co_produced = frozenset({entry, exit_}) in co_produced
-                if path is None and not are_co_produced:
-                    disconnected.append((skill["name"], entry, exit_))
-        assert not disconnected, f"Skills with unreachable state ranges: {disconnected}"

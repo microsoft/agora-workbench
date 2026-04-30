@@ -31,10 +31,6 @@ servers:
     config_function: create_foundry_config
     port: 8003
 
-  - name: dwsim
-    module: domains.dwsim.server.dwsim_server
-    config_function: create_dwsim_config
-    port: 8004
 
   - name: gis
     module: domains.gis.server.gis_server

@@ -68,7 +68,7 @@ class QueryStateGraphInput(BaseModel):
 
     domain: str = Field(
         default="",
-        description="Domain name (e.g. 'dwsim'). Empty string returns all domains.",
+        description="Domain name (e.g. 'powergrid'). Empty string returns all domains.",
     )
     mode: str = Field(
         default="overview",
@@ -82,7 +82,7 @@ class QueryStateGraphInput(BaseModel):
     )
     state: str = Field(
         default="",
-        description="State token for 'from_state' mode (e.g. 'dwsim.flowsheet_exists').",
+        description="State token for 'from_state' mode (e.g. 'powergrid.network_loaded').",
     )
     target_state: str = Field(
         default="",
@@ -262,7 +262,7 @@ class StateGraph:
                 self._to_state[st].append(tool)
 
     def _domain_for_state(self, state_token: str) -> str:
-        """Extract domain prefix from a state token like 'dwsim.flowsheet_exists'."""
+        """Extract domain prefix from a state token like 'powergrid.network_loaded'."""
         return state_token.split(".")[0] if "." in state_token else ""
 
     def _tool_summary(self, tool: ToolInfo) -> dict[str, Any]:
@@ -385,7 +385,7 @@ class StateGraph:
     def from_state(self, state: str) -> dict[str, Any]:
         """Tools and skills reachable from a given state."""
         if not state:
-            return {"error": "Provide a 'state' parameter (e.g. 'dwsim.flowsheet_exists')."}
+            return {"error": "Provide a 'state' parameter (e.g. 'domain.state_name')."}
 
         tools_from = [self._tool_summary(t) for t in self._from_state.get(state, [])]
         # Also include tools that produce this state (how to get here)
@@ -546,7 +546,7 @@ def create_query_state_graph_function(
         tool calls, and discover skills that cover common workflows.
 
         Args:
-            domain: Domain name (e.g. 'dwsim'). Empty for all domains.
+            domain: Domain name (e.g. 'powergrid'). Empty for all domains.
             mode: Query mode — 'overview', 'from_state', 'path', or 'tool'.
             state: State token for 'from_state' / 'path' modes.
             target_state: Target state for 'path' mode.
@@ -598,7 +598,7 @@ class LoadSkillInput(BaseModel):
     skill_name: str = Field(
         description=(
             "Name of the skill to load (e.g. 'flowsheet-setup', "
-            "'process-simulation-with-dwsim').  Use query_state_graph to "
+            "'grid-converter').  Use query_state_graph to "
             "discover available skill names."
         ),
     )

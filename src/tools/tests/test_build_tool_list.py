@@ -39,23 +39,23 @@ class TestIsMetaTool:
 
     @pytest.mark.unit
     def test_execute_code_is_meta(self):
-        assert _is_meta_tool("execute_dwsim_code") is True
+        assert _is_meta_tool("execute_powergrid_code") is True
 
     @pytest.mark.unit
     def test_list_sessions_is_meta(self):
-        assert _is_meta_tool("dwsim_list_sessions") is True
+        assert _is_meta_tool("powergrid_list_sessions") is True
 
     @pytest.mark.unit
     def test_get_session_info_is_meta(self):
-        assert _is_meta_tool("dwsim_get_session_info") is True
+        assert _is_meta_tool("powergrid_get_session_info") is True
 
     @pytest.mark.unit
     def test_close_session_is_meta(self):
-        assert _is_meta_tool("dwsim_close_session") is True
+        assert _is_meta_tool("powergrid_close_session") is True
 
     @pytest.mark.unit
     def test_list_domain_tools_is_meta(self):
-        assert _is_meta_tool("list_dwsim_domain_tools") is True
+        assert _is_meta_tool("list_powergrid_domain_tools") is True
 
     @pytest.mark.unit
     def test_domain_tool_is_not_meta(self):
@@ -72,17 +72,17 @@ class TestIsMetaTool:
     @pytest.mark.unit
     def test_wrong_session_name_pattern_list(self):
         """Verify the old-style list_<server>_sessions pattern is NOT treated as meta."""
-        assert _is_meta_tool("list_dwsim_sessions") is False
+        assert _is_meta_tool("list_powergrid_sessions") is False
 
     @pytest.mark.unit
     def test_wrong_session_name_pattern_get(self):
         """Verify the old-style get_<server>_session_info pattern is NOT treated as meta."""
-        assert _is_meta_tool("get_dwsim_session_info") is False
+        assert _is_meta_tool("get_powergrid_session_info") is False
 
     @pytest.mark.unit
     def test_wrong_session_name_pattern_close(self):
         """Verify the old-style close_<server>_session pattern is NOT treated as meta."""
-        assert _is_meta_tool("close_dwsim_session") is False
+        assert _is_meta_tool("close_powergrid_session") is False
 
 
 class TestBuildToolList:

@@ -40,7 +40,7 @@ class ToolInfo:
 
 # Tools that are infrastructure / meta-tools and should not appear in the
 # search index (they are always present in the agent's tool list).
-# Only matches when BOTH a prefix AND suffix match (e.g. execute_dwsim_code).
+# Only matches when BOTH a prefix AND suffix match (e.g. execute_powergrid_code).
 _META_TOOL_PREFIXES = (
     "execute_",
     "list_",
