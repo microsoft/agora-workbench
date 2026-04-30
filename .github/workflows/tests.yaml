@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests auth, middleware, agents, tools, data_lake, code_execution, context_managers, planning, and domains packages
+# Tests auth, middleware, agents, tools, data_lake, code_execution, planning, and domains packages
 
 name: Tests
 
@@ -77,12 +77,6 @@ jobs:
         run: |
           uv run pytest src/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
-      - name: Run context managers tests
-        id: context_managers_tests
-        continue-on-error: true
-        run: |
-          uv run pytest src/context_managers/tests/ -m "not live" -v --json-report --json-report-file=context-managers-report.json
-
       - name: Run planning tests
         id: planning_tests
         continue-on-error: true
@@ -104,7 +98,6 @@ jobs:
           tools_status="${{ steps.tools_tests.outcome }}"
           data_lake_status="${{ steps.data_lake_tests.outcome }}"
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
-          context_managers_status="${{ steps.context_managers_tests.outcome }}"
           planning_status="${{ steps.planning_tests.outcome }}"
           domains_status="${{ steps.domains_tests.outcome }}"
           
@@ -145,12 +138,6 @@ jobs:
             echo "❌ Code execution tests failed"
           fi
 
-          if [ "$context_managers_status" == "success" ]; then
-            echo "✅ Context managers tests passed"
-          else
-            echo "❌ Context managers tests failed"
-          fi
-
           if [ "$planning_status" == "success" ]; then
             echo "✅ Planning tests passed"
           else
@@ -163,7 +150,7 @@ jobs:
             echo "❌ Domains tests failed"
           fi
           
-          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$agents_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$context_managers_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domains_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$agents_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domains_status" == "success" ]; then
             exit 0
           else
             exit 1
