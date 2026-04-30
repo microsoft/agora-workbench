@@ -466,9 +466,6 @@ def convert_fsd_to_dwsim(
             comp = flowsheet.AvailableCompounds[dwsim_name]
             flowsheet.SelectedCompounds.Add(dwsim_name, comp)
 
-        # DWSIM compound order (as added to flowsheet)
-        dwsim_compounds = list(compound_map.values())
-
         # ── 3. Attach property package ───────────────────────────
         if property_package:
             pp_name = property_package
@@ -516,8 +513,6 @@ def convert_fsd_to_dwsim(
 
         # Streams that are only feeds (not produced by any unit op)
         pure_feed_streams = feed_stream_names - outlet_stream_names
-        # Streams that are only outlets (not consumed by any unit op downstream)
-        pure_outlet_streams = outlet_stream_names - feed_stream_names
 
         # ── 5. Add feed streams ──────────────────────────────────
         stream_lookup: dict[str, dict] = {s["name"]: s for s in topology["streams"]}
