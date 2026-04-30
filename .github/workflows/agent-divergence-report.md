@@ -1,7 +1,7 @@
 ---
 description: >
-  Weekly divergence report comparing the four agent implementations under
-  src/agent_bot/ (agora, gui, plan_then_execute, toolmaker) to
+  Weekly divergence report comparing the three agent implementations under
+  src/agent_bot/ (agora, gui, plan_then_execute) to
   surface improvements that could propagate across agents. Opens an issue
   with findings categorised by severity and dimension.
 on:
@@ -31,11 +31,11 @@ engine: copilot
 
 # Agent Divergence Report
 
-You are an expert code analyst that compares the four agent implementations
+You are an expert code analyst that compares the three agent implementations
 under `src/agent_bot/` to detect innovation propagation
 opportunities. The goal is **not** to make the agents identical — some
 differences are intentional (GUI needs streaming, PlanThenExecute has
-multi-stage workflows, ToolMaker has a four-phase build workflow). The goal is to surface improvements in one agent
+multi-stage workflows). The goal is to surface improvements in one agent
 that could benefit others.
 
 ## Repository Context
@@ -89,9 +89,6 @@ cat src/agent_bot/gui/response_models.py
 echo ""
 echo "=== Response models: plan_then_execute ==="
 cat src/agent_bot/plan_then_execute/response_models.py
-echo ""
-echo "=== Response models: toolmaker ==="
-cat src/agent_bot/toolmaker/models.py
 ```
 
 ### Dimension 2 — Executor Patterns
@@ -110,9 +107,6 @@ echo ""
 echo "=== Executor: plan_then_execute ==="
 cat src/agent_bot/plan_then_execute/executors.py
 echo ""
-echo "=== Executor: toolmaker ==="
-cat src/agent_bot/toolmaker/executors.py
-echo ""
 echo "=== Agent entry points ==="
 echo "--- agora/agent.py ---"
 cat src/agent_bot/agora/agent.py
@@ -122,9 +116,6 @@ cat src/agent_bot/gui/agent.py
 echo ""
 echo "--- plan_then_execute/agent.py ---"
 cat src/agent_bot/plan_then_execute/agent.py
-echo ""
-echo "--- toolmaker/agent.py ---"
-cat src/agent_bot/toolmaker/agent.py
 ```
 
 ### Dimension 3 — Skill Integration
@@ -140,7 +131,6 @@ grep -rn --include='*.py' --include='*.jinja' \
   src/agent_bot/agora/ \
   src/agent_bot/gui/ \
   src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -157,7 +147,6 @@ grep -rn --include='*.py' \
   src/agent_bot/agora/ \
   src/agent_bot/gui/ \
   src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -192,7 +181,6 @@ grep -rn --include='*.py' \
   src/agent_bot/agora/ \
   src/agent_bot/gui/ \
   src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
   2>/dev/null | grep -v __pycache__
 ```
 
@@ -208,7 +196,6 @@ grep -rn --include='*.py' \
   src/agent_bot/agora/ \
   src/agent_bot/gui/ \
   src/agent_bot/plan_then_execute/ \
-  src/agent_bot/toolmaker/ \
   2>/dev/null | grep -v __pycache__ | grep -v 'test'
 ```
 

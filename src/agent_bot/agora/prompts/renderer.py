@@ -26,7 +26,6 @@ jinja_env = Environment(
 def render_system_prompt(
     domain_prompt_path: Optional[str] = None,
     domain_prompt_paths: Optional[list[str]] = None,
-    enable_toolmaker: bool = False,
 ) -> str:
     """
     Render the system prompt using Jinja2 template.
@@ -38,7 +37,6 @@ def render_system_prompt(
         domain_prompt_paths: List of paths to domain-specific prompt templates. If both
                            domain_prompt_path and domain_prompt_paths are provided,
                            the single path is prepended to the list (deduped).
-        enable_toolmaker: If True, include toolmaker-specific agent instructions.
 
     Returns:
         Rendered system prompt
@@ -57,5 +55,4 @@ def render_system_prompt(
     return template.render(
         domain_prompt_path=all_paths[0] if len(all_paths) == 1 else None,
         domain_prompt_paths=all_paths if all_paths else None,
-        enable_toolmaker=enable_toolmaker,
     )
