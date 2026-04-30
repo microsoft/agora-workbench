@@ -1,0 +1,31 @@
+{
+  "name": "vignette-skillset-{{ SOURCE_ID }}",
+  "description": "Generates embeddings for tool-learning vignettes using the summary field.",
+  "skills": [
+    {
+      "@odata.type": "#Microsoft.Skills.Text.AzureOpenAIEmbeddingSkill",
+      "name": "vignette-embedding",
+      "description": "Embed vignette summary for vector search.",
+      "context": "/document",
+      "resourceUri": "{{ AZURE_OPENAI_ENDPOINT }}",
+      "deploymentId": "{{ AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}",
+      "modelName": "text-embedding-3-large",
+      "authIdentity": {
+        "@odata.type": "#Microsoft.Azure.Search.DataUserAssignedIdentity",
+        "userAssignedIdentity": "{{ USER_ASSIGNED_IDENTITY_RESOURCE_ID }}"
+      },
+      "inputs": [
+        {
+          "name": "text",
+          "source": "/document/summary"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "embedding",
+          "targetName": "content_vector"
+        }
+      ]
+    }
+  ]
+}

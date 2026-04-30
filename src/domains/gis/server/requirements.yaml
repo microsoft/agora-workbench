@@ -1,0 +1,31 @@
+# Geospatial analysis dependencies (installed in isolated uv kernel inside Docker)
+
+# Core geospatial libraries
+geopandas>=1.0.0
+shapely>=2.0.0
+fiona>=1.10.0
+pyproj>=3.7.0
+rasterio>=1.4.0
+
+# Interactive and static visualization
+matplotlib>=3.9.0
+mapclassify>=2.8.0
+
+# Scientific computing
+numpy>=1.26.0,<2.0.0
+pandas>=2.2.2,<3.0
+scipy>=1.11.3
+
+# Tabular data I/O (Excel files from data lake)
+openpyxl>=3.1.0
+
+# Planetary Computer / STAC catalog access
+pystac-client>=0.8.0
+planetary-computer>=1.0.0
+rioxarray>=0.17.0
+
+# HTTP client (used by OSM/Overpass API skills)
+httpx>=0.27.0
+
+# Jupyter kernel (required for code execution)
+ipykernel>=6.29.0

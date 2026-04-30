@@ -1,0 +1,22 @@
+[project]
+name = "vitrimer-vae-tools"
+version = "0.1.0"
+description = "Vitrimer VAE tools for AI-guided inverse design of recyclable vitrimeric polymers"
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.0.0",
+    "rdkit>=2023.3.1",
+    "networkx>=3.1",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "scipy>=1.11.0",
+    "azure-identity>=1.14.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

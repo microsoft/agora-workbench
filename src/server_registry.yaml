@@ -1,0 +1,62 @@
+# MCP Server Registry Configuration
+#
+# This file defines the available MCP servers and their configurations.
+# It is loaded by core/tools/mcp/mcp_server_registry.py during auto-discovery.
+
+# Base URL for all MCP servers (can be overridden per-server)
+base_url: http://localhost
+
+# Authentication scope for OBO flow (overridden by MCP_SERVER_SCOPE environment variable and can be overridden per-server)
+scope: api://12c90937-013c-468e-93cf-eb8083d69ca7/.default
+
+# Server configurations
+servers:
+#  - name: example
+    #module: domains.example.server.example_server
+    #config_function: create_example_config
+    #port: 8000
+
+  - name: powergrid
+    module: domains.powergrid.server.powergrid_server
+    config_function: create_powergrid_config
+    port: 8001
+
+  - name: process
+    module: domains.process.server.process_server
+    config_function: create_process_config
+    port: 8002
+
+  - name: foundry
+    module: domains.foundry.server.foundry_server
+    config_function: create_foundry_config
+    port: 8003
+
+  - name: dwsim
+    module: domains.dwsim.server.dwsim_server
+    config_function: create_dwsim_config
+    port: 8004
+
+  - name: gis
+    module: domains.gis.server.gis_server
+    config_function: create_gis_config
+    port: 8006
+
+  - name: office
+    module: domains.office.server.office_server
+    config_function: create_office_config
+    port: 8007
+
+  - name: openlca
+    module: domains.openlca.server.openlca_server
+    config_function: create_openlca_config
+    port: 8008
+
+  - name: vitrimer_tg_sim
+    module: domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server
+    config_function: create_vitrimer_tg_sim_config
+    port: 8010
+
+  - name: vitrimer_vae
+    module: domains.vitrimer_vae.server.vitrimer_vae_server
+    config_function: create_vitrimer_vae_config
+    port: 8011

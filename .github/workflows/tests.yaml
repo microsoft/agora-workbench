@@ -1,0 +1,183 @@
+# This workflow runs tests on the src module when relevant files change
+# Tests auth, middleware, agents, tools, data_lake, code_execution, context_managers, planning, toolmaker, and domains packages
+
+name: Tests
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: read
+  
+on:
+  workflow_dispatch:  # Manual trigger anytime
+  pull_request:
+    paths:
+      - 'src/**'
+      - '.github/workflows/tests.yaml'
+    
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for path checking
+          submodules: recursive
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          uv sync
+          uv pip install pytest pytest-json-report
+      
+      - name: Run auth tests
+        id: auth_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/auth/tests/ -m "not live" -v --json-report --json-report-file=auth-report.json
+
+      - name: Run middleware tests
+        id: middleware_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/middleware/tests/ -m "not live" -v --json-report --json-report-file=middleware-report.json
+
+      - name: Run agents tests
+        id: agents_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/agent_bot/agora/tests/ src/agent_bot/plan_then_execute/tests/ -m "not live" -v --json-report --json-report-file=agents-report.json
+
+      - name: Run tools tests
+        id: tools_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/tools/tests/ -m "not live" -v --json-report --json-report-file=tools-report.json
+
+      - name: Run data_lake tests
+        id: data_lake_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/data_lake/tests/ -m "not live" -v --json-report --json-report-file=data-lake-report.json
+      
+      - name: Run code execution tests
+        id: code_execution_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
+
+      - name: Run context managers tests
+        id: context_managers_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/context_managers/tests/ -m "not live" -v --json-report --json-report-file=context-managers-report.json
+
+      - name: Run planning tests
+        id: planning_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/planning/tests/ -m "not live" -v --json-report --json-report-file=planning-report.json
+
+      - name: Run toolmaker tests
+        id: toolmaker_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/agent_bot/toolmaker/tests/ -m "not live" -v --json-report --json-report-file=toolmaker-report.json
+
+      - name: Run domains tests
+        id: domains_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/domains/tests/ -m "not live" -v --json-report --json-report-file=domains-report.json
+      
+      - name: Test Summary
+        if: always()
+        run: |
+          auth_status="${{ steps.auth_tests.outcome }}"
+          middleware_status="${{ steps.middleware_tests.outcome }}"
+          agents_status="${{ steps.agents_tests.outcome }}"
+          tools_status="${{ steps.tools_tests.outcome }}"
+          data_lake_status="${{ steps.data_lake_tests.outcome }}"
+          code_execution_status="${{ steps.code_execution_tests.outcome }}"
+          context_managers_status="${{ steps.context_managers_tests.outcome }}"
+          planning_status="${{ steps.planning_tests.outcome }}"
+          toolmaker_status="${{ steps.toolmaker_tests.outcome }}"
+          domains_status="${{ steps.domains_tests.outcome }}"
+          
+          echo "## Test Results"
+          if [ "$auth_status" == "success" ]; then
+            echo "✅ Auth tests passed"
+          else
+            echo "❌ Auth tests failed"
+          fi
+
+          if [ "$middleware_status" == "success" ]; then
+            echo "✅ Middleware tests passed"
+          else
+            echo "❌ Middleware tests failed"
+          fi
+
+          if [ "$agents_status" == "success" ]; then
+            echo "✅ Agents tests passed"
+          else
+            echo "❌ Agents tests failed"
+          fi
+
+          if [ "$tools_status" == "success" ]; then
+            echo "✅ Tools tests passed"
+          else
+            echo "❌ Tools tests failed"
+          fi
+
+          if [ "$data_lake_status" == "success" ]; then
+            echo "✅ Data lake tests passed"
+          else
+            echo "❌ Data lake tests failed"
+          fi
+          
+          if [ "$code_execution_status" == "success" ]; then
+            echo "✅ Code execution tests passed"
+          else
+            echo "❌ Code execution tests failed"
+          fi
+
+          if [ "$context_managers_status" == "success" ]; then
+            echo "✅ Context managers tests passed"
+          else
+            echo "❌ Context managers tests failed"
+          fi
+
+          if [ "$planning_status" == "success" ]; then
+            echo "✅ Planning tests passed"
+          else
+            echo "❌ Planning tests failed"
+          fi
+
+          if [ "$toolmaker_status" == "success" ]; then
+            echo "✅ Toolmaker tests passed"
+          else
+            echo "❌ Toolmaker tests failed"
+          fi
+
+          if [ "$domains_status" == "success" ]; then
+            echo "✅ Domains tests passed"
+          else
+            echo "❌ Domains tests failed"
+          fi
+          
+          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$agents_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$context_managers_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$toolmaker_status" == "success" ] && [ "$domains_status" == "success" ]; then
+            exit 0
+          else
+            exit 1
+          fi

@@ -1,0 +1,17 @@
+# Archival Paths
+#
+# Directories listed here are considered archival or legacy code.
+# Automated workflows (security scans, linters, doc updaters, etc.) should
+# skip these paths and NOT propose changes to them.
+#
+# Format: one entry per line, relative to the repository root.
+# Blank lines and lines starting with '#' are ignored.
+#
+# Entries are treated as directory-name patterns, matched at any depth
+# in the tree. Trailing slashes (e.g. "AgoraAgent/") are allowed for
+# readability but do not change the matching behavior.
+#
+# To add a directory, append it to this file and open a PR.
+# To remove a directory (reactivate it), delete the corresponding line.
+
+external

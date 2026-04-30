@@ -1,0 +1,7 @@
+# DWSIM code execution dependencies
+pythonnet==3.0.5
+scipy>=1.11.3
+ipykernel>=6.29.0
+
+# Local DWSIM tools package
+/app/domains/dwsim/server/tools

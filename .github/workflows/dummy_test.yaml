@@ -1,0 +1,49 @@
+name: Dummy Test for Meta Folders
+
+on:
+  pull_request:
+    paths:
+      - '.devcontainer/**'
+      - '.github/**'
+      - '.vscode/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check changed files
+        id: check
+        shell: bash
+        run: |
+          echo "Checking for changes in .devcontainer, .github, or .vscode directories..."
+          
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            # For PRs, compare against base branch
+            git fetch origin ${{ github.base_ref }}
+            BASE="origin/${{ github.base_ref }}"
+            CHANGED_FILES=$(git diff --name-only $BASE...HEAD)
+          else
+            # For pushes, compare against previous commit
+            CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
+          fi
+          
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          
+          if echo "$CHANGED_FILES" | grep -qE '^(\.devcontainer|\.github|\.vscode)/'; then
+            echo "✓ Changes detected in .devcontainer, .github, or .vscode directories"
+          else
+            echo "✓ No changes in meta directories (or other changes present)"
+          fi
+          
+          echo "::notice::This is a dummy test that always passes"
+      - name: Pass test
+        run: |
+          echo "✓ Test passed successfully"
+          exit 0

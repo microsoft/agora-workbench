@@ -1,0 +1,9 @@
+line-length = 120
+extend-exclude = ["*.ipynb", "**/experimental/**", "**/external/**", "src/domains/vitrimer_vae/server/tools/src/vitrimer_vae_tools/vae/"]
+
+[lint]
+ignore = ["UP045"]
+
+[format]
+docstring-code-format = true
+

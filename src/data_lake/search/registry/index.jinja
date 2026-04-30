@@ -1,0 +1,227 @@
+{
+  "name": "artifact-registry-v1",
+  "fields": [
+    {
+      "name": "artifact_id",
+      "type": "Edm.String",
+      "key": true,
+      "filterable": true,
+      "sortable": false,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "artifact_type",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "name",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": true,
+      "facetable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "description",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "description_vector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "retrievable": false,
+      "dimensions": 3072,
+      "vectorSearchProfile": "vector-search-profile"
+    },
+
+    {
+      "name": "semantic_dataset_id",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "retrievable": true
+    },
+
+    {
+      "name": "semantic_dataset_name",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": true,
+      "facetable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "semantic_dataset_description",
+      "type": "Edm.String",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "semantic_dataset_description_vector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "filterable": false,
+      "sortable": false,
+      "facetable": false,
+      "retrievable": false,
+      "dimensions": 3072,
+      "vectorSearchProfile": "vector-search-profile"
+    },
+
+    {
+      "name": "domain",
+      "type": "Edm.String",
+      "searchable": false,
+      "filterable": true,
+      "sortable": false,
+      "facetable": true,
+      "retrievable": true
+    },
+
+    {
+      "name": "rbacScope",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": false,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "detail_index",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": false,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "detail_key",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": false,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "source",
+      "type": "Edm.String",
+      "filterable": true,
+      "sortable": true,
+      "facetable": true,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "created_at",
+      "type": "Edm.DateTimeOffset",
+      "filterable": true,
+      "sortable": true,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    },
+
+    {
+      "name": "updated_at",
+      "type": "Edm.DateTimeOffset",
+      "filterable": true,
+      "sortable": true,
+      "facetable": false,
+      "searchable": false,
+      "retrievable": true
+    }
+  ],
+  "vectorSearch": {
+    "profiles": [
+      {
+        "name": "vector-search-profile",
+        "algorithm": "hnsw-config",
+        "vectorizer": "description-vectorizer"
+      }
+    ],
+    "algorithms": [
+      {
+        "name": "hnsw-config",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500
+        }
+      }
+    ],
+    "vectorizers": [
+      {
+        "name": "description-vectorizer",
+        "kind": "azureOpenAI",
+        "azureOpenAIParameters": {
+          "resourceUri": "{{ azure_openai_endpoint }}",
+          "deploymentId": "{{ azure_openai_embedding_deployment }}",
+          "modelName": "text-embedding-3-large"
+        }
+      }
+    ]
+  },
+  "semantic": {
+    "configurations": [
+      {
+        "name": "default-semantic-config",
+        "prioritizedFields": {
+          "titleField": {
+            "fieldName": "name"
+          },
+          "prioritizedContentFields": [
+            {
+              "fieldName": "description"
+            },
+            {
+              "fieldName": "semantic_dataset_description"
+            }
+          ],
+          "prioritizedKeywordsFields": [
+            {
+              "fieldName": "semantic_dataset_name"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "permissionFilterOption": "enabled"
+}

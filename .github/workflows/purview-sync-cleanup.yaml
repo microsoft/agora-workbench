@@ -1,0 +1,305 @@
+# Scheduled (and on-demand) cleanup of stale artifact-registry entries.
+#
+# When a blob is deleted from Azure Blob Storage the Purview scan will
+# eventually remove its catalog entry, but the artifact-registry Azure AI
+# Search index still holds a stale document pointing to that blob.
+#
+# This workflow runs sync.py with --cleanup --verify-blobs to:
+#   1. Walk every entry in blob-details index.
+#   2. For each entry issue an authenticated HEAD request to confirm the
+#      blob still exists.
+#   3. If the blob is gone (HTTP 404) delete the stale document from
+#      artifact-registry.
+#
+# Schedule: every Sunday at 02:00 UTC (weekly).
+# The workflow can also be triggered manually via workflow_dispatch, which
+# accepts optional overrides for the key sync parameters.
+
+name: Purview Sync Cleanup
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"  # Weekly – every Sunday at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      search_service:
+        description: "Azure AI Search service name (overrides env default)"
+        required: false
+        type: string
+      purview_account:
+        description: "Purview account name (overrides env default)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run – log what would be deleted without making changes"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      max_cleanup:
+        description: "Maximum stale entries to delete per run (default: 50)"
+        required: false
+        default: "50"
+        type: string
+      cleanup_threshold:
+        description: "Circuit-breaker ratio – abort if stale/processed exceeds this (default: 0.2)"
+        required: false
+        default: "0.2"
+        type: string
+
+concurrency:
+  group: purview-sync-cleanup
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # Required for OIDC authentication to Azure
+  contents: read
+
+env:
+  # These defaults can be overridden by repository/environment variables or
+  # by workflow_dispatch inputs above.
+  # Variable names follow the DATA_LAKE_* convention from .env.example.
+  SEARCH_SERVICE: ${{ vars.DATA_LAKE_SEARCH_NAME }}
+  PURVIEW_ACCOUNT: ${{ vars.DATA_LAKE_PURVIEW_ACCOUNT || 'agora-purview' }}
+  AZURE_OPENAI_ENDPOINT: ${{ vars.DATA_LAKE_VECTORIZER_ENDPOINT }}
+  AZURE_OPENAI_EMBEDDING_DEPLOYMENT: ${{ vars.DATA_LAKE_VECTORIZER_DEPLOYMENT || 'text-embedding-3-large' }}
+  BLOB_DETAILS_INDEX: ${{ vars.DATA_LAKE_BLOB_DETAILS_INDEX || 'blob-details' }}
+  ARTIFACT_REGISTRY_INDEX: ${{ vars.DATA_LAKE_CATALOG_INDEX_NAME || 'artifact-registry' }}
+
+jobs:
+  cleanup:
+    name: Cleanup stale artifact-registry entries
+    runs-on: ubuntu-latest
+    environment: pipeline-env
+    if: ${{ !github.event.repository.fork }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve effective parameters
+        id: params
+        run: |
+          SEARCH="${{ github.event.inputs.search_service || env.SEARCH_SERVICE }}"
+          PURVIEW="${{ github.event.inputs.purview_account || env.PURVIEW_ACCOUNT }}"
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+          MAX_CLEANUP="${{ github.event.inputs.max_cleanup || '50' }}"
+          THRESHOLD="${{ github.event.inputs.cleanup_threshold || '0.2' }}"
+
+          if [ -z "$SEARCH" ]; then
+            echo "ERROR: search_service input is not set and env.SEARCH_SERVICE is empty. Cannot run sync cleanup without a search service." >&2
+            exit 1
+          fi
+          if [ -z "$PURVIEW" ]; then
+            echo "ERROR: purview_account input is not set and env.PURVIEW_ACCOUNT is empty. Cannot run sync cleanup without a Purview account." >&2
+            exit 1
+          fi
+          if [ -z "${{ env.AZURE_OPENAI_ENDPOINT }}" ]; then
+            echo "ERROR: DATA_LAKE_VECTORIZER_ENDPOINT is not set. Cannot run sync cleanup without an Azure OpenAI endpoint." >&2
+            exit 1
+          fi
+
+          echo "search_service=${SEARCH}" >> "$GITHUB_OUTPUT"
+          echo "purview_account=${PURVIEW}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+          echo "max_cleanup=${MAX_CLEANUP}" >> "$GITHUB_OUTPUT"
+          echo "cleanup_threshold=${THRESHOLD}" >> "$GITHUB_OUTPUT"
+
+      - name: Run sync cleanup
+        env:
+          DATA_LAKE_VECTORIZER_ENDPOINT: ${{ env.AZURE_OPENAI_ENDPOINT }}
+          DATA_LAKE_VECTORIZER_DEPLOYMENT: ${{ env.AZURE_OPENAI_EMBEDDING_DEPLOYMENT }}
+        run: |
+          ARGS=(
+            --search-service "${{ steps.params.outputs.search_service }}"
+            --purview-account "${{ steps.params.outputs.purview_account }}"
+            --blob-details-index "${{ env.BLOB_DETAILS_INDEX }}"
+            --artifact-registry-index "${{ env.ARTIFACT_REGISTRY_INDEX }}"
+            --cleanup
+            --verify-blobs
+            --max-cleanup "${{ steps.params.outputs.max_cleanup }}"
+            --cleanup-threshold "${{ steps.params.outputs.cleanup_threshold }}"
+            --verbose
+          )
+
+          if [ "${{ steps.params.outputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+            echo "Running in DRY RUN mode"
+          fi
+
+          uv run python -m data_lake.sync.sync "${ARGS[@]}" 2>&1 | tee cleanup-output.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Generate cleanup report
+        if: always()
+        run: |
+          REPORT="cleanup-report.log"
+          echo "========================================" > "$REPORT"
+          echo "  Purview Sync Cleanup Report" >> "$REPORT"
+          echo "========================================" >> "$REPORT"
+          echo "Date:               $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$REPORT"
+          echo "Search service:     ${{ steps.params.outputs.search_service }}" >> "$REPORT"
+          echo "Purview account:    ${{ steps.params.outputs.purview_account }}" >> "$REPORT"
+          echo "Dry run:            ${{ steps.params.outputs.dry_run }}" >> "$REPORT"
+          echo "Max cleanup:        ${{ steps.params.outputs.max_cleanup }}" >> "$REPORT"
+          echo "Cleanup threshold:  ${{ steps.params.outputs.cleanup_threshold }}" >> "$REPORT"
+          echo "Blob details index: ${{ env.BLOB_DETAILS_INDEX }}" >> "$REPORT"
+          echo "Artifact reg index: ${{ env.ARTIFACT_REGISTRY_INDEX }}" >> "$REPORT"
+          echo "========================================" >> "$REPORT"
+
+          if [ -f cleanup-output.log ]; then
+            echo "" >> "$REPORT"
+
+            # Sync summary
+            if grep -q "SYNC SUMMARY" cleanup-output.log; then
+              sed -n '/SYNC SUMMARY/,$ p' cleanup-output.log >> "$REPORT"
+            else
+              echo "No SYNC SUMMARY found in output." >> "$REPORT"
+            fi
+
+            echo "" >> "$REPORT"
+
+            # Stale entries found/deleted
+            STALE_LINES=$(grep -iE "INFO.*(Deleted stale|Blob not found|Skipping stale|HEAD 404|Delete failed|Could not delete)" cleanup-output.log || true)
+            if [ -n "$STALE_LINES" ]; then
+              echo "--- Stale Entries ---" >> "$REPORT"
+              echo "$STALE_LINES" >> "$REPORT"
+            else
+              echo "--- Stale Entries ---" >> "$REPORT"
+              echo "None found." >> "$REPORT"
+            fi
+
+            echo "" >> "$REPORT"
+
+            # Errors
+            ERROR_LINES=$(grep -E "^ERROR" cleanup-output.log || true)
+            if [ -n "$ERROR_LINES" ]; then
+              echo "--- Errors ---" >> "$REPORT"
+              echo "$ERROR_LINES" >> "$REPORT"
+            else
+              echo "--- Errors ---" >> "$REPORT"
+              echo "None." >> "$REPORT"
+            fi
+          else
+            echo "" >> "$REPORT"
+            echo "WARNING: No output log found — sync may not have run." >> "$REPORT"
+          fi
+
+          echo "" >> "$REPORT"
+          echo "========================================" >> "$REPORT"
+          echo "Full output: see cleanup-output.log artifact" >> "$REPORT"
+          echo "========================================" >> "$REPORT"
+
+          # Print report to Actions log as well
+          cat "$REPORT"
+
+      - name: Generate job summary
+        if: always()
+        run: |
+          echo "## Purview Sync Cleanup Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f cleanup-report.log ]; then
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat cleanup-report.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "⚠️ No report generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload cleanup logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cleanup-logs-${{ github.run_id }}
+          path: |
+            cleanup-output.log
+            cleanup-report.log
+          retention-days: 180
+          if-no-files-found: ignore
+
+      - name: Log to Azure Table Storage
+        if: always()
+        run: |
+          STORAGE_ACCOUNT="grid0eastus2"
+          TABLE_NAME="purviewCleanupLogs"
+          RUN_DATE=$(date -u '+%Y-%m-%d')
+          RUN_TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          RUN_ID="${{ github.run_id }}"
+
+          # Ensure the table exists
+          az storage table create \
+            --name "$TABLE_NAME" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --auth-mode login \
+            2>/dev/null || true
+
+          # Extract stats from output log
+          PROCESSED=$(grep -oP 'Processed:\s*\K\d+' cleanup-output.log 2>/dev/null || echo "0")
+          ENRICHED=$(grep -oP 'Enriched:\s*\K\d+' cleanup-output.log 2>/dev/null || echo "0")
+          CLEANED=$(grep -oP 'Cleaned:\s*\K\d+' cleanup-output.log 2>/dev/null || echo "0")
+          FAILED=$(grep -oP 'Failed:\s*\K\d+' cleanup-output.log 2>/dev/null || echo "0")
+          SKIPPED=$(grep -oP 'Skipped:\s*\K\d+' cleanup-output.log 2>/dev/null || echo "0")
+
+          # Collect stale entries (artifact IDs and blob URLs)
+          STALE_ENTRIES=$(grep -E "INFO.*(Deleted stale|Blob not found|Skipping stale|HEAD 404|Delete failed|Could not delete)" cleanup-output.log 2>/dev/null | head -50 || echo "")
+
+          # Collect errors
+          ERRORS=$(grep -E "^ERROR" cleanup-output.log 2>/dev/null | head -20 || echo "")
+
+          # Determine status
+          if [ -z "$ERRORS" ]; then
+            STATUS="success"
+          else
+            STATUS="error"
+          fi
+
+          # Truncate long fields for table storage (max 32KB per property)
+          STALE_ENTRIES=$(echo "$STALE_ENTRIES" | head -c 30000)
+          ERRORS=$(echo "$ERRORS" | head -c 30000)
+
+          # Insert entity
+          az storage entity insert \
+            --table-name "$TABLE_NAME" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --auth-mode login \
+            --entity \
+              PartitionKey="cleanup" \
+              RowKey="${RUN_DATE}_${RUN_ID}" \
+              Timestamp@odata.type=Edm.DateTime Timestamp="$RUN_TIMESTAMP" \
+              SearchService="${{ steps.params.outputs.search_service }}" \
+              PurviewAccount="${{ steps.params.outputs.purview_account }}" \
+              DryRun="${{ steps.params.outputs.dry_run }}" \
+              MaxCleanup="${{ steps.params.outputs.max_cleanup }}" \
+              CleanupThreshold="${{ steps.params.outputs.cleanup_threshold }}" \
+              Processed="$PROCESSED" \
+              Enriched="$ENRICHED" \
+              Cleaned="$CLEANED" \
+              Failed="$FAILED" \
+              Skipped="$SKIPPED" \
+              Status="$STATUS" \
+              StaleEntries="$STALE_ENTRIES" \
+              Errors="$ERRORS" \
+              RunUrl="https://github.com/${{ github.repository }}/actions/runs/${RUN_ID}"

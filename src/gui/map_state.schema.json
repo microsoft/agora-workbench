@@ -1,0 +1,355 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "map_state.schema.json",
+  "title": "Map State",
+  "description": "Schema for map_state.json — the contract between the GIS agent and the interactive map viewer. The agent writes this file to /tmp/maps/map_state.json and the frontend reads it to render layers.",
+  "type": "object",
+  "properties": {
+    "view": {
+      "description": "Map viewport. Set center and zoom to frame the data. Use gdf.total_bounds to compute the center from data extents.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "center": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2,
+              "description": "[latitude, longitude] in WGS84 (EPSG:4326)."
+            },
+            "zoom": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "description": "Zoom level. 1 = world, 8 = state/region, 13 = city, 18 = building."
+            }
+          },
+          "required": ["center", "zoom"]
+        },
+        { "type": "null" }
+      ]
+    },
+    "scale_bar": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show a metric/imperial scale bar on the map. Defaults to true."
+    },
+    "layers": {
+      "type": "array",
+      "description": "Ordered list of layers. Rendered bottom-to-top (first layer is bottommost).",
+      "items": { "$ref": "#/$defs/Layer" }
+    }
+  },
+  "required": ["view", "layers"],
+
+  "$defs": {
+    "Layer": {
+      "type": "object",
+      "description": "A single map layer (vector GeoJSON or raster GeoTIFF).",
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier (snake_case). Used internally for toggling and keying."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable name shown in the layer control panel."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["vector", "raster"],
+          "default": "vector",
+          "description": "'vector' for GeoJSON layers (default), 'raster' for GeoTIFF layers."
+        },
+
+        "geojson_file": {
+          "type": "string",
+          "description": "Filename of the GeoJSON file (relative to /tmp/maps/). Required for vector layers."
+        },
+        "tif_file": {
+          "type": "string",
+          "description": "Filename of the GeoTIFF file (relative to /tmp/maps/). Required for raster layers."
+        },
+
+        "description": {
+          "type": "string",
+          "description": "Short description shown in the Datasets panel."
+        },
+        "source": {
+          "type": "string",
+          "description": "Data provenance — file name, data lake artifact, or URL."
+        },
+        "feature_count": {
+          "type": "integer",
+          "description": "Number of features. Use len(gdf) after filtering."
+        },
+        "visible": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set to false to add a layer but keep it hidden initially (user can toggle it on)."
+        },
+        "z_index": {
+          "type": "integer",
+          "description": "Stacking order. Higher values render on top. If omitted, layers render in array order."
+        },
+
+        "style": { "$ref": "#/$defs/LayerStyle" },
+        "point_style": {
+          "type": "string",
+          "enum": ["marker", "circle"],
+          "description": "Point rendering mode. 'circle' renders as scalable CircleMarkers (recommended for data points). 'marker' uses default pin icons."
+        },
+        "popup_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Feature property names to show in popups when the user clicks a feature."
+        },
+
+        "style_by_property": {
+          "$ref": "#/$defs/StyleByProperty",
+          "description": "Per-feature styling: map a feature property value to a style attribute."
+        },
+        "radius_by_property": {
+          "$ref": "#/$defs/RadiusByProperty",
+          "description": "Per-feature radius: read circle radius from a feature property."
+        },
+        "color_field": {
+          "type": "string",
+          "description": "Shorthand: feature property name containing a CSS color string for stroke color."
+        },
+        "fill_color_field": {
+          "type": "string",
+          "description": "Shorthand: feature property name containing a CSS color string for fill color."
+        },
+        "radius_field": {
+          "type": "string",
+          "description": "Shorthand: feature property name containing a numeric radius value."
+        },
+
+        "classify_by": {
+          "$ref": "#/$defs/ClassifyBy",
+          "description": "Choropleth classification: color features by a numeric or categorical property."
+        },
+
+        "label_field": {
+          "type": "string",
+          "description": "Feature property name whose value is rendered as a text label on the map."
+        },
+        "label_style": {
+          "$ref": "#/$defs/LabelStyle",
+          "description": "Styling options for text labels."
+        },
+
+        "legend": {
+          "$ref": "#/$defs/Legend",
+          "description": "Legend to display for this layer. If omitted but classify_by is set, a legend is auto-generated."
+        },
+
+        "colormap": {
+          "type": "string",
+          "description": "Raster colormap name: 'viridis', 'RdYlGn', 'terrain', 'hot', 'Blues', 'gray'."
+        },
+        "value_range": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "Raster [min, max] for normalization. Auto-detected if omitted."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Layer opacity (0–1). Primarily for raster layers."
+        }
+      }
+    },
+
+    "LayerStyle": {
+      "type": "object",
+      "description": "Leaflet path style applied uniformly to all features in the layer (unless overridden by per-feature styling).",
+      "properties": {
+        "color": {
+          "type": "string",
+          "description": "Stroke color (CSS color string). Example: '#e63946'."
+        },
+        "weight": {
+          "type": "number",
+          "description": "Stroke width in pixels."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Stroke opacity."
+        },
+        "fillColor": {
+          "type": "string",
+          "description": "Fill color for polygons and circle markers."
+        },
+        "fillOpacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fill opacity."
+        },
+        "radius": {
+          "type": "number",
+          "description": "Circle marker radius in pixels (only for point_style='circle')."
+        },
+        "dashArray": {
+          "type": "string",
+          "description": "Stroke dash pattern. Examples: '5 5' (dashed), '1 5' (dotted), '10 5 1 5' (dash-dot). Use for proposed vs existing infrastructure."
+        }
+      }
+    },
+
+    "StyleByProperty": {
+      "type": "object",
+      "description": "Map a feature property to a Leaflet style attribute. The feature property must contain a valid CSS color string.",
+      "required": ["property", "target"],
+      "properties": {
+        "property": {
+          "type": "string",
+          "description": "Feature property name containing the style value (e.g. 'marker_color')."
+        },
+        "target": {
+          "type": "string",
+          "enum": ["color", "fillColor"],
+          "description": "Which style attribute to set."
+        }
+      }
+    },
+
+    "RadiusByProperty": {
+      "type": "object",
+      "description": "Read circle marker radius from a feature property. The property value should be a number.",
+      "required": ["property"],
+      "properties": {
+        "property": {
+          "type": "string",
+          "description": "Feature property name containing the radius value."
+        },
+        "min": {
+          "type": "number",
+          "description": "Minimum radius (clamp floor)."
+        },
+        "max": {
+          "type": "number",
+          "description": "Maximum radius (clamp ceiling)."
+        }
+      }
+    },
+
+    "ClassifyBy": {
+      "type": "object",
+      "description": "Choropleth classification. Colors features by a numeric or categorical field. The renderer assigns colors from the 'colors' array based on classification.",
+      "required": ["field", "method", "colors"],
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "Feature property name to classify by (e.g. 'population', 'soil_type')."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["equal_interval", "quantile", "manual", "categorical"],
+          "description": "Classification method. 'equal_interval': evenly spaced breaks. 'quantile': equal feature count per class. 'manual': use provided breaks array. 'categorical': one color per unique value."
+        },
+        "num_classes": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 12,
+          "description": "Number of classes for equal_interval or quantile methods."
+        },
+        "breaks": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "Manual break values (N-1 values for N classes). Required when method='manual'."
+        },
+        "categories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Category values in display order. Required when method='categorical'."
+        },
+        "colors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CSS colors, one per class. Length must match num_classes (or categories length for 'categorical')."
+        }
+      }
+    },
+
+    "LabelStyle": {
+      "type": "object",
+      "description": "Text label styling. Labels are rendered as permanent Leaflet tooltips.",
+      "properties": {
+        "fontSize": {
+          "type": "number",
+          "default": 11,
+          "description": "Font size in pixels."
+        },
+        "color": {
+          "type": "string",
+          "default": "#222",
+          "description": "Text color."
+        },
+        "haloColor": {
+          "type": "string",
+          "default": "#fff",
+          "description": "Text halo (outline) color for readability over the map."
+        },
+        "haloWidth": {
+          "type": "number",
+          "default": 2,
+          "description": "Halo stroke width in pixels."
+        },
+        "minZoom": {
+          "type": "integer",
+          "description": "Minimum zoom level at which labels appear. Prevents clutter at low zoom."
+        }
+      }
+    },
+
+    "Legend": {
+      "type": "object",
+      "description": "Legend shown on the map for this layer.",
+      "required": ["title", "items"],
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Legend title (e.g. 'Load Capacity (MW)')."
+        },
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LegendItem" },
+          "description": "Legend entries, displayed top-to-bottom."
+        }
+      }
+    },
+
+    "LegendItem": {
+      "type": "object",
+      "required": ["label", "color"],
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Display text (e.g. '> 500 MW', 'Residential')."
+        },
+        "color": {
+          "type": "string",
+          "description": "CSS color for the swatch."
+        },
+        "radius": {
+          "type": "number",
+          "description": "If set, renders a circle swatch at this radius (for point layers)."
+        },
+        "dashArray": {
+          "type": "string",
+          "description": "If set, renders a line swatch with this dash pattern."
+        }
+      }
+    }
+  }
+}

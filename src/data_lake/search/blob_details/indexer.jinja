@@ -1,0 +1,30 @@
+{
+  "name": "blob-details-indexer-{{ SOURCE_ID }}",
+  "dataSourceName": "blob-ds-{{ SOURCE_ID }}",
+  "targetIndexName": "{{ TARGET_INDEX_NAME }}",
+  "description": "Indexes blob metadata for {{ SOURCE_ID }} into {{ TARGET_INDEX_NAME }}. Sets artifact_id from metadata_storage_path via base64Encode.",
+  "parameters": {
+    "configuration": {
+      "dataToExtract": "storageMetadata",
+      "indexedFileNameExtensions": "{{ INCLUDED_EXTENSIONS }}",
+      "excludedFileNameExtensions": "{{ EXCLUDED_EXTENSIONS }}"
+    }
+  },
+  "fieldMappings": [
+    {
+      "sourceFieldName": "metadata_storage_path",
+      "targetFieldName": "artifact_id",
+      "mappingFunction": {
+        "name": "base64Encode"
+      }
+    },
+    {
+      "sourceFieldName": "metadata_storage_path",
+      "targetFieldName": "metadata_storage_path"
+    },
+    {
+      "sourceFieldName": "metadata_rbac_scope",
+      "targetFieldName": "rbacScope"
+    }
+  ]
+}

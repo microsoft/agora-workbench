@@ -1,0 +1,39 @@
+name: Compile agentic workflows
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/*.md"
+      - ".github/workflows/*.lock.yml"
+      - ".github/aw/**"
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up gh-aw
+        uses: github/gh-aw/actions/setup-cli@v0.68.3
+        with:
+          version: v0.68.3
+
+      - name: Compile agentic workflows
+        run: gh aw compile
+
+      - name: Check for stale lock files
+        run: |
+          git add -A .github/workflows .github/aw
+          if git diff --cached --quiet; then
+            echo "✅ Lock files are up to date."
+          else
+            echo "::error::Lock files are out of date. Run 'gh aw compile' locally and commit the results."
+            git diff --cached --stat
+            echo ""
+            git diff --cached
+            exit 1
+          fi

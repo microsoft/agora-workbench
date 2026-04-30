@@ -1,0 +1,1 @@
+"""OpenLCA server package."""

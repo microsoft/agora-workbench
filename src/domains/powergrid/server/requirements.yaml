@@ -1,0 +1,28 @@
+# Power grid analysis dependencies (installed in isolated uv kernel inside Docker)
+
+# Core power grid analysis packages
+pypsa==0.30.2
+pypower>=5.1.19
+
+# Optimization and solving
+cvxpy>=1.6.7
+ortools<9.12.0
+
+# GPU-enabled HiGHS solver (pre-built wheel in /opt/wheelhouse)
+# Must match the version built from domains/powergrid/server/external/HiGHS
+highspy==1.11.0
+
+# Scientific computing
+numpy>=1.26.0,<2.0.0
+pandas>=2.2.2,<3.0
+scipy>=1.11.3
+networkx>=3.1
+xarray==2024.9.0
+linopy==0.3.14
+netcdf4>=1.7.0
+
+# Jupyter kernel (required for code execution)
+ipykernel>=6.29.0
+
+# Local powergrid tools package
+/app/domains/powergrid/server/tools

@@ -1,0 +1,129 @@
+# ══════════════════════════════════════════════════════════════
+# Data Lake Manifest – Combined Example
+# ══════════════════════════════════════════════════════════════
+#
+# This file contains two example manifests that share the same
+# schema module (data_lake.manifest.manifest):
+#
+#   1. IngestionManifest  – full ingestion pipeline (steps 3-6)
+#   2. UtilityManifest    – standalone catalog audit / metadata updates
+#
+# Copy the section you need into its own YAML file and fill it out.
+# Both use AzureCliCredential, so authenticate first:
+#
+#   az login
+#
+
+
+# ──────────────────────────────────────────────────────────────
+# 1. Ingestion Manifest
+# ──────────────────────────────────────────────────────────────
+#
+# Drives the full ingestion pipeline:
+#
+#   uv run -m data_lake.ingest.orchestrator validate  my_ingestion.yaml
+#   uv run -m data_lake.ingest.orchestrator ingest    my_ingestion.yaml --dry-run
+#   uv run -m data_lake.ingest.orchestrator ingest    my_ingestion.yaml
+#
+# Sections you can omit if the matching env vars are set in .env:
+#   source.managed_identity_id  ← DEFAULT_IDENTITY_RESOURCE_ID
+#   search (entire section)     ← DATA_LAKE_SEARCH_NAME
+#   embedding (entire section)  ← DATA_LAKE_VECTORIZER_ENDPOINT
+#
+# version: "1"
+#
+# source:
+#   storage_account: "grid0eastus2"
+#   resource_group: "agora-rg"
+#   subscription_id: "7be6291d-d314-4fb5-8377-b89b8b116529"
+#   container: "demo"
+#   # source_id: "grid0eastus2-demo"             # default: {storage_account}-{container}
+#   # managed_identity_id: ...                   # default: DEFAULT_IDENTITY_RESOURCE_ID env var
+#   # container_query: "subfolder/"              # optional: OData query to filter blobs
+#   # included_extensions:                       # optional: only index these extensions
+#   #   - ".csv"
+#   #   - ".nc"
+#   # excluded_extensions:                       # optional: skip these extensions
+#   #   - ".zip"
+#   #   - ".tar"
+#
+# governance:
+#   purview_account: "agora-purview"
+#   collection: "datacenter"                     # default collection; can be overridden per-dataset
+#
+# datasets:
+#   - subfolder: "whr"                           # scope this dataset to demo/whr
+#     description: >
+#       Datacenter location data including metropolitan areas, addresses,
+#       and geographic coordinates of European datacenters.
+#     artifacts:
+#       - path: "data_center_location.xlsx"
+#         description: >
+#           Datacenter locations in Europe, containing the metropolitan area,
+#           address, latitude and longitude of each datacenter.
+#       - path: "simulation_outputs/"            # folder paths end with /
+#         description: >
+#           Directory of simulation output files.
+#
+#   # Add more datasets to ingest additional subfolders in the same run:
+#   # - subfolder: "other_data"
+#   #   collection: "other-collection"           # optional: override governance.collection
+#   #   description: "Description of this dataset."
+#   #   artifacts:
+#   #     - path: "file.csv"
+#   #       description: "Description of the file."
+#
+# # search:                                      # default: DATA_LAKE_SEARCH_NAME env var
+# #   search_service: "your-search-service"
+# #   blob_details_index: "blob-details"         # default: DATA_LAKE_BLOB_DETAILS_INDEX env var
+# #   artifact_registry_index: "artifact-registry"  # default: DATA_LAKE_CATALOG_INDEX_NAME env var
+#
+# # embedding:                                   # default: DATA_LAKE_VECTORIZER_ENDPOINT env var
+# #   azure_openai_endpoint: "https://..."
+# #   azure_openai_deployment: "text-embedding-3-large"  # default: DATA_LAKE_VECTORIZER_DEPLOYMENT env var
+
+
+# ──────────────────────────────────────────────────────────────
+# 2. Utility Manifest
+# ──────────────────────────────────────────────────────────────
+#
+# For small standalone operations (audit artifact registry,
+# patch Purview metadata) without running the full pipeline:
+#
+#   uv run -m data_lake.manifest.run_manifest my_utility.yaml
+#   uv run -m data_lake.manifest.run_manifest my_utility.yaml --dry-run
+#
+# version: "1"
+# purview_account: "agora-purview"
+#
+# # Query the artifact registry and write a JSON snapshot
+# registry_query:
+#   search_service: "agora-ai-search"            # required: Azure AI Search service name
+#   index_name: "artifact-registry"              # default: "artifact-registry"
+#   filter_expression: "domain eq 'powergrid'"   # optional: OData filter expression
+#                                                #   examples:
+#                                                #     "artifact_type eq 'blob'"
+#                                                #     "domain eq 'powergrid' and artifact_type eq 'blob'"
+#                                                #     "created_at ge 2026-01-01T00:00:00Z"
+#   top: 25                                      # optional: max documents to return (default: all)
+#   select_fields:                               # optional: limit returned fields (default: all)
+#     - "artifact_id"
+#     - "name"
+#     - "domain"
+#     - "artifact_type"
+#     - "description"
+#     - "semantic_dataset_name"
+#   output_path: "analysis/powergrid_registry_snapshot.json"  # optional: write results to file
+#
+# # Batch Purview metadata updates
+# #   Each entry requires qualified_name plus at least one of new_name / new_description.
+# #   For directory entities, use a trailing / in the qualified name.
+# entity_updates:
+#   - qualified_name: "https://coienergydata.blob.core.windows.net/energydata/US_Elec_Transmission_Line/"
+#     new_description: >                         # optional: sets Purview userDescription
+#       Folder-level semantic description for U.S. transmission line artifacts.
+#
+#   - qualified_name: "https://coienergydata.blob.core.windows.net/energydata/US_Elec_Transmission_Line/lines.geojson"
+#     new_name: "US transmission lines"          # optional: sets Purview display name
+#     new_description: >                         # optional: sets Purview userDescription
+#       Geospatial transmission line dataset for U.S. grid analysis.

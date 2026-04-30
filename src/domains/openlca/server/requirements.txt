@@ -1,0 +1,12 @@
+# OpenLCA code execution dependencies
+
+# Local OpenLCA tools package
+/app/domains/openlca/server/tools
+
+# OpenLCA IPC client and schema
+olca-ipc>=2.0.0
+olca-schema>=0.0.12
+
+# Data science packages
+pandas>=2.0.0
+matplotlib>=3.7.0

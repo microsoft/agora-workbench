@@ -1,0 +1,17 @@
+{
+  "name": "blob-ds-{{ SOURCE_ID }}",
+  "type": "azureblob",
+  "indexerPermissionOptions": ["rbacScope"],
+  "credentials": {
+    "connectionString": "ResourceId={{ STORAGE_RESOURCE_ID }}"
+  },
+  "identity": {
+    "@odata.type": "#Microsoft.Azure.Search.DataUserAssignedIdentity",
+    "userAssignedIdentity": "{{ USER_ASSIGNED_IDENTITY_RESOURCE_ID }}"
+  }, 
+  "container": {
+    "name": "{{ CONTAINER_NAME }}",
+    "query": "{{ CONTAINER_QUERY }}"
+  },
+  "description": "Blob data source instance for {{ SOURCE_ID }} feeding blob-details."
+}

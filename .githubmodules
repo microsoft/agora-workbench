@@ -1,0 +1,6 @@
+[submodule "src/domains/powergrid/server/external/pypsa-usa"]
+	path = src/domains/powergrid/server/external/pypsa-usa
+	url = https://github.com/PyPSA/pypsa-usa.git
+[submodule "src/domains/powergrid/server/external/HiGHS"]
+	path = src/domains/powergrid/server/external/HiGHS
+	url = https://github.com/morrissharp/HiGHS.git

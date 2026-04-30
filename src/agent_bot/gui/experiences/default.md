@@ -1,0 +1,1 @@
+Do not plot bus name on the point when you visualize the map!
