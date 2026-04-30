@@ -1,6 +1,0 @@
-# Azure AI Foundry dependencies (installed in isolated uv kernel inside Docker)
-# Requires >=1.2.0b5 for DeepResearch, Fabric, and Sharepoint tools
-# See: https://pypi.org/project/azure-ai-agents/#history
-azure-ai-projects
-azure-identity
-azure-ai-agents>=1.2.0b6

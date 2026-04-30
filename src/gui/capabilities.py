@@ -203,43 +203,5 @@ async def list_skills() -> SkillsResponse:
 
 @router.get("/api/tools")
 async def list_tools() -> ToolsResponse:
-    """List domain-level tools from all active MCP servers.
-
-    Loads tool definitions from each domain's ToolRegistry (defined in
-    domain_registry.yaml).  Only domains with an active MCP server and
-    a registered ToolRegistry are included.
-    """
-    import asyncio
-    import importlib
-    from domains.domain_registry import get_domain_registry
-
-    def _collect() -> list[dict]:
-        active_servers = _get_active_server_names()
-        domain_registry = get_domain_registry()
-        results: list[dict] = []
-
-        for name, config in domain_registry.list_domains().items():
-            if name not in active_servers:
-                continue
-            mod_path = config.tool_registry_module
-            func_name = config.tool_registry_function
-            if not mod_path or not func_name:
-                continue
-            try:
-                mod = importlib.import_module(mod_path)
-                factory = getattr(mod, func_name)
-                tool_reg = factory()
-                for t in tool_reg.tools:
-                    results.append({
-                        "name": t.name,
-                        "description": t.description or "",
-                        "server": name,
-                    })
-            except Exception:
-                LOGGER.warning("Failed to load tool registry for '%s'", name, exc_info=True)
-
-        return results
-
-    raw = await asyncio.to_thread(_collect)
-    tools = [ToolInfo(**t) for t in raw]
-    return ToolsResponse(tools=tools)
+    """List domain-level tools from all active MCP servers."""
+    return ToolsResponse(tools=[])

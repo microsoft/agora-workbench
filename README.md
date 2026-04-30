@@ -34,16 +34,6 @@ src/
 ├── middleware/         # Pluggable conversation middleware
 ├── tools/              # Tool search, MCP server registry, tool catalog
 │   └── search/         # search_tools backends (BM25, Azure AI Search)
-├── domains/            # Domain-specific servers and tools
-│   ├── example/        # Reference implementation
-│   ├── powergrid/      # Power grid analysis (PyPSA, PyPower, HiGHS)
-│   │   └── skills/     # Domain skills (grid-converter: PJM N-1 study → PyPSA network)
-│   ├── process/        # Process simulation (IDAES, Pyomo)
-│   ├── foundry/        # Azure AI Foundry integration
-│   ├── gis/            # Geospatial analysis (GeoPandas, Shapely, Rasterio, Folium)
-│   ├── vitrimer_tg_sim/# Vitrimer Tg estimation via EMC + LAMMPS
-│   ├── vitrimer_vae/   # Vitrimer inverse design via HierVAE + BO
-│   └── office/         # Office document processing (Excel, Word, PowerPoint) with IRM support
 ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
 │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
 ├── data_lake/          # Artifact registry, sync pipeline, Purview integration
@@ -52,29 +42,6 @@ src/
 ├── server_registry.yaml    # MCP server configurations
 └── pyproject.toml
 ```
-
-### Domain Skills
-
-Some domains ship **skills** — curated knowledge packages that teach the agent how to perform complex, domain-specific workflows. Skills live under `domains/<domain>/skills/` and each contains a `SKILL.md` entry point plus supporting knowledge documents.
-
-| Domain | Skill | Description |
-|---|---|---|
-| `powergrid` | [`grid-converter`](src/domains/powergrid/skills/grid-converter/SKILL.md) | Convert a PJM N-1 study Excel file (.xlsx) into a solvable PyPSA power grid model (.nc) and GeoJSON map. Covers bus/line parsing, impedance computation, generator matching (EIA/OSM), demand allocation (EIA-930), transformer detection, and network cleanup. |
-
-### Domain Servers
-
-| Domain | Server module | Notes |
-|---|---|---|
-| `powergrid` | `domains.powergrid.server.powergrid_server` | Grid analysis and optimization |
-| `process` | `domains.process.server.process_server` | Process simulation tooling |
-| `foundry` | `domains.foundry.server.foundry_server` | Azure AI Foundry integration |
-| `gis` | `domains.gis.server.gis_server` | Geospatial workflows used by GUI |
-| `office` | `domains.office.server.office_server` | Office document processing |
-| `openlca` | `domains.openlca.server.openlca_server` | OpenLCA workflows |
-| `vitrimer_tg_sim` | `domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server` | Tg estimation from MD simulation |
-| `vitrimer_vae` | `domains.vitrimer_vae.server.vitrimer_vae_server` | AI-guided vitrimer inverse design |
-
-See [`src/domains/vitrimer/README.md`](src/domains/vitrimer/README.md) for vitrimer-specific setup, dependencies, and tools.
 
 ## Getting Started
 

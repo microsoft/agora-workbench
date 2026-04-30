@@ -41,7 +41,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["tools*", "data_lake*", "domains*", "middleware*", "auth*"]
+include = ["tools*", "data_lake*", "middleware*", "auth*"]
 exclude = ["tests*", "scripts*"]
 
 [build-system]
@@ -60,7 +60,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/auth/tests", "src/tools/tests", "src/data_lake/tests", "src/middleware/tests", "src/planning/tests", "src/domains/tests"]
+testpaths = ["src/auth/tests", "src/tools/tests", "src/data_lake/tests", "src/middleware/tests", "src/planning/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
