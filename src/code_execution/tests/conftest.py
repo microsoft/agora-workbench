@@ -28,14 +28,6 @@ os.environ.setdefault("DATA_LAKE_SEARCH_ENDPOINT", "https://test-search.search.w
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 
-# Mock the MISE native library at module level so CodeExecutionServer can be
-# constructed in test environments where the mise package is not installed.
-import code_execution.code_execution.server as _server_module
-
-if _server_module.Mise is None:
-    _server_module.Mise = MagicMock()
-    _server_module.MiseValidationInput = MagicMock()
-
 from ..code_execution import CodeExecutionServer, EnvironmentConfig
 from ..code_execution.sessions import SessionManager, SessionConfig, set_current_session
 
