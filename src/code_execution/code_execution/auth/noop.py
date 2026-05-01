@@ -9,6 +9,7 @@ provider configured.
 import logging
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 import jwt
 
@@ -80,10 +81,37 @@ class NoOpIdentityExtractor(IdentityExtractor):
     def extract(self, claims: dict) -> Optional[str]:
         # Try oid@tid (Azure-style)
         user_id = claims.get("oid") or claims.get("sub")
-        tenant_id = claims.get("tid") or claims.get("iss", "").split("/")[-1] or "default"
+        tenant_id = claims.get("tid") or self._tenant_from_iss(claims.get("iss", ""))
         if user_id:
             return f"{user_id}@{tenant_id}"
         return self._default
+
+    @staticmethod
+    def _tenant_from_iss(iss: str) -> str:
+        """Extract tenant ID from an OIDC issuer URL.
+
+        Handles the two common Azure issuer formats:
+        - ``https://login.microsoftonline.com/<tenant>/v2.0``  → ``<tenant>``
+        - ``https://sts.windows.net/<tenant>/``                → ``<tenant>``
+
+        Falls back to ``"default"`` when the issuer cannot be parsed or has
+        no recognizable tenant segment.
+        """
+        try:
+            path = urlparse(iss).path  # e.g. "/<tenant>/v2.0" or "/<tenant>/"
+            segments = [s for s in path.split("/") if s]  # drop empty parts
+            if not segments:
+                return "default"
+            # Skip a trailing Azure version token with the exact format v<digits>.<digits>
+            # (e.g. "v2.0", "v1.0") to avoid misidentifying it as a tenant segment.
+            last = segments[-1]
+            if last.startswith("v") and last.count(".") == 1:
+                major, minor = last[1:].split(".")
+                if major.isdigit() and minor.isdigit():
+                    segments = segments[:-1]
+            return segments[-1] if segments else "default"
+        except Exception:
+            return "default"
 
 
 class NoOpCredentialProvider(CredentialProvider):
