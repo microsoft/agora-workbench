@@ -202,6 +202,14 @@ class CodeExecutionServer:
         self.session_manager = _session_manager
 
         # --- Authentication configuration ---
+        # Always resolve entra_client_id/entra_tenant_id so that the OAuth
+        # protected-resource metadata endpoint can reference them regardless of
+        # which auth path is active.  When a non-Entra auth_config is supplied
+        # these will remain None and the metadata endpoint returns 404 instead
+        # of raising AttributeError.
+        self.entra_client_id: Optional[str] = entra_client_id or os.getenv("ENTRA_CLIENT_ID")
+        self.entra_tenant_id: Optional[str] = entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
+
         # If auth_config is provided, use it directly. Otherwise, build one from
         # entra_client_id/entra_tenant_id (legacy path, backward compatible).
         if auth_config is not None:
@@ -209,9 +217,6 @@ class CodeExecutionServer:
             LOGGER.info("Using provided AuthConfig for authentication.")
         else:
             # Legacy Entra ID path: build auth_config from client/tenant params
-            self.entra_client_id = entra_client_id or os.getenv("ENTRA_CLIENT_ID")
-            self.entra_tenant_id = entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
-
             missing = []
             if not self.entra_client_id:
                 missing.append("ENTRA_CLIENT_ID")
@@ -1961,6 +1966,16 @@ else:
         # server and perform OAuth 2.1 flows automatically.
         async def protected_resource_metadata(request: Request):
             """Return OAuth 2.0 Protected Resource Metadata per RFC 9728."""
+            if not self.entra_client_id or not self.entra_tenant_id:
+                return JSONResponse(
+                    {
+                        "error": (
+                            "OAuth protected-resource metadata is not available "
+                            "for the current authentication configuration."
+                        )
+                    },
+                    status_code=404,
+                )
             return JSONResponse(
                 {
                     # The resource identifier must match a registered identifier

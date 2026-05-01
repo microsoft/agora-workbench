@@ -7,20 +7,30 @@ WWW-Authenticate headers on 401 responses for MCP OAuth discovery.
 
 from starlette.testclient import TestClient
 
+from ...code_execution import CodeExecutionServer
+from ...code_execution.auth.noop import create_noop_auth_config
+from ...code_execution.code_execution_models import EnvironmentConfig
+
 
 def _create_server(
     entra_client_id="test-client-id",
     entra_tenant_id="test-tenant-id",
 ):
     """Helper to create a CodeExecutionServer for testing."""
-    from ...code_execution import CodeExecutionServer
-    from ...code_execution.code_execution_models import EnvironmentConfig
-
     config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     return CodeExecutionServer(
         environment_config=config,
         entra_client_id=entra_client_id,
         entra_tenant_id=entra_tenant_id,
+    )
+
+
+def _create_server_with_auth_config():
+    """Helper to create a CodeExecutionServer using a pluggable auth_config (no Entra params)."""
+    config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    return CodeExecutionServer(
+        environment_config=config,
+        auth_config=create_noop_auth_config(),
     )
 
 
@@ -182,3 +192,35 @@ class TestWWWAuthenticateHeader:
 
         response = client.get("/health")
         assert response.status_code == 200
+
+
+class TestProtectedResourceMetadataWithAuthConfig:
+    """Test metadata endpoint when a pluggable auth_config is used instead of Entra params."""
+
+    def test_returns_404_when_no_entra_params(self, monkeypatch):
+        """Metadata endpoint should return 404 when no Entra client/tenant IDs are available."""
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        server = _create_server_with_auth_config()
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 404
+
+    def test_returns_200_when_entra_params_also_provided(self):
+        """Metadata endpoint should still work when auth_config AND Entra params are supplied."""
+        config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+        server = CodeExecutionServer(
+            environment_config=config,
+            auth_config=create_noop_auth_config(),
+            entra_client_id="my-client-id",
+            entra_tenant_id="my-tenant-id",
+        )
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["resource"] == "api://my-client-id"
+        assert "my-tenant-id" in data["authorization_servers"][0]
