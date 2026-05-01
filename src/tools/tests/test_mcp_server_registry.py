@@ -374,57 +374,6 @@ class TestMCPServerRegistry:
         assert isinstance(servers["test_server"], MCPServerDescriptor)
 
     @pytest.mark.unit
-    def test_mcp_tools_empty_registry(self):
-        """Test mcp_tools attribute with empty registry."""
-        registry = MCPServerRegistry()
-        registry.disable_auto_discovery()
-        assert registry.mcp_tools == []
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    @patch("tools.mcp.mcp_server_registry.MCPStreamableHTTPTool")
-    @patch("tools.mcp.mcp_server_registry.create_entra_token_provider")
-    async def test_create_mcp_tools_with_servers(self, mock_token_provider, mock_tool_class):
-        """Test _create_mcp_tools creates tools for registered servers."""
-        registry = MCPServerRegistry()
-        registry.disable_auto_discovery()
-
-        # Register servers
-        with patch.object(registry, "_validate_server_connection", return_value=(True, "")):
-            await registry.register(
-                MCPServerDescriptor(
-                    name="server1",
-                    url="http://localhost:8000/mcp",
-                    description="Server 1",
-                    scope="scope1",
-                )
-            )
-            await registry.register(
-                MCPServerDescriptor(
-                    name="server2",
-                    url="http://localhost:8001/mcp",
-                    description="Server 2",
-                    scope="scope2",
-                )
-            )
-
-        # Mock token provider
-        mock_token_provider.return_value = MagicMock()
-
-        # Mock tool instances
-        mock_tool1 = MagicMock()
-        mock_tool2 = MagicMock()
-        mock_tool_class.side_effect = [mock_tool1, mock_tool2]
-
-        # Create tools by calling private method
-        registry._create_mcp_tools()
-
-        # Verify
-        assert len(registry.mcp_tools) == 2
-        assert mock_token_provider.call_count == 2
-        assert mock_tool_class.call_count == 2
-
-    @pytest.mark.unit
     def test_get_mcp_registry_singleton(self):
         """Test get_mcp_registry returns same instance."""
         registry1 = get_mcp_registry()
@@ -455,35 +404,22 @@ class TestMCPServerRegistry:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_aclose_closes_mcp_tools(self):
-        """Test that aclose() calls .close() on all MCPStreamableHTTPTool instances."""
+    async def test_aclose_closes_http_clients(self):
+        """Test that aclose() calls .aclose() on all HTTP clients."""
         registry = MCPServerRegistry()
         registry.disable_auto_discovery()
-
-        # Create mock MCP tools
-        mock_tool1 = MagicMock()
-        mock_tool1.close = AsyncMock()
-        mock_tool2 = MagicMock()
-        mock_tool2.close = AsyncMock()
 
         # Create a mock HTTP client
         mock_client = MagicMock()
         mock_client.aclose = AsyncMock()
 
-        registry.mcp_tools = [mock_tool1, mock_tool2]
-        registry._mcp_tools_by_name = {"tool1": mock_tool1, "tool2": mock_tool2}
         registry._http_clients = [mock_client]
 
         await registry.aclose()
 
-        # Assert .close() was awaited on each tool
-        mock_tool1.close.assert_awaited_once()
-        mock_tool2.close.assert_awaited_once()
-        # Assert HTTP client was also closed
+        # Assert HTTP client was closed
         mock_client.aclose.assert_awaited_once()
         # Assert lists are cleared
-        assert registry.mcp_tools == []
-        assert registry._mcp_tools_by_name == {}
         assert registry._http_clients == []
 
 

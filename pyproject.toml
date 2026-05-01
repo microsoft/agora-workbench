@@ -5,13 +5,15 @@ description = "A multi-domain AI agent system that combines LLM-driven workflows
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "agent-framework==1.0.0rc5",
+    "azure-ai-agents>=1.0.0",
+    "azure-ai-projects>=1.0.0b11",
     "azure-identity>=1.25.0",
     "azure-mgmt-authorization>=4.0.0",
     "azure-purview-catalog>=1.0.0b4",
     "azure-purview-administration>=1.0.0b1",
     "azure-purview-scanning>=1.0.0b2",
     "azure-search-documents>=11.6.0",
+    "azure-storage-blob[aio]>=12.28.0",
     "dill>=0.3.8",
     "fastapi>=0.115",
     "fastmcp>=2.14.2",

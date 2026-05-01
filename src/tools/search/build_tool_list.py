@@ -4,14 +4,18 @@ Build a list of available tools by querying MCP servers.
 This module provides the `build_tool_list` function that discovers tools
 from all registered MCP servers.  For servers that expose a
 ``list_{name}_domain_tools`` meta-tool, the domain tool catalog is
-retrieved via that tool.  Other servers fall back to iterating their
-``functions`` list.
+retrieved via that tool.  Other servers fall back to listing tools via
+the standard MCP protocol.
 """
 
 import json
 import logging
 from dataclasses import dataclass
 
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+from auth import create_entra_token_provider
 from tools.mcp.mcp_server_registry import get_mcp_registry
 
 LOGGER = logging.getLogger(__name__)
@@ -81,7 +85,7 @@ async def build_tool_list() -> list[ToolInfo]:
 
     For each server, if a ``list_{name}_domain_tools`` meta-tool is available
     it is called to retrieve the structured catalog.  Otherwise, the function
-    falls back to iterating the server's ``functions`` list (filtering out
+    falls back to iterating the server's tool list (filtering out
     infrastructure tools).
 
     Returns:
@@ -97,64 +101,62 @@ async def build_tool_list() -> list[ToolInfo]:
     tools: list[ToolInfo] = []
 
     for server_name, descriptor in servers.items():
-        mcp_tool = registry.get_mcp_tool(server_name)
-        if mcp_tool is None:
-            LOGGER.warning(f"No MCPStreamableHTTPTool for server '{server_name}', skipping")
-            continue
-
         try:
-            if not mcp_tool.is_connected:
-                await mcp_tool.connect()
-            await mcp_tool.load_tools()
+            # Create headers with auth token
+            token_provider = create_entra_token_provider(descriptor.scope)
+            token = token_provider()
+            headers = {"Authorization": f"Bearer {token}"}
 
-            # Try the meta-tool first
-            meta_tool_name = f"list_{descriptor.name}_domain_tools"
-            func_names = {f.name for f in mcp_tool.functions}
+            async with streamablehttp_client(descriptor.url, headers=headers) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
 
-            if meta_tool_name in func_names:
-                result = await mcp_tool.call_tool(tool_name=meta_tool_name)
-                # Result may be a list of Content objects; extract text
-                if isinstance(result, list):
-                    parts: list[str] = []
-                    for item in result:
-                        text = getattr(item, "text", None)
-                        if isinstance(text, str):
-                            parts.append(text)
-                        else:
-                            parts.append(str(item))
-                    result_str = "".join(parts)
-                else:
-                    result_str = str(result)
+                    # List available tools
+                    tools_result = await session.list_tools()
+                    available_tools = tools_result.tools
+                    tool_names = {t.name for t in available_tools}
 
-                catalog = json.loads(result_str)
-                for entry in catalog:
-                    st = entry.get("state_transition", {})
-                    tools.append(
-                        ToolInfo(
-                            name=entry["name"],
-                            description=entry.get("description", ""),
-                            server_name=entry.get("server_name", server_name),
-                            affordances=tuple(entry.get("affordances", [])),
-                            state_requires=tuple(st.get("requires", [])),
-                            state_produces=tuple(st.get("produces", [])),
-                        )
-                    )
-                LOGGER.info(f"Discovered {len(catalog)} domain tools from '{server_name}' via meta-tool")
-            else:
-                # Fallback: iterate functions, filtering out meta/infrastructure tools
-                funcs = mcp_tool.functions
-                count = 0
-                for func in funcs:
-                    if not _is_meta_tool(func.name):
-                        tools.append(
-                            ToolInfo(
-                                name=func.name,
-                                description=func.description or "",
-                                server_name=server_name,
+                    # Try the meta-tool first
+                    meta_tool_name = f"list_{descriptor.name}_domain_tools"
+
+                    if meta_tool_name in tool_names:
+                        result = await session.call_tool(meta_tool_name, arguments={})
+                        # Extract text content from result
+                        parts: list[str] = []
+                        for item in result.content:
+                            text = getattr(item, "text", None)
+                            if isinstance(text, str):
+                                parts.append(text)
+                        result_str = "".join(parts)
+
+                        catalog = json.loads(result_str)
+                        for entry in catalog:
+                            st = entry.get("state_transition", {})
+                            tools.append(
+                                ToolInfo(
+                                    name=entry["name"],
+                                    description=entry.get("description", ""),
+                                    server_name=entry.get("server_name", server_name),
+                                    affordances=tuple(entry.get("affordances", [])),
+                                    state_requires=tuple(st.get("requires", [])),
+                                    state_produces=tuple(st.get("produces", [])),
+                                )
                             )
-                        )
-                        count += 1
-                LOGGER.info(f"Discovered {count} tools from MCP server '{server_name}' via functions fallback")
+                        LOGGER.info(f"Discovered {len(catalog)} domain tools from '{server_name}' via meta-tool")
+                    else:
+                        # Fallback: iterate tools, filtering out meta/infrastructure tools
+                        count = 0
+                        for tool in available_tools:
+                            if not _is_meta_tool(tool.name):
+                                tools.append(
+                                    ToolInfo(
+                                        name=tool.name,
+                                        description=tool.description or "",
+                                        server_name=server_name,
+                                    )
+                                )
+                                count += 1
+                        LOGGER.info(f"Discovered {count} tools from MCP server '{server_name}' via tools list fallback")
 
         except Exception as e:
             LOGGER.warning(f"Failed to discover tools from MCP server '{server_name}': {e}")

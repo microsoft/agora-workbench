@@ -1,6 +1,6 @@
-"""Tools module for AgoraAgentMAF."""
+"""Tools module — MCP registry and tool search infrastructure."""
 
-# MCP (requires agent dependencies)
+# MCP registry (framework-agnostic)
 from .mcp import get_mcp_registry, MCPServerDescriptor, MCPServerRegistry
 
 # Tool search contract
@@ -8,7 +8,6 @@ from .tool_search import ToolSearchBackend, ToolSearchResult, ToolKey
 
 # Tool search implementations
 from .search import (
-    create_search_tools_function,
     AzureAIToolSearchBackend,
     BM25ToolSearchBackend,
     create_and_setup_azure_ai_tool_search,
@@ -26,7 +25,6 @@ __all__ = [
     "ToolSearchResult",
     "ToolKey",
     # Search implementations
-    "create_search_tools_function",
     "AzureAIToolSearchBackend",
     "BM25ToolSearchBackend",
     "create_and_setup_azure_ai_tool_search",

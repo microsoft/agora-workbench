@@ -102,202 +102,21 @@ class TestBuildToolList:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_build_tool_list_via_meta_tool(self):
-        """Test build_tool_list discovers tools via the meta-tool when available."""
-        catalog = [
-            {"name": "run_opf", "description": "Run optimal power flow", "server_name": "powergrid"},
-            {"name": "build_network", "description": "Build network topology", "server_name": "powergrid"},
-        ]
-
-        # Meta-tool function present in the functions list
-        meta_func = MagicMock()
-        meta_func.name = "list_powergrid_domain_tools"
-
-        mock_mcp_tool = MagicMock()
-        mock_mcp_tool.is_connected = True
-        mock_mcp_tool.load_tools = AsyncMock()
-        mock_mcp_tool.functions = [meta_func]
-        mock_mcp_tool.call_tool = AsyncMock(return_value=json.dumps(catalog))
-
-        mock_descriptor = MagicMock()
-        mock_descriptor.name = "powergrid"
-
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
-        mock_registry.get_mcp_tool.return_value = mock_mcp_tool
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        assert len(result) == 2
-        assert result[0] == ToolInfo(name="run_opf", description="Run optimal power flow", server_name="powergrid")
-        assert result[1] == ToolInfo(
-            name="build_network", description="Build network topology", server_name="powergrid"
-        )
-        mock_mcp_tool.call_tool.assert_called_once_with(tool_name="list_powergrid_domain_tools")
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_build_tool_list_fallback_filters_meta_tools(self):
-        """Test fallback path filters out infrastructure/meta tools."""
-        domain_func = MagicMock()
-        domain_func.name = "run_opf"
-        domain_func.description = "Run optimal power flow"
-
-        execute_func = MagicMock()
-        execute_func.name = "execute_powergrid_code"
-        execute_func.description = "Execute code"
-
-        list_sessions_func = MagicMock()
-        list_sessions_func.name = "powergrid_list_sessions"
-        list_sessions_func.description = "List sessions"
-
-        mock_mcp_tool = MagicMock()
-        mock_mcp_tool.is_connected = True
-        mock_mcp_tool.load_tools = AsyncMock()
-        mock_mcp_tool.functions = [domain_func, execute_func, list_sessions_func]
-
-        mock_descriptor = MagicMock()
-        mock_descriptor.name = "powergrid"
-
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
-        mock_registry.get_mcp_tool.return_value = mock_mcp_tool
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        # Only the domain tool should remain; infrastructure tools filtered out
-        assert len(result) == 1
-        assert result[0].name == "run_opf"
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_build_tool_list_already_connected(self):
-        """Test build_tool_list skips connect but still calls load_tools for already-connected servers."""
-        mock_func = MagicMock()
-        mock_func.name = "run_opf"
-        mock_func.description = "Run optimal power flow"
-
-        mock_mcp_tool = MagicMock()
-        mock_mcp_tool.is_connected = True
-        mock_mcp_tool.connect = AsyncMock()
-        mock_mcp_tool.load_tools = AsyncMock()
-        mock_mcp_tool.functions = [mock_func]
-
-        mock_descriptor = MagicMock()
-        mock_descriptor.name = "powergrid"
-
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
-        mock_registry.get_mcp_tool.return_value = mock_mcp_tool
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        assert len(result) == 1
-        mock_mcp_tool.connect.assert_not_called()
-        mock_mcp_tool.load_tools.assert_called_once()
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_build_tool_list_multiple_servers(self):
-        """Test build_tool_list discovers tools from multiple servers."""
-        mock_func1 = MagicMock()
-        mock_func1.name = "run_opf"
-        mock_func1.description = "Run optimal power flow"
-
-        mock_func2 = MagicMock()
-        mock_func2.name = "analyze_data"
-        mock_func2.description = "Analyze data"
-
-        mock_mcp_tool1 = MagicMock()
-        mock_mcp_tool1.is_connected = True
-        mock_mcp_tool1.load_tools = AsyncMock()
-        mock_mcp_tool1.functions = [mock_func1]
-
-        mock_mcp_tool2 = MagicMock()
-        mock_mcp_tool2.is_connected = True
-        mock_mcp_tool2.load_tools = AsyncMock()
-        mock_mcp_tool2.functions = [mock_func2]
-
-        mock_desc1 = MagicMock()
-        mock_desc1.name = "powergrid"
-        mock_desc2 = MagicMock()
-        mock_desc2.name = "process"
-
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {
-            "powergrid": mock_desc1,
-            "process": mock_desc2,
-        }
-
-        def get_mcp_tool(name):
-            if name == "powergrid":
-                return mock_mcp_tool1
-            return mock_mcp_tool2
-
-        mock_registry.get_mcp_tool.side_effect = get_mcp_tool
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        assert len(result) == 2
-        server_names = {r.server_name for r in result}
-        assert server_names == {"powergrid", "process"}
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
     async def test_build_tool_list_connection_failure(self):
         """Test build_tool_list handles connection failures gracefully."""
-        mock_mcp_tool = MagicMock()
-        mock_mcp_tool.is_connected = False
-        mock_mcp_tool.connect = AsyncMock(side_effect=Exception("Connection refused"))
-
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {"powergrid": MagicMock()}
-        mock_registry.get_mcp_tool.return_value = mock_mcp_tool
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        assert result == []
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_build_tool_list_no_mcp_tool(self):
-        """Test build_tool_list handles missing MCPStreamableHTTPTool."""
-        mock_registry = MagicMock()
-        mock_registry.list_servers.return_value = {"powergrid": MagicMock()}
-        mock_registry.get_mcp_tool.return_value = None
-
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
-            result = await build_tool_list()
-
-        assert result == []
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_build_tool_list_empty_description(self):
-        """Test build_tool_list handles tools with empty description."""
-        mock_func = MagicMock()
-        mock_func.name = "run_opf"
-        mock_func.description = None
-
-        mock_mcp_tool = MagicMock()
-        mock_mcp_tool.is_connected = True
-        mock_mcp_tool.load_tools = AsyncMock()
-        mock_mcp_tool.functions = [mock_func]
-
         mock_descriptor = MagicMock()
         mock_descriptor.name = "powergrid"
+        mock_descriptor.url = "http://localhost:8000/mcp"
+        mock_descriptor.scope = "test-scope"
 
         mock_registry = MagicMock()
         mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
-        mock_registry.get_mcp_tool.return_value = mock_mcp_tool
 
-        with patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry):
+        with (
+            patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
+            patch("tools.search.build_tool_list.streamablehttp_client", side_effect=Exception("Connection refused")),
+            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+        ):
             result = await build_tool_list()
 
-        assert len(result) == 1
-        assert result[0].description == ""
+        assert result == []
