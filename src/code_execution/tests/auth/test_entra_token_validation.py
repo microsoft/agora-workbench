@@ -1,6 +1,5 @@
 """Tests for PyJWT-based token validation in EntraTokenValidator."""
 
-import json
 from typing import Optional
 
 import jwt
