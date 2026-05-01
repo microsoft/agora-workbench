@@ -157,7 +157,7 @@ def create_noop_auth_config(
     token_validator = NoOpTokenValidator(default_user_id=default_user_id, default_tenant_id=default_tenant_id)
     identity_extractor = NoOpIdentityExtractor(default_identity=f"{default_user_id}@{default_tenant_id}")
 
-    def credential_factory(user_token: str) -> CredentialProvider:
+    def credential_factory(_user_token: str) -> CredentialProvider:
         return NoOpCredentialProvider()
 
     return AuthConfig(
