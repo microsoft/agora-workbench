@@ -35,6 +35,9 @@ dependencies = [
     "wsproto>=1.3.2",
 ]
 
+[project.optional-dependencies]
+maf = ["agent-framework>=1.2.0"]
+
 [project.urls]
 homepage = "https://github.com/msr-central/agora-agent"
 
@@ -43,7 +46,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["tools*", "data_lake*", "middleware*", "auth*"]
+include = ["tools*", "data_lake*", "middleware*", "auth*", "planning*", "gui*"]
 exclude = ["tests*", "scripts*"]
 
 [build-system]
