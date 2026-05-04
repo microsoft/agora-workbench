@@ -29,7 +29,7 @@ import httpx
 import yaml
 from pydantic import BaseModel, Field
 
-from auth import create_entra_token_provider, BearerTokenAuth
+from auth import create_entra_token_provider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -194,7 +194,6 @@ class MCPServerRegistry:
         self._servers: Dict[str, MCPServerDescriptor] = {}
         self._initialized = False
         self._auto_discovery_enabled = True
-        self._http_clients: list[httpx.AsyncClient] = []  # Track clients for cleanup
 
     async def _validate_server_connection(self, descriptor: MCPServerDescriptor) -> tuple[bool, str]:
         """
@@ -342,55 +341,10 @@ class MCPServerRegistry:
         return name in self._servers
 
     def clear(self) -> None:
-        """
-        Clear all registered servers, closing HTTP clients.
-
-        Automatically closes HTTP clients to prevent connection leaks.
-        Works from both sync and async contexts.
-        """
-        clients_to_close = list(self._http_clients)
-
-        async def _close_all() -> None:
-            await self._close_clients(clients_to_close)
-
-        if clients_to_close:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_close_all())
-            except RuntimeError:
-                asyncio.run(_close_all())
-
+        """Clear all registered servers."""
         self._servers.clear()
-        self._http_clients.clear()
         self._initialized = False
         LOGGER.info("Cleared MCP server registry")
-
-    async def _close_clients(self, clients: list | None = None) -> None:
-        """Close HTTP clients.
-
-        Args:
-            clients: Explicit list of clients to close. If None, closes
-                     self._http_clients.
-        """
-        clients = list(clients if clients is not None else self._http_clients)
-        results = await asyncio.gather(
-            *(client.aclose() for client in clients),
-            return_exceptions=True,
-        )
-        for client, result in zip(clients, results):
-            if isinstance(result, Exception):
-                LOGGER.warning(f"Error closing HTTP client {client}: {result}")
-
-    async def aclose(self) -> None:
-        """
-        Close all HTTP clients and clean up resources.
-
-        Can be called directly in async contexts. For sync contexts,
-        just call clear() which handles closing automatically.
-        """
-        await self._close_clients()
-        self._http_clients.clear()
-        LOGGER.info("Closed all HTTP clients")
 
     def disable_auto_discovery(self) -> None:
         """Disable automatic server discovery."""

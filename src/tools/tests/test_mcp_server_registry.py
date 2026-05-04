@@ -402,26 +402,6 @@ class TestMCPServerRegistry:
         assert retrieved.packages == packages
         assert retrieved.environment_type == "uv"
 
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_aclose_closes_http_clients(self):
-        """Test that aclose() calls .aclose() on all HTTP clients."""
-        registry = MCPServerRegistry()
-        registry.disable_auto_discovery()
-
-        # Create a mock HTTP client
-        mock_client = MagicMock()
-        mock_client.aclose = AsyncMock()
-
-        registry._http_clients = [mock_client]
-
-        await registry.aclose()
-
-        # Assert HTTP client was closed
-        mock_client.aclose.assert_awaited_once()
-        # Assert lists are cleared
-        assert registry._http_clients == []
-
 
 class TestMCPServerRegistryIntegration:
     """Integration tests for MCP Server Registry with other components."""

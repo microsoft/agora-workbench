@@ -120,3 +120,140 @@ class TestBuildToolList:
             result = await build_tool_list()
 
         assert result == []
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_build_tool_list_meta_tool_discovery(self):
+        """Test build_tool_list uses meta-tool to discover domain tools with state transitions."""
+        mock_descriptor = MagicMock()
+        mock_descriptor.name = "powergrid"
+        mock_descriptor.url = "http://localhost:8000/mcp"
+        mock_descriptor.scope = "test-scope"
+
+        mock_registry = MagicMock()
+        mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
+
+        catalog = [
+            {
+                "name": "run_opf",
+                "description": "Run optimal power flow",
+                "server_name": "powergrid",
+                "affordances": ["power-flow", "optimization"],
+                "state_transition": {
+                    "requires": ["powergrid.network_loaded"],
+                    "produces": ["powergrid.opf_solved"],
+                },
+            },
+            {
+                "name": "load_network",
+                "description": "Load a network from file",
+                "server_name": "powergrid",
+                "affordances": ["network-io"],
+                "state_transition": {
+                    "requires": [],
+                    "produces": ["powergrid.network_loaded"],
+                },
+            },
+        ]
+
+        # Mock the MCP session
+        mock_content_item = MagicMock()
+        mock_content_item.text = json.dumps(catalog)
+
+        mock_call_result = MagicMock()
+        mock_call_result.content = [mock_content_item]
+
+        mock_meta_tool = MagicMock()
+        mock_meta_tool.name = "list_powergrid_domain_tools"
+
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.list_tools = AsyncMock(return_value=MagicMock(tools=[mock_meta_tool]))
+        mock_session.call_tool = AsyncMock(return_value=mock_call_result)
+
+        # Create context manager mocks
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_http_cm = AsyncMock()
+        mock_http_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_http_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_streamable_cm = AsyncMock()
+        mock_streamable_cm.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), None))
+        mock_streamable_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
+            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+            patch("tools.search.build_tool_list.httpx.AsyncClient", return_value=mock_http_cm),
+            patch("tools.search.build_tool_list.streamablehttp_client", return_value=mock_streamable_cm),
+            patch("tools.search.build_tool_list.ClientSession", return_value=mock_session_cm),
+        ):
+            result = await build_tool_list()
+
+        assert len(result) == 2
+        assert result[0].name == "run_opf"
+        assert result[0].description == "Run optimal power flow"
+        assert result[0].affordances == ("power-flow", "optimization")
+        assert result[0].state_requires == ("powergrid.network_loaded",)
+        assert result[0].state_produces == ("powergrid.opf_solved",)
+        assert result[1].name == "load_network"
+        assert result[1].state_produces == ("powergrid.network_loaded",)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_build_tool_list_fallback_filtering(self):
+        """Test build_tool_list falls back to list_tools and filters meta/infra tools."""
+        mock_descriptor = MagicMock()
+        mock_descriptor.name = "powergrid"
+        mock_descriptor.url = "http://localhost:8000/mcp"
+        mock_descriptor.scope = "test-scope"
+
+        mock_registry = MagicMock()
+        mock_registry.list_servers.return_value = {"powergrid": mock_descriptor}
+
+        # No meta-tool available — trigger fallback
+        def make_tool(name, description):
+            t = MagicMock()
+            t.name = name
+            t.description = description
+            return t
+
+        mock_tools = [
+            make_tool("run_opf", "Run OPF"),
+            make_tool("execute_powergrid_code", "Code exec"),  # should be filtered
+            make_tool("convert_grid", "Convert formats"),
+        ]
+
+        mock_session = AsyncMock()
+        mock_session.initialize = AsyncMock()
+        mock_session.list_tools = AsyncMock(return_value=MagicMock(tools=mock_tools))
+
+        mock_session_cm = AsyncMock()
+        mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_http_cm = AsyncMock()
+        mock_http_cm.__aenter__ = AsyncMock(return_value=MagicMock())
+        mock_http_cm.__aexit__ = AsyncMock(return_value=False)
+
+        mock_streamable_cm = AsyncMock()
+        mock_streamable_cm.__aenter__ = AsyncMock(return_value=(AsyncMock(), AsyncMock(), None))
+        mock_streamable_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
+            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+            patch("tools.search.build_tool_list.httpx.AsyncClient", return_value=mock_http_cm),
+            patch("tools.search.build_tool_list.streamablehttp_client", return_value=mock_streamable_cm),
+            patch("tools.search.build_tool_list.ClientSession", return_value=mock_session_cm),
+        ):
+            result = await build_tool_list()
+
+        # Only non-meta, non-infrastructure tools should be included
+        result_names = [t.name for t in result]
+        assert "run_opf" in result_names
+        assert "convert_grid" in result_names
+        assert "execute_powergrid_code" not in result_names

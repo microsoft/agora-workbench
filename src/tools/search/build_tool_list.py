@@ -12,6 +12,7 @@ import json
 import logging
 from dataclasses import dataclass
 
+import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
@@ -107,56 +108,62 @@ async def build_tool_list() -> list[ToolInfo]:
             token = token_provider()
             headers = {"Authorization": f"Bearer {token}"}
 
-            async with streamablehttp_client(descriptor.url, headers=headers) as (read, write, _):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
+            async with httpx.AsyncClient(
+                headers=headers,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+            ) as http_client:
+                async with streamablehttp_client(descriptor.url, http_client=http_client) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
 
-                    # List available tools
-                    tools_result = await session.list_tools()
-                    available_tools = tools_result.tools
-                    tool_names = {t.name for t in available_tools}
+                        # List available tools
+                        tools_result = await session.list_tools()
+                        available_tools = tools_result.tools
+                        tool_names = {t.name for t in available_tools}
 
-                    # Try the meta-tool first
-                    meta_tool_name = f"list_{descriptor.name}_domain_tools"
+                        # Try the meta-tool first
+                        meta_tool_name = f"list_{descriptor.name}_domain_tools"
 
-                    if meta_tool_name in tool_names:
-                        result = await session.call_tool(meta_tool_name, arguments={})
-                        # Extract text content from result
-                        parts: list[str] = []
-                        for item in result.content:
-                            text = getattr(item, "text", None)
-                            if isinstance(text, str):
-                                parts.append(text)
-                        result_str = "".join(parts)
+                        if meta_tool_name in tool_names:
+                            result = await session.call_tool(meta_tool_name, arguments={})
+                            # Extract text content from result
+                            parts: list[str] = []
+                            for item in result.content:
+                                text = getattr(item, "text", None)
+                                if isinstance(text, str):
+                                    parts.append(text)
+                            result_str = "".join(parts)
 
-                        catalog = json.loads(result_str)
-                        for entry in catalog:
-                            st = entry.get("state_transition", {})
-                            tools.append(
-                                ToolInfo(
-                                    name=entry["name"],
-                                    description=entry.get("description", ""),
-                                    server_name=entry.get("server_name", server_name),
-                                    affordances=tuple(entry.get("affordances", [])),
-                                    state_requires=tuple(st.get("requires", [])),
-                                    state_produces=tuple(st.get("produces", [])),
-                                )
-                            )
-                        LOGGER.info(f"Discovered {len(catalog)} domain tools from '{server_name}' via meta-tool")
-                    else:
-                        # Fallback: iterate tools, filtering out meta/infrastructure tools
-                        count = 0
-                        for tool in available_tools:
-                            if not _is_meta_tool(tool.name):
+                            catalog = json.loads(result_str)
+                            for entry in catalog:
+                                st = entry.get("state_transition", {})
                                 tools.append(
                                     ToolInfo(
-                                        name=tool.name,
-                                        description=tool.description or "",
-                                        server_name=server_name,
+                                        name=entry["name"],
+                                        description=entry.get("description", ""),
+                                        server_name=entry.get("server_name", server_name),
+                                        affordances=tuple(entry.get("affordances", [])),
+                                        state_requires=tuple(st.get("requires", [])),
+                                        state_produces=tuple(st.get("produces", [])),
                                     )
                                 )
-                                count += 1
-                        LOGGER.info(f"Discovered {count} tools from MCP server '{server_name}' via tools list fallback")
+                            LOGGER.info(f"Discovered {len(catalog)} domain tools from '{server_name}' via meta-tool")
+                        else:
+                            # Fallback: iterate tools, filtering out meta/infrastructure tools
+                            count = 0
+                            for tool in available_tools:
+                                if not _is_meta_tool(tool.name):
+                                    tools.append(
+                                        ToolInfo(
+                                            name=tool.name,
+                                            description=tool.description or "",
+                                            server_name=server_name,
+                                        )
+                                    )
+                                    count += 1
+                            LOGGER.info(
+                                f"Discovered {count} tools from MCP server '{server_name}' via tools list fallback"
+                            )
 
         except Exception as e:
             LOGGER.warning(f"Failed to discover tools from MCP server '{server_name}': {e}")
