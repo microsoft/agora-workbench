@@ -25,13 +25,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-# conditional import to support unit tests
-try:
-    from mise import Mise, MiseValidationInput
-except ImportError:
-    Mise = None  # type: ignore[assignment, misc]
-    MiseValidationInput = None  # type: ignore[assignment, misc]
-
 from . import environment_builders
 from . import code_execution as execution_defaults
 from .code_execution_models import (
@@ -39,6 +32,7 @@ from .code_execution_models import (
     EnvironmentConfig,
     ToolCallRecord,
 )
+from .auth.base import AuthConfig, TokenValidationError
 from .data_access import AssetResolutionMiddleware, DataLakeDataManager
 from .sessions import (
     MaxSessionsReachedError,
@@ -149,6 +143,7 @@ class CodeExecutionServer:
         session_manager: Optional["SessionManager"] = None,
         entra_client_id: Optional[str] = None,
         entra_tenant_id: Optional[str] = None,
+        auth_config: Optional["AuthConfig"] = None,
         max_timeout: int = 600,
         default_timeout: int = 300,
         working_dir: Optional[Path] = None,
@@ -161,8 +156,12 @@ class CodeExecutionServer:
             environment_config: Configuration for the Python execution environment
             tool_registry: Optional ToolRegistry containing domain-specific tools
             session_manager: Optional SessionManager for stateful tool support (auto-created with defaults if None)
-            entra_client_id: Azure Entra ID application client ID (required for token validation, from param or ENTRA_CLIENT_ID env var)
-            entra_tenant_id: Azure Entra ID tenant ID (required for token validation, from param or ENTRA_TENANT_ID env var)
+            entra_client_id: Azure Entra ID application client ID (legacy; prefer auth_config)
+            entra_tenant_id: Azure Entra ID tenant ID (legacy; prefer auth_config)
+            auth_config: Pluggable authentication configuration. If provided, takes
+                precedence over entra_client_id/entra_tenant_id. If None, falls back
+                to Entra ID authentication using the client/tenant ID parameters or
+                environment variables.
             max_timeout: Maximum allowed execution timeout in seconds
             default_timeout: Default timeout if not specified
             working_dir: Working directory for code execution (None = temp dir per execution)
@@ -202,25 +201,41 @@ class CodeExecutionServer:
 
         self.session_manager = _session_manager
 
-        # Token validation configuration (required for MISE)
-        if Mise is None:
-            raise ImportError("The 'mise' package is required for token validation.")
+        # --- Authentication configuration ---
+        # Always resolve entra_client_id/entra_tenant_id so that the OAuth
+        # protected-resource metadata endpoint can reference them regardless of
+        # which auth path is active.  When a non-Entra auth_config is supplied
+        # these will remain None and the metadata endpoint returns 404 instead
+        # of raising AttributeError.
+        self.entra_client_id: Optional[str] = entra_client_id or os.getenv("ENTRA_CLIENT_ID")
+        self.entra_tenant_id: Optional[str] = entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
 
-        self.entra_client_id = entra_client_id or os.getenv("ENTRA_CLIENT_ID")
-        self.entra_tenant_id = entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
+        # If auth_config is provided, use it directly. Otherwise, build one from
+        # entra_client_id/entra_tenant_id (legacy path, backward compatible).
+        if auth_config is not None:
+            self.auth_config = auth_config
+            LOGGER.info("Using provided AuthConfig for authentication.")
+        else:
+            # Legacy Entra ID path: build auth_config from client/tenant params
+            missing = []
+            if not self.entra_client_id:
+                missing.append("ENTRA_CLIENT_ID")
+            if not self.entra_tenant_id:
+                missing.append("ENTRA_TENANT_ID")
+            if missing:
+                raise ValueError(
+                    f"Missing required Entra ID configuration: {', '.join(missing)}. "
+                    "Set via environment variables or constructor arguments."
+                )
 
-        missing = []
-        if not self.entra_client_id:
-            missing.append("ENTRA_CLIENT_ID")
-        if not self.entra_tenant_id:
-            missing.append("ENTRA_TENANT_ID")
-        if missing:
-            raise ValueError(
-                f"Missing required Entra ID configuration: {', '.join(missing)}. "
-                "Set via environment variables or constructor arguments."
+            from .auth.entra import create_entra_auth_config
+
+            self.auth_config = create_entra_auth_config(
+                client_id=self.entra_client_id,
+                tenant_id=self.entra_tenant_id,
             )
 
-        # OBO token exchange configuration
+        # OBO token exchange configuration (informational logging)
         federated_token_file = os.getenv("AZURE_FEDERATED_TOKEN_FILE")
         simulation_mode = os.getenv("OBO_SIMULATION_MODE", "").lower() in ("true", "1", "yes")
         managed_identity_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip()
@@ -243,8 +258,6 @@ class CodeExecutionServer:
             LOGGER.info("Auth method: system-assigned managed identity for downstream Azure resource access")
 
         # Log the auth path and validate method/path compatibility.
-        # OBO path is only supported in simulation mode or when using workload identity
-        # federation; managed identity cannot perform the on-behalf-of token exchange.
         if obo_auth_path:
             if not simulation_mode and not federated_token_file:
                 LOGGER.error(
@@ -296,7 +309,6 @@ class CodeExecutionServer:
         # repair guidance on failures.  Gracefully no-ops when not configured.
         self._setup_tool_learning_middleware()
 
-        self._mise_client = None
         self._setup_tools()
 
     def _setup_tool_learning_middleware(self) -> None:
@@ -508,22 +520,22 @@ class CodeExecutionServer:
     # Authentication helper methods
     # ========================================================================
 
-    @staticmethod
-    def _extract_user_identity(token_data: dict) -> Optional[str]:
+    def _extract_user_identity(self, token_data: dict) -> Optional[str]:
         """
-        Extract a composite user identity string from validated token claims.
+        Extract a unique user identity string from validated token claims.
 
-        The identity is formed as ``{oid}@{tid}`` so that sessions are scoped
-        to both the user *and* the tenant, preventing cross-tenant collisions.
-        Falls back to ``sub`` if ``oid`` is absent.
+        Delegates to ``self.auth_config.identity_extractor``. Falls back to
+        the legacy ``{oid}@{tid}`` format if no auth_config is set.
 
         Args:
             token_data: Decoded JWT token claims dict.
 
         Returns:
-            A string of the form ``"<oid>@<tid>"`` (or ``"<sub>@<tid>"``).
-            ``None`` when the required claims are missing.
+            A unique identity string, or ``None`` when required claims are missing.
         """
+        if hasattr(self, "auth_config") and self.auth_config is not None:
+            return self.auth_config.identity_extractor.extract(token_data)
+        # Legacy fallback (should not normally be reached)
         user_id = token_data.get("oid") or token_data.get("sub")
         tenant_id = token_data.get("tid")
         if not user_id or not tenant_id:
@@ -1847,48 +1859,17 @@ else:
     # Authentication
     # ========================================================================
 
-    def _get_mise_client(self) -> Any:
-        """
-        Get or create a configured Mise client for token validation.
-
-        Returns:
-            Mise client configured for Microsoft identity platform
-
-        Raises:
-            RuntimeError: If MISE configuration fails
-        """
-        if self._mise_client is None:
-            config = json.dumps(
-                {
-                    "AzureAd": {
-                        "Instance": "https://login.microsoftonline.com/",
-                        "TenantId": self.entra_tenant_id,
-                        "ClientId": self.entra_client_id,
-                        "Audience": self.entra_client_id,
-                        "ValidAudiences": [self.entra_client_id, f"api://{self.entra_client_id}"],
-                    }
-                }
-            )
-            client = Mise()
-            result = client.configure(config, "AzureAd")
-            if result.error_description:
-                raise RuntimeError(f"MISE configuration failed: {result.error_description}")
-            self._mise_client = client
-            LOGGER.info(f"Initialized MISE client for tenant: {self.entra_tenant_id}")
-
-        return self._mise_client
-
     async def verify_entra_token(self, token: str, request_path: str = "/mcp", request_method: str = "POST") -> dict:
         """
-        Verify Entra ID JWT token using MISE native library.
+        Verify a bearer token using the configured TokenValidator.
 
-        Uses the MISE native library for JWKS key retrieval, caching, and
-        full token validation (signature, expiry, audience, issuer, idtyp).
+        Delegates to ``self.auth_config.token_validator``. The method name is
+        retained for backward compatibility with subclasses and tests.
 
         Args:
             token: Bearer token from Authorization header
-            request_path: The request URI path (for MISE URI validation)
-            request_method: The HTTP method (for MISE method validation)
+            request_path: The request URI path
+            request_method: The HTTP method
 
         Returns:
             Decoded token claims if valid
@@ -1897,32 +1878,11 @@ else:
             HTTPException: If token is invalid
         """
         try:
-            client = self._get_mise_client()
-
-            validation_input = MiseValidationInput()
-            validation_input.authorization_header = f"Bearer {token}"
-            validation_input.original_uri_header = request_path
-            validation_input.original_method_header = request_method
-
-            result = client.validate(validation_input)
-
-            if result.http_response_status_code != 200:
-                detail = result.error_description or "Token validation failed"
-                LOGGER.warning(f"MISE token validation failed (HTTP {result.http_response_status_code}): {detail}")
-                raise HTTPException(status_code=result.http_response_status_code, detail=detail)
-
-            # Convert MISE claims to a dict for downstream compatibility
-            decoded = {claim.name: claim.value for claim in result.subject_claims}
-
-            # Log successful authentication
-            user_id = self._extract_user_identity(decoded) or decoded.get("oid") or decoded.get("sub")
-            user_name = decoded.get("name") or decoded.get("preferred_username")
-            app_id = decoded.get("appid")
-
-            LOGGER.info(f"✓ Authenticated user: {user_name} ({user_id}) from app: {app_id}")
-
-            return decoded
-
+            return await self.auth_config.token_validator.validate(
+                token, request_path=request_path, request_method=request_method
+            )
+        except TokenValidationError as e:
+            raise HTTPException(status_code=e.status_code, detail=str(e))
         except HTTPException:
             raise
         except Exception as e:
@@ -2006,6 +1966,16 @@ else:
         # server and perform OAuth 2.1 flows automatically.
         async def protected_resource_metadata(request: Request):
             """Return OAuth 2.0 Protected Resource Metadata per RFC 9728."""
+            if not self.entra_client_id or not self.entra_tenant_id:
+                return JSONResponse(
+                    {
+                        "error": (
+                            "OAuth protected-resource metadata is not available "
+                            "for the current authentication configuration."
+                        )
+                    },
+                    status_code=404,
+                )
             return JSONResponse(
                 {
                     # The resource identifier must match a registered identifier
@@ -2281,8 +2251,7 @@ else:
                         )
                         error_msg = (
                             "Missing or invalid Authorization header. "
-                            "Please provide a Bearer token. "
-                            "In local mode, get token via: az account get-access-token --query accessToken -o tsv"
+                            "Please provide a Bearer token."
                         )
                         await send(
                             {
@@ -2294,19 +2263,19 @@ else:
 
                     token = auth_header.replace("Bearer ", "")
 
-                    # Validate token with request context for MISE
+                    # Validate token via pluggable TokenValidator
                     request_method = scope.get("method", "POST")
                     try:
                         token_data = await self.server_instance.verify_entra_token(
                             token, request_path=path, request_method=request_method
                         )
 
-                        # Extract composite user identity (oid@tid) from token claims
+                        # Extract user identity via pluggable IdentityExtractor
                         user_identity = self.server_instance._extract_user_identity(token_data)
                         if not user_identity:
                             raise HTTPException(
                                 status_code=401,
-                                detail="Token missing required user identity claims (oid or sub, and tid)",
+                                detail="Token missing required user identity claims",
                             )
 
                         user_name = token_data.get("name") or token_data.get("preferred_username")
@@ -2344,15 +2313,16 @@ else:
         # See "Middleware Architecture" in class docstring for complete flow.
         middleware.append((MCPSessionMiddleware, {}))
 
-        # Build the WWW-Authenticate value from trusted server config (not from
-        # request headers) to prevent host-header injection.  The path is
-        # well-known and always served on the same origin as /mcp.
-        public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-        if public_base_url:
-            metadata_url = f"{public_base_url}/.well-known/oauth-protected-resource"
+        # Use WWW-Authenticate from auth_config if available, otherwise build from env.
+        if self.auth_config.www_authenticate_value:
+            www_authenticate = self.auth_config.www_authenticate_value
         else:
-            metadata_url = "/.well-known/oauth-protected-resource"
-        www_authenticate = f'Bearer resource_metadata="{metadata_url}"'
+            public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+            if public_base_url:
+                metadata_url = f"{public_base_url}/.well-known/oauth-protected-resource"
+            else:
+                metadata_url = "/.well-known/oauth-protected-resource"
+            www_authenticate = f'Bearer resource_metadata="{metadata_url}"'
 
         middleware.append((AuthMiddleware, {"server_instance": self, "www_authenticate": www_authenticate}))
 
