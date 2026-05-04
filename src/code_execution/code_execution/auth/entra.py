@@ -109,27 +109,33 @@ class EntraIdentityExtractor(IdentityExtractor):
 
 class EntraCredentialProvider(CredentialProvider):
     """
-    Provides Azure credentials for downstream resource access.
+    Provides Azure credentials for downstream resource access via managed identity.
 
-    Wraps the existing OBOCredentialProvider, delegating method/path
-    selection to it based on environment configuration.
+    Uses Azure ManagedIdentityCredential (user-assigned if AZURE_CLIENT_ID is
+    set, otherwise system-assigned) to obtain tokens for downstream resources
+    such as Azure Storage and Azure AI Search.
     """
 
-    def __init__(self, user_assertion: str, **kwargs):
+    def __init__(self, client_id: Optional[str] = None):
         """
         Args:
-            user_assertion: The user's bearer token (JWT) for OBO exchange.
-            **kwargs: Forwarded to OBOCredentialProvider (client_id, tenant_id,
-                      federated_token_file, simulation_mode, managed_identity,
-                      obo_path, etc.)
+            client_id: User-assigned managed identity client ID.
+                      Falls back to AZURE_CLIENT_ID env var.
+                      If None/unset, system-assigned managed identity is used.
         """
-        from .obo_credential import OBOCredentialProvider
+        from azure.identity.aio import ManagedIdentityCredential
 
-        self._provider = OBOCredentialProvider(user_assertion=user_assertion, **kwargs)
+        resolved_client_id = client_id or (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
+        self._credential = ManagedIdentityCredential(client_id=resolved_client_id)
+        if resolved_client_id:
+            LOGGER.info(f"EntraCredentialProvider: using user-assigned MI (client_id={resolved_client_id[:8]}...)")
+        else:
+            LOGGER.info("EntraCredentialProvider: using system-assigned managed identity")
 
     async def get_token(self, scope: str) -> AccessToken:
         try:
-            return await self._provider.get_token_async(scope)
+            token = await self._credential.get_token(scope)
+            return AccessToken(token.token, token.expires_on)
         except Exception as e:
             raise CredentialError(
                 f"Failed to acquire token for scope '{scope}': {e}",
@@ -138,7 +144,7 @@ class EntraCredentialProvider(CredentialProvider):
             ) from e
 
     async def close(self) -> None:
-        self._provider.close()
+        await self._credential.close()
 
 
 def create_entra_auth_config(
@@ -181,8 +187,8 @@ def create_entra_auth_config(
     token_validator = EntraTokenValidator(client_id=resolved_client_id, tenant_id=resolved_tenant_id)
     identity_extractor = EntraIdentityExtractor()
 
-    def credential_factory(user_token: str) -> CredentialProvider:
-        return EntraCredentialProvider(user_assertion=user_token)
+    def credential_factory(_user_token: str) -> CredentialProvider:
+        return EntraCredentialProvider()
 
     www_auth = 'Bearer resource_metadata="/.well-known/oauth-protected-resource"'
 

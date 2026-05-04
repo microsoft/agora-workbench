@@ -85,11 +85,12 @@ def _make_server(
         build_dir=build_dir,
     )
     session_manager = SessionManager(SessionConfig(max_sessions=10, timeout_minutes=5, cleanup_interval_seconds=60))
+    from ..code_execution.auth import create_noop_auth_config
+
     return CodeExecutionServer(
         environment_config=config,
         session_manager=session_manager,
-        entra_client_id="test-client-id",
-        entra_tenant_id="test-tenant-id",
+        auth_config=create_noop_auth_config(),
         working_dir=work_dir,
     )
 

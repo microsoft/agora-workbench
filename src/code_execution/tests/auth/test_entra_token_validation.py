@@ -1,7 +1,5 @@
 """Tests for PyJWT-based token validation in EntraTokenValidator."""
 
-from typing import Optional
-
 import jwt
 import pytest
 from unittest.mock import MagicMock, patch
@@ -16,27 +14,26 @@ def mock_entra_env():
         yield
 
 
-def _create_server(
-    entra_client_id: Optional[str] = "test-client-id", entra_tenant_id: Optional[str] = "test-tenant-id"
-):
-    """Helper to create a CodeExecutionServer for testing."""
+def _create_server():
+    """Helper to create a CodeExecutionServer for testing with Entra auth."""
     from ...code_execution import CodeExecutionServer
     from ...code_execution.code_execution_models import EnvironmentConfig
+    from ...code_execution.auth import create_entra_auth_config
 
     config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    auth_config = create_entra_auth_config(client_id="test-client-id", tenant_id="test-tenant-id")
     return CodeExecutionServer(
         environment_config=config,
-        entra_client_id=entra_client_id,
-        entra_tenant_id=entra_tenant_id,
+        auth_config=auth_config,
     )
 
 
-class TestVerifyEntraTokenWithPyJWT:
-    """Test verify_entra_token uses PyJWT for token validation."""
+class TestValidateTokenWithPyJWT:
+    """Test validate_token uses PyJWT for token validation."""
 
     @pytest.mark.asyncio
     async def test_validates_token_successfully(self, mock_entra_env):
-        """verify_entra_token should validate tokens and return claims."""
+        """validate_token should validate tokens and return claims."""
         server = _create_server()
 
         expected_claims = {
@@ -51,10 +48,15 @@ class TestVerifyEntraTokenWithPyJWT:
         mock_signing_key = MagicMock()
         mock_signing_key.key = "mock-key"
 
-        with patch.object(
-            server.auth_config.token_validator._jwks_client, "get_signing_key_from_jwt", return_value=mock_signing_key
-        ), patch("jwt.decode", return_value=expected_claims):
-            result = await server.verify_entra_token("test-token")
+        with (
+            patch.object(
+                server.auth_config.token_validator._jwks_client,
+                "get_signing_key_from_jwt",
+                return_value=mock_signing_key,
+            ),
+            patch("jwt.decode", return_value=expected_claims),
+        ):
+            result = await server.validate_token("test-token")
 
         assert result["oid"] == "user-123"
         assert result["name"] == "Test User"
@@ -68,11 +70,16 @@ class TestVerifyEntraTokenWithPyJWT:
         mock_signing_key = MagicMock()
         mock_signing_key.key = "mock-key"
 
-        with patch.object(
-            server.auth_config.token_validator._jwks_client, "get_signing_key_from_jwt", return_value=mock_signing_key
-        ), patch("jwt.decode", side_effect=jwt.ExpiredSignatureError("Token is expired")):
+        with (
+            patch.object(
+                server.auth_config.token_validator._jwks_client,
+                "get_signing_key_from_jwt",
+                return_value=mock_signing_key,
+            ),
+            patch("jwt.decode", side_effect=jwt.ExpiredSignatureError("Token is expired")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await server.verify_entra_token("expired-token")
+                await server.validate_token("expired-token")
 
         assert exc_info.value.status_code == 401
         assert "expired" in exc_info.value.detail.lower()
@@ -85,11 +92,16 @@ class TestVerifyEntraTokenWithPyJWT:
         mock_signing_key = MagicMock()
         mock_signing_key.key = "mock-key"
 
-        with patch.object(
-            server.auth_config.token_validator._jwks_client, "get_signing_key_from_jwt", return_value=mock_signing_key
-        ), patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")):
+        with (
+            patch.object(
+                server.auth_config.token_validator._jwks_client,
+                "get_signing_key_from_jwt",
+                return_value=mock_signing_key,
+            ),
+            patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await server.verify_entra_token("bad-aud-token")
+                await server.validate_token("bad-aud-token")
 
         assert exc_info.value.status_code == 401
         assert "audience" in exc_info.value.detail.lower()
@@ -102,11 +114,16 @@ class TestVerifyEntraTokenWithPyJWT:
         mock_signing_key = MagicMock()
         mock_signing_key.key = "mock-key"
 
-        with patch.object(
-            server.auth_config.token_validator._jwks_client, "get_signing_key_from_jwt", return_value=mock_signing_key
-        ), patch("jwt.decode", side_effect=jwt.InvalidIssuerError("Invalid issuer")):
+        with (
+            patch.object(
+                server.auth_config.token_validator._jwks_client,
+                "get_signing_key_from_jwt",
+                return_value=mock_signing_key,
+            ),
+            patch("jwt.decode", side_effect=jwt.InvalidIssuerError("Invalid issuer")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await server.verify_entra_token("bad-iss-token")
+                await server.validate_token("bad-iss-token")
 
         assert exc_info.value.status_code == 401
         assert "issuer" in exc_info.value.detail.lower()
@@ -122,7 +139,7 @@ class TestVerifyEntraTokenWithPyJWT:
             side_effect=jwt.PyJWKClientError("Connection refused"),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await server.verify_entra_token("some-token")
+                await server.validate_token("some-token")
 
         assert exc_info.value.status_code == 401
         assert "signing keys" in exc_info.value.detail.lower()
@@ -135,20 +152,18 @@ class TestVerifyEntraTokenWithPyJWT:
         mock_signing_key = MagicMock()
         mock_signing_key.key = "mock-key"
 
-        with patch.object(
-            server.auth_config.token_validator._jwks_client, "get_signing_key_from_jwt", return_value=mock_signing_key
-        ), patch("jwt.decode", side_effect=jwt.InvalidTokenError("Malformed token")):
+        with (
+            patch.object(
+                server.auth_config.token_validator._jwks_client,
+                "get_signing_key_from_jwt",
+                return_value=mock_signing_key,
+            ),
+            patch("jwt.decode", side_effect=jwt.InvalidTokenError("Malformed token")),
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await server.verify_entra_token("malformed-token")
+                await server.validate_token("malformed-token")
 
         assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_missing_entra_config_raises_on_construction(self):
-        """When entra credentials are not set, server construction should raise ValueError."""
-        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "", "ENTRA_TENANT_ID": ""}, clear=False):
-            with pytest.raises(ValueError, match="Missing required Entra ID configuration"):
-                _create_server(entra_client_id=None, entra_tenant_id=None)
 
 
 class TestEntraTokenValidatorConfig:
@@ -168,8 +183,10 @@ class TestEntraTokenValidatorConfig:
         assert "https://login.microsoftonline.com/test-tenant-id/v2.0" in validator._valid_issuers
         assert "https://sts.windows.net/test-tenant-id/" in validator._valid_issuers
 
-    def test_missing_entra_config_raises_value_error(self, mock_entra_env):
-        """Server construction should raise ValueError when only one credential is missing."""
-        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "some-id", "ENTRA_TENANT_ID": ""}, clear=False):
-            with pytest.raises(ValueError, match="ENTRA_TENANT_ID"):
-                _create_server(entra_client_id="some-id", entra_tenant_id=None)
+    def test_missing_entra_config_raises_value_error(self):
+        """create_entra_auth_config should raise ValueError when config is missing."""
+        from ...code_execution.auth import create_entra_auth_config
+
+        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "", "ENTRA_TENANT_ID": ""}, clear=False):
+            with pytest.raises(ValueError, match="Missing required Entra ID configuration"):
+                create_entra_auth_config(client_id=None, tenant_id=None)

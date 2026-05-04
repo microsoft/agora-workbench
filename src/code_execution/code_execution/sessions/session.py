@@ -28,7 +28,7 @@ class Session(Generic[T]):
         data (T): The session's payload data, type-parameterized for type safety.
         session_type (str): Categorizes session type (e.g., "python", "database").
         user_identity (str): Owner's composite identifier from JWT token (``oid@tid``).
-        user_token (str): User's bearer token for authentication (used as OBO assertion).
+        user_token (str): User's bearer token for authentication.
         metadata (Dict): Optional key-value metadata for session configuration.
         token_claims (Dict): Optional cached JWT token claims for session authorization.
             These claims are used to restore authentication context without re-validating
@@ -77,7 +77,7 @@ class Session(Generic[T]):
         self._status_history = [("created", datetime.now())]
 
         # Initialize data manager for DataLake asset access
-        self.data_manager = DataLakeDataManager(user_token=user_token)
+        self.data_manager = DataLakeDataManager()
 
         # Initialize object store for asset objects
         self.object_store = ObjectStore()

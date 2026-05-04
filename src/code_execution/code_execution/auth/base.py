@@ -97,8 +97,8 @@ class CredentialProvider(ABC):
     Provides credentials for accessing downstream resources on behalf
     of the authenticated user or the server's own identity.
 
-    Implementations may perform OBO token exchange, use managed identity,
-    or provide static/no-op credentials depending on deployment context.
+    Implementations may use managed identity or provide static/no-op
+    credentials depending on deployment context.
     """
 
     @abstractmethod

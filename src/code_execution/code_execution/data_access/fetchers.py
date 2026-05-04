@@ -1,91 +1,38 @@
 """
 Asset fetchers for different storage types.
 
-Each fetcher handles authentication, data retrieval, and basic parsing
-for a specific storage backend (Blob, SQL, Delta Lake).
+Each fetcher handles data retrieval for a specific storage backend
+(Blob, SQL, Delta Lake, etc.).
 
 Authentication:
-    Fetchers use On-Behalf-Of (OBO) token exchange to access downstream
-    Azure resources. The user's assertion token (scoped for the MCP server)
-    is exchanged for tokens with appropriate scopes for each resource type.
+    Fetchers accept an ``AsyncTokenCredential`` (from ``azure.core``) which
+    provides tokens for downstream Azure resources. In production this is
+    typically backed by managed identity.
 """
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from urllib.parse import urlparse
 
 from azure.core.credentials_async import AsyncTokenCredential
-from azure.core.credentials import AccessToken
 from azure.storage.blob.aio import BlobServiceClient
 
-if TYPE_CHECKING:
-    from ..auth import OBOCredentialProvider
-
 LOGGER = logging.getLogger(__name__)
-
-
-class _OBOTokenCredential(AsyncTokenCredential):
-    """
-    Credential wrapper for OBO-exchanged tokens.
-
-    Wraps an already-exchanged token to provide the async get_token() interface
-    required by Azure SDK clients.
-    """
-
-    def __init__(self, token: str, expires_on: int):
-        """
-        Initialize with an exchanged token.
-
-        Args:
-            token: The OBO-exchanged access token
-            expires_on: Token expiration timestamp (Unix epoch seconds)
-        """
-        self._token = token
-        self._expires_on = expires_on
-
-    async def get_token(
-        self,
-        *scopes: str,
-        claims: str | None = None,
-        tenant_id: str | None = None,
-        enable_cae: bool = False,
-        **kwargs: Any,
-    ) -> AccessToken:
-        """Return the pre-exchanged token."""
-        return AccessToken(token=self._token, expires_on=self._expires_on)
-
-    async def close(self) -> None:
-        """No-op close for compatibility."""
-        pass
-
-    async def __aenter__(self) -> "_OBOTokenCredential":
-        """Async context manager entry."""
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: Any = None,
-        exc_val: Any = None,
-        exc_tb: Any = None,
-    ) -> None:
-        """Async context manager exit."""
-        await self.close()
 
 
 class AssetFetcher(ABC):
     """Base class for asset fetchers."""
 
-    def __init__(self, obo_provider: "OBOCredentialProvider"):
+    def __init__(self, credential: AsyncTokenCredential):
         """
-        Initialize fetcher with OBO credential provider.
+        Initialize fetcher with an async token credential.
 
         Args:
-            obo_provider: OBO credential provider for token exchange.
-                         The provider will exchange the user's assertion token
-                         for tokens with appropriate scopes for downstream resources.
+            credential: An ``AsyncTokenCredential`` that provides tokens for
+                       downstream Azure resources (e.g. ManagedIdentityCredential).
         """
-        self.obo_provider = obo_provider
+        self.credential = credential
 
     @abstractmethod
     async def fetch(self, qualified_name: str) -> Any:
@@ -135,7 +82,7 @@ class BlobFetcher(AssetFetcher):
     Fetcher for Azure Blob Storage / ADLS Gen2 assets.
     """
 
-    # Azure Storage scope for OBO token exchange
+    # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
 
     def can_handle(self, qualified_name: str) -> bool:
@@ -162,9 +109,6 @@ class BlobFetcher(AssetFetcher):
         - abfss://container@storage.dfs.core.windows.net/path/to/file
         - https://storage.blob.core.windows.net/container/path/to/file
 
-        Uses OBO token exchange to get a storage-scoped token from the
-        user's assertion token.
-
         Args:
             qualified_name: Blob URL
 
@@ -172,7 +116,6 @@ class BlobFetcher(AssetFetcher):
             Raw bytes of the file
 
         Raises:
-            OBOTokenExchangeError: If token exchange fails
             azure.core.exceptions.ClientAuthenticationError: If access is denied
         """
         # Parse the URL first to sanitize for logging (removes query params like SAS tokens)
@@ -180,29 +123,18 @@ class BlobFetcher(AssetFetcher):
         sanitized_url = f"{storage_account}/{container}/{blob_path}"
         LOGGER.info(f"Fetching blob asset: {sanitized_url}")
 
-        # Exchange user token for storage-scoped token via OBO
-        LOGGER.debug("Exchanging user token for storage scope via OBO")
-        storage_token = await self.obo_provider.get_token_async(self.STORAGE_SCOPE)
-
-        # Create authenticated client with the OBO-exchanged token
+        # Create authenticated client with managed identity credential
         account_url = f"https://{storage_account}.blob.core.windows.net"
 
-        # Create a credential wrapper for the exchanged token
-        credential = _OBOTokenCredential(storage_token.token, storage_token.expires_on)
+        async with BlobServiceClient(account_url=account_url, credential=self.credential) as client:
+            blob_client = client.get_blob_client(container=container, blob=blob_path)
 
-        try:
-            async with BlobServiceClient(account_url=account_url, credential=credential) as client:
-                blob_client = client.get_blob_client(container=container, blob=blob_path)
+            # Download blob data
+            stream = await blob_client.download_blob()
+            data = await stream.readall()
 
-                # Download blob data
-                stream = await blob_client.download_blob()
-                data = await stream.readall()
-
-                LOGGER.info(f"Successfully fetched {len(data)} bytes from {sanitized_url}")
-                return data
-
-        finally:
-            await credential.close()
+            LOGGER.info(f"Successfully fetched {len(data)} bytes from {sanitized_url}")
+            return data
 
     async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
         """
@@ -218,7 +150,6 @@ class BlobFetcher(AssetFetcher):
             Number of bytes written
 
         Raises:
-            OBOTokenExchangeError: If token exchange fails
             azure.core.exceptions.ClientAuthenticationError: If access is denied
         """
         from pathlib import Path
@@ -230,35 +161,26 @@ class BlobFetcher(AssetFetcher):
         sanitized_url = f"{storage_account}/{container}/{blob_path}"
         LOGGER.info(f"Streaming blob asset to file: {sanitized_url}")
 
-        # Exchange user token for storage-scoped token via OBO
-        LOGGER.debug("Exchanging user token for storage scope via OBO")
-        storage_token = await self.obo_provider.get_token_async(self.STORAGE_SCOPE)
-
-        # Create authenticated client with the OBO-exchanged token
+        # Create authenticated client with managed identity credential
         account_url = f"https://{storage_account}.blob.core.windows.net"
-        credential = _OBOTokenCredential(storage_token.token, storage_token.expires_on)
 
-        try:
-            async with BlobServiceClient(account_url=account_url, credential=credential) as client:
-                blob_client = client.get_blob_client(container=container, blob=blob_path)
+        async with BlobServiceClient(account_url=account_url, credential=self.credential) as client:
+            blob_client = client.get_blob_client(container=container, blob=blob_path)
 
-                # Ensure parent directory exists
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
+            # Ensure parent directory exists
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-                # Download blob data and stream to file in chunks
-                bytes_written = 0
-                stream = await blob_client.download_blob()
+            # Download blob data and stream to file in chunks
+            bytes_written = 0
+            stream = await blob_client.download_blob()
 
-                with open(dest_path, "wb") as f:
-                    async for chunk in stream.chunks():
-                        f.write(chunk)
-                        bytes_written += len(chunk)
+            with open(dest_path, "wb") as f:
+                async for chunk in stream.chunks():
+                    f.write(chunk)
+                    bytes_written += len(chunk)
 
-                LOGGER.info(f"Successfully streamed {bytes_written} bytes to {dest_path}")
-                return bytes_written
-
-        finally:
-            await credential.close()
+            LOGGER.info(f"Successfully streamed {bytes_written} bytes to {dest_path}")
+            return bytes_written
 
     def _parse_blob_url(self, url: str) -> tuple[str, str, str]:
         """
