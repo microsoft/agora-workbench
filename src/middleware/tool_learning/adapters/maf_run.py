@@ -1,18 +1,28 @@
 """
 VignetteRunMiddleware: injects tool-guardrail context before agent inference.
 
-This middleware fetches anti-pattern vignettes from Azure AI Search and prepends
-a compact guardrails block to the agent's message list so the LLM is aware of
-known failure modes before choosing tool arguments.
+This module provides :class:`VignetteRunMiddleware`, an Agora
+:class:`~middleware.protocols.ContextProvider` that fetches anti-pattern
+vignettes from Azure AI Search and prepends a compact guardrails block to
+the agent's context so the LLM is aware of known failure modes before
+choosing tool arguments.
 
-By default the middleware discovers tool names from the agent's registered tools
-at runtime, so callers don't need to know the tool set in advance::
+The middleware is framework-agnostic.  To use it inside a MAF agent, wrap it
+with :func:`~middleware.decision_log.adapters.maf_protocols.wrap_context_provider`:
 
-    middleware = VignetteRunMiddleware(
+    from middleware.tool_learning.adapters import VignetteRunMiddleware
+    from middleware.decision_log.adapters.maf_protocols import wrap_context_provider
+
+    agora_mw = VignetteRunMiddleware(
         config=ToolLearningConfig.from_env(),
         credential=credential,
     )
-    agent = Agent(..., middleware=[middleware])
+    maf_provider = wrap_context_provider(agora_mw)
+    agent = Agent(..., context_providers=[maf_provider])
+
+By default the middleware discovers tool names from the agent's registered
+tools (via :attr:`~middleware.protocols.AgentContext.tools`) at runtime, so
+callers don't need to know the tool set in advance.
 
 Vignette results are cached per tool-name set so repeated invocations with the
 same tools don't re-query Azure AI Search.
@@ -22,15 +32,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Awaitable, Callable, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
-try:
-    from agent_framework import AgentContext, AgentMiddleware, Message
-except ImportError as e:
-    raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
-    ) from e
+from middleware.protocols import AgentContext, ContextProvider, Message
 
 from ..config import ToolLearningConfig
 from ..models import Vignette
@@ -40,38 +44,29 @@ from ..search_repo import SearchVignetteRepo
 LOGGER = logging.getLogger(__name__)
 
 
-def _extract_tool_names(context: AgentContext) -> list[str]:
-    """Extract tool names from the agent's registered tools.
-
-    Reads ``context.agent.default_options["tools"]`` (non-MCP tools) and
-    ``context.agent.mcp_tools`` (MCP tools).  Each tool object exposes a
-    ``.name`` attribute.
+class VignetteRunMiddleware(ContextProvider):
     """
-    names: list[str] = []
-    agent = context.agent
+    Agora ContextProvider that injects anti-pattern guardrails before inference.
 
-    for tool in getattr(agent, "default_options", {}).get("tools", []):
-        name = getattr(tool, "name", None)
-        if name:
-            names.append(name)
+    Implements :class:`~middleware.protocols.ContextProvider` — wrap it with
+    :func:`~middleware.decision_log.adapters.maf_protocols.wrap_context_provider`
+    to use it inside a MAF agent.
 
-    for tool in getattr(agent, "mcp_tools", []):
-        name = getattr(tool, "name", None)
-        if name:
-            names.append(name)
-
-    return names
-
-
-class VignetteRunMiddleware(AgentMiddleware):
-    """
-    Agent-run middleware that injects anti-pattern guardrails before inference.
-
-    On each agent run, it:
+    Before each agent run, it:
       1. Discovers which tools are registered on the agent (or uses an
          explicit override list).
       2. Fetches anti-pattern vignettes for those tools (cached per tool set).
       3. Prepends a compact guardrails snippet as a system message.
+
+    Args:
+        config: Agent memory configuration.
+        credential: Azure TokenCredential for Search.
+        tool_names: Explicit tool names to fetch guardrails for.  When
+            *None* (the default), tool names are discovered automatically
+            from the agent's registered tools at each invocation via
+            :attr:`~middleware.protocols.AgentContext.tools`.
+        tenant_id: Optional tenant ID for scope filtering.
+        user_id: Optional user ID for scope filtering.
     """
 
     def __init__(
@@ -82,18 +77,6 @@ class VignetteRunMiddleware(AgentMiddleware):
         tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> None:
-        """
-        Initialize the middleware.
-
-        Args:
-            config: Agent memory configuration.
-            credential: Azure TokenCredential for Search.
-            tool_names: Explicit tool names to fetch guardrails for.  When
-                *None* (the default), tool names are discovered automatically
-                from the agent's registered tools at each invocation.
-            tenant_id: Optional tenant ID for scope filtering.
-            user_id: Optional user ID for scope filtering.
-        """
         self._config = config
         self._explicit_tool_names: list[str] | None = list(tool_names) if tool_names else None
         self._tenant_id = tenant_id
@@ -116,11 +99,11 @@ class VignetteRunMiddleware(AgentMiddleware):
         """Return the tool names to fetch guardrails for.
 
         Uses the explicit override when set, otherwise discovers from the
-        agent's registered tools.
+        agent's registered tools via :attr:`~middleware.protocols.AgentContext.tools`.
         """
         if self._explicit_tool_names is not None:
             return self._explicit_tool_names
-        return _extract_tool_names(context)
+        return [t.name for t in context.tools]
 
     # ------------------------------------------------------------------
     # Vignette fetching (with cache)
@@ -152,20 +135,17 @@ class VignetteRunMiddleware(AgentMiddleware):
         return all_vignettes
 
     # ------------------------------------------------------------------
-    # Middleware entry point
+    # ContextProvider entry point
     # ------------------------------------------------------------------
 
-    async def process(
-        self,
-        context: AgentContext,
-        call_next: Callable[[], Awaitable[None]],
-    ) -> None:
-        """
-        Intercept the agent run to inject guardrails.
+    async def provide(self, context: AgentContext) -> None:
+        """Inject anti-pattern guardrails into the agent's context.
 
-        Discovers tool names from the agent (or uses an explicit list),
-        fetches anti-pattern vignettes (cached), and prepends a guardrails
-        system message when any are found.
+        Discovers tool names from the agent context (or uses an explicit
+        list), fetches anti-pattern vignettes (cached), and injects a
+        guardrails system message via
+        :meth:`~middleware.protocols.AgentContext.extend_messages` when any
+        are found.
         """
         tool_names = self._resolve_tool_names(context)
 
@@ -175,8 +155,6 @@ class VignetteRunMiddleware(AgentMiddleware):
             if all_vignettes:
                 guardrails_text = render_guardrails_block(all_vignettes)
                 if guardrails_text:
-                    guardrails_msg = Message(role="system", text=guardrails_text)
-                    context.messages = [guardrails_msg] + list(context.messages)
+                    guardrails_msg = Message(role="system", content=guardrails_text)
+                    context.extend_messages("vignette_guardrails", [guardrails_msg])
                     LOGGER.debug("Injected %d guardrail vignettes", len(all_vignettes))
-
-        await call_next()

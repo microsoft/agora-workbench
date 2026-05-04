@@ -10,6 +10,7 @@ connect the middleware to their agent's lifecycle hooks.
 
 from .types import Message, ToolCall, ToolResult, FunctionInfo
 from .middleware import (
+    ChatClient,
     ChatMiddleware,
     FunctionMiddleware,
     ContextProvider,
@@ -24,6 +25,7 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "FunctionInfo",
+    "ChatClient",
     "ChatMiddleware",
     "FunctionMiddleware",
     "ContextProvider",

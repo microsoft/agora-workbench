@@ -1,25 +1,25 @@
 """MAF (Microsoft Agent Framework) adapter for Agora middleware protocols.
 
 This module bridges the Agora middleware protocol types to their
-MAF equivalents, allowing existing MAF-based middleware to be used
-with the Agora protocol, and Agora-protocol middleware to be used
+MAF equivalents, allowing Agora-protocol middleware to be used
 in MAF-based agents.
 
 Usage
 -----
 Wrapping an Agora middleware for use in a MAF agent::
 
-    from middleware.protocols.adapters_maf import wrap_chat_middleware
+    from middleware.decision_log.adapters.maf_protocols import wrap_chat_middleware
 
     agora_mw = MyAgoraChatMiddleware()
     maf_mw = wrap_chat_middleware(agora_mw)
     agent = Agent(..., middleware=[maf_mw])
 
-Wrapping a MAF context for Agora middleware consumption::
+Adapting a MAF chat client for use with :class:`~middleware.decision_log.DecisionLogChatMiddleware`::
 
-    from middleware.protocols.adapters_maf import MAFChatContextAdapter
+    from middleware.decision_log.adapters.maf_protocols import MAFChatClientAdapter
 
-    agora_ctx = MAFChatContextAdapter(maf_chat_context)
+    chat_client = MAFChatClientAdapter(maf_client)
+    agora_mw = DecisionLogChatMiddleware(log, agent_name, chat_client)
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import Any, Awaitable, Callable, Sequence
 
 try:
     from agent_framework import (
+        Agent as MAFAgent,
         ContextProvider as MAFBaseContextProvider,
         ChatContext as MAFChatContext,
         ChatMiddleware as MAFChatMiddleware,
@@ -43,6 +44,7 @@ except ImportError as e:
     ) from e
 
 from middleware.protocols import (
+    ChatClient,
     ChatMiddleware,
     ContextProvider,
     FunctionMiddleware,
@@ -140,6 +142,15 @@ class MAFFunctionContextAdapter:
         if isinstance(args, dict):
             return args
         return {}
+
+    @arguments.setter
+    def arguments(self, value: dict[str, Any]) -> None:
+        """Set arguments, reconstructing the original Pydantic model type if possible."""
+        original = self._ctx.arguments
+        try:
+            self._ctx.arguments = type(original)(**value)
+        except Exception:
+            self._ctx.arguments = value
 
     @property
     def result(self) -> ToolResult | None:
@@ -253,6 +264,47 @@ class AgoraContextProviderToMAF(MAFBaseContextProvider):
 # ---------------------------------------------------------------------------
 # Convenience factories
 # ---------------------------------------------------------------------------
+
+
+class MAFChatClientAdapter:
+    """Adapts a MAF chat client to the Agora :class:`~middleware.protocols.ChatClient` protocol.
+
+    Use this to supply an LLM client to
+    :class:`~middleware.decision_log.DecisionLogChatMiddleware` when running
+    inside a MAF agent.
+
+    Args:
+        client: The MAF chat client (e.g. an ``openai.AsyncAzureOpenAI`` or
+            similar object accepted by ``agent_framework.Agent``).
+
+    Example
+    -------
+    ```python
+    from middleware.decision_log.adapters.maf_protocols import MAFChatClientAdapter
+
+    chat_client = MAFChatClientAdapter(my_maf_openai_client)
+    mw = DecisionLogChatMiddleware(log, "my_agent", chat_client)
+    ```
+    """
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    async def complete(self, messages: Sequence[Message]) -> str:
+        """Send *messages* to the MAF agent and return the text response.
+
+        Creates a temporary :class:`agent_framework.Agent` for the synthesis
+        call so that the MAF client is used exactly as callers would expect.
+        """
+        synthesis_agent = MAFAgent(
+            client=self._client,
+            name="decision_log_synthesiser",
+        )
+        session = synthesis_agent.create_session()
+        maf_messages = [_agora_message_to_maf(m) for m in messages]
+
+        result = await synthesis_agent.run(messages=maf_messages, session=session)
+        return getattr(result, "text", None) or ""
 
 
 def wrap_chat_middleware(mw: ChatMiddleware) -> MAFChatMiddleware:

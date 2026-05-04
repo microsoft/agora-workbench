@@ -5,20 +5,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-pytest.importorskip("agent_framework")
-
-
 from middleware.decision_log.adapters.maf_chat_middleware import (
     DECISION_SYNTHESIS_PROMPT,
     DecisionLogChatMiddleware,
     _SynthesisOutput,
     _capture_event,
     _format_buffer,
-    _response_has_tool_calls,
     _strip_markdown_fence,
 )
 from middleware.decision_log.entry import DecisionLogEntry
 from middleware.decision_log.log import DecisionLog
+from middleware.protocols import Message, ToolCall
 
 
 # ------------------------------------------------------------------
@@ -26,36 +23,28 @@ from middleware.decision_log.log import DecisionLog
 # ------------------------------------------------------------------
 
 
-def _make_chat_context(messages=None, result=None):
-    """Build a minimal mock ChatContext."""
+def _make_chat_context(messages=None, result=None, tool_calls=None):
+    """Build a minimal mock Agora ChatContext."""
     ctx = MagicMock()
     ctx.messages = messages or []
     ctx.result = result
+    ctx.tool_calls = tool_calls or []
     return ctx
 
 
-def _make_message(role="user", text="hello"):
-    msg = MagicMock()
-    msg.role = role
-    msg.text = text
-    msg.items = []
-    return msg
+def _make_message(role="user", content="hello"):
+    return Message(role=role, content=content)
 
 
-def _make_response(messages=None):
-    resp = MagicMock()
-    resp.messages = messages or []
-    return resp
+def _make_tool_call(name="my_tool", call_id="call_1"):
+    return ToolCall(id=call_id, name=name, arguments={})
 
 
-def _make_tool_call_message():
-    item = MagicMock()
-    item.type = "function_call"
-    msg = MagicMock()
-    msg.role = "assistant"
-    msg.text = ""
-    msg.items = [item]
-    return msg
+def _make_chat_client() -> MagicMock:
+    """Build a mock ChatClient with an async complete() method."""
+    client = MagicMock()
+    client.complete = AsyncMock(return_value='{"summary": "test", "evidence": {}}')
+    return client
 
 
 # ------------------------------------------------------------------
@@ -109,27 +98,6 @@ class TestSynthesisOutput:
 
 
 # ------------------------------------------------------------------
-# _response_has_tool_calls
-# ------------------------------------------------------------------
-
-
-class TestResponseHasToolCalls:
-    @pytest.mark.unit
-    def test_no_tool_calls(self):
-        resp = _make_response([_make_message("assistant", "Hello")])
-        assert _response_has_tool_calls(resp) is False
-
-    @pytest.mark.unit
-    def test_with_tool_calls(self):
-        resp = _make_response([_make_tool_call_message()])
-        assert _response_has_tool_calls(resp) is True
-
-    @pytest.mark.unit
-    def test_none_response(self):
-        assert _response_has_tool_calls(None) is False
-
-
-# ------------------------------------------------------------------
 # _capture_event
 # ------------------------------------------------------------------
 
@@ -137,24 +105,29 @@ class TestResponseHasToolCalls:
 class TestCaptureEvent:
     @pytest.mark.unit
     def test_captures_input_and_output(self):
-        ctx = _make_chat_context(messages=[_make_message("user", "What is 2+2?")])
-        resp = _make_response([_make_message("assistant", "4")])
-        event = _capture_event(ctx, resp)
+        result_msg = _make_message("assistant", "4")
+        ctx = _make_chat_context(
+            messages=[_make_message("user", "What is 2+2?")],
+            result=result_msg,
+        )
+        event = _capture_event(ctx)
         assert "What is 2+2?" in event["input_summary"]
         assert "4" in event["output_summary"]
         assert event["has_tool_calls"] is False
 
     @pytest.mark.unit
     def test_captures_tool_call_flag(self):
-        ctx = _make_chat_context(messages=[_make_message("user", "search")])
-        resp = _make_response([_make_tool_call_message()])
-        event = _capture_event(ctx, resp)
+        ctx = _make_chat_context(
+            messages=[_make_message("user", "search")],
+            tool_calls=[_make_tool_call()],
+        )
+        event = _capture_event(ctx)
         assert event["has_tool_calls"] is True
 
     @pytest.mark.unit
-    def test_none_response(self):
-        ctx = _make_chat_context(messages=[_make_message("user", "hi")])
-        event = _capture_event(ctx, None)
+    def test_none_result(self):
+        ctx = _make_chat_context(messages=[_make_message("user", "hi")], result=None)
+        event = _capture_event(ctx)
         assert event["output_summary"] == "(no output)"
         assert event["has_tool_calls"] is False
 
@@ -214,19 +187,13 @@ class TestProcess:
     async def test_accumulates_events_in_buffer(self):
         """When response has tool calls and buffer isn't full, events accumulate."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock(), max_buffer_size=5)
-        ctx = _make_chat_context(messages=[_make_message("user", "hi")])
-        resp = _make_response([_make_tool_call_message()])
-        ctx.result = resp
-
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client(), max_buffer_size=5)
+        ctx = _make_chat_context(
+            messages=[_make_message("user", "hi")],
+            result=_make_message("assistant", ""),
+            tool_calls=[_make_tool_call()],
+        )
         call_next = AsyncMock()
-
-        # Patch context.result to be set after call_next
-        async def set_result():
-            ctx.result = resp
-
-        call_next.side_effect = set_result
-
         await mw.process(ctx, call_next)
         call_next.assert_awaited_once()
         assert len(mw._buffer) == 1
@@ -236,19 +203,17 @@ class TestProcess:
     async def test_synthesis_triggered_no_tool_calls(self):
         """When response has no tool calls, buffer is drained and synthesis queued."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock(), max_buffer_size=5)
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client(), max_buffer_size=5)
 
-        resp = _make_response([_make_message("assistant", "Done!")])
-        ctx = _make_chat_context(messages=[_make_message("user", "do it")])
-        ctx.result = resp
-
+        ctx = _make_chat_context(
+            messages=[_make_message("user", "do it")],
+            result=_make_message("assistant", "Done!"),
+            tool_calls=[],
+        )
         call_next = AsyncMock()
-
         await mw.process(ctx, call_next)
 
-        # Buffer should be cleared after synthesis trigger
         assert len(mw._buffer) == 0
-        # Queue should have an item
         assert mw._synthesis_queue is not None
         assert mw._synthesis_queue.qsize() >= 1
 
@@ -259,24 +224,25 @@ class TestProcess:
     async def test_synthesis_triggered_buffer_full(self):
         """When buffer reaches max_buffer_size, synthesis is triggered."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock(), max_buffer_size=2)
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client(), max_buffer_size=2)
 
         call_next = AsyncMock()
 
-        # First call with tool calls — buffer size 1, no trigger
-        resp1 = _make_response([_make_tool_call_message()])
-        ctx1 = _make_chat_context(messages=[_make_message("user", "step 1")])
-        ctx1.result = resp1
+        ctx1 = _make_chat_context(
+            messages=[_make_message("user", "step 1")],
+            result=_make_message("assistant", ""),
+            tool_calls=[_make_tool_call()],
+        )
         await mw.process(ctx1, call_next)
         assert len(mw._buffer) == 1
 
-        # Second call with tool calls — buffer size reaches 2, triggers synthesis
-        resp2 = _make_response([_make_tool_call_message()])
-        ctx2 = _make_chat_context(messages=[_make_message("user", "step 2")])
-        ctx2.result = resp2
+        ctx2 = _make_chat_context(
+            messages=[_make_message("user", "step 2")],
+            result=_make_message("assistant", ""),
+            tool_calls=[_make_tool_call()],
+        )
         await mw.process(ctx2, call_next)
 
-        # Buffer should be cleared
         assert len(mw._buffer) == 0
         assert mw._synthesis_queue is not None
 
@@ -294,13 +260,10 @@ class TestFlush:
     async def test_flush_drains_buffer(self):
         """flush() should submit any buffered events and wait for queue to drain."""
         log = DecisionLog()
-        mock_client = MagicMock()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client, max_buffer_size=10)
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client(), max_buffer_size=10)
 
-        # Manually add an event to the buffer
         mw._buffer.append({"input_summary": "q", "output_summary": "a", "has_tool_calls": False})
 
-        # Patch _synthesise_entry to return a valid entry
         entry = DecisionLogEntry(
             timestamp="2026-01-01T00:00:00Z",
             agent="coder",
@@ -320,7 +283,7 @@ class TestFlush:
     async def test_flush_noop_when_empty(self):
         """flush() with empty buffer and no queue should not raise."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client())
         await mw.flush()
         assert len(log) == 0
 
@@ -333,29 +296,15 @@ class TestFlush:
 class TestSynthesiseEntry:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_returns_entry_from_structured_output(self):
-        """When the synthesis Agent returns a _SynthesisOutput value, build entry."""
+    async def test_returns_entry_from_json_response(self):
+        """When the synthesis ChatClient returns valid JSON, build entry."""
         log = DecisionLog()
+        raw_json = json.dumps({"summary": "Planned next step", "evidence": {"step": "1"}})
         mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=raw_json)
         mw = DecisionLogChatMiddleware(log, agent_name="planner", chat_client=mock_client)
 
-        synthesis_output = _SynthesisOutput(
-            summary="Planned next step",
-            evidence={"step": "1"},
-        )
-
-        mock_result = MagicMock()
-        mock_result.value = synthesis_output
-        mock_result.text = ""
-
-        mock_thread = MagicMock()
-
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = mock_thread
-            agent_instance.run = AsyncMock(return_value=mock_result)
-
-            entry = await mw._synthesise_entry("some events", "2026-01-01T00:00:00Z")
+        entry = await mw._synthesise_entry("some events", "2026-01-01T00:00:00Z")
 
         assert entry is not None
         assert entry.summary == "Planned next step"
@@ -364,28 +313,15 @@ class TestSynthesiseEntry:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_falls_back_to_json_parsing(self):
-        """When value is not _SynthesisOutput, parse raw text as JSON."""
+    async def test_falls_back_to_markdown_fence_stripping(self):
+        """Markdown-fenced JSON is parsed correctly."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        raw_json = json.dumps({"summary": "Used search tool", "evidence": {"tool": "search"}})
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value=f"```json\n{raw_json}\n```")
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client)
 
-        raw_json = json.dumps(
-            {
-                "summary": "Used search tool",
-                "evidence": {"tool": "search"},
-            }
-        )
-
-        mock_result = MagicMock()
-        mock_result.value = None  # No structured output
-        mock_result.text = f"```json\n{raw_json}\n```"
-
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = MagicMock()
-            agent_instance.run = AsyncMock(return_value=mock_result)
-
-            entry = await mw._synthesise_entry("events", "2026-02-01T00:00:00Z")
+        entry = await mw._synthesise_entry("events", "2026-02-01T00:00:00Z")
 
         assert entry is not None
         assert entry.summary == "Used search tool"
@@ -393,16 +329,13 @@ class TestSynthesiseEntry:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_returns_none_on_llm_error(self):
-        """When the LLM call raises, return None."""
+        """When the ChatClient.complete raises, return None."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(side_effect=RuntimeError("LLM down"))
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client)
 
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = MagicMock()
-            agent_instance.run = AsyncMock(side_effect=RuntimeError("LLM down"))
-
-            entry = await mw._synthesise_entry("events", "2026-03-01T00:00:00Z")
+        entry = await mw._synthesise_entry("events", "2026-03-01T00:00:00Z")
 
         assert entry is None
 
@@ -411,70 +344,31 @@ class TestSynthesiseEntry:
     async def test_returns_none_on_bad_json(self):
         """When raw text isn't parseable JSON, return None."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mock_client = MagicMock()
+        mock_client.complete = AsyncMock(return_value="this is not valid json")
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client)
 
-        mock_result = MagicMock()
-        mock_result.value = "not a SynthesisOutput"
-        mock_result.text = "this is not valid json"
-
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = MagicMock()
-            agent_instance.run = AsyncMock(return_value=mock_result)
-
-            entry = await mw._synthesise_entry("events", "2026-04-01T00:00:00Z")
+        entry = await mw._synthesise_entry("events", "2026-04-01T00:00:00Z")
 
         assert entry is None
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_synthesis_uses_configured_client(self):
-        """The synthesis agent is created with the configured client (model baked into client)."""
+    async def test_synthesis_uses_protocol_messages(self):
+        """The synthesis call uses Agora Message objects with correct content."""
         log = DecisionLog()
+        raw_json = json.dumps({"summary": "test", "evidence": {}})
         mock_client = MagicMock()
-        mw = DecisionLogChatMiddleware(
-            log,
-            agent_name="coder",
-            chat_client=mock_client,
-        )
+        mock_client.complete = AsyncMock(return_value=raw_json)
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client)
 
-        mock_result = MagicMock()
-        mock_result.value = _SynthesisOutput(summary="test")
+        await mw._synthesise_entry("some events text", "2026-01-01T00:00:00Z")
 
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = MagicMock()
-            agent_instance.run = AsyncMock(return_value=mock_result)
-
-            await mw._synthesise_entry("events", "2026-01-01T00:00:00Z")
-
-            MockAgent.assert_called_once_with(
-                client=mock_client,
-                name="decision_log_synthesiser",
-            )
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_synthesis_prompt_in_messages(self):
-        """The synthesis prompt should be sent as a system message."""
-        log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
-
-        mock_result = MagicMock()
-        mock_result.value = _SynthesisOutput(summary="test")
-
-        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
-            agent_instance = MockAgent.return_value
-            agent_instance.create_session.return_value = MagicMock()
-            agent_instance.run = AsyncMock(return_value=mock_result)
-
-            await mw._synthesise_entry("some events text", "2026-01-01T00:00:00Z")
-
-            call_kwargs = agent_instance.run.call_args[1]
-            messages = call_kwargs["messages"]
-            assert messages[0].role == "system"
-            assert messages[0].text == DECISION_SYNTHESIS_PROMPT
-            assert "some events text" in messages[1].text
+        mock_client.complete.assert_awaited_once()
+        messages = mock_client.complete.call_args[0][0]
+        assert messages[0].role == "system"
+        assert messages[0].content == DECISION_SYNTHESIS_PROMPT
+        assert "some events text" in messages[1].content
 
 
 # ------------------------------------------------------------------
@@ -488,7 +382,7 @@ class TestAclose:
     async def test_aclose_noop_when_no_worker(self):
         """aclose() is safe to call when no worker has been started."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client())
         await mw.aclose()
         assert mw._worker_task is None
         assert mw._synthesis_queue is None
@@ -498,9 +392,8 @@ class TestAclose:
     async def test_aclose_cancels_worker(self):
         """aclose() cancels the background worker task."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client())
 
-        # Force worker creation
         mw._ensure_worker()
         assert mw._worker_task is not None
         assert not mw._worker_task.done()
@@ -515,8 +408,7 @@ class TestAclose:
     async def test_aclose_flushes_buffer(self):
         """aclose() flushes buffered events before shutting down."""
         log = DecisionLog()
-        mock_client = MagicMock()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=mock_client)
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client())
 
         mw._buffer.append({"input_summary": "q", "output_summary": "a", "has_tool_calls": False})
 
@@ -538,7 +430,7 @@ class TestAclose:
     async def test_aclose_idempotent(self):
         """Calling aclose() multiple times is safe."""
         log = DecisionLog()
-        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
+        mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=_make_chat_client())
         mw._ensure_worker()
 
         await mw.aclose()

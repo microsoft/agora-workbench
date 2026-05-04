@@ -1,6 +1,23 @@
 """
 VignetteFunctionMiddleware: intercepts tool calls for validation and repair.
 
+This module provides :class:`VignetteFunctionMiddleware`, an Agora
+:class:`~middleware.protocols.FunctionMiddleware` that validates tool calls
+against anti-patterns and applies repair templates when tool calls fail.
+
+The middleware is framework-agnostic.  To use it inside a MAF agent, wrap it
+with :func:`~middleware.decision_log.adapters.maf_protocols.wrap_function_middleware`:
+
+    from middleware.tool_learning.adapters import VignetteFunctionMiddleware
+    from middleware.decision_log.adapters.maf_protocols import wrap_function_middleware
+
+    agora_mw = VignetteFunctionMiddleware(
+        config=ToolLearningConfig.from_env(),
+        credential=credential,
+    )
+    maf_mw = wrap_function_middleware(agora_mw)
+    agent = Agent(..., middleware=[maf_mw])
+
 Before a tool call:
   - Retrieves anti-pattern vignettes and checks for "hard" constraint violations.
   - Hard violations block execution and surface the guardrail to the caller.
@@ -17,13 +34,12 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-try:
-    from agent_framework import FunctionInvocationContext, FunctionMiddleware, MiddlewareTermination
-except ImportError as e:
-    raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
-    ) from e
+from middleware.protocols import (
+    FunctionInvocationContext,
+    FunctionMiddleware,
+    MiddlewareTermination,
+    ToolResult,
+)
 
 from ..compile import compile_vignettes
 from ..config import ToolLearningConfig
@@ -32,9 +48,6 @@ from ..search_repo import SearchVignetteRepo
 from ..table_repo import TableVignetteRepo
 
 LOGGER = logging.getLogger(__name__)
-
-# Metadata key used to pass repair context between pre/post processing
-_REPAIR_CONTEXT_KEY = "_vignette_repair_context"
 
 
 def _extract_error_class(exc: Exception) -> str:
@@ -65,16 +78,19 @@ def _check_hard_violations(vignettes, args: Dict[str, Any]) -> List[str]:
 
 class VignetteFunctionMiddleware(FunctionMiddleware):
     """
-    Function middleware that validates tool calls against anti-patterns and
+    Agora FunctionMiddleware that validates tool calls against anti-patterns and
     applies repair templates when tool calls fail.
 
-    Usage::
+    Implements :class:`~middleware.protocols.FunctionMiddleware` — wrap it with
+    :func:`~middleware.decision_log.adapters.maf_protocols.wrap_function_middleware`
+    to use it inside a MAF agent.
 
-        middleware = VignetteFunctionMiddleware(
-            config=ToolLearningConfig.from_env(),
-            credential=credential,
-        )
-        agent = Agent(..., middleware=[middleware])
+    Args:
+        config: Tool-learning configuration.
+        credential: Azure TokenCredential. Used for both Search and Table repos.
+        tenant_id: Optional tenant ID for scope filtering.
+        user_id: Optional user ID for scope filtering.
+        write_vignettes: If True, compile and upsert vignettes on successful repair.
     """
 
     def __init__(
@@ -85,16 +101,6 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
         user_id: Optional[str] = None,
         write_vignettes: bool = True,
     ) -> None:
-        """
-        Initialize the middleware.
-
-        Args:
-            config: Agent memory configuration.
-            credential: Azure TokenCredential. Used for both Search and Table repos.
-            tenant_id: Optional tenant ID for scope filtering.
-            user_id: Optional user ID for scope filtering.
-            write_vignettes: If True, compile and upsert vignettes on successful repair.
-        """
         self._config = config
         self._tenant_id = tenant_id
         self._user_id = user_id
@@ -125,15 +131,7 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
         Post-call: apply repair templates on failure; write vignettes on success.
         """
         tool_name = context.function.name
-        args: Dict[str, Any] = {}
-        if context.arguments is not None:
-            try:
-                args = dict(context.arguments)
-            except Exception:
-                try:
-                    args = context.arguments.model_dump()
-                except Exception:
-                    LOGGER.debug("Could not extract arguments for %s; proceeding with empty args", tool_name, exc_info=True)
+        args: Dict[str, Any] = dict(context.arguments)
 
         # --- Pre-call: check hard constraints ---
         if self._search_repo:
@@ -152,11 +150,11 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
                     violation_text = "\n".join(violations)
                     LOGGER.warning("Hard constraint violation(s) for %s:\n%s", tool_name, violation_text)
                     # Block execution — raise MiddlewareTermination with guardrail message
-                    context.result = (
+                    result_text = (
                         f"Tool call blocked by hard guardrail constraints:\n{violation_text}\n"
                         "Please revise the tool arguments to comply with the listed constraints."
                     )
-                    raise MiddlewareTermination()
+                    raise MiddlewareTermination(reason="Hard constraint violated", result=result_text)
             except MiddlewareTermination:
                 raise
             except Exception as e:
@@ -215,22 +213,15 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
                 try:
                     # Apply patched args example as the new arguments if available
                     if vignette.repair.patched_args_example:
-                        try:
-                            patched = vignette.repair.patched_args_example
-                            context.arguments = type(context.arguments)(**patched)
-                            # Re-extract args dict to keep in sync with context.arguments
-                            actual_patched_args = dict(patched)
-                        except Exception:
-                            LOGGER.debug("Could not apply patched_args_example for %s", tool_name, exc_info=True)
+                        patched = dict(vignette.repair.patched_args_example)
+                        context.arguments = patched
+                        actual_patched_args = patched
 
                     await call_next()
                     repair_succeeded = True
                     applied_steps = vignette.repair.steps
                     # Capture the args actually in effect after a successful repair
-                    try:
-                        actual_patched_args = context.arguments.model_dump()
-                    except Exception:
-                        LOGGER.debug("Could not extract patched args via model_dump for %s", tool_name, exc_info=True)
+                    actual_patched_args = dict(context.arguments)
                     LOGGER.info(
                         "Repair succeeded for %s on attempt %d/%d",
                         tool_name,

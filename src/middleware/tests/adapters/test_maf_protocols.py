@@ -1,4 +1,4 @@
-"""Tests for middleware.protocols.adapters_maf -- adapter bridging logic."""
+"""Tests for middleware.decision_log.adapters.maf_protocols -- adapter bridging logic."""
 
 import pytest
 
@@ -17,6 +17,7 @@ from middleware.decision_log.adapters.maf_protocols import (
     AgoraFunctionMiddlewareToMAF,
     MAFAgentContextAdapter,
     MAFChatContextAdapter,
+    MAFChatClientAdapter,
     _maf_message_to_agora,
 )
 
@@ -177,3 +178,58 @@ class TestContextProviderInheritance:
 
         wrapped = AgoraContextProviderToMAF(MyProvider())
         assert wrapped.source_id == "custom_id"
+
+
+# ---------------------------------------------------------------------------
+# MAFChatClientAdapter -- wraps MAF client as ChatClient protocol
+# ---------------------------------------------------------------------------
+
+
+class TestMAFChatClientAdapter:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_complete_uses_maf_agent(self):
+        """MAFChatClientAdapter.complete creates a MAF Agent and returns its text output."""
+        from middleware.protocols import Message
+        from middleware.decision_log.adapters.maf_protocols import MAFAgent
+
+        mock_client = MagicMock()
+        adapter = MAFChatClientAdapter(mock_client)
+
+        mock_result = MagicMock()
+        mock_result.text = "synthesis result"
+
+        with patch("middleware.decision_log.adapters.maf_protocols.MAFAgent") as MockAgent:
+            agent_instance = MockAgent.return_value
+            agent_instance.create_session.return_value = MagicMock()
+            agent_instance.run = AsyncMock(return_value=mock_result)
+
+            messages = [Message(role="system", content="You are helpful")]
+            result = await adapter.complete(messages)
+
+        assert result == "synthesis result"
+        MockAgent.assert_called_once_with(client=mock_client, name="decision_log_synthesiser")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_complete_returns_empty_string_on_no_text(self):
+        """Returns empty string when result.text is None."""
+        from middleware.protocols import Message
+
+        mock_client = MagicMock()
+        adapter = MAFChatClientAdapter(mock_client)
+
+        mock_result = MagicMock()
+        mock_result.text = None
+
+        with patch("middleware.decision_log.adapters.maf_protocols.MAFAgent") as MockAgent:
+            agent_instance = MockAgent.return_value
+            agent_instance.create_session.return_value = MagicMock()
+            agent_instance.run = AsyncMock(return_value=mock_result)
+
+            result = await adapter.complete([Message(role="user", content="hi")])
+
+        assert result == ""
+
+
+from unittest.mock import patch
