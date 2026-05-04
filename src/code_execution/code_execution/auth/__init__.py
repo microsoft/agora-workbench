@@ -54,6 +54,7 @@ def __getattr__(name: str):
 
 __all__ = [
     # Abstract interfaces
+    "AccessToken",
     "AuthConfig",
     "CredentialError",
     "CredentialProvider",
