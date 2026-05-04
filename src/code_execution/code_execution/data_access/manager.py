@@ -5,6 +5,7 @@ This module provides the core manager that handles fetching assets from
 DataLake-cataloged sources and caching them to disk for tool access.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -263,34 +264,56 @@ class DataLakeDataManager:
 
         # Close search client
         if hasattr(self, "_search_client") and self._search_client:
-            import asyncio
-
             try:
-                # Close async search client
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If event loop is running, schedule close
-                    asyncio.create_task(self._search_client.close())
-                else:
-                    # If no loop or loop not running, run synchronously
-                    asyncio.run(self._search_client.close())
-            except Exception as e:
-                LOGGER.debug(f"Error closing search client: {e}")
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._search_client.close())
+            except RuntimeError:
+                try:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(self._search_client.close())
+                    loop.close()
+                except Exception as e:
+                    LOGGER.debug(f"Error closing search client: {e}")
 
         # Close managed identity credential
         if hasattr(self, "_credential"):
-            import asyncio
-
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(self._credential.close())
-                else:
-                    asyncio.run(self._credential.close())
+                loop = asyncio.get_running_loop()
+                # We're inside a running loop — schedule close as a task
+                loop.create_task(self._credential.close())
+            except RuntimeError:
+                # No running loop — safe to create a temporary one
+                try:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(self._credential.close())
+                    loop.close()
+                except Exception as e:
+                    LOGGER.debug(f"Error closing credential: {e}")
+
+        # Remove temp directory
+        if self._cache_dir and self._cache_dir.exists():
+            try:
+                shutil.rmtree(self._cache_dir)
+                LOGGER.info(f"Cleaned up cache directory: {self._cache_dir}")
+            except Exception as e:
+                LOGGER.warning(f"Failed to clean up cache directory: {e}")
+
+    async def aclose(self) -> None:
+        """Async cleanup — preferred over sync cleanup() when inside an event loop."""
+        self._cache_index.clear()
+
+        if hasattr(self, "_search_client") and self._search_client:
+            try:
+                await self._search_client.close()
+            except Exception as e:
+                LOGGER.debug(f"Error closing search client: {e}")
+
+        if hasattr(self, "_credential"):
+            try:
+                await self._credential.close()
             except Exception as e:
                 LOGGER.debug(f"Error closing credential: {e}")
 
-        # Remove temp directory if we created it
         if self._cache_dir and self._cache_dir.exists():
             try:
                 shutil.rmtree(self._cache_dir)

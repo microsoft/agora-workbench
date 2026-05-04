@@ -33,7 +33,7 @@ from .code_execution_models import (
     ToolCallRecord,
 )
 from .auth.base import AuthConfig, TokenValidationError
-from .data_access import AssetResolutionMiddleware, DataLakeDataManager
+from .data_access import AssetResolutionMiddleware
 from .sessions import (
     MaxSessionsReachedError,
     SessionConfig,
@@ -204,9 +204,17 @@ class CodeExecutionServer:
         self.auth_config = auth_config
 
         # Entra client/tenant IDs for RFC 9728 OAuth protected-resource metadata.
-        # Read from environment — only relevant when using Entra ID auth.
-        self.entra_client_id: Optional[str] = os.getenv("ENTRA_CLIENT_ID")
-        self.entra_tenant_id: Optional[str] = os.getenv("ENTRA_TENANT_ID")
+        # Prefer values from the auth_config's token validator (when Entra-based),
+        # falling back to environment variables for backwards compatibility.
+        self.entra_client_id: Optional[str] = None
+        self.entra_tenant_id: Optional[str] = None
+        if hasattr(auth_config.token_validator, "_client_id"):
+            self.entra_client_id = auth_config.token_validator._client_id
+            self.entra_tenant_id = auth_config.token_validator._tenant_id
+        if not self.entra_client_id:
+            self.entra_client_id = os.getenv("ENTRA_CLIENT_ID")
+        if not self.entra_tenant_id:
+            self.entra_tenant_id = os.getenv("ENTRA_TENANT_ID")
 
         self.max_timeout = max_timeout
         self.default_timeout = default_timeout
@@ -684,9 +692,10 @@ class CodeExecutionServer:
 
         When the token changes the cached ``token_claims`` are also replaced
         with the claims from the current request context so that they stay
-        consistent with the stored bearer token.  The ``data_manager`` is
-        recreated so that its internal credential uses the refreshed identity
-        context.
+        consistent with the stored bearer token.
+
+        Note: Since `DataLakeDataManager` uses managed identity (not OBO), it
+        does not depend on the user's bearer token and is not recreated here.
         """
         fresh_token = get_current_request_token()
         if fresh_token and fresh_token != session.user_token:
@@ -695,14 +704,6 @@ class CodeExecutionServer:
             fresh_claims = get_current_token_claims()
             if fresh_claims is not None:
                 session.token_claims = fresh_claims
-            # Recreate the DataLakeDataManager so its internal credential
-            # uses the refreshed context for downstream data-access calls.
-            if hasattr(session, "data_manager"):
-                try:
-                    session.data_manager.cleanup()
-                except Exception:
-                    LOGGER.debug("Failed to cleanup old data_manager during token refresh", exc_info=True)
-                session.data_manager = DataLakeDataManager()
             LOGGER.debug(f"Refreshed token for session {session.session_id[:8]}")
 
     async def _get_or_create_session(self, tool_name: str, session_id: Optional[str] = None) -> "Session":

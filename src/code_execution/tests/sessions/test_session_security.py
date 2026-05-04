@@ -371,8 +371,8 @@ class TestSessionTokenRefresh:
         assert session.token_claims == new_claims
 
     @pytest.mark.asyncio
-    async def test_refresh_session_token_recreates_data_manager(self, mock_entra_env):
-        """data_manager should be recreated with the fresh token so its OBO provider is up to date."""
+    async def test_refresh_session_token_preserves_data_manager(self, mock_entra_env):
+        """data_manager should NOT be recreated since MI credential is token-independent."""
         from ...code_execution import CodeExecutionServer
         from ...code_execution.code_execution_models import EnvironmentConfig
 
@@ -395,8 +395,8 @@ class TestSessionTokenRefresh:
         server._refresh_session_token(session)
 
         assert session.user_token == "fresh-new-token"
-        # data_manager must have been replaced (not the same object)
-        assert session.data_manager is not original_data_manager
+        # data_manager should be preserved (MI credential is token-independent)
+        assert session.data_manager is original_data_manager
 
     @pytest.mark.asyncio
     async def test_refresh_session_token_noop_when_same(self, mock_entra_env):
