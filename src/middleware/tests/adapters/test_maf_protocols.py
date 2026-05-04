@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("agent_framework")
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from middleware.protocols import (
     FunctionMiddleware,
@@ -230,6 +230,3 @@ class TestMAFChatClientAdapter:
             result = await adapter.complete([Message(role="user", content="hi")])
 
         assert result == ""
-
-
-from unittest.mock import patch

@@ -93,11 +93,11 @@ class DecisionLogContextProvider(ContextProvider):
             await self._chat_middleware.flush()
 
         log_str = self._log.to_context_string(self._max_context_entries)
-        context_text = (
+        decision_log_text = (
             "<decision_log>\n"
             "The following is a read-only record of past decisions made by agents. "
             "You may use this for reference but cannot modify it.\n\n"
             f"{log_str}\n"
             "</decision_log>"
         )
-        context.extend_messages(self.source_id, [Message(role="user", content=context_text)])
+        context.extend_messages(self.source_id, [Message(role="user", content=decision_log_text)])
