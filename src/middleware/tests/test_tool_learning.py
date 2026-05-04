@@ -12,7 +12,6 @@ Tests cover:
 from __future__ import annotations
 
 import pytest
-from typing import List
 
 from middleware.tool_learning.models import (
     AntiPattern,
@@ -550,5 +549,3 @@ class TestCompileVignettes:
         )
         for v in vignettes:
             assert "auto_compiled" in v.tags
-
-

@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from typing import List
-from unittest.mock import AsyncMock, MagicMock, patch
 
 pytest.importorskip("agent_framework")
 
 from middleware.tool_learning.models import (
     AntiPattern,
     MatchSpec,
-    RepairStrategy,
     ToolSignature,
     Vignette,
 )
@@ -26,7 +23,7 @@ from middleware.tool_learning.adapters.maf_function import _check_hard_violation
 class TestCheckHardViolations:
     """Test the _check_hard_violations helper in middleware_function."""
 
-    def _make_hard_vignette(self, required_keys: List[str]) -> Vignette:
+    def _make_hard_vignette(self, required_keys: list[str]) -> Vignette:
         return Vignette(
             vignette_id="hv-001",
             kind="anti_pattern",
