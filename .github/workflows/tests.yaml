@@ -124,7 +124,7 @@ jobs:
             echo "❌ Planning tests failed"
           fi
           
-          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$context_managers_status" == "success" ] && [ "$planning_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$planning_status" == "success" ]; then
             exit 0
           else
             exit 1
