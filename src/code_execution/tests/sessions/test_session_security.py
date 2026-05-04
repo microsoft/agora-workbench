@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from ...code_execution.auth import create_noop_auth_config
 from ...code_execution.sessions import (
     Session,
     get_current_request_token,
@@ -61,7 +62,7 @@ class TestSessionOwnershipValidation:
         config = EnvironmentConfig(
             name="test", type="uv", description="Test environment", dependency_file="# Test dependencies"
         )
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -83,7 +84,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -94,8 +95,8 @@ class TestSessionOwnershipValidation:
             token_claims={},
         )
 
-        # Mock verify_entra_token to raise exception
-        server.verify_entra_token = AsyncMock(side_effect=Exception("Invalid token"))
+        # Mock validate_token to raise exception
+        server.validate_token = AsyncMock(side_effect=Exception("Invalid token"))
 
         is_authorized = await server._verify_session_ownership(session, "invalid-token")
         assert is_authorized is False
@@ -107,7 +108,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -119,7 +120,7 @@ class TestSessionOwnershipValidation:
         )
 
         # Any app with a valid token and matching user identity should be authorized
-        server.verify_entra_token = AsyncMock(
+        server.validate_token = AsyncMock(
             return_value={
                 "appid": "any-client-app-id",
                 "oid": "user-oid-123",
@@ -138,7 +139,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -150,7 +151,7 @@ class TestSessionOwnershipValidation:
         )
 
         # Different user identity in the token — must be denied regardless of app
-        server.verify_entra_token = AsyncMock(
+        server.validate_token = AsyncMock(
             return_value={
                 "appid": "any-client-app-id",
                 "oid": "other-user-oid",
@@ -169,7 +170,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -181,9 +182,7 @@ class TestSessionOwnershipValidation:
         )
 
         # Token with no oid/sub or tid — identity cannot be extracted
-        server.verify_entra_token = AsyncMock(
-            return_value={"appid": "some-app-id", "name": "App Without Identity Claims"}
-        )
+        server.validate_token = AsyncMock(return_value={"appid": "some-app-id", "name": "App Without Identity Claims"})
 
         is_authorized = await server._verify_session_ownership(session, "valid-token")
         assert is_authorized is False
@@ -195,7 +194,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -207,7 +206,7 @@ class TestSessionOwnershipValidation:
         )
 
         # Token with NO appid/azp (delegated user token from OAuth code flow)
-        server.verify_entra_token = AsyncMock(
+        server.validate_token = AsyncMock(
             return_value={"oid": "user-oid-789", "tid": "test-tenant-id", "name": "Direct User"}
         )
 
@@ -221,7 +220,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="test-123",
@@ -233,7 +232,7 @@ class TestSessionOwnershipValidation:
         )
 
         # Token with NO appid/azp but DIFFERENT user identity
-        server.verify_entra_token = AsyncMock(
+        server.validate_token = AsyncMock(
             return_value={"oid": "attacker-oid", "tid": "test-tenant-id", "name": "Other User"}
         )
 
@@ -247,7 +246,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         # Create a session
         session_id = server.session_manager.create_session(
@@ -278,7 +277,7 @@ class TestSessionOwnershipValidation:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         # Create a session
         session_id = server.session_manager.create_session(
@@ -313,6 +312,7 @@ class TestSessionTokenRefresh:
         yield
         set_current_request_token(None)
         from ...code_execution.sessions import set_current_user_identity, set_current_token_claims
+
         set_current_user_identity(None)
         set_current_token_claims(None)
 
@@ -323,7 +323,7 @@ class TestSessionTokenRefresh:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="sess-1",
@@ -349,7 +349,7 @@ class TestSessionTokenRefresh:
         from ...code_execution.sessions import set_current_token_claims
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         old_claims = {"oid": "user-oid", "exp": 1000}
         session = Session(
@@ -371,13 +371,13 @@ class TestSessionTokenRefresh:
         assert session.token_claims == new_claims
 
     @pytest.mark.asyncio
-    async def test_refresh_session_token_recreates_data_manager(self, mock_entra_env):
-        """data_manager should be recreated with the fresh token so its OBO provider is up to date."""
+    async def test_refresh_session_token_preserves_data_manager(self, mock_entra_env):
+        """data_manager should NOT be recreated since MI credential is token-independent."""
         from ...code_execution import CodeExecutionServer
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="sess-2",
@@ -395,8 +395,8 @@ class TestSessionTokenRefresh:
         server._refresh_session_token(session)
 
         assert session.user_token == "fresh-new-token"
-        # data_manager must have been replaced (not the same object)
-        assert session.data_manager is not original_data_manager
+        # data_manager should be preserved (MI credential is token-independent)
+        assert session.data_manager is original_data_manager
 
     @pytest.mark.asyncio
     async def test_refresh_session_token_noop_when_same(self, mock_entra_env):
@@ -405,7 +405,7 @@ class TestSessionTokenRefresh:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="sess-3",
@@ -430,7 +430,7 @@ class TestSessionTokenRefresh:
         from ...code_execution.code_execution_models import EnvironmentConfig
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         session = Session(
             session_id="sess-4",
@@ -455,7 +455,7 @@ class TestSessionTokenRefresh:
         from ...code_execution.sessions import set_current_user_identity
 
         config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
-        server = CodeExecutionServer(environment_config=config)
+        server = CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
 
         # Create a session with an old token
         session_id = server.session_manager.create_session(

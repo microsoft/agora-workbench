@@ -473,6 +473,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
                 output_truncation_threshold=99999,
             )
             assert test_server.output_truncation_threshold == 12345
@@ -483,6 +484,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 50000
 
@@ -492,6 +494,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 1000
 
@@ -501,6 +504,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
                 output_truncation_threshold=42000,
             )
             assert test_server.output_truncation_threshold == 42000
@@ -511,6 +515,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
                 output_truncation_threshold=42000,
             )
             assert test_server.output_truncation_threshold == 42000
@@ -521,6 +526,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 0
 
@@ -531,6 +537,7 @@ class TestEnvVarParsing:
             test_server.__class__.__init__(
                 test_server,
                 environment_config=test_server.environment_config,
+                auth_config=test_server.auth_config,
                 output_truncation_threshold=77777,
             )
             assert test_server.output_truncation_threshold == 77777
