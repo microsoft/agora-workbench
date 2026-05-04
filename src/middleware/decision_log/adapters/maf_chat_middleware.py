@@ -23,10 +23,16 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from agent_framework import Agent, ChatContext, ChatMiddleware, Message
+try:
+    from agent_framework import Agent, ChatContext, ChatMiddleware, Message
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 
-from .entry import DecisionLogEntry
-from .log import DecisionLog
+from ..entry import DecisionLogEntry
+from ..log import DecisionLog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -311,13 +317,13 @@ class DecisionLogChatMiddleware(ChatMiddleware):
         session = synthesis_agent.create_session()
 
         messages = [
-            Message(role="system", text=DECISION_SYNTHESIS_PROMPT),
+            Message(role="system", contents=[DECISION_SYNTHESIS_PROMPT]),
             Message(
                 role="user",
-                text=(
+                contents=[
                     "Given these observed events, produce a concise "
                     "decision log entry.\n\nObserved events:\n" + events_text
-                ),
+                ],
             ),
         ]
 

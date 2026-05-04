@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from middleware.decision_log.chat_middleware import (
+pytest.importorskip("agent_framework")
+
+
+from middleware.decision_log.adapters.maf_chat_middleware import (
     DECISION_SYNTHESIS_PROMPT,
     DecisionLogChatMiddleware,
     _SynthesisOutput,
@@ -347,7 +350,7 @@ class TestSynthesiseEntry:
 
         mock_thread = MagicMock()
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = mock_thread
             agent_instance.run = AsyncMock(return_value=mock_result)
@@ -377,7 +380,7 @@ class TestSynthesiseEntry:
         mock_result.value = None  # No structured output
         mock_result.text = f"```json\n{raw_json}\n```"
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = MagicMock()
             agent_instance.run = AsyncMock(return_value=mock_result)
@@ -394,7 +397,7 @@ class TestSynthesiseEntry:
         log = DecisionLog()
         mw = DecisionLogChatMiddleware(log, agent_name="coder", chat_client=MagicMock())
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = MagicMock()
             agent_instance.run = AsyncMock(side_effect=RuntimeError("LLM down"))
@@ -414,7 +417,7 @@ class TestSynthesiseEntry:
         mock_result.value = "not a SynthesisOutput"
         mock_result.text = "this is not valid json"
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = MagicMock()
             agent_instance.run = AsyncMock(return_value=mock_result)
@@ -438,7 +441,7 @@ class TestSynthesiseEntry:
         mock_result = MagicMock()
         mock_result.value = _SynthesisOutput(summary="test")
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = MagicMock()
             agent_instance.run = AsyncMock(return_value=mock_result)
@@ -460,7 +463,7 @@ class TestSynthesiseEntry:
         mock_result = MagicMock()
         mock_result.value = _SynthesisOutput(summary="test")
 
-        with patch("middleware.decision_log.chat_middleware.Agent") as MockAgent:
+        with patch("middleware.decision_log.adapters.maf_chat_middleware.Agent") as MockAgent:
             agent_instance = MockAgent.return_value
             agent_instance.create_session.return_value = MagicMock()
             agent_instance.run = AsyncMock(return_value=mock_result)

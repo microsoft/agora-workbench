@@ -4,9 +4,12 @@ import json
 
 import pytest
 
-from ..models import StepStatus
-from ..store import PlanStore
-from ..tools import create_execution_tools, create_plan_tools, create_read_only_tools
+pytest.importorskip("agent_framework")
+
+
+from planning.models import StepStatus
+from planning.store import PlanStore
+from planning.adapters.maf import create_execution_tools, create_plan_tools, create_read_only_tools
 
 
 @pytest.fixture

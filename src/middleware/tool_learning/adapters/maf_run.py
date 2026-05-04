@@ -24,12 +24,18 @@ import asyncio
 import logging
 from typing import Awaitable, Callable, List, Optional, Sequence
 
-from agent_framework import AgentContext, AgentMiddleware, Message
+try:
+    from agent_framework import AgentContext, AgentMiddleware, Message
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 
-from .config import ToolLearningConfig
-from .models import Vignette
-from .render import render_guardrails_block
-from .search_repo import SearchVignetteRepo
+from ..config import ToolLearningConfig
+from ..models import Vignette
+from ..render import render_guardrails_block
+from ..search_repo import SearchVignetteRepo
 
 LOGGER = logging.getLogger(__name__)
 

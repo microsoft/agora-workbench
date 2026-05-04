@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from middleware.decision_log.context_provider import DecisionLogContextProvider
+pytest.importorskip("agent_framework")
+
+
+from middleware.decision_log.adapters.maf_context_provider import DecisionLogContextProvider
 from middleware.decision_log.entry import DecisionLogEntry
 from middleware.decision_log.log import DecisionLog
 

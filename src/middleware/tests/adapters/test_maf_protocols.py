@@ -1,6 +1,9 @@
 """Tests for middleware.protocols.adapters_maf -- adapter bridging logic."""
 
 import pytest
+
+pytest.importorskip("agent_framework")
+
 from unittest.mock import AsyncMock, MagicMock
 
 from middleware.protocols import (
@@ -9,7 +12,7 @@ from middleware.protocols import (
     MiddlewareTermination,
     ToolCall,
 )
-from middleware.protocols.adapters_maf import (
+from middleware.decision_log.adapters.maf_protocols import (
     AgoraContextProviderToMAF,
     AgoraFunctionMiddlewareToMAF,
     MAFAgentContextAdapter,
@@ -154,7 +157,7 @@ class TestFunctionMiddlewareTerminationPropagation:
 class TestContextProviderInheritance:
     @pytest.mark.unit
     def test_inherits_base_context_provider(self):
-        from agent_framework import BaseContextProvider
+        from agent_framework import ContextProvider as BaseContextProvider
 
         class MyProvider(ContextProvider):
             async def provide(self, context):

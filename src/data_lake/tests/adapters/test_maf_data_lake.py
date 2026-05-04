@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from data_lake.tools.data_lake import (
+pytest.importorskip("agent_framework")
+
+
+from data_lake.tools.adapters.maf import (
     DataLakeSearchBackend,
     DataLakeSearchClientManager,
     DataLakeSearchParams,
@@ -79,13 +82,13 @@ class TestCreateDataLakeSearchTool:
 
     @pytest.fixture(autouse=True)
     def _mock_domain_discovery(self):
-        with patch("data_lake.tools.data_lake._discover_available_domains", new_callable=AsyncMock, return_value=[]):
+        with patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock, return_value=[]):
             yield
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_creates_tool_with_cli_credential(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test creates tool using Azure CLI credential when no user_token."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -125,8 +128,8 @@ class TestCreateDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_creates_tool_with_obo_credential(self, mock_create_obo, mock_search_client, monkeypatch):
         """Test creates tool using OBO credential when user_token provided."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -188,8 +191,8 @@ class TestCreateDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_raises_error_on_client_creation_failure(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns error JSON when SearchClient creation fails."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -217,13 +220,13 @@ class TestDataLakeSearchTool:
 
     @pytest.fixture(autouse=True)
     def _mock_domain_discovery(self):
-        with patch("data_lake.tools.data_lake._discover_available_domains", new_callable=AsyncMock, return_value=[]):
+        with patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock, return_value=[]):
             yield
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_returns_results(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool returns search results as JSON."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -270,8 +273,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_with_asset_type_filter(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool applies asset type filter correctly."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -295,9 +298,9 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
-    @patch("data_lake.tools.data_lake.check_resource_permissions")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.check_resource_permissions")
     async def test_search_filters_results_by_user_permissions(
         self, mock_check_permissions, mock_create_cred, mock_search_client, monkeypatch
     ):
@@ -326,9 +329,9 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
-    @patch("data_lake.tools.data_lake.check_resource_permissions")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.check_resource_permissions")
     async def test_search_excludes_asset_on_permission_check_exception(
         self, mock_check_permissions, mock_create_cred, mock_search_client, monkeypatch
     ):
@@ -352,8 +355,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_with_select_fields(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses select_fields parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -377,8 +380,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_defaults_to_all_fields(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool defaults to all fields when select_fields not specified."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -402,8 +405,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_with_order_by(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses order_by parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -427,8 +430,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_with_search_mode(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses search_mode parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -452,8 +455,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_handles_errors_gracefully(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool returns error message on search failure."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -476,8 +479,8 @@ class TestDataLakeSearchTool:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_search_respects_top_parameter(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool respects top parameter for result limit."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -560,8 +563,8 @@ class TestDiscoverAvailableDomains:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_returns_sorted_domains_from_facets(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns sorted list of domains discovered via facets query."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -584,8 +587,8 @@ class TestDiscoverAvailableDomains:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_returns_empty_list_when_no_domain_facets(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns empty list when index has no domain facet values."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -604,8 +607,8 @@ class TestDiscoverAvailableDomains:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_returns_empty_list_on_search_error(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns empty list when search raises an exception."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -622,8 +625,8 @@ class TestDiscoverAvailableDomains:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_skips_facet_entries_without_value(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test ignores facet entries with missing or empty value field."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -691,8 +694,8 @@ class TestDomainDiscoveryIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake._build_search_params_model")
-    @patch("data_lake.tools.data_lake._discover_available_domains", new_callable=AsyncMock)
+    @patch("data_lake.tools.adapters.maf._build_search_params_model")
+    @patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock)
     async def test_tool_creation_discovers_domains_and_builds_model(self, mock_discover, mock_build_model, monkeypatch):
         """Test that create_data_lake_search_tool calls discovery and model builder."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -708,9 +711,9 @@ class TestDomainDiscoveryIntegration:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    @patch("data_lake.tools.data_lake._discover_available_domains", new_callable=AsyncMock)
-    @patch("data_lake.tools.data_lake.SearchClient")
-    @patch("data_lake.tools.data_lake.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock)
+    @patch("data_lake.tools.adapters.maf.SearchClient")
+    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
     async def test_tool_accepts_dict_params_with_dynamic_model(
         self, mock_create_cred, mock_search_client, mock_discover, monkeypatch
     ):
@@ -783,7 +786,7 @@ class TestDataLakeSearchBackendABC:
     @pytest.mark.unit
     def test_default_backend_is_subclass(self):
         """DefaultDataLakeSearchBackend inherits from DataLakeSearchBackend."""
-        with patch("data_lake.tools.data_lake.create_async_obo_credential", return_value=MagicMock()):
+        with patch("data_lake.tools.adapters.maf.create_async_obo_credential", return_value=MagicMock()):
             backend = DefaultDataLakeSearchBackend(user_token="tok")
             assert isinstance(backend, DataLakeSearchBackend)
             assert backend.user_token == "tok"
@@ -804,7 +807,7 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
 
     @pytest.fixture(autouse=True)
     def _mock_domain_discovery(self):
-        with patch("data_lake.tools.data_lake._discover_available_domains", new_callable=AsyncMock, return_value=[]):
+        with patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock, return_value=[]):
             yield
 
     @pytest.mark.asyncio
@@ -868,8 +871,8 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
             yield {"name": "test_asset"}
 
         with (
-            patch("data_lake.tools.data_lake.SearchClient") as mock_sc,
-            patch("data_lake.tools.data_lake.create_async_obo_credential", return_value=MagicMock()),
+            patch("data_lake.tools.adapters.maf.SearchClient") as mock_sc,
+            patch("data_lake.tools.adapters.maf.create_async_obo_credential", return_value=MagicMock()),
         ):
             mock_client = MagicMock()
             mock_client.search = AsyncMock(return_value=async_results())

@@ -14,7 +14,13 @@ import logging
 import uuid
 from typing import Any, Callable, Optional
 
-from agent_framework import FunctionTool
+try:
+    from agent_framework import FunctionTool
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 from pydantic import BaseModel, Field
 
 LOGGER = logging.getLogger(__name__)

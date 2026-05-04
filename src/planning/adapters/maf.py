@@ -18,11 +18,17 @@ import json
 import logging
 from typing import Optional
 
-from agent_framework import FunctionTool
+try:
+    from agent_framework import FunctionTool
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 from pydantic import BaseModel, Field
 
-from .models import StepStatus
-from .store import PlanStore
+from ..models import StepStatus
+from ..store import PlanStore
 
 LOGGER = logging.getLogger(__name__)
 

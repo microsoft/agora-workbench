@@ -3,10 +3,13 @@
 import json
 
 import pytest
+
+pytest.importorskip("agent_framework")
+
 from unittest.mock import AsyncMock, MagicMock
 
 from tools.tool_search import ToolSearchResult
-from tools.search.core import (
+from tools.search.adapters.maf_core import (
     SearchToolsInput,
     create_search_tools_function,
 )

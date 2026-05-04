@@ -1,45 +1,11 @@
-"""Shared pytest fixtures for AgoraAgentMAF tests."""
+"""Shared pytest fixtures for Agora Workbench tests."""
 
 import os
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-from agent_framework import Message
 
 from code_execution import ToolDefinition, ToolParameter
-
-
-@pytest.fixture
-def mock_chat_client():
-    """Mock MAF ChatClient for testing."""
-    mock_client = MagicMock()
-    return mock_client
-
-
-@pytest.fixture
-def mock_chat_agent():
-    """Mock MAF Agent for testing."""
-    mock_agent = MagicMock()
-    mock_thread = MagicMock()
-    mock_agent.create_session.return_value = mock_thread
-
-    # Mock async run method
-    mock_response = MagicMock()
-    mock_response.text = (
-        '{"explanation": "test reasoning", "response": {"type": "solution", "solution": "test solution"}}'
-    )
-    mock_agent.run = AsyncMock(return_value=mock_response)
-
-    return mock_agent
-
-
-@pytest.fixture
-def sample_chat_messages():
-    """Sample MAF Message list for testing."""
-    return [
-        Message(role="user", text="Test user message"),
-        Message(role="assistant", text="Test AI response"),
-    ]
 
 
 @pytest.fixture

@@ -26,15 +26,21 @@ from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Sequence
 
-from agent_framework import (
-    BaseContextProvider as MAFBaseContextProvider,
-    ChatContext as MAFChatContext,
-    ChatMiddleware as MAFChatMiddleware,
-    FunctionInvocationContext as MAFFunctionInvocationContext,
-    FunctionMiddleware as MAFFunctionMiddleware,
-    Message as MAFMessage,
-    MiddlewareTermination as MAFMiddlewareTermination,
-)
+try:
+    from agent_framework import (
+        ContextProvider as MAFBaseContextProvider,
+        ChatContext as MAFChatContext,
+        ChatMiddleware as MAFChatMiddleware,
+        FunctionInvocationContext as MAFFunctionInvocationContext,
+        FunctionMiddleware as MAFFunctionMiddleware,
+        Message as MAFMessage,
+        MiddlewareTermination as MAFMiddlewareTermination,
+    )
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 
 from middleware.protocols import (
     ChatMiddleware,

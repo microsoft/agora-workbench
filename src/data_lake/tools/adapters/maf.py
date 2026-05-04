@@ -9,12 +9,18 @@ import os
 from abc import ABC, abstractmethod
 from typing import Callable, Optional
 
-from agent_framework import tool
+try:
+    from agent_framework import tool
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from pydantic import BaseModel, Field
 
-from .permissions import check_resource_permissions
+from ..permissions import check_resource_permissions
 from auth import create_async_obo_credential
 
 LOGGER = logging.getLogger(__name__)

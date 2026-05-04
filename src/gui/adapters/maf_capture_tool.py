@@ -15,10 +15,16 @@ import logging
 import uuid
 from typing import Any, Callable, Optional
 
-from agent_framework import FunctionTool
+try:
+    from agent_framework import FunctionTool
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 from pydantic import BaseModel, Field
 
-from .map_capture import (
+from ..map_capture import (
     CAPTURE_TIMEOUT,
     cancel_capture_request,
     create_capture_request,

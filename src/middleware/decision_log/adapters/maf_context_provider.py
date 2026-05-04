@@ -15,9 +15,15 @@ synthesis before injecting, ensuring the context is fully up-to-date.
 import logging
 from typing import Any, Optional
 
-from agent_framework import BaseContextProvider, Message
+try:
+    from agent_framework import ContextProvider as BaseContextProvider, Message
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 
-from .log import DecisionLog
+from ..log import DecisionLog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,4 +99,4 @@ class DecisionLogContextProvider(BaseContextProvider):
             f"{log_str}\n"
             "</decision_log>"
         )
-        context.extend_messages(self, [Message(role="user", text=context_text)])
+        context.extend_messages(self, [Message(role="user", contents=[context_text])])

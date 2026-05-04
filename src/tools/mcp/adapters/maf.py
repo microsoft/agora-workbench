@@ -8,8 +8,14 @@ management tools that the agent uses directly.
 
 import logging
 
-from .mcp_server_registry import get_mcp_registry
-from agent_framework import MCPStreamableHTTPTool
+from ..mcp_server_registry import get_mcp_registry
+try:
+    from agent_framework import MCPStreamableHTTPTool
+except ImportError as e:
+    raise ImportError(
+        "agent-framework is required for MAF adapters. "
+        "Install with: pip install agora-workbench[maf]"
+    ) from e
 
 LOGGER = logging.getLogger(__name__)
 
