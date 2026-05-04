@@ -5,8 +5,6 @@ description = "A multi-domain AI agent system that combines LLM-driven workflows
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "azure-ai-agents>=1.0.0",
-    "azure-ai-projects>=1.0.0b11",
     "azure-identity>=1.25.0",
     "azure-mgmt-authorization>=4.0.0",
     "azure-purview-catalog>=1.0.0b4",
