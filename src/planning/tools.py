@@ -179,7 +179,7 @@ def create_read_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
         ToolDescriptor(
             name="view_plan",
             description="View the current execution plan with all steps and their statuses.",
-            input_schema=ViewPlanInput.model_json_schema(),
+            input_model=ViewPlanInput,
             func=view_plan,
         ),
         ToolDescriptor(
@@ -188,13 +188,13 @@ def create_read_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
                 "Filter and list plan steps by status, tag, or dependency readiness. "
                 "Returns a JSON array of step objects."
             ),
-            input_schema=QueryStepsInput.model_json_schema(),
+            input_model=QueryStepsInput,
             func=query_steps,
         ),
         ToolDescriptor(
             name="plan_summary",
             description="Return a summary of step counts grouped by status.",
-            input_schema=SummaryInput.model_json_schema(),
+            input_model=SummaryInput,
             func=plan_summary,
         ),
         ToolDescriptor(
@@ -203,7 +203,7 @@ def create_read_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
                 "Retrieve the change history for a specific step or the whole plan. "
                 "Omit step_id to get the full plan history."
             ),
-            input_schema=GetHistoryInput.model_json_schema(),
+            input_model=GetHistoryInput,
             func=get_history,
         ),
     ]
@@ -245,13 +245,13 @@ def _build_execution_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
                 "Set the status of a plan step. "
                 "Valid statuses: 'pending', 'in_progress', 'completed', 'failed', 'skipped'."
             ),
-            input_schema=SetStepStatusInput.model_json_schema(),
+            input_model=SetStepStatusInput,
             func=set_step_status,
         ),
         ToolDescriptor(
             name="update_step_notes",
             description="Attach or update notes on a step (e.g. progress, failure reason).",
-            input_schema=UpdateStepNotesInput.model_json_schema(),
+            input_model=UpdateStepNotesInput,
             func=update_step_notes,
         ),
     ]
@@ -292,25 +292,25 @@ def _build_structural_descriptors(store: PlanStore) -> list[ToolDescriptor]:
         ToolDescriptor(
             name="add_step",
             description="Add a new step to the end of the execution plan.",
-            input_schema=AddStepInput.model_json_schema(),
+            input_model=AddStepInput,
             func=add_step,
         ),
         ToolDescriptor(
             name="insert_step",
             description="Insert a new step after a given step_id. Use after_step_id=0 to insert at the beginning.",
-            input_schema=InsertStepInput.model_json_schema(),
+            input_model=InsertStepInput,
             func=insert_step,
         ),
         ToolDescriptor(
             name="update_step",
             description="Update a step's description and/or notes.",
-            input_schema=UpdateStepInput.model_json_schema(),
+            input_model=UpdateStepInput,
             func=update_step,
         ),
         ToolDescriptor(
             name="remove_step",
             description="Remove a step from the plan.",
-            input_schema=RemoveStepInput.model_json_schema(),
+            input_model=RemoveStepInput,
             func=remove_step,
         ),
         ToolDescriptor(
@@ -319,7 +319,7 @@ def _build_structural_descriptors(store: PlanStore) -> list[ToolDescriptor]:
                 "Finalize the plan and transition from the planning phase to the execution phase. "
                 "Call this once the plan is complete and approved by the user."
             ),
-            input_schema=FinalizePlanInput.model_json_schema(),
+            input_model=FinalizePlanInput,
             func=finalize_plan,
         ),
     ]
@@ -360,25 +360,25 @@ def _build_dep_tag_descriptors(store: PlanStore) -> list[ToolDescriptor]:
         ToolDescriptor(
             name="add_dependency",
             description="Add a dependency between steps: step_id will be blocked until depends_on is completed.",
-            input_schema=AddDependencyInput.model_json_schema(),
+            input_model=AddDependencyInput,
             func=add_dependency,
         ),
         ToolDescriptor(
             name="remove_dependency",
             description="Remove a dependency edge between two steps.",
-            input_schema=RemoveDependencyInput.model_json_schema(),
+            input_model=RemoveDependencyInput,
             func=remove_dependency,
         ),
         ToolDescriptor(
             name="tag_step",
             description="Attach a label/tag to a step (e.g. 'research', 'implementation').",
-            input_schema=TagStepInput.model_json_schema(),
+            input_model=TagStepInput,
             func=tag_step,
         ),
         ToolDescriptor(
             name="untag_step",
             description="Remove a label/tag from a step.",
-            input_schema=UntagStepInput.model_json_schema(),
+            input_model=UntagStepInput,
             func=untag_step,
         ),
     ]

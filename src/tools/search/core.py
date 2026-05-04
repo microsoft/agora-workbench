@@ -94,6 +94,6 @@ def create_search_tools_descriptor(backend: ToolSearchBackend) -> ToolDescriptor
             "Domain tools are invoked programmatically inside execute_code — use search_tools "
             "to discover their names, signatures, and which server they belong to."
         ),
-        input_schema=SearchToolsInput.model_json_schema(),
+        input_model=SearchToolsInput,
         func=search_tools,
     )

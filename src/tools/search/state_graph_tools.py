@@ -168,7 +168,7 @@ def create_query_state_graph_descriptor(
             "describes well-known paths — for tasks not covered, use "
             "execute_{domain}_code directly."
         ),
-        input_schema=QueryStateGraphInput.model_json_schema(),
+        input_model=QueryStateGraphInput,
         func=query_state_graph,
     )
 
@@ -242,6 +242,6 @@ def create_load_skill_descriptor(
             "discover available skill names, then call load_skill to get "
             "the detailed instructions before starting a workflow."
         ),
-        input_schema=LoadSkillInput.model_json_schema(),
+        input_model=LoadSkillInput,
         func=load_skill,
     )

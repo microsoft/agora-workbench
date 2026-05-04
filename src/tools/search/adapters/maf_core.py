@@ -12,8 +12,7 @@ try:
     from agent_framework import FunctionTool
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 
 from tools.search.core import SearchToolsInput, create_search_tools_descriptor
@@ -54,5 +53,5 @@ def create_search_tools_function(backend: ToolSearchBackend) -> FunctionTool:
         description=descriptor.description,
         approval_mode="never_require",
         func=descriptor.func,
-        input_model=SearchToolsInput,
+        input_model=descriptor.input_model,
     )

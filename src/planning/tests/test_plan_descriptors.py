@@ -52,6 +52,22 @@ class TestDescriptorContract:
         for d in create_plan_descriptors(store):
             assert callable(d.func), f"{d.name} func not callable"
 
+    @pytest.mark.unit
+    def test_all_have_input_model(self, store):
+        """Every descriptor carries its Pydantic input model."""
+        from pydantic import BaseModel
+
+        for d in create_plan_descriptors(store):
+            assert d.input_model is not None, f"{d.name} missing input_model"
+            assert issubclass(d.input_model, BaseModel), f"{d.name} input_model not a BaseModel"
+
+    @pytest.mark.unit
+    def test_input_schema_matches_input_model(self, store):
+        """input_schema must be derivable from input_model for all descriptors."""
+        for d in create_plan_descriptors(store):
+            expected = d.input_model.model_json_schema()
+            assert d.input_schema == expected, f"{d.name}: input_schema drifted from input_model.model_json_schema()"
+
 
 # ── Tool-set membership ───────────────────────────────────────────────────────
 

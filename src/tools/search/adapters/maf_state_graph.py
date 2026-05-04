@@ -16,8 +16,7 @@ try:
     from agent_framework import FunctionTool
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 
 from tools.search.build_tool_list import ToolInfo
@@ -74,7 +73,7 @@ def create_query_state_graph_function(
         description=descriptor.description,
         approval_mode="never_require",
         func=descriptor.func,
-        input_model=QueryStateGraphInput,
+        input_model=descriptor.input_model,
     )
 
 
@@ -106,5 +105,5 @@ def create_load_skill_function(
         description=descriptor.description,
         approval_mode="never_require",
         func=descriptor.func,
-        input_model=LoadSkillInput,
+        input_model=descriptor.input_model,
     )

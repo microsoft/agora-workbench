@@ -22,53 +22,16 @@ try:
     from agent_framework import FunctionTool
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 
 from ..store import PlanStore
 from ..tools import (
     # Input models (re-exported so existing imports keep working)
-    AddDependencyInput,
-    AddStepInput,
-    FinalizePlanInput,
-    GetHistoryInput,
-    InsertStepInput,
-    QueryStepsInput,
-    RemoveDependencyInput,
-    RemoveStepInput,
-    SetStepStatusInput,
-    SummaryInput,
-    TagStepInput,
-    UntagStepInput,
-    UpdateStepInput,
-    UpdateStepNotesInput,
-    ViewPlanInput,
-    # Framework-agnostic factories
     create_execution_descriptors,
     create_plan_descriptors,
     create_read_only_descriptors,
 )
-
-# ── Input-model → Pydantic class lookup ──────────────────────────────────────
-
-_INPUT_MODELS: dict[str, type] = {
-    "view_plan": ViewPlanInput,
-    "query_steps": QueryStepsInput,
-    "plan_summary": SummaryInput,
-    "get_history": GetHistoryInput,
-    "set_step_status": SetStepStatusInput,
-    "update_step_notes": UpdateStepNotesInput,
-    "add_step": AddStepInput,
-    "insert_step": InsertStepInput,
-    "update_step": UpdateStepInput,
-    "remove_step": RemoveStepInput,
-    "finalize_plan": FinalizePlanInput,
-    "add_dependency": AddDependencyInput,
-    "remove_dependency": RemoveDependencyInput,
-    "tag_step": TagStepInput,
-    "untag_step": UntagStepInput,
-}
 
 
 def _to_function_tool(descriptor) -> FunctionTool:
@@ -77,7 +40,7 @@ def _to_function_tool(descriptor) -> FunctionTool:
         name=descriptor.name,
         description=descriptor.description,
         func=descriptor.func,
-        input_model=_INPUT_MODELS[descriptor.name],
+        input_model=descriptor.input_model,
         approval_mode="never_require",
     )
 
