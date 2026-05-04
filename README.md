@@ -32,8 +32,17 @@ Key capabilities:
 src/
 ├── auth/               # Agent-side credentials (ChainedTokenCredential)
 ├── middleware/         # Pluggable conversation middleware
+│   └── */adapters/     # MAF-specific wrappers (requires [maf] extra)
 ├── tools/              # Tool search, MCP server registry, tool catalog
-│   └── search/         # search_tools backends (BM25, Azure AI Search)
+│   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
+│   ├── search/                 # search_tools backends (BM25, Azure AI Search)
+│   │   ├── core.py             # create_search_tools_descriptor (no framework dep)
+│   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
+│   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
+│   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
+├── planning/           # SQLite-backed plan store
+│   ├── tools.py                # create_plan_descriptors (no framework dep)
+│   └── adapters/               # MAF FunctionTool wrappers (requires [maf] extra)
 ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
 │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
 ├── data_lake/          # Artifact registry, sync pipeline, Purview integration
@@ -42,6 +51,8 @@ src/
 ├── server_registry.yaml    # MCP server configurations
 └── pyproject.toml
 ```
+
+All `*/adapters/` directories contain framework-specific bridges.  They are the **only** source files that import `agent_framework` and they are isolated behind the `[maf]` optional extra.  The rest of the codebase is framework-agnostic.
 
 ## Getting Started
 
@@ -54,9 +65,22 @@ src/
 ### Installation
 
 ```bash
-uv sync            # install dependencies
+uv sync            # install base dependencies (framework-agnostic)
 uv sync --group dev  # include dev tools (pytest, pre-commit, jupyter)
 ```
+
+**Optional extras** — install only what you need:
+
+| Extra | Command | What it adds |
+|-------|---------|--------------|
+| `maf` | `uv sync --extra maf` | `agent-framework` — required only to use the MAF adapters (`*/adapters/maf*.py`) that wrap tool descriptors in `FunctionTool` / `MCPStreamableHTTPTool` |
+
+The base package ships the full framework-agnostic layer:
+- `tools.tool_descriptor.ToolDescriptor` — callable + JSON Schema, usable with any agent framework
+- `tools.search.core` / `tools.search.state_graph_tools` — descriptor factories for search and state-graph tools
+- `planning.tools` — descriptor factories for all plan-management tools
+
+If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
 
 Copy `.env.example` to `.env` and configure credentials. See the comments in that file for available settings.
 
