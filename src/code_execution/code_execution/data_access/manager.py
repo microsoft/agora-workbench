@@ -16,12 +16,8 @@ from urllib.parse import urlparse
 
 from azure.search.documents.aio import SearchClient
 
-from ..auth import (
-    _AsyncOBOCredentialWrapper,
-    IRMDecryptionError,
-    get_obo_credential_provider,
-    is_irm_protected,
-)
+from ..auth.irm import IRMDecryptionError, is_irm_protected
+from ..auth.obo_credential import _AsyncOBOCredentialWrapper, get_obo_credential_provider
 from .fetchers import BlobFetcher
 from ..types import AssetId
 

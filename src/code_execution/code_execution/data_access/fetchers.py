@@ -20,7 +20,7 @@ from azure.core.credentials import AccessToken
 from azure.storage.blob.aio import BlobServiceClient
 
 if TYPE_CHECKING:
-    from ..auth import OBOCredentialProvider
+    from ..auth.obo_credential import OBOCredentialProvider
 
 LOGGER = logging.getLogger(__name__)
 

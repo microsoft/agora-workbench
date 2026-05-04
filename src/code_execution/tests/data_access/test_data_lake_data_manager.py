@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from ...code_execution.data_access.manager import DataLakeDataManager
-from ...code_execution.auth import configure_obo_provider_factory, IRMDecryptionError
+from ...code_execution.auth.obo_credential import configure_obo_provider_factory
+from ...code_execution.auth.irm import IRMDecryptionError
 
 
 @pytest.fixture(autouse=True)

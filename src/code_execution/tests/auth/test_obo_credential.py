@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch, mock_open
 
 from azure.core.credentials import AccessToken
 
-from ...code_execution.auth import (
+from ...code_execution.auth.obo_credential import (
     OBOCredentialProvider,
     OBOTokenExchangeError,
     get_obo_credential_provider,

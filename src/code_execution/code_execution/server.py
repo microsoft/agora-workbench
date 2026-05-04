@@ -321,7 +321,7 @@ class CodeExecutionServer:
                 LOGGER.debug("ToolLearningMiddleware: no backends configured, skipping.")
                 return
 
-            from .auth import OBOCredentialProvider
+            from .auth.obo_credential import OBOCredentialProvider
 
             provider = OBOCredentialProvider(user_assertion="", managed_identity=True)
             credential = provider.get_credential()
