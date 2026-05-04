@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from auth import create_entra_token_provider
 from tools.mcp.mcp_server_registry import get_mcp_registry
@@ -112,7 +112,7 @@ async def build_tool_list() -> list[ToolInfo]:
                 headers=headers,
                 timeout=httpx.Timeout(30.0, connect=10.0),
             ) as http_client:
-                async with streamablehttp_client(descriptor.url, http_client=http_client) as (read, write, _):
+                async with streamable_http_client(descriptor.url, http_client=http_client) as (read, write, _):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
 
