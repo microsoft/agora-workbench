@@ -29,6 +29,7 @@ from typing import Callable, Generator, Union
 
 import httpx
 from azure.core.credentials import AzureKeyCredential, TokenCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.identity import (
     AzureCliCredential,
     ChainedTokenCredential,
@@ -40,11 +41,6 @@ from azure.identity.aio import (
     ChainedTokenCredential as AsyncChainedTokenCredential,
     ManagedIdentityCredential as AsyncManagedIdentityCredential,
 )
-
-try:
-    from azure.core.credentials_async import AsyncTokenCredential
-except ImportError:
-    from azure.core.credentials import TokenCredential as AsyncTokenCredential  # type: ignore[assignment]
 
 LOGGER = logging.getLogger(__name__)
 

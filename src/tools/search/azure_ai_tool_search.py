@@ -17,10 +17,12 @@ returns the ``AzureAIToolSearchBackend`` + ``ToolSearchIndexManager``.
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import httpx
 
+from azure.core.credentials import AzureKeyCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
@@ -37,13 +39,12 @@ from ._constants import (
 from .manager import ToolSearchIndexManager
 
 if TYPE_CHECKING:
-    from azure.core.credentials_async import AsyncTokenCredential
     from .manager import ToolSearchIndexManager
 
 LOGGER = logging.getLogger(__name__)
 
 
-async def _embed_query(text: str, credential: "AsyncTokenCredential") -> list[float]:
+async def _embed_query(text: str, credential: AsyncTokenCredential) -> list[float]:
     """Generate an embedding vector for *text* using Azure OpenAI (client-side).
 
     This bypasses the integrated vectorizer so we don't depend on Azure AI
@@ -98,7 +99,7 @@ class ToolSearchClientManager:
             ``None``, a default credential chain is created internally.
     """
 
-    def __init__(self, index_name: str, credential: Optional["AsyncTokenCredential"] = None):
+    def __init__(self, index_name: str, credential: Optional[Union[AsyncTokenCredential, AzureKeyCredential]] = None):
         self._index_name = index_name
         self._client: Optional[SearchClient] = None
         self._external_credential = credential is not None
@@ -203,8 +204,16 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
     async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
         """Search the Azure AI Search index for tools matching *query*."""
-        # Generate query embedding
-        query_vector = await _embed_query(query, self._credential)
+        # Generate query embedding (requires token credential for OpenAI)
+        credential = self._credential
+        if isinstance(credential, AzureKeyCredential):
+            raise TypeError(
+                "AzureAIToolSearchBackend requires Entra ID authentication for "
+                "embedding generation. API key auth is not supported for this backend."
+            )
+        # At this point credential is AsyncTokenCredential (Entra chain)
+        assert not isinstance(credential, AzureKeyCredential)
+        query_vector = await _embed_query(query, credential)  # type: ignore[arg-type]
 
         search_kwargs: dict = {
             "search_text": query,
