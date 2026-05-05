@@ -25,7 +25,7 @@ from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-from auth import create_async_obo_credential, get_search_credential_async
+from auth import get_search_credential_async
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from .build_tool_list import build_tool_list
 from ._constants import (
@@ -194,14 +194,11 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
     Args:
         index_name: Name of the Azure AI Search index to query.
-        user_token: Bearer token for OBO (On-Behalf-Of) authentication.
-            Always used to authenticate to Azure AI Search and the
-            embedding endpoint.
     """
 
-    def __init__(self, index_name: str, user_token: str):
-        super().__init__(user_token=user_token)
-        self._credential: AsyncTokenCredential = create_async_obo_credential(user_token)  # type: ignore[assignment]
+    def __init__(self, index_name: str):
+        super().__init__()
+        self._credential = get_search_credential_async()
         self._client_manager = ToolSearchClientManager(index_name, credential=self._credential)
 
     async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
@@ -268,9 +265,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 # ============================================================================
 
 
-async def create_and_setup_azure_ai_tool_search(
-    user_token: str,
-) -> tuple["AzureAIToolSearchBackend", "ToolSearchIndexManager"]:
+async def create_and_setup_azure_ai_tool_search() -> tuple["AzureAIToolSearchBackend", "ToolSearchIndexManager"]:
     """
     Create an ephemeral Azure AI Search index and return a backend + manager.
 
@@ -290,11 +285,6 @@ async def create_and_setup_azure_ai_tool_search(
     Callers feed the backend into :func:`tools.search.core.create_search_tools_function`
     and :func:`tools.search.core.create_search_tools_function` separately.
 
-    Args:
-        user_token: Bearer token for OBO (On-Behalf-Of) authentication.
-            The backend always uses the OBO flow to authenticate to
-            Azure AI Search and the embedding endpoint.
-
     Returns:
         A ``(AzureAIToolSearchBackend, ToolSearchIndexManager)`` tuple.
 
@@ -307,7 +297,7 @@ async def create_and_setup_azure_ai_tool_search(
     manager = ToolSearchIndexManager.from_env()
     await manager.setup(tools)
 
-    backend = AzureAIToolSearchBackend(index_name=manager.index_name, user_token=user_token)
+    backend = AzureAIToolSearchBackend(index_name=manager.index_name)
 
     LOGGER.info(
         "Tool search ready: index '%s' with %d tools",

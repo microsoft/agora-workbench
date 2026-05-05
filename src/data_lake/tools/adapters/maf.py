@@ -13,15 +13,14 @@ try:
     from agent_framework import tool
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from pydantic import BaseModel, Field
 
 from ..permissions import check_resource_permissions
-from auth import create_async_obo_credential
+from auth import get_search_credential_async
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,14 +34,8 @@ class DataLakeSearchClientManager:
     to continue working even after token expiration.
     """
 
-    def __init__(self, user_token: str):
-        """
-        Initialize the manager.
-
-        Args:
-            user_token: User's bearer token (JWT) for OBO authentication. Required.
-        """
-        self.user_token = user_token
+    def __init__(self):
+        """Initialize the manager."""
         self._client: Optional[SearchClient] = None
         self._endpoint: Optional[str] = None
         self._index_name: Optional[str] = None
@@ -85,9 +78,9 @@ class DataLakeSearchClientManager:
         """
         endpoint, index_name = self._get_data_lake_config()
 
-        # Create credential for OBO authentication
-        credential = create_async_obo_credential(user_token=self.user_token)
-        LOGGER.debug("Created OBO credential for DataLake search")
+        # Create credential for search
+        credential = get_search_credential_async()
+        LOGGER.debug("Created credential for DataLake search")
 
         # Create and return SearchClient
         try:
@@ -233,22 +226,14 @@ class DataLakeSearchParams(BaseModel):
 class DataLakeSearchBackend(ABC):
     """Abstract base class for searching the DataLake catalog.
 
-    Subclasses must implement :meth:`search`. The ``user_token`` passed
-    at construction time is stored as an instance attribute for backends
-    that need it for authentication (e.g. OBO flow).
+    Subclasses must implement :meth:`search`. Authentication is handled
+    by the credential factories in ``auth.providers`` — backends obtain
+    credentials directly rather than accepting user tokens.
 
     Implement a custom subclass to add hard constraints on what assets
     the agent can discover (e.g., restricting to specific domains or
     sources) or to override the default search behavior entirely.
-
-    Args:
-        user_token: Bearer token forwarded to backends that require
-            user-level authentication. Backends that don't need it
-            simply ignore it.
     """
-
-    def __init__(self, user_token: str = ""):
-        self.user_token = user_token
 
     @abstractmethod
     async def search(self, params: "DataLakeSearchParams") -> list[dict]:
@@ -269,14 +254,11 @@ class DefaultDataLakeSearchBackend(DataLakeSearchBackend):
     Performs hybrid search (text + semantic vector matching) against the
     DataLake artifact registry. Applies per-resource RBAC permission
     filtering to ensure users only see assets they can access.
-
-    Args:
-        user_token: User's bearer token (JWT) for OBO authentication.
     """
 
-    def __init__(self, user_token: str):
-        super().__init__(user_token=user_token)
-        self._client_manager = DataLakeSearchClientManager(user_token=user_token)
+    def __init__(self):
+        super().__init__()
+        self._client_manager = DataLakeSearchClientManager()
 
     async def search(self, params: "DataLakeSearchParams") -> list[dict]:
         """Search the DataLake catalog using Azure AI Search with RBAC filtering.
@@ -379,8 +361,7 @@ class DefaultDataLakeSearchBackend(DataLakeSearchBackend):
         accessible_assets = assets_without_scope
         if assets_with_scope:
             permission_tasks = [
-                check_resource_permissions(resource_id=rbac_scope, user_token=self.user_token)
-                for _, rbac_scope in assets_with_scope
+                check_resource_permissions(resource_id=rbac_scope) for _, rbac_scope in assets_with_scope
             ]
             permission_results = await asyncio.gather(*permission_tasks, return_exceptions=True)
 
@@ -411,14 +392,11 @@ def is_data_lake_configured() -> bool:
     return bool(os.getenv("DATA_LAKE_SEARCH_ENDPOINT"))
 
 
-async def _discover_available_domains(user_token: str) -> list[str]:
+async def _discover_available_domains() -> list[str]:
     """Query the artifact registry index to discover distinct domain values.
 
-    Uses the async SearchClient with OBO credentials so it works in both
-    local-dev and deployed environments.
-
-    Args:
-        user_token: User's bearer token for OBO authentication.
+    Uses the async SearchClient with credentials from auth.providers so it
+    works with both API key and Entra authentication.
 
     Returns:
         Sorted list of unique domain strings found in the index.
@@ -430,7 +408,7 @@ async def _discover_available_domains(user_token: str) -> list[str]:
         if not endpoint:
             return []
 
-        credential = create_async_obo_credential(user_token=user_token)
+        credential = get_search_credential_async()
         client = SearchClient(
             endpoint=endpoint,
             index_name=index_name,
@@ -490,16 +468,12 @@ def _build_search_params_model(available_domains: list[str]) -> type[BaseModel]:
 
 
 async def create_data_lake_search_tool(
-    user_token: str,
     backend: Optional[DataLakeSearchBackend] = None,
 ) -> Callable:
     """
     Create a MAF tool for DataLake catalog search.
 
     Args:
-        user_token: User's bearer token (JWT) for authentication. Required.
-            Used for user-scoped DataLake catalog access via OBO flow, and
-            for domain discovery at tool creation time.
         backend: Optional :class:`DataLakeSearchBackend` implementation to use.
             When ``None`` (default), a :class:`DefaultDataLakeSearchBackend` is
             created automatically, and its internal ``SearchClient`` lifecycle
@@ -515,13 +489,11 @@ async def create_data_lake_search_tool(
         MAF tool callable that can be used as a tool
 
     Raises:
-        ValueError: If DataLake is not configured or configuration is invalid,
-            or if *backend* carries a ``user_token`` that does not match the
-            *user_token* argument (to prevent ambiguous authentication).
+        ValueError: If DataLake is not configured or configuration is invalid.
 
     Example — default backend (no custom constraints)::
 
-        tool = await create_data_lake_search_tool(user_token=token)
+        tool = await create_data_lake_search_tool()
         agent = chat_client.create_agent(name="resource_selector", instructions=prompt, tools=[tool])
 
     Example — custom backend with a hard domain constraint::
@@ -529,34 +501,16 @@ async def create_data_lake_search_tool(
         class EnergyOnlyBackend(DataLakeSearchBackend):
             async def search(self, params):
                 restricted = params.model_copy(update={"domains": ["energy"]})
-                return await DefaultDataLakeSearchBackend(self.user_token).search(restricted)
+                return await DefaultDataLakeSearchBackend().search(restricted)
 
-        tool = await create_data_lake_search_tool(
-            user_token=token,
-            backend=EnergyOnlyBackend(user_token=token),
-        )
+
+        tool = await create_data_lake_search_tool(backend=EnergyOnlyBackend())
     """
     if backend is None:
-        backend = DefaultDataLakeSearchBackend(user_token=user_token)
-    else:
-        # Ensure backend.user_token is consistent with the provided user_token
-        backend_user_token = getattr(backend, "user_token", None)
-
-        # If the backend already has a non-empty token that does not match, fail fast
-        if backend_user_token:
-            if backend_user_token != user_token:
-                raise ValueError(
-                    "create_data_lake_search_tool received a backend with a different "
-                    "user_token than the one passed to the function. To avoid ambiguous "
-                    "authentication, ensure both tokens match or only provide one source "
-                    "of truth."
-                )
-        # If the backend exposes a user_token attribute but it is unset/empty, populate it
-        elif hasattr(backend, "user_token"):
-            setattr(backend, "user_token", user_token)
+        backend = DefaultDataLakeSearchBackend()
 
     # Discover available domains from the index at tool creation time
-    available_domains = await _discover_available_domains(user_token=user_token)
+    available_domains = await _discover_available_domains()
     SearchParamsModel = _build_search_params_model(available_domains)
 
     # Create MAF tool with SearchClient manager
@@ -597,18 +551,17 @@ async def create_data_lake_search_tool(
     return search_catalog
 
 
-async def validate_assets_against_catalog(qualified_names: list[str], user_token: str) -> list[dict]:
+async def validate_assets_against_catalog(qualified_names: list[str]) -> list[dict]:
     """
     Validate artifact IDs directly against DataLake artifact registry.
 
     Queries DataLake directly for each artifact_id to:
     1. Verify the artifact exists
     2. Retrieve full metadata
-    3. Respect user's data access permissions (RBAC)
+    3. Respect data access permissions (RBAC)
 
     Args:
         qualified_names: List of artifact_ids to validate
-        user_token: User's bearer token (JWT) for OBO authentication. Required.
 
     Returns:
         List of validated artifact dictionaries with full metadata
@@ -621,7 +574,7 @@ async def validate_assets_against_catalog(qualified_names: list[str], user_token
         raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
 
     validated_assets = []
-    client_manager = DataLakeSearchClientManager(user_token=user_token)
+    client_manager = DataLakeSearchClientManager()
 
     for artifact_id in qualified_names:
         try:

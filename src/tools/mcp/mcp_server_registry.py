@@ -51,7 +51,7 @@ class MCPServerConfig(BaseModel):
                          (e.g., \"create_example_config\")
         port: Port number where the server runs
         base_url: Base URL for the MCP servers (required)
-        scope: Auth scope for authenticating to the MCP server. Used for OBO flow.
+        scope: Auth scope for authenticating to the MCP server.
                Required (can be set via MCP_SERVER_SCOPE env var in YAML defaults)
 
     Example YAML representation:
@@ -73,7 +73,7 @@ class MCPServerConfig(BaseModel):
     config_function: str = Field(..., description="Name of the function that creates EnvironmentConfig")
     port: int = Field(..., ge=1, le=65535, description="Port number where the server runs")
     base_url: str = Field(..., description="Base URL for the MCP servers")
-    scope: str = Field(..., description="Auth scope for authenticating to the MCP server (OBO flow)")
+    scope: str = Field(..., description="Auth scope for authenticating to the MCP server")
 
     model_config = {"frozen": True}
 
@@ -145,7 +145,7 @@ def create_mcp_descriptor_from_config(
         name: Unique name for the MCP server
         port: Port number where the server runs
         base_url: Base URL for the server
-        scope: Auth scope for authenticating to the MCP server (OBO flow)
+        scope: Auth scope for authenticating to the MCP server
 
     Returns:
         MCPServerDescriptor ready to register

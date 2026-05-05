@@ -82,18 +82,6 @@ class TestToolSearchBackendABC:
 
         backend = _FakeBackend()
         assert isinstance(backend, ToolSearchBackend)
-        assert backend.user_token == ""
-
-    @pytest.mark.unit
-    def test_subclass_stores_user_token(self):
-        """user_token passed at construction is stored as an attribute."""
-
-        class _FakeBackend(ToolSearchBackend):
-            async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
-                return []
-
-        backend = _FakeBackend(user_token="my-token")
-        assert backend.user_token == "my-token"
 
     @pytest.mark.unit
     def test_non_subclass_is_not_instance(self):
@@ -119,11 +107,10 @@ class TestToolSearchBackendABC:
         from unittest.mock import patch, MagicMock
 
         with patch(
-            "tools.search.azure_ai_tool_search.create_async_obo_credential",
+            "tools.search.azure_ai_tool_search.get_search_credential_async",
             return_value=MagicMock(),
         ):
             from tools.search.azure_ai_tool_search import AzureAIToolSearchBackend
 
-            backend = AzureAIToolSearchBackend("test-index", user_token="tok")
+            backend = AzureAIToolSearchBackend("test-index")
             assert isinstance(backend, ToolSearchBackend)
-            assert backend.user_token == "tok"

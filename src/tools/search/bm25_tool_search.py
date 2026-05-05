@@ -131,8 +131,8 @@ class BM25ToolSearchBackend(ToolSearchBackend):
     on the first call to :meth:`search`.
     """
 
-    def __init__(self, tools: Optional[list[ToolInfo]] = None, user_token: str = ""):
-        super().__init__(user_token=user_token)
+    def __init__(self, tools: Optional[list[ToolInfo]] = None):
+        super().__init__()
         self._index: Optional[BM25Index] = None
         if tools is not None:
             self._index = BM25Index()

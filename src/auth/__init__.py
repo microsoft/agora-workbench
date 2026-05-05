@@ -13,17 +13,9 @@ This module provides:
    - `get_token_provider(scope)` — returns a callable that yields fresh tokens
    - `BearerTokenAuth` — httpx Auth class using a token provider
 
-3. **OBO helpers** (enterprise multi-tenant only):
-   - `create_obo_credential(user_token)` / `create_async_obo_credential(user_token)`
-
-See `auth.providers` for the credential factories and `auth.obo` for
-On-Behalf-Of helpers used in enterprise multi-tenant deployments.
+See `auth.providers` for the credential factories.
 """
 
-from .obo import (
-    create_async_obo_credential,
-    create_obo_credential,
-)
 from .providers import (
     BearerTokenAuth,
     get_search_auth_headers_async,
@@ -44,7 +36,4 @@ __all__ = [
     # Token providers (Entra-only)
     "BearerTokenAuth",
     "get_token_provider",
-    # OBO (enterprise multi-tenant only)
-    "create_async_obo_credential",
-    "create_obo_credential",
 ]

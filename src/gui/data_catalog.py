@@ -5,8 +5,7 @@ the same Azure AI Search artifact registry used by the agent's
 ``search_data_lake_catalog`` tool.  The endpoint does **not** require
 user authentication — it uses ``get_search_credential_async()``, which
 provides either an API key credential or a chained Azure credential for
-local-dev (Azure CLI login) and deployed environments (managed identity)
-without needing an OBO token flow.
+local-dev (Azure CLI login) and deployed environments (managed identity).
 """
 
 import logging
