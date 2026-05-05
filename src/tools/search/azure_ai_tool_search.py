@@ -25,7 +25,7 @@ from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-from auth import create_azure_credential_async, create_async_obo_credential
+from auth import create_async_obo_credential, get_search_credential_async
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from .build_tool_list import build_tool_list
 from ._constants import (
@@ -120,7 +120,7 @@ class ToolSearchClientManager:
     def _get_credential(self):
         """Return the cached async credential, creating it on first use."""
         if self._credential is None:
-            self._credential = create_azure_credential_async()
+            self._credential = get_search_credential_async()
         return self._credential
 
     def _create_client(self) -> SearchClient:

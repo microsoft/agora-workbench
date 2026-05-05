@@ -29,7 +29,7 @@ import httpx
 import yaml
 from pydantic import BaseModel, Field
 
-from auth import create_entra_token_provider
+from auth import get_token_provider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -231,7 +231,7 @@ class MCPServerRegistry:
 
             # Second check: Authentication via MCP endpoint
             try:
-                token_provider = create_entra_token_provider(descriptor.scope)
+                token_provider = get_token_provider(descriptor.scope)
                 token = token_provider()
 
                 async with httpx.AsyncClient(

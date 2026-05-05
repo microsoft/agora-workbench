@@ -22,7 +22,7 @@ from uuid import uuid4
 import httpx
 from jinja2 import Template
 
-from auth import create_azure_credential, create_azure_credential_async
+from auth import get_search_credential, get_search_credential_async
 from tools.search.build_tool_list import ToolInfo
 from tools.search._constants import (
     TOOL_SEARCH_ENDPOINT_ENV,
@@ -142,23 +142,31 @@ class ToolSearchIndexManager:
     def _get_credential_async(self):
         """Return the cached async credential, creating it on first use."""
         if self._async_credential is None:
-            self._async_credential = create_azure_credential_async()
+            self._async_credential = get_search_credential_async()
         return self._async_credential
 
     async def _close_credential_async(self) -> None:
-        """Close and discard the cached async credential."""
+        """Close and discard the cached async credential (no-op for API key)."""
         if self._async_credential is not None:
             try:
-                await self._async_credential.close()
+                if hasattr(self._async_credential, "close"):
+                    await self._async_credential.close()
             except Exception:
                 LOGGER.debug("Error closing async credential", exc_info=True)
             self._async_credential = None
 
-    async def _get_token(self) -> str:
-        """Get an Azure AI Search bearer token via service credential chain."""
+    async def _get_auth_headers(self) -> dict[str, str]:
+        """Get authentication headers for raw HTTP calls to Azure AI Search.
+
+        Returns api-key header for key-based auth, Bearer token for Entra.
+        """
+        from azure.core.credentials import AzureKeyCredential
+
         credential = self._get_credential_async()
+        if isinstance(credential, AzureKeyCredential):
+            return {"api-key": credential.key}
         token_response = await credential.get_token("https://search.azure.com/.default")
-        return token_response.token
+        return {"Authorization": f"Bearer {token_response.token}"}
 
     def _render_index_definition(self) -> dict:
         """Render the Jinja index template with the current index name.
@@ -209,13 +217,14 @@ class ToolSearchIndexManager:
 
         texts = [f"{doc['name']} {doc['description']} {doc.get('affordances', '')}".strip() for doc in documents]
 
-        credential = self._get_credential_async()
-        token_response = await credential.get_token("https://cognitiveservices.azure.com/.default")
+        from auth import get_token_provider
+
+        token_provider = get_token_provider("https://cognitiveservices.azure.com/.default")
 
         url = f"{self.azure_openai_endpoint}/openai/deployments/{self.azure_openai_embedding_deployment}/embeddings"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {token_response.token}",
+            "Authorization": f"Bearer {token_provider()}",
         }
         params = {"api-version": _OPENAI_EMBEDDING_API_VERSION}
 
@@ -264,12 +273,12 @@ class ToolSearchIndexManager:
             httpx.HTTPStatusError: If the index creation request fails.
         """
         index_payload = self._render_index_definition()
-        token = await self._get_token()
+        auth_headers = await self._get_auth_headers()
 
         url = f"{self.search_endpoint}/indexes/{self.index_name}"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
+            **auth_headers,
         }
         params = {"api-version": _SEARCH_API_VERSION}
 
@@ -314,11 +323,11 @@ class ToolSearchIndexManager:
         # Wrap each document with the upload action for the batch index API
         batch = {"value": [{"@search.action": "upload", **doc} for doc in documents]}
 
-        token = await self._get_token()
+        auth_headers = await self._get_auth_headers()
         url = f"{self.search_endpoint}/indexes/{self.index_name}/docs/index"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {token}",
+            **auth_headers,
         }
         params = {"api-version": _SEARCH_API_VERSION}
 
@@ -354,9 +363,9 @@ class ToolSearchIndexManager:
             return
 
         try:
-            token = await self._get_token()
+            auth_headers = await self._get_auth_headers()
             url = f"{self.search_endpoint}/indexes/{self.index_name}"
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = {**auth_headers}
             params = {"api-version": _SEARCH_API_VERSION}
 
             LOGGER.info("Deleting tool search index: %s", self.index_name)
@@ -407,10 +416,15 @@ class ToolSearchIndexManager:
 
         LOGGER.debug("Running tool search index cleanup")
         try:
-            credential = create_azure_credential()
-            token_response = credential.get_token("https://search.azure.com/.default")
+            from azure.core.credentials import AzureKeyCredential
+
+            credential = get_search_credential()
+            if isinstance(credential, AzureKeyCredential):
+                headers = {"api-key": credential.key}
+            else:
+                token_response = credential.get_token("https://search.azure.com/.default")
+                headers = {"Authorization": f"Bearer {token_response.token}"}
             url = f"{self.search_endpoint}/indexes/{self.index_name}"
-            headers = {"Authorization": f"Bearer {token_response.token}"}
             params = {"api-version": _SEARCH_API_VERSION}
 
             LOGGER.info("Deleting tool search index: %s", self.index_name)

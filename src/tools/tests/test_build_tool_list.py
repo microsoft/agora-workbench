@@ -115,7 +115,7 @@ class TestBuildToolList:
         with (
             patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
             patch("tools.search.build_tool_list.streamable_http_client", side_effect=Exception("Connection refused")),
-            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+            patch("tools.search.build_tool_list.get_token_provider", return_value=lambda: "token"),
         ):
             result = await build_tool_list()
 
@@ -186,7 +186,7 @@ class TestBuildToolList:
 
         with (
             patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
-            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+            patch("tools.search.build_tool_list.get_token_provider", return_value=lambda: "token"),
             patch("tools.search.build_tool_list.httpx.AsyncClient", return_value=mock_http_cm),
             patch("tools.search.build_tool_list.streamable_http_client", return_value=mock_streamable_cm),
             patch("tools.search.build_tool_list.ClientSession", return_value=mock_session_cm),
@@ -245,7 +245,7 @@ class TestBuildToolList:
 
         with (
             patch("tools.search.build_tool_list.get_mcp_registry", return_value=mock_registry),
-            patch("tools.search.build_tool_list.create_entra_token_provider", return_value=lambda: "token"),
+            patch("tools.search.build_tool_list.get_token_provider", return_value=lambda: "token"),
             patch("tools.search.build_tool_list.httpx.AsyncClient", return_value=mock_http_cm),
             patch("tools.search.build_tool_list.streamable_http_client", return_value=mock_streamable_cm),
             patch("tools.search.build_tool_list.ClientSession", return_value=mock_session_cm),

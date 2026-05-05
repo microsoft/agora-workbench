@@ -498,7 +498,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             is_valid, error_msg = await registry._validate_server_connection(descriptor)
 
@@ -648,7 +648,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             is_valid, error_msg = await registry._validate_server_connection(descriptor)
 
@@ -686,7 +686,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             is_valid, error_msg = await registry._validate_server_connection(descriptor)
 
@@ -722,7 +722,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             await registry._validate_server_connection(descriptor)
 
@@ -760,7 +760,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: test_token),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: test_token),
         ):
             await registry._validate_server_connection(descriptor)
 
@@ -799,7 +799,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             is_valid, error_msg = await registry._validate_server_connection(descriptor)
 
@@ -904,7 +904,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient", return_value=mock_client),
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider") as mock_token_provider,
+            patch("tools.mcp.mcp_server_registry.get_token_provider") as mock_token_provider,
         ):
             mock_token_provider.return_value = lambda: "test_token"
 
@@ -938,7 +938,7 @@ class TestServerValidation:
 
         with (
             patch("tools.mcp.mcp_server_registry.httpx.AsyncClient") as mock_client_class,
-            patch("tools.mcp.mcp_server_registry.create_entra_token_provider", return_value=lambda: "test_token"),
+            patch("tools.mcp.mcp_server_registry.get_token_provider", return_value=lambda: "test_token"),
         ):
             mock_client_class.return_value = mock_client
 

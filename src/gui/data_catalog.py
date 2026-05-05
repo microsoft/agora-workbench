@@ -3,10 +3,10 @@
 Exposes ``GET /api/data-catalog`` which performs a hybrid search against
 the same Azure AI Search artifact registry used by the agent's
 ``search_data_lake_catalog`` tool.  The endpoint does **not** require
-user authentication — it uses ``create_azure_credential_async()``, which
-provides a chained Azure credential for local-dev (Azure CLI login) and
-deployed environments (managed identity) without needing an OBO token
-flow.
+user authentication — it uses ``get_search_credential_async()``, which
+provides either an API key credential or a chained Azure credential for
+local-dev (Azure CLI login) and deployed environments (managed identity)
+without needing an OBO token flow.
 """
 
 import logging
@@ -24,6 +24,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Response models
 # ---------------------------------------------------------------------------
+
 
 class CatalogAsset(BaseModel):
     """Minimal representation of a data lake asset for the GUI catalog."""
@@ -49,6 +50,7 @@ class CatalogDomainsResponse(BaseModel):
 # Endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.get("/api/data-catalog", response_model=CatalogResponse)
 async def search_data_catalog(
     q: str = Query(default="", description="Search query (empty = browse all)"),
@@ -71,9 +73,9 @@ async def search_data_catalog(
     try:
         from azure.search.documents.aio import SearchClient
 
-        from auth import create_azure_credential_async
+        from auth import get_search_credential_async
 
-        credential = create_azure_credential_async()
+        credential = get_search_credential_async()
         client = SearchClient(
             endpoint=endpoint,
             index_name=index_name,
@@ -94,8 +96,14 @@ async def search_data_catalog(
                 results = await client.search(
                     search_text=search_text,
                     filter=filter_expr,
-                    select=["artifact_id", "artifact_type", "name", "description",
-                            "semantic_dataset_description", "domain"],
+                    select=[
+                        "artifact_id",
+                        "artifact_type",
+                        "name",
+                        "description",
+                        "semantic_dataset_description",
+                        "domain",
+                    ],
                     top=top,
                     skip=skip,
                     query_type="semantic",
@@ -107,8 +115,14 @@ async def search_data_catalog(
                 results = await client.search(
                     search_text=search_text,
                     filter=filter_expr,
-                    select=["artifact_id", "artifact_type", "name", "description",
-                            "semantic_dataset_description", "domain"],
+                    select=[
+                        "artifact_id",
+                        "artifact_type",
+                        "name",
+                        "description",
+                        "semantic_dataset_description",
+                        "domain",
+                    ],
                     top=top,
                     skip=skip,
                 )
@@ -118,23 +132,21 @@ async def search_data_catalog(
                 artifact_type = doc.get("artifact_type", "")
                 artifact_id = doc.get("artifact_id", "")
                 name = doc.get("name", artifact_id)
-                description = (
-                    doc.get("semantic_dataset_description")
-                    or doc.get("description")
-                    or ""
-                )
+                description = doc.get("semantic_dataset_description") or doc.get("description") or ""
                 asset_tag = (
                     f"<{artifact_type}>{artifact_id}</{artifact_type}>"
                     if artifact_type and artifact_id
                     else artifact_id
                 )
-                assets.append(CatalogAsset(
-                    name=name,
-                    description=description,
-                    asset_tag=asset_tag,
-                    domain=doc.get("domain", ""),
-                    artifact_type=artifact_type,
-                ))
+                assets.append(
+                    CatalogAsset(
+                        name=name,
+                        description=description,
+                        asset_tag=asset_tag,
+                        domain=doc.get("domain", ""),
+                        artifact_type=artifact_type,
+                    )
+                )
         finally:
             await client.close()
             await credential.close()
@@ -159,9 +171,9 @@ async def list_catalog_domains():
     try:
         from azure.search.documents.aio import SearchClient
 
-        from auth import create_azure_credential_async
+        from auth import get_search_credential_async
 
-        credential = create_azure_credential_async()
+        credential = get_search_credential_async()
         client = SearchClient(
             endpoint=endpoint,
             index_name=index_name,

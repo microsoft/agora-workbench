@@ -9,9 +9,11 @@ Usage:
     credential = get_search_credential()       # sync
     credential = get_search_credential_async() # async
 
-    # The returned credential is either:
-    #   - AzureKeyCredential (if AZURE_SEARCH_API_KEY is set)
-    #   - ChainedTokenCredential (if using Entra/CLI auth)
+    # For raw HTTP calls that need auth headers:
+    headers = get_search_auth_headers()        # returns appropriate headers
+
+    # For bearer token provider (Entra-only, e.g. MCP servers):
+    token_provider = get_token_provider(scope)
 
 Environment Variables:
     AZURE_SEARCH_API_KEY: API key for Azure AI Search (query or admin key).
@@ -23,10 +25,16 @@ Environment Variables:
 
 import logging
 import os
-from typing import Union
+from typing import Callable, Generator, Union
 
+import httpx
 from azure.core.credentials import AzureKeyCredential, TokenCredential
-from azure.identity import AzureCliCredential, ChainedTokenCredential, ManagedIdentityCredential
+from azure.identity import (
+    AzureCliCredential,
+    ChainedTokenCredential,
+    ManagedIdentityCredential,
+    get_bearer_token_provider,
+)
 from azure.identity.aio import (
     AzureCliCredential as AsyncAzureCliCredential,
     ChainedTokenCredential as AsyncChainedTokenCredential,
@@ -47,6 +55,29 @@ AsyncSearchCredential = Union[AsyncTokenCredential, AzureKeyCredential]
 # Environment variable names
 AZURE_SEARCH_API_KEY_ENV = "AZURE_SEARCH_API_KEY"
 AZURE_STORAGE_CONNECTION_STRING_ENV = "AZURE_STORAGE_CONNECTION_STRING"
+
+
+# =============================================================================
+# Utility classes
+# =============================================================================
+
+
+class BearerTokenAuth(httpx.Auth):
+    """Custom httpx Auth that uses a token provider callable to get fresh tokens."""
+
+    def __init__(self, token_provider: Callable[[], str]):
+        self.token_provider = token_provider
+
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
+        """Add Bearer token to the request Authorization header."""
+        token = self.token_provider()
+        request.headers["Authorization"] = f"Bearer {token}"
+        yield request
+
+
+# =============================================================================
+# Search credential factories
+# =============================================================================
 
 
 def get_search_credential() -> SearchCredential:
@@ -101,6 +132,67 @@ def get_search_credential_async() -> AsyncSearchCredential:
     return _create_async_credential_chain()
 
 
+async def get_search_auth_headers_async() -> dict[str, str]:
+    """
+    Get authentication headers for raw HTTP calls to Azure AI Search.
+
+    For API key auth, returns an ``api-key`` header.
+    For Entra auth, acquires a bearer token and returns an ``Authorization`` header.
+
+    Returns:
+        Dict with the appropriate auth header for the current auth mode.
+    """
+    api_key = os.getenv(AZURE_SEARCH_API_KEY_ENV)
+    if api_key:
+        return {"api-key": api_key}
+
+    credential = _create_async_credential_chain()
+    try:
+        token_response = await credential.get_token("https://search.azure.com/.default")
+        return {"Authorization": f"Bearer {token_response.token}"}
+    finally:
+        await credential.close()
+
+
+# =============================================================================
+# Token provider (Entra-only)
+# =============================================================================
+
+
+def get_token_provider(scope: str) -> Callable[[], str]:
+    """
+    Create an Entra ID token provider for Azure service authentication.
+
+    Uses a credential chain that tries Azure CLI first, then Managed Identity.
+    This allows the same code to work in local development (CLI) and deployed
+    environments (Managed Identity).
+
+    Note: This function requires Entra ID authentication and does not support
+    API key auth. It is used for services that require bearer tokens (e.g.,
+    MCP servers, Azure OpenAI with Entra).
+
+    Args:
+        scope: Azure scope for token (e.g., 'https://cognitiveservices.azure.com/.default')
+
+    Returns:
+        Token provider function that can be called to get bearer tokens.
+
+    Example:
+        >>> from auth import get_token_provider
+        >>> token_provider = get_token_provider("https://cognitiveservices.azure.com/.default")
+        >>> token = token_provider()
+    """
+    credential = _create_sync_credential_chain()
+    token_provider = get_bearer_token_provider(credential, scope)
+    LOGGER.debug(f"Created Entra ID token provider for scope: {scope}")
+    return token_provider
+
+
+# =============================================================================
+# Storage helpers
+# =============================================================================
+
+
 def get_storage_connection_string() -> str | None:
     """
     Get an Azure Storage connection string if configured.
@@ -120,6 +212,11 @@ def get_storage_connection_string() -> str | None:
     return os.getenv(AZURE_STORAGE_CONNECTION_STRING_ENV) or None
 
 
+# =============================================================================
+# Auth mode introspection
+# =============================================================================
+
+
 def is_key_based_auth() -> bool:
     """
     Check if the environment is configured for key-based authentication.
@@ -133,7 +230,9 @@ def is_key_based_auth() -> bool:
     return bool(os.getenv(AZURE_SEARCH_API_KEY_ENV))
 
 
-# --- Internal helpers ---
+# =============================================================================
+# Internal helpers
+# =============================================================================
 
 
 def _create_sync_credential_chain() -> ChainedTokenCredential:
