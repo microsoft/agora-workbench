@@ -1,0 +1,13 @@
+name: gis
+module: domains.gis.server.gis_server
+port: 8006
+description: Geospatial analysis (GIS)
+system_packages: []
+extra_files:
+  - __init__.py
+  - states.py
+extra_env: {}
+depends_on: []
+volumes:
+  - ../../maps:/tmp/maps:rw
+trusted_hosts: true

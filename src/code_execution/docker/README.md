@@ -10,9 +10,12 @@ Multi-stage Docker builds for the code execution servers. Each server shares a c
 | `powergrid-server` | Power grid (PyPSA, HiGHS GPU) | 8001 |
 | `process-server` | Process simulation (IDAES) | 8002 |
 | `foundry-server` | Azure AI Foundry | 8003 |
+| `powergrid-server-cpu` | Power grid (CPU-only HiGHS) | 8005 |
 | `gis-server` | Geospatial analysis (GIS) | 8006 |
 | `office-server` | Office document processing | 8007 |
 | `openlca-server` | Life cycle assessment (LCA) | 8008 |
+| `vitrimer-tg-sim-server` | Vitrimer Tg simulation | 8010 |
+| `vitrimer-vae-server` | Vitrimer VAE polymer design | 8011 |
 | `openlca-ipc` *(sidecar)* | openLCA IPC JSON-RPC server | 8080 |
 
 The `openlca-ipc` sidecar service (port 8080) is also defined in `docker-compose.yml`. It is a custom-built image (see `domains/openlca/docker/`) that runs the openLCA IPC server alongside `openlca-server`.
@@ -101,17 +104,137 @@ command: ["-db", "mydb", "--readonly"]
 
 ## Adding a New Server
 
-1. Create a Dockerfile stage targeting `base`:
+The recommended workflow uses `build.py` to scaffold a new domain and regenerate
+the Docker files automatically.
+
+### Option A — Automated scaffolding (recommended)
+
+```bash
+# 1. Scaffold the domain (creates domain.yaml + server stub):
+uv run python src/code_execution/docker/build.py new <name>
+
+# 2. Edit the generated domain.yaml and implement your server tools.
+
+# 3. Regenerate Dockerfile + docker-compose.yml:
+uv run python src/code_execution/docker/build.py generate
+
+# 4. Build and test:
+docker compose build <name>-server
+docker compose up <name>-server
+```
+
+### Option B — Manual addition
+
+If you prefer to add a server manually:
+
+1. **Create `domains/<name>/domain.yaml`** describing the server:
+
+   ```yaml
+   name: myserver
+   module: domains.myserver.server.myserver_server
+   port: 8012
+   description: My domain server
+   system_packages: []      # apt packages (optional)
+   extra_files:
+     - states.py            # files to COPY beyond server/
+   extra_env: {}
+   depends_on: []
+   volumes: []
+   trusted_hosts: true
+   ```
+
+2. **Add a Dockerfile stage** to `Dockerfile` targeting `base`:
 
    ```dockerfile
    FROM base AS myserver-server
-   COPY domains/myserver /app/domains/myserver
+   COPY --chown=appuser:appuser domains/myserver/server /app/domains/myserver/server
+   COPY --chown=appuser:appuser domains/myserver/states.py /app/domains/myserver/states.py
    CMD ["python", "-m", "domains.myserver.server.myserver_server"]
    ```
 
-2. Add a service in `docker-compose.yml` following the existing pattern (include `additional_contexts: azure-cli: ~/.azure` under `build`).
+3. **Add a service** in `docker-compose.yml` using the existing anchors:
 
-3. Register the server in `server_registry.yaml`.
+   ```yaml
+   myserver-server:
+     build:
+       <<: *common-build
+       target: myserver-server
+     command: ["python", "-m", "domains.myserver.server.myserver_server"]
+     ports:
+       - "8012:8000"
+     volumes:
+       - ~/.azure:/root/.azure:rw
+     env_file:
+       - ../../.env
+     environment:
+       <<: [*base-env, *trusted-hosts]
+     healthcheck:
+       <<: *common-healthcheck
+   ```
+
+4. **Update the `*trusted-hosts` anchor** (top of `docker-compose.yml`) to include `myserver-server`.
+
+5. **Register the server** in `server_registry.yaml`.
+
+## `build.py` Reference
+
+```
+usage: build.py [-h] {generate,new} ...
+
+subcommands:
+  generate    Generate Dockerfile and docker-compose.yml from all domain.yaml files
+  new         Scaffold a new domain server (creates domain.yaml + server stub)
+```
+
+### `generate`
+
+```bash
+uv run python src/code_execution/docker/build.py generate [--root ROOT] [--output-dir DIR]
+```
+
+Reads every `domains/*/domain.yaml` under `ROOT` (default: `src/`), renders
+`domain.Dockerfile.j2` for each, and combines with `base.Dockerfile` to produce
+`Dockerfile`.  Also renders `compose-service.j2` for each domain and writes a
+new `docker-compose.yml` with YAML anchors.
+
+### `new`
+
+```bash
+uv run python src/code_execution/docker/build.py new <name> [--root ROOT]
+```
+
+Creates:
+- `domains/<name>/domain.yaml` — pre-filled config (edit port + description)
+- `domains/<name>/server/<name>_server.py` — `CodeExecutionServer` subclass stub
+- `domains/<name>/__init__.py` and `domains/<name>/server/__init__.py`
+
+## Architecture
+
+```
+src/code_execution/docker/
+├── base.Dockerfile          # Shared base: GPU wheel builder + base image + powergrid (special case)
+├── domain.Dockerfile.j2     # Jinja2 template for standard per-domain stages
+├── compose-service.j2       # Jinja2 template for docker-compose service entries
+├── build.py                 # CLI: `generate` + `new` commands
+├── Dockerfile               # Combined output (base + generated domain stages)
+├── docker-compose.yml       # Hand-maintained with YAML anchors; regenerate via build.py
+└── README.md                # This file
+
+src/domains/<name>/
+├── domain.yaml              # Per-domain config consumed by build.py
+├── server/                  # Server implementation
+│   └── <name>_server.py
+└── states.py                # Optional domain state definitions
+```
+
+### Special cases
+
+**PowerGrid** (`powergrid-server` / `powergrid-server-cpu`) uses a complex
+multi-stage CUDA build to compile a GPU-enabled HiGHS wheel. These stages live
+in `base.Dockerfile` rather than being generated from a template.  The
+`domains/powergrid/domain.yaml` references a `Dockerfile.fragment` file (managed
+by the domain team) so `build.py generate` can include them once the fragment
+is in place.
 
 ## Build Context
 

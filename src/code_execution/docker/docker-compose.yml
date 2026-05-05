@@ -1,150 +1,127 @@
+# ---------------------------------------------------------------------------
+# YAML anchors (Docker Compose extension fields — ignored by compose itself,
+# used here purely to DRY up repeated blocks).
+# ---------------------------------------------------------------------------
+
+x-common-build: &common-build
+  context: ../..
+  dockerfile: code_execution/docker/Dockerfile
+  additional_contexts:
+    azure-cli: ~/.azure
+
+x-base-env: &base-env
+  PORT: "8000"
+  HOST: "0.0.0.0"
+  OBO_SIMULATION_MODE: "true"
+
+# All servers that participate in object-transfer (cross-service data sharing).
+# Update this anchor whenever a new server is added.
+x-trusted-hosts: &trusted-hosts
+  OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu,vitrimer-tg-sim-server,vitrimer-vae-server"
+
+x-common-healthcheck: &common-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 60s
+
 services:
   example-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: example-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.example.server.example_server" ]
+    command: ["python", "-m", "domains.example.server.example_server"]
     ports:
-    - 8000:8000
+      - "8000:8000"
     volumes:
-      - ~/.azure:/root/.azure:rw # rw needed: Azure CLI refreshes token cache
+      - ~/.azure:/root/.azure:rw
     env_file:
-    - ../../.env
+      - ../../.env
     environment:
-    - PORT=8000
-    - HOST=0.0.0.0
-    - OBO_SIMULATION_MODE=true
+      <<: *base-env
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
+
   powergrid-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: powergrid-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.powergrid.server.powergrid_server" ]
+    command: ["python", "-m", "domains.powergrid.server.powergrid_server"]
     ports:
-    - 8001:8000
+      - "8001:8000"
     volumes:
-    - ~/.azure:/root/.azure:rw
+      - ~/.azure:/root/.azure:rw
     env_file:
-    - ../../.env
+      - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
       # Clear stale venvs on restart so the custom GPU-enabled highspy wheel
       # (built from source with CUPDLP_GPU=ON) is always cleanly installed.
-      # Without this, a leftover/broken venv may keep a CPU-only highspy or
-      # cause uv venv creation to fail on a non-empty directory.
-      - UV_VENV_CLEAR=1
+      UV_VENV_CLEAR: "1"
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
-              capabilities: [ gpu ]
+              capabilities: [gpu]
 
   powergrid-server-cpu:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: powergrid-server-cpu
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.powergrid.server.powergrid_server" ]
+    command: ["python", "-m", "domains.powergrid.server.powergrid_server"]
     ports:
       - "8005:8000"
     volumes:
-    - ~/.azure:/root/.azure:rw
+      - ~/.azure:/root/.azure:rw
     env_file:
-    - ../../.env
+      - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
+
   process-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: process-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.process.server.process_server" ]
+    command: ["python", "-m", "domains.process.server.process_server"]
     ports:
-    - 8002:8000
+      - "8002:8000"
     volumes:
-    - ~/.azure:/root/.azure:rw
+      - ~/.azure:/root/.azure:rw
     env_file:
-    - ../../.env
+      - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
+
   foundry-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: foundry-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.foundry.server.foundry_server" ]
+    command: ["python", "-m", "domains.foundry.server.foundry_server"]
     ports:
-    - 8003:8000
+      - "8003:8000"
     volumes:
-    - ~/.azure:/root/.azure:rw
+      - ~/.azure:/root/.azure:rw
     env_file:
-    - ../../.env
+      - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
 
   gis-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: gis-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.gis.server.gis_server" ]
+    command: ["python", "-m", "domains.gis.server.gis_server"]
     ports:
       - "8006:8000"
     volumes:
@@ -153,16 +130,9 @@ services:
     env_file:
       - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
 
   openlca-ipc:
     build:
@@ -175,12 +145,9 @@ services:
 
   openlca-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: openlca-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.openlca.server.openlca_server" ]
+    command: ["python", "-m", "domains.openlca.server.openlca_server"]
     ports:
       - "8008:8000"
     volumes:
@@ -188,28 +155,18 @@ services:
     env_file:
       - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OLCA_IPC_HOST=openlca-ipc
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
+      OLCA_IPC_HOST: openlca-ipc
     depends_on:
       - openlca-ipc
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
 
   office-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: office-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.office.server.office_server" ]
+    command: ["python", "-m", "domains.office.server.office_server"]
     ports:
       - "8007:8000"
     volumes:
@@ -218,25 +175,15 @@ services:
     env_file:
       - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu
+      <<: [*base-env, *trusted-hosts]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
 
   vitrimer-tg-sim-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: vitrimer-tg-sim-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server" ]
+    command: ["python", "-m", "domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server"]
     ports:
       - "8010:8000"
     volumes:
@@ -244,17 +191,10 @@ services:
     env_file:
       - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - LAMMPS_CMD=lmp
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu,vitrimer-tg-sim-server
+      <<: [*base-env, *trusted-hosts]
+      LAMMPS_CMD: lmp
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
     deploy:
       resources:
         limits:
@@ -262,12 +202,9 @@ services:
 
   vitrimer-vae-server:
     build:
-      context: ../..
-      dockerfile: code_execution/docker/Dockerfile
+      <<: *common-build
       target: vitrimer-vae-server
-      additional_contexts:
-        azure-cli: ~/.azure
-    command: [ "python", "-m", "domains.vitrimer_vae.server.vitrimer_vae_server" ]
+    command: ["python", "-m", "domains.vitrimer_vae.server.vitrimer_vae_server"]
     ports:
       - "8011:8000"
     volumes:
@@ -275,18 +212,11 @@ services:
     env_file:
       - ../../.env
     environment:
-      - PORT=8000
-      - HOST=0.0.0.0
-      - OBO_SIMULATION_MODE=true
-      - VITRIMER_VAE_CHECKPOINT_URL=https://sorbent0eastus.blob.core.windows.net/vitrimervae-checkpoints/prop49.model
-      - VITRIMER_VAE_CHECKPOINT_SHA256=725b4cfa60a9a6858b79298907cdf1fd4566d704a007d1cb966a1098b0f05033
-      - OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS=powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu,vitrimer-tg-sim-server,vitrimer-vae-server
+      <<: [*base-env, *trusted-hosts]
+      VITRIMER_VAE_CHECKPOINT_URL: https://sorbent0eastus.blob.core.windows.net/vitrimervae-checkpoints/prop49.model
+      VITRIMER_VAE_CHECKPOINT_SHA256: 725b4cfa60a9a6858b79298907cdf1fd4566d704a007d1cb966a1098b0f05033
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      <<: *common-healthcheck
 
 volumes:
   openlca-data:

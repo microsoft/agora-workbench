@@ -1,0 +1,12 @@
+name: office
+module: domains.office.server.office_server
+port: 8007
+description: Office document processing (Excel, Word, PowerPoint, IRM decryption)
+system_packages: []
+extra_files:
+  - states.py
+extra_env: {}
+depends_on: []
+volumes:
+  - ../../maps:/tmp/maps:rw
+trusted_hosts: true

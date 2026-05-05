@@ -1,0 +1,13 @@
+name: vitrimer_tg_sim
+module: domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server
+port: 8010
+description: Vitrimer Tg simulation (EMC + LAMMPS + PCFF)
+system_packages:
+  - lammps
+extra_files: []
+extra_env:
+  LAMMPS_CMD: lmp
+depends_on: []
+volumes: []
+trusted_hosts: true
+memory_limit: 32g

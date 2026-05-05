@@ -1,0 +1,12 @@
+name: vitrimer_vae
+module: domains.vitrimer_vae.server.vitrimer_vae_server
+port: 8011
+description: Vitrimer VAE (HierVAE generative model for polymer design)
+system_packages: []
+extra_files: []
+extra_env:
+  VITRIMER_VAE_CHECKPOINT_URL: https://sorbent0eastus.blob.core.windows.net/vitrimervae-checkpoints/prop49.model
+  VITRIMER_VAE_CHECKPOINT_SHA256: 725b4cfa60a9a6858b79298907cdf1fd4566d704a007d1cb966a1098b0f05033
+depends_on: []
+volumes: []
+trusted_hosts: true
