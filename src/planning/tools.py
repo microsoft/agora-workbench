@@ -1,15 +1,18 @@
 """
-FunctionTool wrappers for the PlanStore.
+Framework-agnostic planning tool descriptor factories.
 
-This module is the only part of the planning package that depends on
-agent_framework.  The rest of the package (store.py, models.py) is
-framework-agnostic.
+Provides factory functions that return
+:class:`~tools.tool_descriptor.ToolDescriptor` objects for the planning tools.
+No agent-framework imports — this module can be used with any framework.
 
-Tool factory presets
---------------------
-- ``create_plan_tools(store)``      — full read/write (planning + execution)
-- ``create_read_only_tools(store)`` — view + query only (presentation stage)
-- ``create_execution_tools(store)`` — status updates + view, no structural changes
+MAF users should import from ``planning.adapters.maf`` which wraps these
+descriptors in ``FunctionTool`` objects.
+
+Factory presets
+---------------
+- :func:`create_plan_descriptors`      — full read/write (planning + execution)
+- :func:`create_read_only_descriptors` — view + query only (presentation stage)
+- :func:`create_execution_descriptors` — status updates + view, no structural changes
 """
 
 from __future__ import annotations
@@ -18,16 +21,16 @@ import json
 import logging
 from typing import Optional
 
-from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
 from .models import StepStatus
 from .store import PlanStore
+from tools.tool_descriptor import ToolDescriptor
 
 LOGGER = logging.getLogger(__name__)
 
 
-# ── Pydantic input models ─────────────────────────────────────────────────────
+# ── Pydantic input models (framework-agnostic) ────────────────────────────────
 
 
 class ViewPlanInput(BaseModel):
@@ -133,22 +136,22 @@ def _parse_status(status: Optional[str]) -> Optional[StepStatus]:
 # ── Factory functions ─────────────────────────────────────────────────────────
 
 
-def create_plan_tools(store: PlanStore) -> list[FunctionTool]:
-    """Create the full set of read/write plan tools bound to *store*.
+def create_plan_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Create the full set of read/write plan tool descriptors bound to *store*.
 
     Includes structural tools (add/insert/remove steps, dependencies, tags)
     as well as status-update and query tools.  Suitable for planning and
     execution stages.
     """
-    read_only = create_read_only_tools(store)
-    execution = _build_execution_only_tools(store)
-    structural = _build_structural_tools(store)
-    dep_tag = _build_dep_tag_tools(store)
+    read_only = create_read_only_descriptors(store)
+    execution = _build_execution_only_descriptors(store)
+    structural = _build_structural_descriptors(store)
+    dep_tag = _build_dep_tag_descriptors(store)
     return read_only + execution + structural + dep_tag
 
 
-def create_read_only_tools(store: PlanStore) -> list[FunctionTool]:
-    """Create read-only tools: view_plan, query_steps, plan_summary, get_history."""
+def create_read_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Create read-only descriptors: view_plan, query_steps, plan_summary, get_history."""
 
     async def view_plan() -> str:
         return store.view()
@@ -173,53 +176,49 @@ def create_read_only_tools(store: PlanStore) -> list[FunctionTool]:
         return json.dumps([r.to_dict() for r in records])
 
     return [
-        FunctionTool(
+        ToolDescriptor(
             name="view_plan",
             description="View the current execution plan with all steps and their statuses.",
-            func=view_plan,
             input_model=ViewPlanInput,
-            approval_mode="never_require",
+            func=view_plan,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="query_steps",
             description=(
                 "Filter and list plan steps by status, tag, or dependency readiness. "
                 "Returns a JSON array of step objects."
             ),
-            func=query_steps,
             input_model=QueryStepsInput,
-            approval_mode="never_require",
+            func=query_steps,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="plan_summary",
             description="Return a summary of step counts grouped by status.",
-            func=plan_summary,
             input_model=SummaryInput,
-            approval_mode="never_require",
+            func=plan_summary,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="get_history",
             description=(
                 "Retrieve the change history for a specific step or the whole plan. "
                 "Omit step_id to get the full plan history."
             ),
-            func=get_history,
             input_model=GetHistoryInput,
-            approval_mode="never_require",
+            func=get_history,
         ),
     ]
 
 
-def create_execution_tools(store: PlanStore) -> list[FunctionTool]:
-    """Create execution-stage tools: view, query, status updates.
+def create_execution_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Create execution-stage descriptors: view, query, status updates.
 
     No structural changes (no add/insert/remove/dependency/tag tools).
     """
-    return create_read_only_tools(store) + _build_execution_only_tools(store)
+    return create_read_only_descriptors(store) + _build_execution_only_descriptors(store)
 
 
-def _build_execution_only_tools(store: PlanStore) -> list[FunctionTool]:
-    """Build tools that update step status and notes (no structural changes)."""
+def _build_execution_only_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Build descriptors that update step status and notes (no structural changes)."""
 
     async def set_step_status(step_id: int, status: str, notes: str | None = None) -> str:
         try:
@@ -240,28 +239,26 @@ def _build_execution_only_tools(store: PlanStore) -> list[FunctionTool]:
             return f"Error: {e}"
 
     return [
-        FunctionTool(
+        ToolDescriptor(
             name="set_step_status",
             description=(
                 "Set the status of a plan step. "
                 "Valid statuses: 'pending', 'in_progress', 'completed', 'failed', 'skipped'."
             ),
-            func=set_step_status,
             input_model=SetStepStatusInput,
-            approval_mode="never_require",
+            func=set_step_status,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="update_step_notes",
             description="Attach or update notes on a step (e.g. progress, failure reason).",
-            func=update_step_notes,
             input_model=UpdateStepNotesInput,
-            approval_mode="never_require",
+            func=update_step_notes,
         ),
     ]
 
 
-def _build_structural_tools(store: PlanStore) -> list[FunctionTool]:
-    """Build tools that structurally modify the plan (add/insert/update/remove/finalize)."""
+def _build_structural_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Build descriptors that structurally modify the plan (add/insert/update/remove/finalize)."""
 
     async def add_step(description: str) -> str:
         step = store.add_step(description)
@@ -292,49 +289,44 @@ def _build_structural_tools(store: PlanStore) -> list[FunctionTool]:
         return store.finalize()
 
     return [
-        FunctionTool(
+        ToolDescriptor(
             name="add_step",
             description="Add a new step to the end of the execution plan.",
-            func=add_step,
             input_model=AddStepInput,
-            approval_mode="never_require",
+            func=add_step,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="insert_step",
-            description=("Insert a new step after a given step_id. Use after_step_id=0 to insert at the beginning."),
-            func=insert_step,
+            description="Insert a new step after a given step_id. Use after_step_id=0 to insert at the beginning.",
             input_model=InsertStepInput,
-            approval_mode="never_require",
+            func=insert_step,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="update_step",
             description="Update a step's description and/or notes.",
-            func=update_step,
             input_model=UpdateStepInput,
-            approval_mode="never_require",
+            func=update_step,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="remove_step",
             description="Remove a step from the plan.",
-            func=remove_step,
             input_model=RemoveStepInput,
-            approval_mode="never_require",
+            func=remove_step,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="finalize_plan",
             description=(
                 "Finalize the plan and transition from the planning phase to the execution phase. "
                 "Call this once the plan is complete and approved by the user."
             ),
-            func=finalize_plan,
             input_model=FinalizePlanInput,
-            approval_mode="never_require",
+            func=finalize_plan,
         ),
     ]
 
 
-def _build_dep_tag_tools(store: PlanStore) -> list[FunctionTool]:
-    """Build dependency and tag management tools."""
+def _build_dep_tag_descriptors(store: PlanStore) -> list[ToolDescriptor]:
+    """Build dependency and tag management descriptors."""
 
     async def add_dependency(step_id: int, depends_on: int) -> str:
         try:
@@ -365,32 +357,28 @@ def _build_dep_tag_tools(store: PlanStore) -> list[FunctionTool]:
             return f"Error: {e}"
 
     return [
-        FunctionTool(
+        ToolDescriptor(
             name="add_dependency",
-            description=("Add a dependency between steps: step_id will be blocked until depends_on is completed."),
-            func=add_dependency,
+            description="Add a dependency between steps: step_id will be blocked until depends_on is completed.",
             input_model=AddDependencyInput,
-            approval_mode="never_require",
+            func=add_dependency,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="remove_dependency",
             description="Remove a dependency edge between two steps.",
-            func=remove_dependency,
             input_model=RemoveDependencyInput,
-            approval_mode="never_require",
+            func=remove_dependency,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="tag_step",
             description="Attach a label/tag to a step (e.g. 'research', 'implementation').",
-            func=tag_step,
             input_model=TagStepInput,
-            approval_mode="never_require",
+            func=tag_step,
         ),
-        FunctionTool(
+        ToolDescriptor(
             name="untag_step",
             description="Remove a label/tag from a step.",
-            func=untag_step,
             input_model=UntagStepInput,
-            approval_mode="never_require",
+            func=untag_step,
         ),
     ]

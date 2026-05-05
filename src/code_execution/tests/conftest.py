@@ -18,23 +18,12 @@ from azure.core.credentials import AccessToken
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-# Set OBO simulation mode for all tests before importing CodeExecutionServer
-# This allows the server to initialize without requiring actual Azure credentials
-os.environ["OBO_SIMULATION_MODE"] = "true"
 # Set a deterministic test endpoint so DataLakeDataManager can initialize in CI
 # without requiring environment-specific Azure Search configuration.
 os.environ.setdefault("DATA_LAKE_SEARCH_ENDPOINT", "https://test-search.search.windows.net")
 # Provide default Entra ID credentials for tests
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
-
-# Mock the MISE native library at module level so CodeExecutionServer can be
-# constructed in test environments where the mise package is not installed.
-import code_execution.code_execution.server as _server_module
-
-if _server_module.Mise is None:
-    _server_module.Mise = MagicMock()
-    _server_module.MiseValidationInput = MagicMock()
 
 from ..code_execution import CodeExecutionServer, EnvironmentConfig
 from ..code_execution.sessions import SessionManager, SessionConfig, set_current_session
@@ -45,37 +34,34 @@ TEST_USER_TOKEN = "test-user-token-for-testing"
 
 
 @pytest.fixture
-def create_mock_obo_provider():
+def create_mock_credential():
     """
-    Fixture that provides a factory function to create mock OBO providers.
+    Fixture that provides a factory function to create mock credentials.
 
     Usage:
-        def test_something(create_mock_obo_provider):
-            provider = create_mock_obo_provider()
+        def test_something(create_mock_credential):
+            credential = create_mock_credential()
             # or with custom token:
-            provider = create_mock_obo_provider(token="custom-token")
+            credential = create_mock_credential(token="custom-token")
     """
 
-    def _create_mock_obo_provider(token: str = "mock-obo-token", expires_on: int = 9999999999):
+    def _create_mock_credential(token: str = "mock-credential-token", expires_on: int = 9999999999):
         """
-        Create a mock OBO credential provider for testing.
+        Create a mock AsyncTokenCredential for testing.
 
         Args:
             token: The token string to return from get_token calls
             expires_on: Token expiration timestamp
 
         Returns:
-            Mock OBOCredentialProvider that returns the specified token for all scopes
+            Mock credential that returns the specified token for all scopes
         """
-        mock_provider = MagicMock()
-        mock_provider.get_token_async = AsyncMock(return_value=AccessToken(token=token, expires_on=expires_on))
-        mock_provider.get_token = MagicMock(return_value=AccessToken(token=token, expires_on=expires_on))
-        mock_provider.get_storage_token_async = AsyncMock(return_value=AccessToken(token=token, expires_on=expires_on))
-        mock_provider.get_sql_token_async = AsyncMock(return_value=AccessToken(token=token, expires_on=expires_on))
-        mock_provider.close = MagicMock()
-        return mock_provider
+        mock_cred = MagicMock()
+        mock_cred.get_token = AsyncMock(return_value=AccessToken(token=token, expires_on=expires_on))
+        mock_cred.close = AsyncMock()
+        return mock_cred
 
-    return _create_mock_obo_provider
+    return _create_mock_credential
 
 
 @pytest.fixture(scope="session")
@@ -223,11 +209,12 @@ async def test_server(
         )
     )
 
+    from ..code_execution.auth import create_noop_auth_config
+
     server = CodeExecutionServer(
         environment_config=config,
         session_manager=session_manager,
-        entra_client_id="test-client-id",
-        entra_tenant_id="test-tenant-id",
+        auth_config=create_noop_auth_config(),
         working_dir=session_work_dir,
     )
 

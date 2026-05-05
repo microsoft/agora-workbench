@@ -262,9 +262,8 @@ class SessionManager:
             session_id: Session identifier.
             working_dir: Optional working directory for the kernel process.
             user_token: User bearer token to expose as ``USER_ASSERTION_TOKEN``
-                in the kernel environment. Used by kernel-side tools (e.g. OBO
-                credential providers) to authenticate with downstream services
-                on behalf of the user.
+                in the kernel environment. Used by kernel-side tools to authenticate
+                with downstream services on behalf of the user.
             user_identity: User identity string to expose as ``USER_IDENTITY``
                 in the kernel environment.
         """

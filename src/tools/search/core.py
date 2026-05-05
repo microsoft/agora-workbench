@@ -1,34 +1,35 @@
 """
-Generic tool search catalog.
+Framework-agnostic search tool descriptor factory.
 
-Provides a ``FunctionTool`` factory:
+Provides :func:`create_search_tools_descriptor` — a factory that wraps a
+:class:`~tools.tool_search.ToolSearchBackend` in a
+:class:`~tools.tool_descriptor.ToolDescriptor`.  No agent-framework imports.
 
-* :func:`create_search_tools_function` — backend-agnostic catalog search
-  (returns JSON object with ``results`` list of
-  :class:`~tools.tool_search.ToolSearchResult` dicts and optional ``error``).
-
-Neither factory depends on a specific search backend; callers inject the
-backend via the :class:`~tools.tool_search.ToolSearchBackend` protocol.
+MAF users should import
+:func:`tools.search.adapters.maf_core.create_search_tools_function` which
+calls this factory and wraps the result in a ``FunctionTool``.
 """
+
+from __future__ import annotations
 
 import json
 import logging
 
-from agent_framework import FunctionTool
 from pydantic import BaseModel, Field
 
+from tools.tool_descriptor import ToolDescriptor
 from tools.tool_search import ToolSearchBackend
 
 LOGGER = logging.getLogger(__name__)
 
 
 # ============================================================================
-# Input models
+# Input model (framework-agnostic)
 # ============================================================================
 
 
 class SearchToolsInput(BaseModel):
-    """Input model for the ``search_tools`` FunctionTool."""
+    """Input model for the ``search_tools`` tool."""
 
     query: str = Field(
         description=(
@@ -44,14 +45,14 @@ class SearchToolsInput(BaseModel):
 
 
 # ============================================================================
-# search_tools factory
+# Framework-agnostic factory
 # ============================================================================
 
 
-def create_search_tools_function(backend: ToolSearchBackend) -> FunctionTool:
-    """Create a ``search_tools`` FunctionTool backed by *backend*.
+def create_search_tools_descriptor(backend: ToolSearchBackend) -> ToolDescriptor:
+    """Create a ``search_tools`` :class:`~tools.tool_descriptor.ToolDescriptor`.
 
-    The returned tool performs a catalog search and returns a JSON object
+    The returned descriptor performs a catalog search and returns a JSON object
     with a ``results`` key (list of :class:`~tools.tool_search.ToolSearchResult`
     dicts) and an optional ``error`` key.  It is completely backend-agnostic —
     any object satisfying the :class:`ToolSearchBackend` protocol can be
@@ -62,7 +63,7 @@ def create_search_tools_function(backend: ToolSearchBackend) -> FunctionTool:
                  :class:`~tools.tool_search.ToolSearchBackend`.
 
     Returns:
-        ``FunctionTool`` named ``search_tools``.
+        :class:`~tools.tool_descriptor.ToolDescriptor` named ``search_tools``.
     """
 
     async def search_tools(query: str, top: int = 5) -> str:
@@ -84,7 +85,7 @@ def create_search_tools_function(backend: ToolSearchBackend) -> FunctionTool:
             LOGGER.error("search_tools failed for query '%s': %s", query, exc, exc_info=True)
             return json.dumps({"results": [], "error": f"{type(exc).__name__}: {exc}"})
 
-    return FunctionTool(
+    return ToolDescriptor(
         name="search_tools",
         description=(
             "Search the tool catalog for domain-specific tools by name or description.  "
@@ -93,7 +94,6 @@ def create_search_tools_function(backend: ToolSearchBackend) -> FunctionTool:
             "Domain tools are invoked programmatically inside execute_code — use search_tools "
             "to discover their names, signatures, and which server they belong to."
         ),
-        approval_mode="never_require",
-        func=search_tools,
         input_model=SearchToolsInput,
+        func=search_tools,
     )

@@ -1,21 +1,6 @@
 # Docker Configuration
 
-Multi-stage Docker builds for the code execution servers. Each server shares a common base layer and adds only its own code and dependencies.
-
-## Build Stages
-
-| Stage | Domain | Host Port |
-|-------|--------|-----------|
-| `example-server` | General data science | 8000 |
-| `powergrid-server` | Power grid (PyPSA, HiGHS GPU) | 8001 |
-| `process-server` | Process simulation (IDAES) | 8002 |
-| `foundry-server` | Azure AI Foundry | 8003 |
-| `gis-server` | Geospatial analysis (GIS) | 8006 |
-| `office-server` | Office document processing | 8007 |
-| `openlca-server` | Life cycle assessment (LCA) | 8008 |
-| `openlca-ipc` *(sidecar)* | openLCA IPC JSON-RPC server | 8080 |
-
-The `openlca-ipc` sidecar service (port 8080) is also defined in `docker-compose.yml`. It is a custom-built image (see `domains/openlca/docker/`) that runs the openLCA IPC server alongside `openlca-server`.
+Multi-stage Docker builds for code execution servers. All servers share a common base layer (`base`) and add only their own code and dependencies on top.
 
 ## Prerequisites: Azure CLI Authentication
 
@@ -31,88 +16,151 @@ The `docker-compose.yml` automatically mounts `~/.azure` as an additional build 
 
 > **Note:** The `~/.azure` directory is only used during the build step to fetch the feed token — it is never baked into the final image.
 
-## Usage
+## Adding a New Server
+
+The recommended workflow uses `build.py` to scaffold a new domain and regenerate the Docker files automatically.
+
+### Option A — Automated scaffolding (recommended)
 
 ```bash
-cd code_execution/docker
+# 1. Scaffold the domain (creates domain.yaml + server stub):
+uv run python src/code_execution/docker/build.py new <name>
 
-# Build and run a single server (recommended: use docker compose so ~/.azure is wired up automatically)
-docker compose up example-server --build
+# 2. Edit the generated domain.yaml and implement your server tools.
 
-# Build and run all servers
-docker compose up --build
+# 3. Regenerate Dockerfile + docker-compose.yml:
+uv run python src/code_execution/docker/build.py generate
 
-# Health check
-curl http://localhost:8000/health
+# 4. Build and test:
+docker compose build <name>-server
+docker compose up <name>-server
 ```
+
+### Option B — Manual addition
+
+1. **Create `domains/<name>/domain.yaml`** describing the server:
+
+   ```yaml
+   name: myserver
+   module: domains.myserver.server.myserver_server
+   port: 8000
+   description: My domain server
+   system_packages: []      # apt packages (optional)
+   extra_files:
+     - states.py            # files to COPY beyond server/
+   extra_env: {}
+   depends_on: []
+   volumes: []
+   trusted_hosts: true
+   ```
+
+2. **Add a Dockerfile stage** to `Dockerfile` targeting `base`:
+
+   ```dockerfile
+   FROM base AS myserver-server
+   COPY --chown=appuser:appuser domains/myserver/server /app/domains/myserver/server
+   COPY --chown=appuser:appuser domains/myserver/states.py /app/domains/myserver/states.py
+   CMD ["python", "-m", "domains.myserver.server.myserver_server"]
+   ```
+
+3. **Add a service** in `docker-compose.yml` using the existing anchors:
+
+   ```yaml
+   myserver-server:
+     build:
+       <<: *common-build
+       target: myserver-server
+     command: ["python", "-m", "domains.myserver.server.myserver_server"]
+     ports:
+       - "8000:8000"
+     volumes:
+       - ~/.azure:/root/.azure:rw
+     env_file:
+       - ../../.env
+     environment:
+       <<: [*base-env, *trusted-hosts]
+     healthcheck:
+       <<: *common-healthcheck
+   ```
+
+4. **Update the `*trusted-hosts` anchor** (top of `docker-compose.yml`) to include `myserver-server`.
+
+5. **Register the server** in `server_registry.yaml`.
 
 ### Building without docker compose
 
 If you need to invoke `docker build` directly you must supply the `azure-cli` build context manually:
 
 ```bash
-cd AgoraAgentMAF  # build context root
+cd src  # build context root
 
 docker build \
   --build-context azure-cli=$HOME/.azure \
-  --target example-server \
+  --target myserver-server \
   -f code_execution/docker/Dockerfile \
-  -t example-server:local .
+  -t myserver-server:local .
 ```
 
 ## Environment Variables
 
-Containers read from `../../.env` (the AgoraAgentMAF root). Key variables:
+Containers read from `../../.env` (the repo root). Key variables:
 
 - `ENTRA_CLIENT_ID` / `ENTRA_TENANT_ID` — Entra ID app registration (required for auth)
 - `OBO_SIMULATION_MODE` — set `true` for local development to bypass OBO flow
 
 See `.env.example` for the full list.
 
-## OpenLCA IPC Sidecar
+## `build.py` Reference
 
-The `openlca-server` depends on `openlca-ipc`, a custom Java-based sidecar that exposes the openLCA JSON-RPC API on port 8080. Its Dockerfile lives at `domains/openlca/docker/Dockerfile` and uses MCR base images (`mcr.microsoft.com/openjdk/jdk:17-ubuntu`); it pulls the `olca-ipc` library JARs from Maven Central at build time — no external registry images are used.
+```
+usage: build.py [-h] {generate,new} ...
 
-### Database setup
+subcommands:
+  generate    Generate Dockerfile and docker-compose.yml from all domain.yaml files
+  new         Scaffold a new domain server (creates domain.yaml + server stub)
+```
 
-The `openlca-ipc` container serves databases from the `openlca-data` Docker named volume, mounted at `/app/data` inside the container. The volume is declared in `docker-compose.yml` and created automatically by Docker Compose, but it starts **empty**. To load an openLCA database:
+### `generate`
 
 ```bash
-# 1. Start the services once so Docker Compose creates the volume, then stop:
-docker compose up openlca-ipc --no-start
-
-# 2. Populate the volume with your openLCA databases (adjust the source path):
-docker run --rm \
-  -v openlca-data:/dst \
-  -v $HOME/openLCA-data-1.4:/src:ro \
-  ubuntu:24.04 \
-  cp -a /src/. /dst/
-
-# 3. Start the services (the IPC server will find the databases on startup):
-docker compose up openlca-ipc openlca-server --build
+uv run python src/code_execution/docker/build.py generate [--root ROOT] [--output-dir DIR]
 ```
 
-The `openlca-ipc` server accepts extra arguments (appended to the `docker run` or compose `command:`) such as `-db <name>` to pre-select a database and `--readonly` to forbid writes. Example:
+Reads every `domains/*/domain.yaml` under `ROOT` (default: `src/`), renders
+`domain.Dockerfile.j2` for each, and combines with `base.Dockerfile` to produce
+`Dockerfile`. Also renders `compose-service.j2` for each domain and writes a
+new `docker-compose.yml` with YAML anchors.
 
-```yaml
-# in docker-compose.yml, override the command for read-only mode:
-command: ["-db", "mydb", "--readonly"]
+### `new`
+
+```bash
+uv run python src/code_execution/docker/build.py new <name> [--root ROOT]
 ```
 
-## Adding a New Server
+Creates:
+- `domains/<name>/domain.yaml` — pre-filled config (edit port + description)
+- `domains/<name>/server/<name>_server.py` — `CodeExecutionServer` subclass stub
+- `domains/<name>/__init__.py` and `domains/<name>/server/__init__.py`
 
-1. Create a Dockerfile stage targeting `base`:
+## Architecture
 
-   ```dockerfile
-   FROM base AS myserver-server
-   COPY domains/myserver /app/domains/myserver
-   CMD ["python", "-m", "domains.myserver.server.myserver_server"]
-   ```
+```
+src/code_execution/docker/
+├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, code_execution)
+├── domain.Dockerfile.j2     # Jinja2 template for standard per-domain stages
+├── compose-service.j2       # Jinja2 template for docker-compose service entries
+├── build.py                 # CLI: `generate` + `new` commands
+├── Dockerfile               # Combined output (base + generated domain stages)
+├── docker-compose.yml       # YAML-anchor header; services added by build.py or manually
+└── README.md                # This file
 
-2. Add a service in `docker-compose.yml` following the existing pattern (include `additional_contexts: azure-cli: ~/.azure` under `build`).
-
-3. Register the server in `server_registry.yaml`.
+src/domains/<name>/          # Per-domain configs (created by `build.py new`)
+├── domain.yaml
+├── server/
+│   └── <name>_server.py
+└── states.py
+```
 
 ## Build Context
 
-The build context is `../..` (the AgoraAgentMAF root) so the Dockerfile can copy from `code_execution/`, `tools/`, `domains/`, and other top-level packages.
+The build context is `../..` from `code_execution/docker/` (i.e., `src/`) so the Dockerfile can copy from `code_execution/`, `domains/`, and other top-level packages.

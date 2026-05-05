@@ -5,22 +5,31 @@ Validates that CodeExecutionServer correctly exposes the
 WWW-Authenticate headers on 401 responses for MCP OAuth discovery.
 """
 
+from unittest.mock import patch
+
 from starlette.testclient import TestClient
 
+from ...code_execution import CodeExecutionServer
+from ...code_execution.auth import create_entra_auth_config, create_noop_auth_config
+from ...code_execution.code_execution_models import EnvironmentConfig
 
-def _create_server(
-    entra_client_id="test-client-id",
-    entra_tenant_id="test-tenant-id",
-):
-    """Helper to create a CodeExecutionServer for testing."""
-    from ...code_execution import CodeExecutionServer
-    from ...code_execution.code_execution_models import EnvironmentConfig
 
+def _create_server(entra_client_id="test-client-id", entra_tenant_id="test-tenant-id"):
+    """Helper to create a CodeExecutionServer for testing with Entra auth."""
+    config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    auth_config = create_entra_auth_config(client_id=entra_client_id, tenant_id=entra_tenant_id)
+    return CodeExecutionServer(
+        environment_config=config,
+        auth_config=auth_config,
+    )
+
+
+def _create_server_with_noop_auth():
+    """Helper to create a CodeExecutionServer using no-op auth_config."""
     config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     return CodeExecutionServer(
         environment_config=config,
-        entra_client_id=entra_client_id,
-        entra_tenant_id=entra_tenant_id,
+        auth_config=create_noop_auth_config(),
     )
 
 
@@ -71,7 +80,8 @@ class TestProtectedResourceMetadata:
 
     def test_resource_is_entra_identifier_uri(self):
         """Resource URI should be the Entra app identifier URI (for RFC 8707 audience binding)."""
-        server = _create_server(entra_client_id="my-app-id")
+        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "my-app-id", "ENTRA_TENANT_ID": "test-tenant-id"}):
+            server = _create_server(entra_client_id="my-app-id")
         client = TestClient(_create_test_app(server))
 
         data = client.get("/.well-known/oauth-protected-resource").json()
@@ -79,7 +89,8 @@ class TestProtectedResourceMetadata:
 
     def test_authorization_server_uses_tenant_id(self):
         """Authorization server URL should include the configured tenant ID."""
-        server = _create_server(entra_tenant_id="my-tenant-123")
+        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "test-client-id", "ENTRA_TENANT_ID": "my-tenant-123"}):
+            server = _create_server(entra_tenant_id="my-tenant-123")
         client = TestClient(_create_test_app(server))
 
         data = client.get("/.well-known/oauth-protected-resource").json()
@@ -89,7 +100,8 @@ class TestProtectedResourceMetadata:
 
     def test_scopes_include_client_id(self):
         """Scopes should reference the configured client ID."""
-        server = _create_server(entra_client_id="my-app-id")
+        with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "my-app-id", "ENTRA_TENANT_ID": "test-tenant-id"}):
+            server = _create_server(entra_client_id="my-app-id")
         client = TestClient(_create_test_app(server))
 
         data = client.get("/.well-known/oauth-protected-resource").json()
@@ -141,13 +153,12 @@ class TestWWWAuthenticateHeader:
         server = _create_server()
         client = TestClient(_create_test_app_with_auth(server))
 
-        # Mock verify_entra_token to raise 401
         from fastapi import HTTPException
 
-        async def mock_verify(*args, **kwargs):
+        async def mock_validate(*args, **kwargs):
             raise HTTPException(status_code=401, detail="Token expired")
 
-        server.verify_entra_token = mock_verify
+        server.validate_token = mock_validate
 
         response = client.post(
             "/mcp",
@@ -163,10 +174,10 @@ class TestWWWAuthenticateHeader:
 
         from fastapi import HTTPException
 
-        async def mock_verify(*args, **kwargs):
+        async def mock_validate(*args, **kwargs):
             raise HTTPException(status_code=403, detail="Forbidden")
 
-        server.verify_entra_token = mock_verify
+        server.validate_token = mock_validate
 
         response = client.post(
             "/mcp",
@@ -182,3 +193,32 @@ class TestWWWAuthenticateHeader:
 
         response = client.get("/health")
         assert response.status_code == 200
+
+
+class TestProtectedResourceMetadataWithAuthConfig:
+    """Test metadata endpoint when a pluggable auth_config is used instead of Entra params."""
+
+    def test_returns_404_when_no_entra_params(self, monkeypatch):
+        """Metadata endpoint should return 404 when no Entra client/tenant IDs are available."""
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        server = _create_server_with_noop_auth()
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 404
+
+    def test_returns_200_when_entra_env_vars_set(self, monkeypatch):
+        """Metadata endpoint should work when ENTRA env vars are set alongside noop auth."""
+        monkeypatch.setenv("ENTRA_CLIENT_ID", "my-client-id")
+        monkeypatch.setenv("ENTRA_TENANT_ID", "my-tenant-id")
+
+        server = _create_server_with_noop_auth()
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["resource"] == "api://my-client-id"
+        assert "my-tenant-id" in data["authorization_servers"][0]

@@ -9,21 +9,16 @@ from .entry import DecisionLogEntry
 class DecisionLog:
     """Thread-safe, append-only store of agent decision log entries.
 
-    The log is written to exclusively by MAF middleware (via :meth:`_append`).
-    Agents have read-only access through the :attr:`entries` property and
+    The log is written to exclusively by middleware (via :meth:`_append`).
+    Consumers have read-only access through the :attr:`entries` property and
     :meth:`to_context_string` helper.
 
-    Example usage by a programmer::
+    Example usage::
 
-        from middleware.decision_log import DecisionLog, DecisionLogContextProvider
+        from middleware.decision_log import DecisionLog
 
         log = DecisionLog()
-        provider = DecisionLogContextProvider(
-            decision_log=log,
-            agent_name="planner",
-            inject_context=True,
-        )
-        # Pass provider to the agent's context_providers list
+        # Pass log to middleware that records decisions
     """
 
     def __init__(self) -> None:
@@ -85,8 +80,7 @@ class DecisionLog:
     def _append(self, entry: DecisionLogEntry) -> None:
         """Append an entry to the log.
 
-        This method is intended for use by MAF middleware only (e.g.
-        :class:`~middleware.decision_log.DecisionLogContextProvider`).
+        This method is intended for use by middleware only.
         It is intentionally prefixed with ``_`` to signal that agents
         should not call it directly.
 

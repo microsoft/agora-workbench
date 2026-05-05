@@ -5,6 +5,7 @@ This module provides the core manager that handles fetching assets from
 DataLake-cataloged sources and caching them to disk for tool access.
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -14,14 +15,9 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+from azure.identity.aio import ManagedIdentityCredential
 from azure.search.documents.aio import SearchClient
 
-from ..auth import (
-    _AsyncOBOCredentialWrapper,
-    IRMDecryptionError,
-    get_obo_credential_provider,
-    is_irm_protected,
-)
 from .fetchers import BlobFetcher
 from ..types import AssetId
 
@@ -36,31 +32,33 @@ class DataLakeDataManager:
     to disk in their original format. Tools receive Path objects and handle
     loading the data as needed.
 
-    Authentication is handled via OBO token exchange - the user's assertion
-    token is exchanged for tokens with appropriate scopes for each resource.
+    Authentication is handled via managed identity — the server's identity
+    is used to access downstream Azure resources (Storage, AI Search).
 
     Supports:
     - Azure Blob Storage (abfss://, https://)
     """
 
-    def __init__(self, user_token: str):
+    def __init__(self):
         """
         Initialize the data manager.
 
-        Args:
-            user_token: User's bearer token (JWT) for OBO token exchange.
+        Uses managed identity for downstream resource access. Set
+        AZURE_CLIENT_ID for user-assigned MI, otherwise system-assigned MI is used.
 
         Raises:
-            ValueError: If OBO is not configured (missing env vars)
+            ValueError: If DATA_LAKE_SEARCH_ENDPOINT is not configured.
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
 
-        self._obo_provider = get_obo_credential_provider(user_assertion=user_token)
+        # Create managed identity credential for downstream access
+        mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
+        self._credential = ManagedIdentityCredential(client_id=mi_client_id)
 
         # Initialize fetchers
         self._fetchers = [
-            BlobFetcher(obo_provider=self._obo_provider),
+            BlobFetcher(credential=self._credential),
         ]
 
         # Initialize Azure Search client for blob-details index
@@ -73,8 +71,8 @@ class DataLakeDataManager:
                 "Set this to your Azure AI Search service endpoint (e.g., https://your-service.search.windows.net)"
             )
 
-        # Wrap OBO provider with async credential wrapper for Search client
-        search_credential = _AsyncOBOCredentialWrapper(self._obo_provider)
+        # Use managed identity credential for Search client
+        search_credential = self._credential
         self._search_client = SearchClient(
             endpoint=search_endpoint,
             index_name=self._blob_details_index,
@@ -176,9 +174,6 @@ class DataLakeDataManager:
         # Stream asset directly to file to avoid loading into memory
         bytes_written = await self._fetch_asset_to_file(resource_url, cache_path)
 
-        # Attempt IRM decryption if the file is IRM/DRM-protected
-        await self._try_decrypt_irm(cache_path)
-
         # Update index (use artifact_id as key)
         self._cache_index[artifact_id] = cache_path
 
@@ -204,37 +199,6 @@ class DataLakeDataManager:
 
         raise ValueError(
             f"No fetcher available for asset: {qualified_name}. Supported formats: Azure Blob/ADLS (abfss://, https://)"
-        )
-
-    async def _try_decrypt_irm(self, cache_path: Path) -> None:
-        """
-        Check for IRM/DRM-protected files and raise an error if found.
-
-        IRM decryption is not currently supported. If an IRM-protected file is
-        detected, this raises IRMDecryptionError to give the caller direct feedback.
-
-        If the file is not IRM-protected, this is a no-op.
-
-        Note: The underlying IRM decryption code (irm.py) and OBO-based token
-        acquisition remain in place for potential future use.
-        """
-        # Quick check: is it an OLE2 file?
-        try:
-            with open(cache_path, "rb") as f:
-                header = f.read(8)
-            if header != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-                return  # Not OLE2, definitely not IRM
-        except Exception:
-            return
-
-        if not is_irm_protected(cache_path):
-            LOGGER.debug(f"File is OLE2 but not IRM-protected: {cache_path.name}")
-            return
-
-        raise IRMDecryptionError(
-            f"IRM-protected file detected ({cache_path.name}). "
-            "IRM decryption is not currently supported. "
-            "Please decrypt the file before ingestion."
         )
 
     def _get_cache_file_path(self, qualified_name: str) -> Path:
@@ -290,7 +254,7 @@ class DataLakeDataManager:
 
     def cleanup(self) -> None:
         """
-        Clean up cache directory, OBO provider, and resources.
+        Clean up cache directory, credentials, and resources.
 
         Removes the temporary cache directory if it was created by this manager.
         Call this when the session is ending to free up disk space.
@@ -300,25 +264,56 @@ class DataLakeDataManager:
 
         # Close search client
         if hasattr(self, "_search_client") and self._search_client:
-            import asyncio
-
             try:
-                # Close async search client
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # If event loop is running, schedule close
-                    asyncio.create_task(self._search_client.close())
-                else:
-                    # If no loop or loop not running, run synchronously
-                    asyncio.run(self._search_client.close())
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._search_client.close())
+            except RuntimeError:
+                try:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(self._search_client.close())
+                    loop.close()
+                except Exception as e:
+                    LOGGER.debug(f"Error closing search client: {e}")
+
+        # Close managed identity credential
+        if hasattr(self, "_credential"):
+            try:
+                loop = asyncio.get_running_loop()
+                # We're inside a running loop — schedule close as a task
+                loop.create_task(self._credential.close())
+            except RuntimeError:
+                # No running loop — safe to create a temporary one
+                try:
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(self._credential.close())
+                    loop.close()
+                except Exception as e:
+                    LOGGER.debug(f"Error closing credential: {e}")
+
+        # Remove temp directory
+        if self._cache_dir and self._cache_dir.exists():
+            try:
+                shutil.rmtree(self._cache_dir)
+                LOGGER.info(f"Cleaned up cache directory: {self._cache_dir}")
+            except Exception as e:
+                LOGGER.warning(f"Failed to clean up cache directory: {e}")
+
+    async def aclose(self) -> None:
+        """Async cleanup — preferred over sync cleanup() when inside an event loop."""
+        self._cache_index.clear()
+
+        if hasattr(self, "_search_client") and self._search_client:
+            try:
+                await self._search_client.close()
             except Exception as e:
                 LOGGER.debug(f"Error closing search client: {e}")
 
-        # Close OBO credential provider
-        if hasattr(self, "_obo_provider"):
-            self._obo_provider.close()
+        if hasattr(self, "_credential"):
+            try:
+                await self._credential.close()
+            except Exception as e:
+                LOGGER.debug(f"Error closing credential: {e}")
 
-        # Remove temp directory if we created it
         if self._cache_dir and self._cache_dir.exists():
             try:
                 shutil.rmtree(self._cache_dir)

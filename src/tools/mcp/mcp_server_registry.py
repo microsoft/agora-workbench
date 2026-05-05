@@ -28,9 +28,8 @@ from functools import lru_cache
 import httpx
 import yaml
 from pydantic import BaseModel, Field
-from agent_framework import MCPStreamableHTTPTool
 
-from auth import create_entra_token_provider, BearerTokenAuth
+from auth import create_entra_token_provider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -83,7 +82,7 @@ class MCPServerConfig(BaseModel):
 class MCPServerDescriptor:
     """Descriptor for an MCP code execution server.
 
-    Contains metadata needed to create an MCPStreamableHTTPTool connection.
+    Contains metadata needed to connect to an MCP server.
     """
 
     name: str
@@ -168,7 +167,7 @@ class MCPServerRegistry:
     """
     Global registry for MCP code execution servers.
 
-    Exposes a list of MCPStreamableHTTPTool at `mcp_tools`.
+    Maintains a catalog of server descriptors for discovery and connection.
 
     Usage:
         # In code_execution module (registers servers):
@@ -182,7 +181,7 @@ class MCPServerRegistry:
             packages=["pypsa", "pypower"],
         ))
 
-        # In agent code (discovers servers):
+        # In client code (discovers servers):
         from tools.mcp.mcp_server_registry import get_mcp_registry
 
         registry = get_mcp_registry()
@@ -195,9 +194,6 @@ class MCPServerRegistry:
         self._servers: Dict[str, MCPServerDescriptor] = {}
         self._initialized = False
         self._auto_discovery_enabled = True
-        self._mcp_tools_by_name: Dict[str, MCPStreamableHTTPTool] = {}
-        self.mcp_tools: list[MCPStreamableHTTPTool] = []
-        self._http_clients: list[httpx.AsyncClient] = []  # Track clients for cleanup
 
     async def _validate_server_connection(self, descriptor: MCPServerDescriptor) -> tuple[bool, str]:
         """
@@ -344,103 +340,11 @@ class MCPServerRegistry:
 
         return name in self._servers
 
-    def get_mcp_tool(self, name: str) -> Optional[MCPStreamableHTTPTool]:
-        """
-        Get MCP tool by name.
-
-        Args:
-            name: Server/tool name
-
-        Returns:
-            MCPStreamableHTTPTool instance or None if not found
-        """
-        # Trigger auto-discovery if not already done
-        if not self._initialized and self._auto_discovery_enabled:
-            self._auto_discover()
-
-        return self._mcp_tools_by_name.get(name)
-
     def clear(self) -> None:
-        """
-        Clear all registered servers and tools, closing MCP tools and HTTP clients.
-
-        Automatically closes MCP tools and HTTP clients to prevent connection leaks.
-        Works from both sync and async contexts.
-        """
-        # Capture current tools/clients before clearing so the background task
-        # closes the actual objects even if the registry lists are emptied first.
-        tools_to_close = list(self.mcp_tools)
-        clients_to_close = list(self._http_clients)
-
-        async def _close_all() -> None:
-            await self._close_mcp_tools(tools_to_close)
-            await self._close_clients(clients_to_close)
-
-        if tools_to_close or clients_to_close:
-            try:
-                loop = asyncio.get_running_loop()
-                # Already in async context - schedule cleanup
-                loop.create_task(_close_all())
-            except RuntimeError:
-                # No running loop - safe to use asyncio.run
-                asyncio.run(_close_all())
-
+        """Clear all registered servers."""
         self._servers.clear()
-        self._mcp_tools_by_name.clear()
-        self.mcp_tools.clear()
-        self._http_clients.clear()
         self._initialized = False
         LOGGER.info("Cleared MCP server registry")
-
-    async def _close_clients(self, clients: list | None = None) -> None:
-        """Close HTTP clients.
-
-        Args:
-            clients: Explicit list of clients to close. If None, closes
-                     self._http_clients.
-        """
-        clients = list(clients if clients is not None else self._http_clients)
-        results = await asyncio.gather(
-            *(client.aclose() for client in clients),
-            return_exceptions=True,
-        )
-        for client, result in zip(clients, results):
-            if isinstance(result, Exception):
-                LOGGER.warning(f"Error closing HTTP client {client}: {result}")
-
-    async def _close_mcp_tools(self, tools: list | None = None) -> None:
-        """Close MCPStreamableHTTPTool instances.
-
-        Args:
-            tools: Explicit list of tools to close. If None, closes
-                   self.mcp_tools.
-        """
-        tools = list(tools if tools is not None else self.mcp_tools)
-        results = await asyncio.gather(
-            *(tool.close() for tool in tools),
-            return_exceptions=True,
-        )
-        for tool, result in zip(tools, results):
-            if isinstance(result, Exception):
-                LOGGER.warning(f"Error closing MCP tool {tool}: {result}")
-
-    async def aclose(self) -> None:
-        """
-        Close all MCP tools and HTTP clients, then clean up resources.
-
-        Closes MCPStreamableHTTPTool instances first (which handle cancel
-        scope errors gracefully via _safe_close_exit_stack), then closes
-        any remaining HTTP clients.
-
-        Can be called directly in async contexts. For sync contexts,
-        just call clear() which handles closing automatically.
-        """
-        await self._close_mcp_tools()
-        await self._close_clients()
-        self.mcp_tools.clear()
-        self._mcp_tools_by_name.clear()
-        self._http_clients.clear()
-        LOGGER.info("Closed all MCP tools and HTTP clients")
 
     def disable_auto_discovery(self) -> None:
         """Disable automatic server discovery."""
@@ -449,52 +353,6 @@ class MCPServerRegistry:
     def enable_auto_discovery(self) -> None:
         """Enable automatic server discovery."""
         self._auto_discovery_enabled = True
-
-    def _create_mcp_tools(self) -> None:
-        """
-        Create MCPStreamableHTTPTool instances for all registered servers.
-        Updates the public mcp_tools attribute and internal lookup dictionary.
-
-        Warning: This is a synchronous method that cannot close existing async clients.
-        If recreating tools, call aclose() first to prevent connection leaks.
-
-        Example:
-            await registry.aclose()  # Close existing clients first
-            registry._create_mcp_tools()  # Then recreate tools
-        """
-        self.mcp_tools.clear()
-        self._mcp_tools_by_name.clear()
-        self._http_clients.clear()  # Clear references to old clients (should be closed first)
-
-        for name, descriptor in self._servers.items():
-            try:
-                token_provider = create_entra_token_provider(descriptor.scope)
-                # Create an httpx client with Bearer token auth using the token provider.
-                # The BearerTokenAuth class will call token_provider() for each request
-                # to ensure fresh tokens are used. Configure timeouts so that
-                # long-lived MCP streams are not interrupted by read timeouts.
-                http_client = httpx.AsyncClient(
-                    auth=BearerTokenAuth(token_provider),
-                    timeout=httpx.Timeout(
-                        connect=5.0,
-                        write=10.0,
-                        read=None,
-                        pool=5.0,
-                    ),
-                )
-                self._http_clients.append(http_client)  # Track for cleanup
-
-                mcp_tool = MCPStreamableHTTPTool(
-                    url=descriptor.url,
-                    name=descriptor.name,
-                    description=descriptor.description,
-                    http_client=http_client,
-                )
-                self.mcp_tools.append(mcp_tool)
-                self._mcp_tools_by_name[name] = mcp_tool
-                LOGGER.info(f"Created MCP tool for registered server: {name}")
-            except Exception as e:
-                LOGGER.warning(f"Failed to create MCP tool for '{name}': {e}")
 
     def _auto_discover(self) -> None:
         """
@@ -516,10 +374,6 @@ class MCPServerRegistry:
 
         if server_configs:
             LOGGER.info(f"Loading {len(server_configs)} server configs, validating connectivity...")
-            # Await server registration during initialization.
-            # If we're already inside a running event loop (e.g. agent framework),
-            # asyncio.run() would fail and leave the coroutine unawaited.
-            # In that case, run the coroutine in a new thread with its own loop.
             coro = self._register_from_configs(server_configs)
             try:
                 asyncio.get_running_loop()
@@ -536,9 +390,6 @@ class MCPServerRegistry:
             LOGGER.info(f"Successfully registered {len(self._servers)} MCP servers")
         else:
             LOGGER.warning("No MCP servers were successfully registered")
-
-        # Create MCP tools after discovery
-        self._create_mcp_tools()
 
     def _load_configs_from_yaml(self) -> List[MCPServerConfig]:
         """
