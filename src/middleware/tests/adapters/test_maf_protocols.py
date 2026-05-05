@@ -120,6 +120,87 @@ class TestMAFChatContextAdapterToolCalls:
 
 
 # ---------------------------------------------------------------------------
+# MAFFunctionContextAdapter -- arguments setter round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMAFFunctionContextAdapterArgumentsSetter:
+    """Test the arguments setter handles both Pydantic model reconstruction and dict fallback."""
+
+    @pytest.mark.unit
+    def test_reconstructs_pydantic_model_from_dict(self):
+        """When original args are a Pydantic model, setter reconstructs the model type."""
+        from pydantic import BaseModel
+        from middleware.decision_log.adapters.maf_protocols import MAFFunctionContextAdapter
+
+        class MyInput(BaseModel):
+            x: int = 0
+            y: str = ""
+
+        maf_ctx = MagicMock()
+        maf_ctx.function = MagicMock()
+        maf_ctx.function.configure_mock(name="test_fn")
+        maf_ctx.arguments = MyInput(x=1, y="original")
+        maf_ctx.result = None
+
+        adapter = MAFFunctionContextAdapter(maf_ctx)
+
+        # Write new values via the adapter
+        adapter.arguments = {"x": 42, "y": "updated"}
+
+        # Should have reconstructed as MyInput on the MAF context
+        assert isinstance(maf_ctx.arguments, MyInput)
+        assert maf_ctx.arguments.x == 42
+        assert maf_ctx.arguments.y == "updated"
+
+    @pytest.mark.unit
+    def test_falls_back_to_dict_when_model_reconstruction_fails(self):
+        """When model reconstruction raises, falls back to storing a plain dict."""
+        from middleware.decision_log.adapters.maf_protocols import MAFFunctionContextAdapter
+
+        class BrokenModel:
+            """A non-Pydantic object whose constructor rejects kwargs."""
+
+            def __init__(self):
+                pass
+
+            def model_dump(self):
+                return {"old": "value"}
+
+        maf_ctx = MagicMock()
+        maf_ctx.function = MagicMock()
+        maf_ctx.function.configure_mock(name="test_fn")
+        maf_ctx.arguments = BrokenModel()
+        maf_ctx.result = None
+
+        adapter = MAFFunctionContextAdapter(maf_ctx)
+
+        # Write a plain dict — reconstruction of BrokenModel(**dict) will fail
+        adapter.arguments = {"new_key": "new_value"}
+
+        # Should fall back to storing the dict directly
+        assert maf_ctx.arguments == {"new_key": "new_value"}
+
+    @pytest.mark.unit
+    def test_round_trip_read_write_read(self):
+        """Read → write → read round-trip preserves values."""
+        from middleware.decision_log.adapters.maf_protocols import MAFFunctionContextAdapter
+
+        maf_ctx = MagicMock()
+        maf_ctx.function = MagicMock()
+        maf_ctx.function.configure_mock(name="test_fn")
+        maf_ctx.arguments = {"a": 1, "b": 2}
+        maf_ctx.result = None
+
+        adapter = MAFFunctionContextAdapter(maf_ctx)
+        original = adapter.arguments
+        assert original == {"a": 1, "b": 2}
+
+        adapter.arguments = {"a": 10, "b": 20}
+        assert adapter.arguments == {"a": 10, "b": 20}
+
+
+# ---------------------------------------------------------------------------
 # AgoraFunctionMiddlewareToMAF -- MiddlewareTermination propagation
 # ---------------------------------------------------------------------------
 
@@ -158,7 +239,7 @@ class TestFunctionMiddlewareTerminationPropagation:
 class TestContextProviderInheritance:
     @pytest.mark.unit
     def test_inherits_base_context_provider(self):
-        from agent_framework import ContextProvider as BaseContextProvider
+        from agent_framework import BaseContextProvider
 
         class MyProvider(ContextProvider):
             async def provide(self, context):
@@ -191,7 +272,6 @@ class TestMAFChatClientAdapter:
     async def test_complete_uses_maf_agent(self):
         """MAFChatClientAdapter.complete creates a MAF Agent and returns its text output."""
         from middleware.protocols import Message
-        from middleware.decision_log.adapters.maf_protocols import MAFAgent
 
         mock_client = MagicMock()
         adapter = MAFChatClientAdapter(mock_client)
@@ -230,3 +310,28 @@ class TestMAFChatClientAdapter:
             result = await adapter.complete([Message(role="user", content="hi")])
 
         assert result == ""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_reuses_agent_across_calls(self):
+        """Agent is created once and reused across multiple complete() calls."""
+        from middleware.protocols import Message
+
+        mock_client = MagicMock()
+        adapter = MAFChatClientAdapter(mock_client)
+
+        mock_result = MagicMock()
+        mock_result.text = "ok"
+
+        with patch("middleware.decision_log.adapters.maf_protocols.MAFAgent") as MockAgent:
+            agent_instance = MockAgent.return_value
+            agent_instance.create_session.return_value = MagicMock()
+            agent_instance.run = AsyncMock(return_value=mock_result)
+
+            await adapter.complete([Message(role="user", content="first")])
+            await adapter.complete([Message(role="user", content="second")])
+
+        # Agent constructed only once, but create_session called twice
+        MockAgent.assert_called_once()
+        assert agent_instance.create_session.call_count == 2
+        assert agent_instance.run.call_count == 2

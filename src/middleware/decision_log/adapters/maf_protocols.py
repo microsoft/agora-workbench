@@ -29,7 +29,7 @@ from typing import Any, Awaitable, Callable, Sequence
 try:
     from agent_framework import (
         Agent as MAFAgent,
-        ContextProvider as MAFBaseContextProvider,
+        BaseContextProvider as MAFBaseContextProvider,
         ChatContext as MAFChatContext,
         ChatMiddleware as MAFChatMiddleware,
         FunctionInvocationContext as MAFFunctionInvocationContext,
@@ -39,12 +39,10 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 
 from middleware.protocols import (
-    ChatClient,
     ChatMiddleware,
     ContextProvider,
     FunctionMiddleware,
@@ -273,6 +271,10 @@ class MAFChatClientAdapter:
     :class:`~middleware.decision_log.DecisionLogChatMiddleware` when running
     inside a MAF agent.
 
+    The adapter lazily creates a single :class:`agent_framework.Agent` instance
+    and reuses it across calls to avoid repeated construction overhead during
+    long-running or multi-agent workloads.
+
     Args:
         client: The MAF chat client (e.g. an ``openai.AsyncAzureOpenAI`` or
             similar object accepted by ``agent_framework.Agent``).
@@ -289,21 +291,28 @@ class MAFChatClientAdapter:
 
     def __init__(self, client: Any) -> None:
         self._client = client
+        self._agent: MAFAgent | None = None
+
+    def _get_agent(self) -> MAFAgent:
+        """Return the cached MAF Agent, creating it on first use."""
+        if self._agent is None:
+            self._agent = MAFAgent(
+                client=self._client,
+                name="decision_log_synthesiser",
+            )
+        return self._agent
 
     async def complete(self, messages: Sequence[Message]) -> str:
         """Send *messages* to the MAF agent and return the text response.
 
-        Creates a temporary :class:`agent_framework.Agent` for the synthesis
-        call so that the MAF client is used exactly as callers would expect.
+        Uses a cached :class:`agent_framework.Agent` instance with a fresh
+        session per call (sessions are lightweight and isolate message history).
         """
-        synthesis_agent = MAFAgent(
-            client=self._client,
-            name="decision_log_synthesiser",
-        )
-        session = synthesis_agent.create_session()
+        agent = self._get_agent()
+        session = agent.create_session()
         maf_messages = [_agora_message_to_maf(m) for m in messages]
 
-        result = await synthesis_agent.run(messages=maf_messages, session=session)
+        result = await agent.run(messages=maf_messages, session=session)
         return getattr(result, "text", None) or ""
 
 

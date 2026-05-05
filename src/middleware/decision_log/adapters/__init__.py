@@ -1,11 +1,13 @@
-"""MAF adapters for decision log middleware.
-
-Requires the ``maf`` extra: ``pip install agora-workbench[maf]``
+"""Decision log middleware implementations.
 
 The classes exported here implement the Agora middleware protocol ABCs
 (:class:`~middleware.protocols.ChatMiddleware` and
-:class:`~middleware.protocols.ContextProvider`) and must be wrapped for
-use inside a MAF agent:
+:class:`~middleware.protocols.ContextProvider`).  They are framework-agnostic
+and do **not** require ``agent_framework``.
+
+To use them inside a MAF agent, wrap with the helpers in
+:mod:`~middleware.decision_log.adapters.maf_protocols` (which *does*
+require the ``maf`` extra):
 
     from middleware.decision_log.adapters import (
         DecisionLogChatMiddleware,

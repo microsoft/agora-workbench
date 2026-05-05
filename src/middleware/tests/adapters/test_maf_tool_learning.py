@@ -136,7 +136,7 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_discovers_tool_names_from_context_tools(self):
         """When no explicit tool_names, middleware discovers from context.tools."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
@@ -154,7 +154,7 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_uses_explicit_tool_names_over_discovery(self):
         """When explicit tool_names provided, middleware ignores agent tools."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
@@ -171,7 +171,7 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_caches_vignette_results(self):
         """Repeated calls with same tool set use cached vignettes."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
@@ -189,7 +189,7 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_cache_miss_on_different_tool_set(self):
         """Different tool sets produce separate cache entries."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
@@ -208,7 +208,6 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_no_search_when_no_repo(self):
         """When search repo is unavailable, middleware is a no-op."""
-        from unittest.mock import AsyncMock
 
         mw = self._make_middleware(search_repo=None)
         ctx = self._make_context(tool_names=["my_tool"])
@@ -221,7 +220,7 @@ class TestVignetteRunMiddlewareProvide:
     @pytest.mark.unit
     async def test_no_search_when_no_tools(self):
         """When no tools are registered, middleware is a no-op."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         mw = self._make_middleware(search_repo=search_repo)
@@ -231,6 +230,48 @@ class TestVignetteRunMiddlewareProvide:
 
         search_repo.search_vignettes.assert_not_called()
         ctx.extend_messages.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_injects_guardrails_when_vignettes_found(self):
+        """When vignettes are returned, guardrails are injected via extend_messages."""
+        from unittest.mock import MagicMock
+
+        vignette = Vignette(
+            vignette_id="v-001",
+            kind="anti_pattern",
+            scope="user",
+            tenant_id="t1",
+            user_id="u1",
+            tool=ToolSignature(tool_name="calendar.create_event"),
+            match=MatchSpec(arg_keys=["timezone"]),
+            title="Timezone required",
+            summary="Must supply timezone.",
+            anti_pattern=AntiPattern(
+                rule="Do not omit 'timezone' for calendar.create_event.",
+                severity="soft",
+            ),
+        )
+
+        search_repo = MagicMock()
+        search_repo.search_vignettes.return_value = [vignette]
+
+        mw = self._make_middleware(search_repo=search_repo)
+        ctx = self._make_context(tool_names=["calendar.create_event"])
+
+        await mw.provide(ctx)
+
+        # extend_messages should have been called with source_id and a system message
+        ctx.extend_messages.assert_called_once()
+        call_args = ctx.extend_messages.call_args
+        source_id = call_args[0][0]
+        messages = call_args[0][1]
+
+        assert source_id == "vignette_guardrails"
+        assert len(messages) == 1
+        assert messages[0].role == "system"
+        # The injected content should mention the anti-pattern rule
+        assert "timezone" in messages[0].content.lower()
 
     @pytest.mark.asyncio
     @pytest.mark.unit
