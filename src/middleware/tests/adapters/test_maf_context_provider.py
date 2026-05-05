@@ -7,7 +7,7 @@ import pytest
 from middleware.decision_log.adapters.maf_context_provider import DecisionLogContextProvider
 from middleware.decision_log.entry import DecisionLogEntry
 from middleware.decision_log.log import DecisionLog
-from middleware.protocols import FunctionInfo, Message
+from middleware.protocols import Message
 
 
 def _make_agent_context() -> MagicMock:
@@ -125,9 +125,7 @@ class TestProvide:
     async def test_message_role_is_user(self):
         """The injected message should have role 'user'."""
         log = DecisionLog()
-        log._append(
-            DecisionLogEntry(timestamp="2026-01-01T00:00:00Z", agent="a", summary="Did something")
-        )
+        log._append(DecisionLogEntry(timestamp="2026-01-01T00:00:00Z", agent="a", summary="Did something"))
         provider = DecisionLogContextProvider(log)
         context = _make_agent_context()
         await provider.provide(context)

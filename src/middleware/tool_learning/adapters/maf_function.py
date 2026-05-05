@@ -38,7 +38,6 @@ from middleware.protocols import (
     FunctionInvocationContext,
     FunctionMiddleware,
     MiddlewareTermination,
-    ToolResult,
 )
 
 from ..compile import compile_vignettes
