@@ -207,7 +207,9 @@ def get_storage_connection_string() -> str | None:
         >>> if conn_str:
         ...     client = BlobServiceClient.from_connection_string(conn_str)
         ... else:
-        ...     client = BlobServiceClient(account_url, credential=get_search_credential())
+        ...     from azure.identity import DefaultAzureCredential
+        ...
+        ...     client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
     """
     return os.getenv(AZURE_STORAGE_CONNECTION_STRING_ENV) or None
 
@@ -219,10 +221,10 @@ def get_storage_connection_string() -> str | None:
 
 def is_key_based_auth() -> bool:
     """
-    Check if the environment is configured for key-based authentication.
+    Check if Azure AI Search is configured for API key authentication.
 
-    Returns True if any API key environment variables are set, indicating
-    the user prefers key-based auth over Entra ID.
+    Returns True if AZURE_SEARCH_API_KEY is set, indicating the user
+    prefers key-based auth over Entra ID for search operations.
 
     This is useful for consumers that need to branch behavior based on
     auth mode (e.g., skipping operations that require token-based auth).
