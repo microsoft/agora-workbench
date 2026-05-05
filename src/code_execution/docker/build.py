@@ -25,7 +25,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 from jinja2 import Environment, FileSystemLoader
@@ -81,14 +81,14 @@ class DomainConfig(BaseModel):
         description="Docker build-time ARG values passed to the Dockerfile",
     )
     gpu: bool = Field(default=False, description="Reserve NVIDIA GPU resource in docker-compose")
-    memory_limit: Optional[str] = Field(
+    memory_limit: str | None = Field(
         default=None, description="Compose memory limit, e.g. '32g'"
     )
     trusted_hosts: bool = Field(
         default=True,
         description="Include OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS env var in the compose service",
     )
-    dockerfile_fragment: Optional[str] = Field(
+    dockerfile_fragment: str | None = Field(
         default=None,
         description=(
             "Path to a raw Dockerfile fragment relative to the domain directory. "
