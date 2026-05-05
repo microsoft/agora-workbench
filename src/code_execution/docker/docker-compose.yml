@@ -14,10 +14,10 @@ x-base-env: &base-env
   HOST: "0.0.0.0"
   OBO_SIMULATION_MODE: "true"
 
-# All servers that participate in object-transfer (cross-service data sharing).
-# Update this anchor whenever a new server is added.
+# Populated by `build.py generate` once domains are added.
+# List all server service names that participate in object-transfer.
 x-trusted-hosts: &trusted-hosts
-  OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "powergrid-server,gis-server,process-server,foundry-server,office-server,openlca-server,powergrid-server-cpu,vitrimer-tg-sim-server,vitrimer-vae-server"
+  OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: ""
 
 x-common-healthcheck: &common-healthcheck
   test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -26,197 +26,23 @@ x-common-healthcheck: &common-healthcheck
   retries: 3
   start_period: 60s
 
-services:
-  example-server:
-    build:
-      <<: *common-build
-      target: example-server
-    command: ["python", "-m", "domains.example.server.example_server"]
-    ports:
-      - "8000:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: *base-env
-    healthcheck:
-      <<: *common-healthcheck
+# Domain services are added here by `build.py generate` or manually following
+# the pattern in README.md.  Use the anchors above to avoid boilerplate:
+#
+#   my-server:
+#     build:
+#       <<: *common-build
+#       target: my-server
+#     command: ["python", "-m", "domains.myserver.server.myserver_server"]
+#     ports:
+#       - "8000:8000"
+#     volumes:
+#       - ~/.azure:/root/.azure:rw
+#     env_file:
+#       - ../../.env
+#     environment:
+#       <<: [*base-env, *trusted-hosts]
+#     healthcheck:
+#       <<: *common-healthcheck
 
-  powergrid-server:
-    build:
-      <<: *common-build
-      target: powergrid-server
-    command: ["python", "-m", "domains.powergrid.server.powergrid_server"]
-    ports:
-      - "8001:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-      # Clear stale venvs on restart so the custom GPU-enabled highspy wheel
-      # (built from source with CUPDLP_GPU=ON) is always cleanly installed.
-      UV_VENV_CLEAR: "1"
-    healthcheck:
-      <<: *common-healthcheck
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-
-  powergrid-server-cpu:
-    build:
-      <<: *common-build
-      target: powergrid-server-cpu
-    command: ["python", "-m", "domains.powergrid.server.powergrid_server"]
-    ports:
-      - "8005:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-    healthcheck:
-      <<: *common-healthcheck
-
-  process-server:
-    build:
-      <<: *common-build
-      target: process-server
-    command: ["python", "-m", "domains.process.server.process_server"]
-    ports:
-      - "8002:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-    healthcheck:
-      <<: *common-healthcheck
-
-  foundry-server:
-    build:
-      <<: *common-build
-      target: foundry-server
-    command: ["python", "-m", "domains.foundry.server.foundry_server"]
-    ports:
-      - "8003:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-    healthcheck:
-      <<: *common-healthcheck
-
-  gis-server:
-    build:
-      <<: *common-build
-      target: gis-server
-    command: ["python", "-m", "domains.gis.server.gis_server"]
-    ports:
-      - "8006:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-      - ../../maps:/tmp/maps:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-    healthcheck:
-      <<: *common-healthcheck
-
-  openlca-ipc:
-    build:
-      context: ../../domains/openlca/docker
-      dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
-    volumes:
-      - openlca-data:/app/data
-
-  openlca-server:
-    build:
-      <<: *common-build
-      target: openlca-server
-    command: ["python", "-m", "domains.openlca.server.openlca_server"]
-    ports:
-      - "8008:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-      OLCA_IPC_HOST: openlca-ipc
-    depends_on:
-      - openlca-ipc
-    healthcheck:
-      <<: *common-healthcheck
-
-  office-server:
-    build:
-      <<: *common-build
-      target: office-server
-    command: ["python", "-m", "domains.office.server.office_server"]
-    ports:
-      - "8007:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-      - ../../maps:/tmp/maps:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-    healthcheck:
-      <<: *common-healthcheck
-
-  vitrimer-tg-sim-server:
-    build:
-      <<: *common-build
-      target: vitrimer-tg-sim-server
-    command: ["python", "-m", "domains.vitrimer_tg_sim.server.vitrimer_tg_sim_server"]
-    ports:
-      - "8010:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-      LAMMPS_CMD: lmp
-    healthcheck:
-      <<: *common-healthcheck
-    deploy:
-      resources:
-        limits:
-          memory: 32g
-
-  vitrimer-vae-server:
-    build:
-      <<: *common-build
-      target: vitrimer-vae-server
-    command: ["python", "-m", "domains.vitrimer_vae.server.vitrimer_vae_server"]
-    ports:
-      - "8011:8000"
-    volumes:
-      - ~/.azure:/root/.azure:rw
-    env_file:
-      - ../../.env
-    environment:
-      <<: [*base-env, *trusted-hosts]
-      VITRIMER_VAE_CHECKPOINT_URL: https://sorbent0eastus.blob.core.windows.net/vitrimervae-checkpoints/prop49.model
-      VITRIMER_VAE_CHECKPOINT_SHA256: 725b4cfa60a9a6858b79298907cdf1fd4566d704a007d1cb966a1098b0f05033
-    healthcheck:
-      <<: *common-healthcheck
-
-volumes:
-  openlca-data:
+services: {}
