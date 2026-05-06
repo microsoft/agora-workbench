@@ -5,7 +5,7 @@
 #   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 #
 # Then build the chemistry server:
-#   docker build -t chemistry-server:local .
+#   docker build -f domain_examples/chemistry/Dockerfile -t chemistry-server:local .
 
 FROM mcp-server-base:local
 
