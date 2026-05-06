@@ -7,7 +7,8 @@
 # Then build this server image:
 #   docker build -t energysystems-server:local .
 
-FROM mcp-server-base:local
+ARG BASE_IMAGE=mcp-server-base:local
+FROM ${BASE_IMAGE}
 
 # Copy server code into the image
 COPY --chown=appuser:appuser server/ /app/domain_examples/energysystems/server/
