@@ -1,0 +1,27 @@
+# Earth Science MCP Server — local development
+#
+# Prerequisites — build the base image first:
+#   cd src
+#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#
+# Then from this directory:
+#   docker compose up --build
+
+services:
+  earthscience-server:
+    build:
+      context: ../..
+      dockerfile: domain_examples/earthscience/Dockerfile
+    ports:
+      - "8021:8000"
+    env_file:
+      - ../../../.env
+    environment:
+      PORT: "8000"
+      HOST: "0.0.0.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
