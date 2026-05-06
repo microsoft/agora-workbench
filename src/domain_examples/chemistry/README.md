@@ -27,7 +27,7 @@ docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ### 2. Build and run the chemistry server
 
 ```bash
-cd src/domains/chemistry
+cd src/domain_examples/chemistry
 docker compose up --build
 ```
 
