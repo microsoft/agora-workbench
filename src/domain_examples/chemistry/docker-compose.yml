@@ -1,0 +1,29 @@
+# Chemistry MCP Server — local development
+#
+# Prerequisites — build the base image first:
+#   cd src
+#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#
+# Then from this directory:
+#   docker compose up --build
+
+services:
+  chemistry-server:
+    build:
+      context: ../..
+      dockerfile: domain_examples/chemistry/Dockerfile
+    ports:
+      # Bind to localhost by default because this service is unauthenticated.
+      # Do not expose it to untrusted networks unless authentication is enabled.
+      - "127.0.0.1:8020:8000"
+    env_file:
+      - ../../../.env
+    environment:
+      PORT: "8000"
+      HOST: "0.0.0.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
