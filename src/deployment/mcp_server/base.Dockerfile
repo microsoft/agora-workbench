@@ -1,10 +1,15 @@
-# Base Dockerfile for all code execution servers.
-# Contains the shared base image that all domain stages build upon.
-# Domain stages are appended by `build.py generate` from domains/*/domain.yaml.
+# Base image for CodeExecutionServer deployments.
 #
-# To scaffold a new domain and regenerate the full Dockerfile:
-#   uv run python src/deployment/mcp_server/build.py new <name>
-#   uv run python src/deployment/mcp_server/build.py generate
+# Contains system dependencies, uv, miniforge, and the code_execution package.
+# User server images should extend the locally built or published base image.
+#
+# Build from the repo's src/ directory:
+#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#
+# Then create your own Dockerfile:
+#   FROM mcp-server-base:local
+#   COPY --chown=appuser:appuser my_server/ /app/my_server/
+#   CMD ["python", "-m", "my_server.server"]
 
 # ============================================================================
 # Stage: Base image with common dependencies

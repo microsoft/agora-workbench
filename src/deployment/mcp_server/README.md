@@ -1,149 +1,77 @@
-# Docker Configuration
+# MCP Server Deployment
 
-Multi-stage Docker builds for code execution servers. All servers share a common base layer (`base`) and add only their own code and dependencies on top.
+Docker-based deployment for `CodeExecutionServer` instances. Provides a shared base image and examples for local development and Azure Container Apps deployment.
 
-## Adding a New Server
+## Quick Start
 
-The recommended workflow uses `build.py` to scaffold a new domain and regenerate the Docker files automatically.
+### 1. Build the base image
 
-### Option A — Automated scaffolding (recommended)
+From the repo's `src/` directory:
 
 ```bash
-# 1. Scaffold the domain (creates domain.yaml + server stub):
-uv run python src/deployment/mcp_server/build.py new <name>
-
-# 2. Edit the generated domain.yaml and implement your server tools.
-
-# 3. Regenerate Dockerfile + docker-compose.yml:
-uv run python src/deployment/mcp_server/build.py generate
-
-# 4. Build and test:
-docker compose build <name>-server
-docker compose up <name>-server
+cd src
+docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ```
 
-### Option B — Manual addition
+The base image includes system dependencies, `uv`, miniforge, and the `code_execution` package.
 
-1. **Create `domains/<name>/domain.yaml`** describing the server:
+### 2. Create your server Dockerfile
 
-   ```yaml
-   name: myserver
-   module: domains.myserver.server.myserver_server
-   port: 8000
-   description: My domain server
-   system_packages: []      # apt packages (optional)
-   extra_files:
-     - states.py            # files to COPY beyond server/
-   extra_env: {}
-   depends_on: []
-   volumes: []
-   trusted_hosts: true
-   ```
+Your Dockerfile extends the base image with your server code:
 
-2. **Add a Dockerfile stage** to `Dockerfile` targeting `base`:
+```dockerfile
+FROM mcp-server-base:local
 
-   ```dockerfile
-   FROM base AS myserver-server
-   COPY --chown=appuser:appuser domains/myserver/server /app/domains/myserver/server
-   COPY --chown=appuser:appuser domains/myserver/states.py /app/domains/myserver/states.py
-   CMD ["python", "-m", "domains.myserver.server.myserver_server"]
-   ```
+COPY --chown=appuser:appuser my_server/ /app/my_server/
+CMD ["python", "-m", "my_server.server"]
+```
 
-3. **Add a service** in `docker-compose.yml` using the existing anchors:
+See [`example/Dockerfile`](example/Dockerfile) for a full example with comments on adding pip dependencies and system packages.
 
-   ```yaml
-   myserver-server:
-     build:
-       <<: *common-build
-       target: myserver-server
-     command: ["python", "-m", "domains.myserver.server.myserver_server"]
-     ports:
-       - "8000:8000"
-     env_file:
-       - ../../.env
-     environment:
-       <<: [*base-env, *trusted-hosts]
-     healthcheck:
-       <<: *common-healthcheck
-   ```
+### 3. Run locally with Docker Compose
 
-4. **Update the `*trusted-hosts` anchor** (top of `docker-compose.yml`) to include `myserver-server`.
-
-5. **Register the server** in `server_registry.yaml`.
-
-### Building without docker compose
-
-If you need to invoke `docker build` directly:
+See [`example/docker-compose.yml`](example/docker-compose.yml) for a ready-to-use compose file:
 
 ```bash
-cd src  # build context root
+docker compose up --build
+```
 
-docker build \
-  --target myserver-server \
-  -f deployment/mcp_server/Dockerfile \
-  -t myserver-server:local .
+### 4. Deploy to Azure Container Apps
+
+See [`container_apps/README.md`](container_apps/README.md) for infrastructure setup. Quick start:
+
+```bash
+cd container_apps
+./deploy.sh \
+  --server my-server \
+  --dockerfile /path/to/your/Dockerfile \
+  --context /path/to/build/context
 ```
 
 ## Environment Variables
 
-Containers read from `../../.env` (the repo root). Key variables:
+Containers read configuration from a `.env` file. Key variables:
 
 - `ENTRA_CLIENT_ID` / `ENTRA_TENANT_ID` — Entra ID app registration (required for auth)
-- `OBO_SIMULATION_MODE` — set `true` for local development to bypass OBO flow
 
-See `.env.example` for the full list.
-
-## `build.py` Reference
-
-```
-usage: build.py [-h] {generate,new} ...
-
-subcommands:
-  generate    Generate Dockerfile and docker-compose.yml from all domain.yaml files
-  new         Scaffold a new domain server (creates domain.yaml + server stub)
-```
-
-### `generate`
-
-```bash
-uv run python src/deployment/mcp_server/build.py generate [--root ROOT] [--output-dir DIR]
-```
-
-Reads every `domains/*/domain.yaml` under `ROOT` (default: `src/`), renders
-`domain.Dockerfile.j2` for each, and combines with `base.Dockerfile` to produce
-`Dockerfile`. Also renders `compose-service.j2` for each domain and writes a
-new `docker-compose.yml` with YAML anchors.
-
-### `new`
-
-```bash
-uv run python src/deployment/mcp_server/build.py new <name> [--root ROOT]
-```
-
-Creates:
-- `domains/<name>/domain.yaml` — pre-filled config (edit port + description)
-- `domains/<name>/server/<name>_server.py` — `CodeExecutionServer` subclass stub
-- `domains/<name>/__init__.py` and `domains/<name>/server/__init__.py`
+See `.env.example` at the repo root for the full list.
 
 ## Architecture
 
 ```
 src/deployment/mcp_server/
 ├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, code_execution)
-├── domain.Dockerfile.j2     # Jinja2 template for standard per-domain stages
-├── compose-service.j2       # Jinja2 template for docker-compose service entries
-├── build.py                 # CLI: `generate` + `new` commands
-├── Dockerfile               # Combined output (base + generated domain stages)
-├── docker-compose.yml       # YAML-anchor header; services added by build.py or manually
-└── README.md                # This file
-
-src/domains/<name>/          # Per-domain configs (created by `build.py new`)
-├── domain.yaml
-├── server/
-│   └── <name>_server.py
-└── states.py
+├── README.md                # This file
+├── example/
+│   ├── Dockerfile           # Example server Dockerfile
+│   └── docker-compose.yml   # Example local compose setup
+└── container_apps/
+    ├── deploy.sh            # Build, push, and deploy to Azure Container Apps
+    ├── main.bicep           # ARM template for the Container App
+    ├── README.md            # Container Apps setup guide
+    └── parameters/          # Per-server Bicep parameter files
 ```
 
 ## Build Context
 
-The build context is `../..` from `deployment/mcp_server/` (i.e., `src/`) so the Dockerfile can copy from `code_execution/`, `domains/`, and other top-level packages.
+The base image must be built with `src/` as the Docker build context so the Dockerfile can copy `code_execution/` and `middleware/` packages. Rebuild the base image after changes to these packages.
