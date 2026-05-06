@@ -7,7 +7,7 @@ Exposes an `execute_energysystems_code` MCP tool that runs Python code in an iso
 ## Pre-installed Packages
 
 | Package | Purpose |
-|---------|---------|
+| --- | --- |
 | **pypsa** | Power system modeling: networks, generators, loads, optimal power flow |
 | **linopy** | Linear optimization modeling (PyPSA's optimization backend) |
 | **highspy** | HiGHS solver — free LP/MIP/QP solver, no license required |
