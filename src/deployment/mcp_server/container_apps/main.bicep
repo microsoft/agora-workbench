@@ -69,6 +69,9 @@ param maxReplicas int = 3
 @description('Additional environment variables as key-value pairs.')
 param extraEnvVars object = {}
 
+@description('Container startup command. When empty (default), the image CMD is used.')
+param command array = []
+
 // ── Environment variables ───────────────────────────────────────────────────
 
 var baseEnv = [
@@ -123,11 +126,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: appName
           image: containerImage
-          command: [
-            'python'
-            '-m'
-            'domains.${serverName}.server.${serverName}_server'
-          ]
+          command: command
           resources: {
             cpu: json(cpu)
             memory: memory
