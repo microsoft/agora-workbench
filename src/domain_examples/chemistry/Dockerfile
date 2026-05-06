@@ -9,8 +9,8 @@
 
 FROM mcp-server-base:local
 
-# Copy chemistry server code
-COPY --chown=appuser:appuser domain_examples/chemistry/server /app/domain_examples/chemistry/server
-COPY --chown=appuser:appuser domain_examples/chemistry/__init__.py /app/domain_examples/chemistry/__init__.py
+# Copy chemistry package tree so Python module execution can resolve the
+# full package path consistently at runtime.
+COPY --chown=appuser:appuser domain_examples/chemistry /app/domain_examples/chemistry
 
 CMD ["python", "-m", "domain_examples.chemistry.server.chemistry_server"]
