@@ -23,7 +23,7 @@ import yaml
 # import it by file path using importlib.
 import importlib.util
 
-_BUILD_PY = Path(__file__).parent.parent.parent / "deployment" / "mcp_server" / "build.py"
+_BUILD_PY = Path(__file__).parent.parent / "build.py"
 
 
 def _load_build_module():
