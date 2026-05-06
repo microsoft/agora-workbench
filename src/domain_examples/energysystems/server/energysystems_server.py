@@ -67,8 +67,28 @@ class EnergySystemsServer(CodeExecutionServer):
     """Energy systems MCP server with auto-imported PyPSA modules."""
 
     def preprocess_code(self, code: str) -> str:
-        """Inject common PyPSA and scientific Python imports before user code."""
-        return PYPSA_PRELUDE + code
+        """Inject common imports without breaking Python top-of-file directives."""
+        lines = code.splitlines(keepends=True)
+        insert_at = 0
+
+        if insert_at < len(lines) and lines[insert_at].startswith("#!"):
+            insert_at += 1
+
+        for encoding_line_index in range(min(2, len(lines))):
+            stripped_line = lines[encoding_line_index].lstrip()
+            if "coding" in stripped_line and stripped_line.startswith("#"):
+                if encoding_line_index >= insert_at:
+                    insert_at = encoding_line_index + 1
+                break
+
+        while insert_at < len(lines):
+            stripped_line = lines[insert_at].lstrip()
+            if stripped_line.startswith("from __future__ import "):
+                insert_at += 1
+                continue
+            break
+
+        return "".join(lines[:insert_at]) + PYPSA_PRELUDE + "".join(lines[insert_at:])
 
 
 server = EnergySystemsServer(
