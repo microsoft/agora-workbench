@@ -1,5 +1,5 @@
 """
-Tests for the Docker build script (src/code_execution/docker/build.py).
+Tests for the Docker build script (src/deployment/mcp_server/build.py).
 
 These tests validate:
 - DomainConfig model parsing and validation
@@ -19,11 +19,11 @@ import yaml
 # Import the module under test
 # ---------------------------------------------------------------------------
 
-# build.py lives in src/code_execution/docker/ — not a Python package, so we
+# build.py lives in src/deployment/mcp_server/ — not a Python package, so we
 # import it by file path using importlib.
 import importlib.util
 
-_BUILD_PY = Path(__file__).parent.parent.parent / "code_execution" / "docker" / "build.py"
+_BUILD_PY = Path(__file__).parent.parent.parent / "deployment" / "mcp_server" / "build.py"
 
 
 def _load_build_module():
@@ -334,9 +334,7 @@ def test_generate_named_volumes_in_compose(tmp_path: Path):
 
 def test_new_creates_expected_files(tmp_path: Path):
     """build.py new creates domain.yaml, server stub, and __init__.py files."""
-    _build.cmd_new(
-        _build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new))
 
     domain_dir = tmp_path / "domains" / "chemistry"
     assert (domain_dir / "domain.yaml").exists()
@@ -347,9 +345,7 @@ def test_new_creates_expected_files(tmp_path: Path):
 
 def test_new_domain_yaml_content(tmp_path: Path):
     """The generated domain.yaml is a valid DomainConfig."""
-    _build.cmd_new(
-        _build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new))
 
     data = yaml.safe_load((tmp_path / "domains" / "chemistry" / "domain.yaml").read_text())
     cfg = DomainConfig.model_validate(data)
@@ -359,9 +355,7 @@ def test_new_domain_yaml_content(tmp_path: Path):
 
 def test_new_server_stub_content(tmp_path: Path):
     """The generated server stub imports CodeExecutionServer."""
-    _build.cmd_new(
-        _build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new))
 
     content = (tmp_path / "domains" / "chemistry" / "server" / "chemistry_server.py").read_text()
     assert "CodeExecutionServer" in content
@@ -372,34 +366,26 @@ def test_new_server_stub_content(tmp_path: Path):
 def test_new_invalid_name_exits(tmp_path: Path):
     """build.py new with an invalid Python identifier exits with code 1."""
     with pytest.raises(SystemExit) as exc_info:
-        _build.cmd_new(
-            _build.argparse.Namespace(name="my-domain", root=str(tmp_path), func=_build.cmd_new)
-        )
+        _build.cmd_new(_build.argparse.Namespace(name="my-domain", root=str(tmp_path), func=_build.cmd_new))
     assert exc_info.value.code == 1
 
 
 def test_new_port_auto_assigned(tmp_path: Path):
     """Port is auto-assigned as max(existing_ports) + 1."""
     _make_domain(tmp_path, "existing", 8050)
-    _build.cmd_new(
-        _build.argparse.Namespace(name="newdomain", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="newdomain", root=str(tmp_path), func=_build.cmd_new))
     data = yaml.safe_load((tmp_path / "domains" / "newdomain" / "domain.yaml").read_text())
     assert data["port"] == 8051
 
 
 def test_new_does_not_overwrite_existing(tmp_path: Path, capsys):
     """Running new twice on the same domain name warns instead of overwriting."""
-    _build.cmd_new(
-        _build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new))
     # Modify the file to detect if it gets overwritten
     yaml_path = tmp_path / "domains" / "chemistry" / "domain.yaml"
     original_mtime = yaml_path.stat().st_mtime
 
-    _build.cmd_new(
-        _build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new)
-    )
+    _build.cmd_new(_build.argparse.Namespace(name="chemistry", root=str(tmp_path), func=_build.cmd_new))
     captured = capsys.readouterr()
     assert "WARNING" in captured.err
     assert yaml_path.stat().st_mtime == original_mtime  # file not modified

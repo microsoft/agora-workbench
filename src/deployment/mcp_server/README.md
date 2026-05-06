@@ -2,20 +2,6 @@
 
 Multi-stage Docker builds for code execution servers. All servers share a common base layer (`base`) and add only their own code and dependencies on top.
 
-## Prerequisites: Azure CLI Authentication
-
-The Docker build installs the `mise` package from a private Azure DevOps Artifacts feed (`agorahub`). This requires valid Azure CLI credentials at build time.
-
-**Before building, log in with the Azure CLI:**
-
-```bash
-az login
-```
-
-The `docker-compose.yml` automatically mounts `~/.azure` as an additional build context so the Dockerfile can obtain a short-lived feed token via `az account get-access-token`. If credentials are absent or expired the build will fail with an explicit error message.
-
-> **Note:** The `~/.azure` directory is only used during the build step to fetch the feed token — it is never baked into the final image.
-
 ## Adding a New Server
 
 The recommended workflow uses `build.py` to scaffold a new domain and regenerate the Docker files automatically.
@@ -24,12 +10,12 @@ The recommended workflow uses `build.py` to scaffold a new domain and regenerate
 
 ```bash
 # 1. Scaffold the domain (creates domain.yaml + server stub):
-uv run python src/code_execution/docker/build.py new <name>
+uv run python src/deployment/mcp_server/build.py new <name>
 
 # 2. Edit the generated domain.yaml and implement your server tools.
 
 # 3. Regenerate Dockerfile + docker-compose.yml:
-uv run python src/code_execution/docker/build.py generate
+uv run python src/deployment/mcp_server/build.py generate
 
 # 4. Build and test:
 docker compose build <name>-server
@@ -73,8 +59,6 @@ docker compose up <name>-server
      command: ["python", "-m", "domains.myserver.server.myserver_server"]
      ports:
        - "8000:8000"
-     volumes:
-       - ~/.azure:/root/.azure:rw
      env_file:
        - ../../.env
      environment:
@@ -89,15 +73,14 @@ docker compose up <name>-server
 
 ### Building without docker compose
 
-If you need to invoke `docker build` directly you must supply the `azure-cli` build context manually:
+If you need to invoke `docker build` directly:
 
 ```bash
 cd src  # build context root
 
 docker build \
-  --build-context azure-cli=$HOME/.azure \
   --target myserver-server \
-  -f code_execution/docker/Dockerfile \
+  -f deployment/mcp_server/Dockerfile \
   -t myserver-server:local .
 ```
 
@@ -123,7 +106,7 @@ subcommands:
 ### `generate`
 
 ```bash
-uv run python src/code_execution/docker/build.py generate [--root ROOT] [--output-dir DIR]
+uv run python src/deployment/mcp_server/build.py generate [--root ROOT] [--output-dir DIR]
 ```
 
 Reads every `domains/*/domain.yaml` under `ROOT` (default: `src/`), renders
@@ -134,7 +117,7 @@ new `docker-compose.yml` with YAML anchors.
 ### `new`
 
 ```bash
-uv run python src/code_execution/docker/build.py new <name> [--root ROOT]
+uv run python src/deployment/mcp_server/build.py new <name> [--root ROOT]
 ```
 
 Creates:
@@ -145,7 +128,7 @@ Creates:
 ## Architecture
 
 ```
-src/code_execution/docker/
+src/deployment/mcp_server/
 ├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, code_execution)
 ├── domain.Dockerfile.j2     # Jinja2 template for standard per-domain stages
 ├── compose-service.j2       # Jinja2 template for docker-compose service entries
@@ -163,4 +146,4 @@ src/domains/<name>/          # Per-domain configs (created by `build.py new`)
 
 ## Build Context
 
-The build context is `../..` from `code_execution/docker/` (i.e., `src/`) so the Dockerfile can copy from `code_execution/`, `domains/`, and other top-level packages.
+The build context is `../..` from `deployment/mcp_server/` (i.e., `src/`) so the Dockerfile can copy from `code_execution/`, `domains/`, and other top-level packages.

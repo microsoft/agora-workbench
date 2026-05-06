@@ -120,7 +120,7 @@ if [[ ! -f "$PARAM_FILE" ]]; then
 fi
 
 DOCKER_TARGET="${SERVER_NAME}-server"
-DOCKERFILE="$REPO_ROOT/code_execution/docker/Dockerfile"
+DOCKERFILE="$REPO_ROOT/deployment/mcp_server/Dockerfile"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 IMAGE_REF="${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:${IMAGE_TAG}"
 

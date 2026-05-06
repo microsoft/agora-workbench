@@ -11,11 +11,12 @@
     command: ["python", "-m", "{{ config.module }}"]
     ports:
       - "{{ config.port }}:8000"
+{%- if config.volumes %}
     volumes:
-      - ~/.azure:/root/.azure:rw
 {%- for vol in config.volumes %}
       - {{ vol }}
 {%- endfor %}
+{%- endif %}
     env_file:
       - ../../.env
     environment:
