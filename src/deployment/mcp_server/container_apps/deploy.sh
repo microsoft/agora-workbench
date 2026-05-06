@@ -18,8 +18,8 @@
 #   - .env configured with ACA_* variables (see .env.example)
 #
 # Usage:
-#   ./deploy.sh --server office
-#   ./deploy.sh --server office --tag v1.2.3
+#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context
+#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context --tag v1.2.3
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -60,14 +60,18 @@ ENTRA_TENANT_ID_VAL="${ENTRA_TENANT_ID:-}"
 SERVER_NAME=""
 IMAGE_TAG=""                         # auto-set to git short SHA if empty
 PARAM_FILE=""                        # auto-resolved from server name
+DOCKERFILE=""                        # user-provided Dockerfile path
+BUILD_CONTEXT=""                     # Docker build context directory
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
 Required:
-  --server, -s          NAME    Server name (must match a Dockerfile target and
-                                a parameters/<name>.bicepparam file)
+  --server, -s          NAME    Server name (used for image naming and
+                                parameters/<name>.bicepparam lookup)
+  --dockerfile, -f      PATH    Path to the Dockerfile to build
+  --context, -c         PATH    Docker build context directory
 
 Optional:
   --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env
@@ -85,6 +89,8 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --resource-group|-g)  RESOURCE_GROUP="$2";  shift 2 ;;
         --server|-s)          SERVER_NAME="$2";     shift 2 ;;
+        --dockerfile|-f)      DOCKERFILE="$2";      shift 2 ;;
+        --context|-c)         BUILD_CONTEXT="$2";   shift 2 ;;
         --tag|-t)             IMAGE_TAG="$2";       shift 2 ;;
         --acr-name)           ACR_NAME="$2";        shift 2 ;;
         --param-file)         PARAM_FILE="$2";      shift 2 ;;
@@ -95,6 +101,22 @@ done
 
 if [[ -z "$SERVER_NAME" ]]; then
     echo "ERROR: --server is required." >&2; exit 1
+fi
+
+if [[ -z "$DOCKERFILE" ]]; then
+    echo "ERROR: --dockerfile is required." >&2; exit 1
+fi
+
+if [[ ! -f "$DOCKERFILE" ]]; then
+    echo "ERROR: Dockerfile not found: $DOCKERFILE" >&2; exit 1
+fi
+
+if [[ -z "$BUILD_CONTEXT" ]]; then
+    echo "ERROR: --context is required." >&2; exit 1
+fi
+
+if [[ ! -d "$BUILD_CONTEXT" ]]; then
+    echo "ERROR: Build context directory not found: $BUILD_CONTEXT" >&2; exit 1
 fi
 
 # Validate required infrastructure variables
@@ -119,8 +141,8 @@ if [[ ! -f "$PARAM_FILE" ]]; then
     exit 1
 fi
 
-DOCKER_TARGET="${SERVER_NAME}-server"
-DOCKERFILE="$REPO_ROOT/code_execution/docker/Dockerfile"
+DOCKERFILE="$(cd "$(dirname "$DOCKERFILE")" && pwd)/$(basename "$DOCKERFILE")"
+BUILD_CONTEXT="$(cd "$BUILD_CONTEXT" && pwd)"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
 IMAGE_REF="${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:${IMAGE_TAG}"
 
@@ -132,6 +154,8 @@ ENV_ID=$(az containerapp env show \
 
 echo "=== MCP Server ACA Deployment ==="
 echo "  Server:         $SERVER_NAME"
+echo "  Dockerfile:     $DOCKERFILE"
+echo "  Build context:  $BUILD_CONTEXT"
 echo "  Resource Group: $RESOURCE_GROUP"
 echo "  ACR:            $ACR_LOGIN_SERVER"
 echo "  ACA Env:        $ACA_ENV_NAME"
@@ -141,12 +165,11 @@ echo ""
 
 # ── 1. Build Docker image ────────────────────────────────────────────────────
 
-echo ">> Building Docker image (target: $DOCKER_TARGET)..."
+echo ">> Building Docker image..."
 docker build \
     --file "$DOCKERFILE" \
-    --target "$DOCKER_TARGET" \
     --tag "$IMAGE_REF" \
-    "$REPO_ROOT"
+    "$BUILD_CONTEXT"
 
 # ── 2. Push to ACR ───────────────────────────────────────────────────────────
 

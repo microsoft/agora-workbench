@@ -97,6 +97,10 @@ The Container App receives these at runtime:
 ## Adding a new server
 
 1. Copy `parameters/office.bicepparam` to `parameters/<name>.bicepparam`.
-2. Update `serverName` and any server-specific overrides.
-3. Ensure the Dockerfile has a matching `<name>-server` build target.
-4. Run `./deploy.sh --resource-group <rg> --server <name>`.
+2. Update `serverName` and any server-specific overrides (e.g. cpu, memory).
+3. Optionally set the `command` parameter to override the image's `CMD`.
+   When omitted, the container uses whatever `CMD` is set in your Dockerfile.
+4. Run:
+   ```bash
+   ./deploy.sh --server <name> --dockerfile /path/to/Dockerfile --context /path/to/context
+   ```
