@@ -132,7 +132,7 @@ MCP code-execution servers use `OBOCredentialProvider` (`code_execution/auth/obo
 
 ## Deployment
 
-MCP servers can be deployed as Azure Container Apps. The deployment infrastructure lives in `code_execution/deploy/`:
+MCP servers can be deployed as Azure Container Apps. The deployment infrastructure lives in `deployment/mcp_server/container_apps/`:
 
 - **`deploy.sh`** — builds a Docker image for a given server, pushes it to Azure Container Registry, and deploys or updates a Container App via Bicep.
 - **`main.bicep`** — ARM template defining the Container App with health probes and HTTP-based auto-scaling.
@@ -141,11 +141,11 @@ MCP servers can be deployed as Azure Container Apps. The deployment infrastructu
 Quick start:
 
 ```bash
-cd src/code_execution/deploy
+cd src/deployment/mcp_server/container_apps
 ./deploy.sh --server office   # build, push, and deploy the Office MCP server
 ```
 
-See [`src/code_execution/deploy/README.md`](src/code_execution/deploy/README.md) for infrastructure setup and environment variables (`ACA_*`).
+See [`src/deployment/mcp_server/container_apps/README.md`](src/deployment/mcp_server/container_apps/README.md) for infrastructure setup and environment variables (`ACA_*`).
 
 ## Code Execution
 
