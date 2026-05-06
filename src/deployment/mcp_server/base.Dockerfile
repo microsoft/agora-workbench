@@ -69,9 +69,9 @@ RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 ENV HOME=/home/appuser
 
-# Environment variables for Entra ID (override at runtime)
-ENV ENTRA_CLIENT_ID=""
-ENV ENTRA_TENANT_ID=""
+# Authentication: pass ENTRA_CLIENT_ID and ENTRA_TENANT_ID at runtime
+# for production (Entra ID). For local development, configure your server
+# with create_noop_auth_config() and no env vars are needed.
 
 # Switch to non-root user for runtime
 USER appuser
