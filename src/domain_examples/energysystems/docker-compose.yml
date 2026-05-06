@@ -1,0 +1,25 @@
+# Energy Systems MCP Server — local development with docker compose.
+#
+# Prerequisites — build the base image first:
+#   cd src
+#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#
+# Then from this directory:
+#   docker compose up --build
+
+services:
+  energysystems-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8022:8000"
+    environment:
+      PORT: "8000"
+      HOST: "0.0.0.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
