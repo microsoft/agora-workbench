@@ -10,18 +10,26 @@
 services:
   my-server:
     build:
+      # Directory containing your server code and Dockerfile
       context: .
       dockerfile: Dockerfile
     ports:
+      # Maps host port 8000 → container port 8000 (the default server port).
+      # Change the left side if you need a different host port.
       - "8000:8000"
     env_file:
-      - .env  # Create from .env.example at the repo root
+      # Loads ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and other config.
+      # Copy .env.example from the repo root and fill in your values.
+      - .env
     environment:
+      # PORT/HOST tell the CodeExecutionServer where to bind inside the container.
       PORT: "8000"
       HOST: "0.0.0.0"
     healthcheck:
+      # The base image exposes GET /health — compose uses this to report readiness.
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      # Gives the server time to start before health checks begin failing.
       start_period: 60s
