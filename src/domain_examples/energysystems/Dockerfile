@@ -13,4 +13,4 @@ FROM ${BASE_IMAGE}
 # Copy server code into the image
 COPY --chown=appuser:appuser server/ /app/domain_examples/energysystems/server/
 
-CMD ["python", "-m", "domain_examples.energysystems.server.energysystems_server"]
+CMD ["python", "/app/domain_examples/energysystems/server/energysystems_server.py"]
