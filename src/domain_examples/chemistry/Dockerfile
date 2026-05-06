@@ -7,7 +7,8 @@
 # Then build the chemistry server:
 #   docker build -t chemistry-server:local .
 
-FROM mcp-server-base:local
+ARG BASE_IMAGE=mcp-server-base:local
+FROM ${BASE_IMAGE}
 
 # Copy chemistry server code
 COPY --chown=appuser:appuser domain_examples/chemistry/server /app/domain_examples/chemistry/server
