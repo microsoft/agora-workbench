@@ -88,12 +88,11 @@ class TestCreateDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
-    async def test_creates_tool_with_cli_credential(self, mock_create_cred, mock_search_client, monkeypatch):
-        """Test creates tool using Azure CLI credential when no user_token."""
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
+    async def test_creates_tool_with_credential(self, mock_create_cred, mock_search_client, monkeypatch):
+        """Test creates tool using search credential from providers."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
         monkeypatch.delenv("DATA_LAKE_CATALOG_INDEX_NAME", raising=False)
-        user_token = "test_bearer_token"
         mock_cred = MagicMock()
         mock_create_cred.return_value = mock_cred
         mock_client = MagicMock()
@@ -105,7 +104,7 @@ class TestCreateDataLakeSearchTool:
 
         mock_client.search = AsyncMock(return_value=mock_search_results())
 
-        tool = await create_data_lake_search_tool(user_token=user_token)
+        tool = await create_data_lake_search_tool()
 
         # Verify tool is callable
         assert callable(tool)
@@ -119,50 +118,7 @@ class TestCreateDataLakeSearchTool:
         await tool(params)
 
         # Now verify credential and client were created
-        mock_create_cred.assert_called_once_with(user_token=user_token)
-        mock_search_client.assert_called_once_with(
-            endpoint="https://test.search.windows.net",
-            index_name="artifact-registry",
-            credential=mock_cred,
-        )
-
-    @pytest.mark.asyncio
-    @pytest.mark.unit
-    @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
-    async def test_creates_tool_with_obo_credential(self, mock_create_obo, mock_search_client, monkeypatch):
-        """Test creates tool using OBO credential when user_token provided."""
-        monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
-        monkeypatch.delenv("DATA_LAKE_CATALOG_INDEX_NAME", raising=False)
-        user_token = "test_bearer_token"
-        mock_cred = MagicMock()
-        mock_create_obo.return_value = mock_cred
-        mock_client = MagicMock()
-        mock_search_client.return_value = mock_client
-
-        # Mock async search results
-        async def mock_search_results(*args, **kwargs):
-            yield {"name": "test_asset", "description": "Test asset"}
-
-        mock_client.search = AsyncMock(return_value=mock_search_results())
-
-        tool = await create_data_lake_search_tool(user_token=user_token)
-
-        # Verify tool is callable
-        assert callable(tool)
-
-        # Credentials should NOT be created yet (lazy initialization)
-        mock_create_obo.assert_not_called()
-        mock_search_client.assert_not_called()
-
-        # Now call the tool
-        params = DataLakeSearchParams(query="test query")
-        await tool(params)
-
-        # Verify OBO credential creation with user token
-        mock_create_obo.assert_called_once_with(user_token=user_token)
-
-        # Verify SearchClient creation
+        mock_create_cred.assert_called_once()
         mock_search_client.assert_called_once_with(
             endpoint="https://test.search.windows.net",
             index_name="artifact-registry",
@@ -176,7 +132,7 @@ class TestCreateDataLakeSearchTool:
         monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
 
         # Tool creation should succeed (lazy initialization)
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
 
         # Error should occur when actually trying to use the tool
         params = DataLakeSearchParams(query="test query")
@@ -192,7 +148,7 @@ class TestCreateDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_raises_error_on_client_creation_failure(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns error JSON when SearchClient creation fails."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -201,7 +157,7 @@ class TestCreateDataLakeSearchTool:
         mock_search_client.side_effect = Exception("Connection failed")
 
         # Tool creation should succeed
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
 
         # Error should be caught and returned as JSON when tool is used
         params = DataLakeSearchParams(query="test query")
@@ -226,7 +182,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_returns_results(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool returns search results as JSON."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -254,7 +210,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data")
         result = await tool(params)
 
@@ -274,7 +230,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_with_asset_type_filter(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool applies asset type filter correctly."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -288,7 +244,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool with asset types
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data", artifact_types=["azure_sql_table", "parquet"])
         await tool(params)
 
@@ -299,7 +255,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     @patch("data_lake.tools.adapters.maf.check_resource_permissions")
     async def test_search_filters_results_by_user_permissions(
         self, mock_check_permissions, mock_create_cred, mock_search_client, monkeypatch
@@ -318,7 +274,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
         mock_check_permissions.side_effect = [True, False]
 
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data")
         result = await tool(params)
 
@@ -330,7 +286,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     @patch("data_lake.tools.adapters.maf.check_resource_permissions")
     async def test_search_excludes_asset_on_permission_check_exception(
         self, mock_check_permissions, mock_create_cred, mock_search_client, monkeypatch
@@ -347,7 +303,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
         mock_check_permissions.side_effect = RuntimeError("permission API error")
 
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data")
         result = await tool(params)
 
@@ -356,7 +312,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_with_select_fields(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses select_fields parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -370,7 +326,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool with specific fields
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data", select_fields=["name", "description", "owner"])
         await tool(params)
 
@@ -381,7 +337,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_defaults_to_all_fields(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool defaults to all fields when select_fields not specified."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -395,7 +351,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool without select_fields
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data")
         await tool(params)
 
@@ -406,7 +362,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_with_order_by(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses order_by parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -420,7 +376,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool with order_by
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data", order_by=["last_modified desc", "name asc"])
         await tool(params)
 
@@ -431,7 +387,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_with_search_mode(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool uses search_mode parameter."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -445,7 +401,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool with search_mode
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data", search_mode="all")
         await tool(params)
 
@@ -456,7 +412,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_handles_errors_gracefully(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool returns error message on search failure."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -467,7 +423,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data")
         result = await tool(params)
 
@@ -480,7 +436,7 @@ class TestDataLakeSearchTool:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_search_respects_top_parameter(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test tool respects top parameter for result limit."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -494,7 +450,7 @@ class TestDataLakeSearchTool:
         mock_create_cred.return_value = MagicMock()
 
         # Create and invoke tool with custom top
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
         params = DataLakeSearchParams(query="test data", top=5)
         await tool(params)
 
@@ -558,13 +514,13 @@ class TestDiscoverAvailableDomains:
     async def test_returns_empty_list_when_not_configured(self, monkeypatch):
         """Test returns empty list when DATA_LAKE_SEARCH_ENDPOINT is not set."""
         monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
-        result = await _discover_available_domains(user_token="test_token")
+        result = await _discover_available_domains()
         assert result == []
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_returns_sorted_domains_from_facets(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns sorted list of domains discovered via facets query."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -579,7 +535,7 @@ class TestDiscoverAvailableDomains:
         mock_client.close = AsyncMock()
         mock_search_client.return_value = mock_client
 
-        result = await _discover_available_domains(user_token="test_token")
+        result = await _discover_available_domains()
 
         assert result == ["climate", "energy", "power-grid"]
         mock_client.search.assert_awaited_once_with(search_text="*", facets=["domain"], top=0)
@@ -588,7 +544,7 @@ class TestDiscoverAvailableDomains:
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_returns_empty_list_when_no_domain_facets(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns empty list when index has no domain facet values."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -601,14 +557,14 @@ class TestDiscoverAvailableDomains:
         mock_client.close = AsyncMock()
         mock_search_client.return_value = mock_client
 
-        result = await _discover_available_domains(user_token="test_token")
+        result = await _discover_available_domains()
 
         assert result == []
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_returns_empty_list_on_search_error(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test returns empty list when search raises an exception."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -619,14 +575,14 @@ class TestDiscoverAvailableDomains:
         mock_client.close = AsyncMock()
         mock_search_client.return_value = mock_client
 
-        result = await _discover_available_domains(user_token="test_token")
+        result = await _discover_available_domains()
 
         assert result == []
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_skips_facet_entries_without_value(self, mock_create_cred, mock_search_client, monkeypatch):
         """Test ignores facet entries with missing or empty value field."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "https://test.search.windows.net")
@@ -641,7 +597,7 @@ class TestDiscoverAvailableDomains:
         mock_client.close = AsyncMock()
         mock_search_client.return_value = mock_client
 
-        result = await _discover_available_domains(user_token="test_token")
+        result = await _discover_available_domains()
 
         assert result == ["energy"]
 
@@ -704,16 +660,16 @@ class TestDomainDiscoveryIntegration:
         # Return a real model so the tool decorator doesn't fail
         mock_build_model.return_value = _build_search_params_model(discovered)
 
-        await create_data_lake_search_tool(user_token="test_token")
+        await create_data_lake_search_tool()
 
-        mock_discover.assert_awaited_once_with(user_token="test_token")
+        mock_discover.assert_awaited_once()
         mock_build_model.assert_called_once_with(discovered)
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     @patch("data_lake.tools.adapters.maf._discover_available_domains", new_callable=AsyncMock)
     @patch("data_lake.tools.adapters.maf.SearchClient")
-    @patch("data_lake.tools.adapters.maf.create_async_obo_credential")
+    @patch("data_lake.tools.adapters.maf.get_search_credential_async")
     async def test_tool_accepts_dict_params_with_dynamic_model(
         self, mock_create_cred, mock_search_client, mock_discover, monkeypatch
     ):
@@ -729,7 +685,7 @@ class TestDomainDiscoveryIntegration:
         mock_client.search = AsyncMock(return_value=mock_search_results())
         mock_search_client.return_value = mock_client
 
-        tool = await create_data_lake_search_tool(user_token="test_token")
+        tool = await create_data_lake_search_tool()
 
         # Pass params as a dict (as MAF sometimes does)
         result = await tool({"query": "energy datasets", "domains": ["energy"]})
@@ -760,18 +716,6 @@ class TestDataLakeSearchBackendABC:
 
         backend = _FakeBackend()
         assert isinstance(backend, DataLakeSearchBackend)
-        assert backend.user_token == ""
-
-    @pytest.mark.unit
-    def test_subclass_stores_user_token(self):
-        """user_token passed at construction is stored as an attribute."""
-
-        class _FakeBackend(DataLakeSearchBackend):
-            async def search(self, params: DataLakeSearchParams) -> list[dict]:
-                return []
-
-        backend = _FakeBackend(user_token="my-token")
-        assert backend.user_token == "my-token"
 
     @pytest.mark.unit
     def test_non_subclass_is_not_instance(self):
@@ -786,10 +730,9 @@ class TestDataLakeSearchBackendABC:
     @pytest.mark.unit
     def test_default_backend_is_subclass(self):
         """DefaultDataLakeSearchBackend inherits from DataLakeSearchBackend."""
-        with patch("data_lake.tools.adapters.maf.create_async_obo_credential", return_value=MagicMock()):
-            backend = DefaultDataLakeSearchBackend(user_token="tok")
+        with patch("data_lake.tools.adapters.maf.get_search_credential_async", return_value=MagicMock()):
+            backend = DefaultDataLakeSearchBackend()
             assert isinstance(backend, DataLakeSearchBackend)
-            assert backend.user_token == "tok"
 
     @pytest.mark.unit
     def test_subclass_without_search_raises_type_error(self):
@@ -820,7 +763,7 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
             async def search(self, params: DataLakeSearchParams) -> list[dict]:
                 return expected_assets
 
-        tool = await create_data_lake_search_tool(user_token="tok", backend=_FixedBackend())
+        tool = await create_data_lake_search_tool(backend=_FixedBackend())
         result = await tool(DataLakeSearchParams(query="anything"))
         assert json.loads(result) == expected_assets
 
@@ -835,7 +778,7 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
                 received.append(params)
                 return []
 
-        tool = await create_data_lake_search_tool(user_token="tok", backend=_CapturingBackend())
+        tool = await create_data_lake_search_tool(backend=_CapturingBackend())
         await tool(DataLakeSearchParams(query="my query", top=10))
 
         assert len(received) == 1
@@ -855,7 +798,7 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
                 # Return domain so we can assert it was applied
                 return [{"domain": restricted.domains[0]}]
 
-        tool = await create_data_lake_search_tool(user_token="tok", backend=_DomainRestrictedBackend())
+        tool = await create_data_lake_search_tool(backend=_DomainRestrictedBackend())
         # Even if the agent asks for all domains, only the allowed domain is returned
         result = await tool(DataLakeSearchParams(query="wind power"))
         result_data = json.loads(result)
@@ -872,13 +815,13 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
 
         with (
             patch("data_lake.tools.adapters.maf.SearchClient") as mock_sc,
-            patch("data_lake.tools.adapters.maf.create_async_obo_credential", return_value=MagicMock()),
+            patch("data_lake.tools.adapters.maf.get_search_credential_async", return_value=MagicMock()),
         ):
             mock_client = MagicMock()
             mock_client.search = AsyncMock(return_value=async_results())
             mock_sc.return_value = mock_client
 
-            tool = await create_data_lake_search_tool(user_token="tok")
+            tool = await create_data_lake_search_tool()
             result = await tool(DataLakeSearchParams(query="test"))
 
         result_data = json.loads(result)

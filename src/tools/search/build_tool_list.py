@@ -16,7 +16,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from auth import create_entra_token_provider
+from auth import get_token_provider
 from tools.mcp.mcp_server_registry import get_mcp_registry
 
 LOGGER = logging.getLogger(__name__)
@@ -104,7 +104,7 @@ async def build_tool_list() -> list[ToolInfo]:
     for server_name, descriptor in servers.items():
         try:
             # Create headers with auth token
-            token_provider = create_entra_token_provider(descriptor.scope)
+            token_provider = get_token_provider(descriptor.scope)
             token = token_provider()
             headers = {"Authorization": f"Bearer {token}"}
 

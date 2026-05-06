@@ -29,18 +29,10 @@ class ToolSearchResult(BaseModel):
 class ToolSearchBackend(ABC):
     """Abstract base class for searching a tool catalog.
 
-    Subclasses must implement :meth:`search`.  The ``user_token`` passed
-    at construction time is stored as an instance attribute for backends
-    that need it for authentication (e.g. OBO flow).
-
-    Args:
-        user_token: Bearer token forwarded to backends that require
-            user-level authentication.  Backends that don't need it
-            (e.g. BM25) simply ignore it.
+    Subclasses must implement :meth:`search`.  Authentication is handled
+    by the credential factories in ``auth.providers`` — backends obtain
+    credentials directly rather than accepting user tokens.
     """
-
-    def __init__(self, user_token: str = ""):
-        self.user_token = user_token
 
     @abstractmethod
     async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:

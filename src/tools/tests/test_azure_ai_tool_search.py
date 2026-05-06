@@ -131,13 +131,13 @@ class TestCreateAndSetupToolSearch:
             ),
             patch("tools.search.azure_ai_tool_search.ToolSearchIndexManager") as MockManagerClass,
             patch(
-                "tools.search.azure_ai_tool_search.create_async_obo_credential",
+                "tools.search.azure_ai_tool_search.get_search_credential_async",
                 return_value=MagicMock(),
             ),
         ):
             MockManagerClass.from_env.return_value = mock_manager
 
-            backend, manager = await create_and_setup_azure_ai_tool_search(user_token="test-token")
+            backend, manager = await create_and_setup_azure_ai_tool_search()
 
         assert isinstance(backend, AzureAIToolSearchBackend)
         assert manager is mock_manager
@@ -165,4 +165,4 @@ class TestCreateAndSetupToolSearch:
             MockManagerClass.from_env.return_value = mock_manager
 
             with pytest.raises(Exception, match="deploy failed"):
-                await create_and_setup_azure_ai_tool_search(user_token="test-token")
+                await create_and_setup_azure_ai_tool_search()

@@ -170,10 +170,9 @@ class TestDeployIndex:
         mock_response = MagicMock()
         mock_response.status_code = 201
 
-        mock_get_token = AsyncMock(return_value="fake-token")
         mock_put = AsyncMock(return_value=mock_response)
 
-        with patch.object(mgr, "_get_token", mock_get_token):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})):
             with patch("httpx.AsyncClient") as mock_client_cls:
                 mock_http = AsyncMock()
                 mock_http.__aenter__ = AsyncMock(return_value=mock_http)
@@ -197,7 +196,7 @@ class TestDeployIndex:
         mock_response.text = "Forbidden"
         mock_response.raise_for_status = MagicMock(side_effect=Exception("403 Forbidden"))
 
-        with patch.object(mgr, "_get_token", AsyncMock(return_value="tok")):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})):
             with patch("httpx.AsyncClient") as mock_client_cls:
                 mock_http = AsyncMock()
                 mock_http.__aenter__ = AsyncMock(return_value=mock_http)
@@ -223,7 +222,7 @@ class TestPopulateIndex:
         mgr = ToolSearchIndexManager(_SEARCH_ENDPOINT, _OPENAI_ENDPOINT, _EMBEDDING_DEPLOYMENT)
         tools = [_make_tool_info()]
 
-        with patch.object(mgr, "_get_token", AsyncMock()):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})):
             with patch("httpx.AsyncClient") as mock_client_cls:
                 await mgr.populate_index(tools)
                 mock_client_cls.assert_not_called()
@@ -241,7 +240,7 @@ class TestPopulateIndex:
         mock_response.status_code = 200
         mock_response.json.return_value = result_body
 
-        with patch.object(mgr, "_get_token", AsyncMock(return_value="tok")):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})):
             with patch("httpx.AsyncClient") as mock_client_cls:
                 mock_http = AsyncMock()
                 mock_http.__aenter__ = AsyncMock(return_value=mock_http)
@@ -272,7 +271,7 @@ class TestDeleteIndex:
     async def test_no_op_when_not_deployed(self):
         mgr = ToolSearchIndexManager(_SEARCH_ENDPOINT, _OPENAI_ENDPOINT, _EMBEDDING_DEPLOYMENT)
         # Should not raise or call anything
-        with patch.object(mgr, "_get_token", AsyncMock()) as mock_token:
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})) as mock_token:
             await mgr.delete_index()
             mock_token.assert_not_called()
 
@@ -285,7 +284,7 @@ class TestDeleteIndex:
         mock_response = MagicMock()
         mock_response.status_code = 204
 
-        with patch.object(mgr, "_get_token", AsyncMock(return_value="tok")):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(return_value={"api-key": "fake-key"})):
             with patch("httpx.AsyncClient") as mock_client_cls:
                 mock_http = AsyncMock()
                 mock_http.__aenter__ = AsyncMock(return_value=mock_http)
@@ -304,7 +303,7 @@ class TestDeleteIndex:
         mgr = ToolSearchIndexManager(_SEARCH_ENDPOINT, _OPENAI_ENDPOINT, _EMBEDDING_DEPLOYMENT)
         mgr._index_deployed = True
 
-        with patch.object(mgr, "_get_token", AsyncMock(side_effect=Exception("auth failed"))):
+        with patch.object(mgr, "_get_auth_headers", AsyncMock(side_effect=Exception("auth failed"))):
             # Should not raise
             await mgr.delete_index()
 

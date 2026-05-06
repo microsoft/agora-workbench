@@ -17,15 +17,17 @@ returns the ``AzureAIToolSearchBackend`` + ``ToolSearchIndexManager``.
 
 import logging
 import os
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import httpx
 
+from azure.core.credentials import AzureKeyCredential
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-from auth import create_azure_credential_async, create_async_obo_credential
+from auth import get_search_credential_async
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from .build_tool_list import build_tool_list
 from ._constants import (
@@ -37,13 +39,12 @@ from ._constants import (
 from .manager import ToolSearchIndexManager
 
 if TYPE_CHECKING:
-    from azure.core.credentials_async import AsyncTokenCredential
     from .manager import ToolSearchIndexManager
 
 LOGGER = logging.getLogger(__name__)
 
 
-async def _embed_query(text: str, credential: "AsyncTokenCredential") -> list[float]:
+async def _embed_query(text: str, credential: AsyncTokenCredential) -> list[float]:
     """Generate an embedding vector for *text* using Azure OpenAI (client-side).
 
     This bypasses the integrated vectorizer so we don't depend on Azure AI
@@ -98,7 +99,7 @@ class ToolSearchClientManager:
             ``None``, a default credential chain is created internally.
     """
 
-    def __init__(self, index_name: str, credential: Optional["AsyncTokenCredential"] = None):
+    def __init__(self, index_name: str, credential: Optional[Union[AsyncTokenCredential, AzureKeyCredential]] = None):
         self._index_name = index_name
         self._client: Optional[SearchClient] = None
         self._external_credential = credential is not None
@@ -120,7 +121,7 @@ class ToolSearchClientManager:
     def _get_credential(self):
         """Return the cached async credential, creating it on first use."""
         if self._credential is None:
-            self._credential = create_azure_credential_async()
+            self._credential = get_search_credential_async()
         return self._credential
 
     def _create_client(self) -> SearchClient:
@@ -194,20 +195,25 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
     Args:
         index_name: Name of the Azure AI Search index to query.
-        user_token: Bearer token for OBO (On-Behalf-Of) authentication.
-            Always used to authenticate to Azure AI Search and the
-            embedding endpoint.
     """
 
-    def __init__(self, index_name: str, user_token: str):
-        super().__init__(user_token=user_token)
-        self._credential: AsyncTokenCredential = create_async_obo_credential(user_token)  # type: ignore[assignment]
+    def __init__(self, index_name: str):
+        super().__init__()
+        self._credential = get_search_credential_async()
         self._client_manager = ToolSearchClientManager(index_name, credential=self._credential)
 
     async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
         """Search the Azure AI Search index for tools matching *query*."""
-        # Generate query embedding
-        query_vector = await _embed_query(query, self._credential)
+        # Generate query embedding (requires token credential for OpenAI)
+        credential = self._credential
+        if isinstance(credential, AzureKeyCredential):
+            raise TypeError(
+                "AzureAIToolSearchBackend requires Entra ID authentication for "
+                "embedding generation. API key auth is not supported for this backend."
+            )
+        # At this point credential is AsyncTokenCredential (Entra chain)
+        assert not isinstance(credential, AzureKeyCredential)
+        query_vector = await _embed_query(query, credential)  # type: ignore[arg-type]
 
         search_kwargs: dict = {
             "search_text": query,
@@ -268,9 +274,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 # ============================================================================
 
 
-async def create_and_setup_azure_ai_tool_search(
-    user_token: str,
-) -> tuple["AzureAIToolSearchBackend", "ToolSearchIndexManager"]:
+async def create_and_setup_azure_ai_tool_search() -> tuple["AzureAIToolSearchBackend", "ToolSearchIndexManager"]:
     """
     Create an ephemeral Azure AI Search index and return a backend + manager.
 
@@ -290,11 +294,6 @@ async def create_and_setup_azure_ai_tool_search(
     Callers feed the backend into :func:`tools.search.core.create_search_tools_function`
     and :func:`tools.search.core.create_search_tools_function` separately.
 
-    Args:
-        user_token: Bearer token for OBO (On-Behalf-Of) authentication.
-            The backend always uses the OBO flow to authenticate to
-            Azure AI Search and the embedding endpoint.
-
     Returns:
         A ``(AzureAIToolSearchBackend, ToolSearchIndexManager)`` tuple.
 
@@ -307,7 +306,7 @@ async def create_and_setup_azure_ai_tool_search(
     manager = ToolSearchIndexManager.from_env()
     await manager.setup(tools)
 
-    backend = AzureAIToolSearchBackend(index_name=manager.index_name, user_token=user_token)
+    backend = AzureAIToolSearchBackend(index_name=manager.index_name)
 
     LOGGER.info(
         "Tool search ready: index '%s' with %d tools",

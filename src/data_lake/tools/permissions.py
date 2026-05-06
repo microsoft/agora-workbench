@@ -18,7 +18,7 @@ from azure.core.exceptions import (
     ResourceNotFoundError,
 )
 
-from auth import create_obo_credential
+from auth import get_search_credential
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,34 +69,30 @@ def get_acceptable_actions_for_resource(resource_id: str) -> list[str]:
 
 async def check_resource_permissions(
     resource_id: str,
-    user_token: str,
     acceptable_actions: Optional[list[str]] = None,
 ) -> bool:
     """
-    Check if a user has permissions on an Azure resource using ARM permissions API.
+    Check if the current identity has permissions on an Azure resource.
 
     Uses Azure Resource Manager's permissions API to directly query whether the
-    authenticated user has access to a specific resource. Returns True if the user
-    has ANY of the acceptable actions.
+    authenticated identity has access to a specific resource. Returns True if
+    the identity has ANY of the acceptable actions.
 
     Args:
         resource_id: Azure Resource ID to check permissions for.
             Format: '/subscriptions/{sub}/resourceGroups/{rg}/providers/{provider}/{type}/{name}'
             Example: '/subscriptions/xxx/.../storageAccounts/myaccount/blobServices/default/containers/data'
-        user_token: User's bearer token (JWT) for authentication. Required.
-            Must be a valid token that can be used to check the user's permissions.
         acceptable_actions: Optional list of actions where ANY is sufficient for access.
             Examples: ['Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read', '*/read']
             If not provided, automatically determines appropriate actions based on the resource type
             (e.g., Storage blobs need read permissions, SQL databases need query permissions).
-            The function returns True as soon as it finds the user has ANY of these actions.
+            The function returns True as soon as it finds the identity has ANY of these actions.
 
     Returns:
-        True if user has ANY of the acceptable actions on the resource, False otherwise.
+        True if identity has ANY of the acceptable actions on the resource, False otherwise.
 
     Security:
         On errors, fails closed (returns False) to prevent unauthorized access.
-        Always authenticates as the user (via token), never as service identity.
     """
     try:
         # Parse resource ID to extract components using Azure's built-in parser
@@ -113,11 +109,10 @@ async def check_resource_permissions(
             f"(type: {provider_namespace}/{resource_type}, rg: {resource_group})"
         )
 
-        # Create credential using On-Behalf-Of (OBO) flow with user token
-        # This ensures we check permissions in the context of the user, not the service
-        credential = create_obo_credential(user_token)
+        # Create credential using the configured auth (CLI/Managed Identity or API key)
+        credential = get_search_credential()
 
-        LOGGER.debug(f"Using user token for permission check (token length: {len(user_token)})")
+        LOGGER.debug("Using configured credential for permission check")
 
         # Define acceptable actions - ANY of these is sufficient for access
         # If not explicitly provided, determine based on resource type
