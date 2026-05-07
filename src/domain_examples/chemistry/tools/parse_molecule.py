@@ -5,7 +5,7 @@ Parses a SMILES string and returns basic molecular identity and properties.
 Demonstrates the simplest ToolDefinition: one required parameter, fixed output.
 """
 
-from code_execution import ReturnSpec, ToolDefinition, ToolParameter
+from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
 
 
 def parse_molecule(smiles: str) -> dict:
@@ -54,6 +54,9 @@ TOOL_DEFINITION = ToolDefinition(
         ReturnSpec(name="num_bonds", type=int, description="Number of bonds"),
     ],
     module="domain_examples.chemistry.tools.parse_molecule",
+    state_transition=StateTransition(
+        produces=frozenset({"chemistry.molecule_parsed"}),
+    ),
     affordances=[
         "parse a SMILES string",
         "get the molecular weight of a compound",

@@ -103,37 +103,53 @@ This example uses `create_noop_auth_config()` (no authentication required). For 
 
 ## Domain Tools
 
-In addition to the general `execute_chemistry_code` tool, the server registers three domain-specific tools that are injected into the execution kernel as callable functions. These demonstrate the `ToolRegistry` / `ToolDefinition` pattern at increasing levels of complexity:
+In addition to the general `execute_chemistry_code` tool, the server registers domain-specific tools that are injected into the execution kernel as callable functions. These tools form a **state graph** demonstrating how tool transitions model workflows at increasing levels of complexity.
 
-| Tool | Complexity | Description |
-|------|-----------|-------------|
-| `parse_molecule` | Low | Parse SMILES → canonical form, formula, weight, atom/bond counts |
-| `compute_descriptors` | Medium | Physicochemical descriptors with optional subset selection + Lipinski evaluation |
-| `find_similar_molecules` | High | Fingerprint-based Tanimoto similarity search with algorithm selection |
+### State Graph
 
-These tools are defined in `tools/` and registered in `chemistry_server.py` via `ToolRegistry`. Each tool has a corresponding skill file in `skills/` describing usage patterns.
+```
+parse_molecule ──► molecule_parsed ──┬── enumerate_functional_groups ──► groups_identified
+                                     ├── compute_descriptors ──► descriptors_computed
+                                     │       └── filter_drug_candidates ──► candidates_filtered
+                                     └── compute_fingerprints ──► fingerprints_computed
+                                             ├── find_similar_molecules ──► similarity_computed
+                                             └── cluster_molecules ──► molecules_clustered
+```
+
+### Tool Summary
+
+| Tool | Chain | Requires | Produces |
+|------|-------|----------|----------|
+| `parse_molecule` | Entry point | — | `molecule_parsed` |
+| `enumerate_functional_groups` | Molecular analysis | `molecule_parsed` | `groups_identified` |
+| `compute_descriptors` | Drug screening | `molecule_parsed` | `descriptors_computed` |
+| `filter_drug_candidates` | Drug screening | `descriptors_computed` | `candidates_filtered` |
+| `compute_fingerprints` | Similarity/Clustering | `molecule_parsed` | `fingerprints_computed` |
+| `find_similar_molecules` | Similarity | `fingerprints_computed` | `similarity_computed` |
+| `cluster_molecules` | Clustering | `fingerprints_computed` | `molecules_clustered` |
+
+Tools are defined in `tools/` and registered in `chemistry_server.py` via `ToolRegistry`. Each workflow has a corresponding skill file in `skills/` describing the full chain. The state vocabulary is defined in `states.py`.
 
 ### Using domain tools in code
 
 Domain tools are available as regular Python functions inside `execute_chemistry_code`:
 
 ```python
-# Low: parse a molecule
-info = parse_molecule(smiles="CCO")
-print(info["molecular_formula"])  # C2H6O
+# Chain 1: Molecular analysis
+info = parse_molecule(smiles="CC(=O)Oc1ccccc1C(=O)O")
+groups = enumerate_functional_groups(smiles="CC(=O)Oc1ccccc1C(=O)O")
 
-# Medium: compute descriptors
-result = compute_descriptors(smiles="c1ccccc1", descriptors=["logp", "tpsa"])
-print(result["lipinski_pass"])  # True
-
-# High: similarity search
-matches = find_similar_molecules(
-    query_smiles="c1ccccc1",
-    candidate_smiles_list=["c1ccc(O)cc1", "CCCCCC"],
-    threshold=0.3,
+# Chain 2: Drug screening
+descriptors = compute_descriptors(smiles="c1ccccc1")
+screening = filter_drug_candidates(
+    smiles_list=["CCO", "c1ccccc1", "CC(=O)Oc1ccccc1C(=O)O"],
+    rules="both",
 )
-for m in matches["matches"]:
-    print(f"{m['canonical_smiles']}: {m['similarity']:.3f}")
+
+# Chain 3: Similarity & clustering (branching graph)
+fps = compute_fingerprints(smiles_list=library)
+hits = find_similar_molecules(query_smiles="c1ccccc1", candidate_smiles_list=library)
+clusters = cluster_molecules(smiles_list=library, cutoff=0.4)
 ```
 
 ## License

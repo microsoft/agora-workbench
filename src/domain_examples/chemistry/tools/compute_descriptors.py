@@ -5,7 +5,7 @@ Computes physicochemical and Lipinski descriptors for a molecule.
 Demonstrates optional parameters (descriptor subset selection) and richer output.
 """
 
-from code_execution import ReturnSpec, ToolDefinition, ToolParameter
+from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
 
 # Descriptor name → (label, RDKit function path)
 _DESCRIPTOR_REGISTRY: dict[str, str] = {
@@ -115,6 +115,10 @@ TOOL_DEFINITION = ToolDefinition(
         ReturnSpec(name="lipinski_pass", type=bool, description="Whether the molecule passes Lipinski's Rule of Five"),
     ],
     module="domain_examples.chemistry.tools.compute_descriptors",
+    state_transition=StateTransition(
+        requires=frozenset({"chemistry.molecule_parsed"}),
+        produces=frozenset({"chemistry.descriptors_computed"}),
+    ),
     affordances=[
         "compute molecular descriptors",
         "check Lipinski's Rule of Five",

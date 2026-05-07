@@ -6,7 +6,7 @@ Demonstrates multiple required and optional parameters, list I/O, algorithm
 selection, input validation, and ranked output.
 """
 
-from code_execution import ReturnSpec, ToolDefinition, ToolParameter
+from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
 
 SUPPORTED_FINGERPRINTS = ("morgan", "rdkit", "maccs")
 
@@ -156,6 +156,10 @@ TOOL_DEFINITION = ToolDefinition(
         ReturnSpec(name="matches", type=list, description="Ranked list of matching molecules with similarity scores"),
     ],
     module="domain_examples.chemistry.tools.find_similar_molecules",
+    state_transition=StateTransition(
+        requires=frozenset({"chemistry.fingerprints_computed"}),
+        produces=frozenset({"chemistry.similarity_computed"}),
+    ),
     affordances=[
         "find similar molecules",
         "molecular similarity search",

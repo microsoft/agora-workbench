@@ -1,6 +1,14 @@
 ---
 name: chemistry-rdkit
-description: Molecular analysis and cheminformatics using RDKit — SMILES handling, descriptor calculation, fingerprints, substructure search, and reaction enumeration via the execute_chemistry_code tool and domain-specific tools.
+description: Molecular analysis and cheminformatics using RDKit — SMILES handling, descriptor calculation, fingerprints, substructure search, similarity, clustering, and drug-likeness screening via domain tools and the execute_chemistry_code tool.
+states:
+  - chemistry.molecule_parsed
+  - chemistry.groups_identified
+  - chemistry.descriptors_computed
+  - chemistry.candidates_filtered
+  - chemistry.fingerprints_computed
+  - chemistry.similarity_computed
+  - chemistry.molecules_clustered
 ---
 
 # Chemistry / RDKit
@@ -9,21 +17,39 @@ Use this skill when the user asks about molecules, chemical structures, SMILES,
 molecular properties, similarity, substructure matching, or any cheminformatics
 task. Code runs in the `execute_chemistry_code` tool with RDKit auto-imported.
 
-## Domain Tools
+## State Graph Overview
 
-Three domain tools are available as callable functions inside the execution
-environment. Prefer these over writing raw RDKit code when the task matches:
+The domain tools form a directed graph of workflows. `parse_molecule` is the
+entry point; downstream tools have prerequisite states that guide workflow
+planning.
 
-| Tool | Complexity | Use When |
-|------|-----------|----------|
-| `parse_molecule(smiles)` | Low | Validate SMILES, get formula/weight/atom counts |
-| `compute_descriptors(smiles, descriptors=...)` | Medium | Calculate physicochemical properties, check Lipinski |
-| `find_similar_molecules(query, candidates, ...)` | High | Fingerprint-based similarity search and ranking |
+```
+parse_molecule ─────► chemistry.molecule_parsed
+                              │
+              ┌───────────────┼───────────────────┐
+              ▼               ▼                   ▼
+   enumerate_functional  compute_descriptors  compute_fingerprints
+      _groups               │                    │
+              │             ▼                    ├──────────────┐
+              ▼     chemistry.descriptors_       ▼              ▼
+   chemistry.groups_    computed         chemistry.fingerprints_ │
+    identified          │                  computed              │
+                        ▼                    │                   │
+               filter_drug_candidates        ▼                  ▼
+                        │           find_similar_molecules  cluster_molecules
+                        ▼                    │                   │
+               chemistry.candidates_         ▼                   ▼
+                 filtered           chemistry.similarity_  chemistry.molecules_
+                                     computed               clustered
+```
 
-See the individual skill files for full signatures and examples:
-- [parse-molecule.md](parse-molecule.md)
-- [compute-descriptors.md](compute-descriptors.md)
-- [find-similar-molecules.md](find-similar-molecules.md)
+## Workflow Skills
+
+| Skill | Tools | Description |
+|-------|-------|-------------|
+| [molecular-analysis](molecular-analysis.md) | `parse_molecule` → `enumerate_functional_groups` | Structural characterization |
+| [drug-screening](drug-screening.md) | `compute_descriptors` → `filter_drug_candidates` | Drug-likeness evaluation |
+| [similarity-and-clustering](similarity-and-clustering.md) | `compute_fingerprints` → `find_similar_molecules` / `cluster_molecules` | Library search and grouping |
 
 ## Auto-Imported Modules
 
