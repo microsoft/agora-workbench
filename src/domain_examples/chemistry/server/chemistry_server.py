@@ -4,6 +4,12 @@ Chemistry MCP Server — RDKit-based cheminformatics code execution.
 Provides an `execute_chemistry_code` MCP tool backed by a conda environment
 with RDKit and common scientific Python packages from conda-forge.
 
+Domain-specific tool implementations live in the ``chemistry_tools`` pip
+package (under ``chemistry_tools/``), which is installed into the conda
+environment via ``additional_commands``.  The server holds only the
+``ToolDefinition`` metadata (schemas, state transitions, affordances);
+the kernel imports implementations from the installed package.
+
 Usage:
     python -m domain_examples.chemistry.server.chemistry_server
 
@@ -11,12 +17,17 @@ Requires the base image (mcp-server-base:local) to be built first.
 See the README for full instructions.
 """
 
-
 import asyncio
 import os
+from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig
+from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
+from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
+
+# Path to the chemistry_tools package (relative to this file so it works
+# both inside Docker and when running locally from the repo root).
+_CHEMISTRY_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "chemistry_tools")
 
 ENVIRONMENT_YML = """\
 name: chemistry
@@ -24,6 +35,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
+  - pip
   - rdkit
   - numpy
   - pandas
@@ -51,6 +63,12 @@ config = EnvironmentConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
+    additional_commands=[
+        # Install the chemistry_tools package into the conda environment
+        # so that tool proxy imports (e.g. ``from chemistry_tools.parse_molecule
+        # import parse_molecule``) resolve correctly inside the kernel.
+        f"python -m pip install --no-deps {_CHEMISTRY_TOOLS_PKG}",
+    ],
 )
 
 
@@ -62,8 +80,14 @@ class ChemistryServer(CodeExecutionServer):
         return RDKIT_PRELUDE + code
 
 
+# Build the tool registry from domain tool definitions
+tool_registry = ToolRegistry()
+for tool_def in CHEMISTRY_TOOLS:
+    tool_registry.register_tool(tool_def)
+
 server = ChemistryServer(
     environment_config=config,
+    tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )
 
