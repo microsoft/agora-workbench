@@ -610,14 +610,21 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
 
         backend = LocalDataLakeSearchBackend(local_catalog)
         validated_assets = []
+
+        # The local BM25 backend does not index artifact_id, so searching with
+        # query=artifact_id can miss valid records. Fetch catalog documents with
+        # a wildcard query and then validate by exact artifact_id match.
+        params = DataLakeSearchParams(query="*", top=100000)
+        results = await backend.search(params)
+        artifacts_by_id = {
+            asset.get("artifact_id"): asset for asset in results if asset.get("artifact_id")
+        }
+
         for artifact_id in qualified_names:
-            # Search with wildcard query and match by artifact_id
-            params = DataLakeSearchParams(query=artifact_id, top=50)
-            results = await backend.search(params)
-            matched = [a for a in results if a.get("artifact_id") == artifact_id]
+            matched = artifacts_by_id.get(artifact_id)
             if matched:
                 LOGGER.info(f"[DATA_LAKE] Validated artifact_id (local): {artifact_id!r}")
-                validated_assets.append(matched[0])
+                validated_assets.append(matched)
             else:
                 LOGGER.warning(f"Artifact not found in local catalog: {artifact_id}")
         return validated_assets
