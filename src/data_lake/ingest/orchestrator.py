@@ -27,12 +27,12 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-from azure.identity import AzureCliCredential
 from dotenv import load_dotenv
 from jinja2 import Template
 
 from ..manifest.manifest import DataConfigSingle, IngestionManifest
 from ..utilities.utilities import move_entities
+from auth import get_purview_credential, get_token_provider
 
 # Load .env so manifest validators can resolve env-var fallbacks
 load_dotenv(verbose=True, override=False)
@@ -57,8 +57,7 @@ _MAX_WAIT_SECONDS = 1800  # 30 min
 
 def _get_token() -> str:
     """Acquire a bearer token for Azure AI Search."""
-    cred = AzureCliCredential()
-    return cred.get_token("https://search.azure.com/.default").token
+    return get_token_provider("https://search.azure.com/.default")()
 
 
 def _load_template(template_path: Path, substitutions: Dict[str, str]) -> Dict[str, Any]:
@@ -124,7 +123,7 @@ class IngestionOrchestrator:
     def __init__(self, manifest: IngestionManifest, *, dry_run: bool = False):
         self.m = manifest
         self.dry_run = dry_run
-        self.credential = AzureCliCredential()
+        self.credential = get_purview_credential()
         self._search_endpoint = f"https://{self.m.search.search_service}.search.windows.net"
         # Per-dataset state – set by _apply_dataset before each iteration
         self._current_subfolder: Optional[str] = None

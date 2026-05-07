@@ -23,9 +23,9 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
-from azure.identity import AzureCliCredential
 from azure.purview.administration.account import PurviewAccountClient
 from azure.purview.scanning import PurviewScanningClient
+from auth import get_purview_credential
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class PurviewDataSourceManager:
         self.endpoint = f"https://{purview_account}.purview.azure.com"
         self.scan_endpoint = f"https://{purview_account}.scan.purview.azure.com"
 
-        credential = AzureCliCredential()
+        credential = get_purview_credential()
 
         # Initialize clients
         self.scanning_client = PurviewScanningClient(endpoint=self.scan_endpoint, credential=credential)

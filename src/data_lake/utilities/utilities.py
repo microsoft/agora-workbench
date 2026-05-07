@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from azure.identity import AzureCliCredential
+from auth import get_purview_credential, get_search_credential
 from azure.purview.catalog import PurviewCatalogClient
 from azure.search.documents import SearchClient
 
@@ -38,7 +38,7 @@ def move_entities(
     """
     from data_lake.semantic import PurviewDataSourceManager
 
-    credential = AzureCliCredential()
+    credential = get_purview_credential()
     endpoint = f"https://{purview_account}.purview.azure.com"
     client = PurviewCatalogClient(endpoint=endpoint, credential=credential)
 
@@ -163,7 +163,7 @@ def update_purview_entity(
 
     from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 
-    credential = AzureCliCredential()
+    credential = get_purview_credential()
     endpoint = f"https://{purview_account}.purview.azure.com"
     client = PurviewCatalogClient(endpoint=endpoint, credential=credential)
 
@@ -265,7 +265,7 @@ def list_artifact_registry(
         azure.core.exceptions.ServiceRequestError: If the search service
             cannot be reached (DNS/network failure).
     """
-    credential = AzureCliCredential()
+    credential = get_search_credential()
     endpoint = f"https://{search_service}.search.windows.net"
 
     client = SearchClient(

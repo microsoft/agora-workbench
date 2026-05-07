@@ -9,7 +9,10 @@ This module provides:
    - `get_storage_connection_string()` — Azure Storage connection string
    - `is_key_based_auth()` — check if running in key-based mode
 
-2. **Token providers** (Entra-only, for services requiring bearer tokens):
+2. **Purview credential factory** (Entra-only):
+   - `get_purview_credential()` — credential chain for Microsoft Purview clients
+
+3. **Token providers** (Entra-only, for services requiring bearer tokens):
    - `get_token_provider(scope)` — returns a callable that yields fresh tokens
    - `BearerTokenAuth` — httpx Auth class using a token provider
 
@@ -18,6 +21,7 @@ See `auth.providers` for the credential factories.
 
 from .providers import (
     BearerTokenAuth,
+    get_purview_credential,
     get_search_auth_headers_async,
     get_search_credential,
     get_search_credential_async,
@@ -33,6 +37,8 @@ __all__ = [
     "get_search_auth_headers_async",
     "get_storage_connection_string",
     "is_key_based_auth",
+    # Purview credential factory (Entra-only)
+    "get_purview_credential",
     # Token providers (Entra-only)
     "BearerTokenAuth",
     "get_token_provider",
