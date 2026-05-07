@@ -18,6 +18,7 @@ from data_lake.tools.adapters.maf import (
     _discover_available_domains,
     create_data_lake_search_tool,
     is_data_lake_configured,
+    validate_assets_against_catalog,
 )
 
 
@@ -882,6 +883,61 @@ artifacts:
         )
         names = [result["name"] for result in results]
         assert names == sorted(names, reverse=True)
+
+
+class TestValidateAssetsAgainstCatalogLocal:
+    """Tests for local-catalog branch in validate_assets_against_catalog."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_returns_only_found_artifacts(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text(
+            """
+artifacts:
+  - artifact_id: weather-1
+    name: Daily Weather Observations
+    description: NOAA weather station temperatures
+    artifact_type: blob
+    domain: earthscience
+    source: local
+  - artifact_id: grid-1
+    name: Transmission Lines
+    description: Power grid transmission line geospatial data
+    artifact_type: blob
+    domain: powergrid
+    source: local
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        validated = await validate_assets_against_catalog(["weather-1", "missing-id"])
+
+        assert len(validated) == 1
+        assert validated[0]["artifact_id"] == "weather-1"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_raises_when_catalog_file_missing(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        missing_catalog = tmp_path / "does-not-exist-validate-assets.yaml"
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(missing_catalog))
+
+        with pytest.raises(FileNotFoundError, match="Local DataLake catalog file not found"):
+            await validate_assets_against_catalog(["weather-1"])
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_raises_when_catalog_is_invalid(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "invalid-catalog.yaml"
+        catalog.write_text("artifacts: not-a-list", encoding="utf-8")
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        with pytest.raises(ValueError, match="top-level 'artifacts' list"):
+            await validate_assets_against_catalog(["weather-1"])
 
 
 class TestCreateDataLakeSearchToolWithCustomBackend:

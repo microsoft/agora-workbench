@@ -112,6 +112,10 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
         self._index = _CatalogBM25Index(self._catalog_docs)
 
+    def get_catalog_docs(self) -> list[dict[str, Any]]:
+        """Return a copy of loaded catalog documents."""
+        return [dict(doc) for doc in self._catalog_docs]
+
     @property
     def available_domains(self) -> list[str]:
         domains = {str(doc.get("domain")) for doc in self._catalog_docs if doc.get("domain")}
