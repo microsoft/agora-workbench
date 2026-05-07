@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from azure.identity.aio import ManagedIdentityCredential
 from azure.search.documents.aio import SearchClient
 
-from .fetchers import BlobFetcher
+from .fetchers import BlobFetcher, LocalFileFetcher
 from ..types import AssetId
 
 LOGGER = logging.getLogger(__name__)
@@ -37,48 +37,50 @@ class DataLakeDataManager:
 
     Supports:
     - Azure Blob Storage (abfss://, https://)
+    - Local filesystem (absolute paths, relative paths, file:// URIs)
     """
 
-    def __init__(self):
+    def __init__(self, allowed_local_roots: list[str] | None = None):
         """
         Initialize the data manager.
 
-        Uses managed identity for downstream resource access. Set
-        AZURE_CLIENT_ID for user-assigned MI, otherwise system-assigned MI is used.
+        Uses managed identity for downstream resource access when Azure
+        services are configured. Falls back to local-only mode when
+        ``DATA_LAKE_SEARCH_ENDPOINT`` is not set.
 
-        Raises:
-            ValueError: If DATA_LAKE_SEARCH_ENDPOINT is not configured.
+        Args:
+            allowed_local_roots: Optional list of directory paths the local
+                file fetcher is allowed to read from. If ``None`` or empty,
+                all paths are permitted (suitable for sandboxed containers).
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
 
-        # Create managed identity credential for downstream access
-        mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
-        self._credential = ManagedIdentityCredential(client_id=mi_client_id)
+        search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
 
         # Initialize fetchers
         self._fetchers = [
-            BlobFetcher(credential=self._credential),
+            LocalFileFetcher(allowed_roots=allowed_local_roots),
         ]
 
-        # Initialize Azure Search client for blob-details index
-        self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
-        search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
+        if search_endpoint:
+            # Azure mode: add blob fetcher and search client
+            mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
+            self._credential = ManagedIdentityCredential(client_id=mi_client_id)
+            self._fetchers.append(BlobFetcher(credential=self._credential))
 
-        if not search_endpoint:
-            raise ValueError(
-                "DATA_LAKE_SEARCH_ENDPOINT environment variable is required for blob artifact resolution. "
-                "Set this to your Azure AI Search service endpoint (e.g., https://your-service.search.windows.net)"
+            self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
+            self._search_client = SearchClient(
+                endpoint=search_endpoint,
+                index_name=self._blob_details_index,
+                credential=self._credential,
             )
-
-        # Use managed identity credential for Search client
-        search_credential = self._credential
-        self._search_client = SearchClient(
-            endpoint=search_endpoint,
-            index_name=self._blob_details_index,
-            credential=search_credential,
-        )
-        LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
+            LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
+        else:
+            self._credential = None
+            self._search_client = None
+            self._blob_details_index = None
+            LOGGER.info("DataLakeDataManager running in local-only mode (no Azure Search endpoint configured)")
 
     async def _get_blob_url_from_artifact_id(self, artifact_id: str) -> str:
         """
@@ -95,8 +97,8 @@ class DataLakeDataManager:
         """
         if not self._search_client:
             raise RuntimeError(
-                "Search client not initialized. This is an internal error - "
-                "DATA_LAKE_SEARCH_ENDPOINT should have been validated during initialization."
+                "Search client not initialized. "
+                "Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
             )
 
         try:
@@ -164,6 +166,9 @@ class DataLakeDataManager:
         # Route to appropriate resolver based on artifact type
         if artifact_type == "blob":
             resource_url = await self._get_blob_url_from_artifact_id(artifact_id)
+        elif artifact_type == "local":
+            # Local artifacts: the artifact_id is the file path itself
+            resource_url = artifact_id
         else:
             raise ValueError(f"Unsupported artifact type: {artifact_type}.")
 
@@ -198,7 +203,8 @@ class DataLakeDataManager:
                 return await fetcher.fetch_to_file(qualified_name, dest_path)
 
         raise ValueError(
-            f"No fetcher available for asset: {qualified_name}. Supported formats: Azure Blob/ADLS (abfss://, https://)"
+            f"No fetcher available for asset: {qualified_name}. "
+            f"Supported formats: local paths, file:// URIs, Azure Blob/ADLS (abfss://, https://)"
         )
 
     def _get_cache_file_path(self, qualified_name: str) -> Path:
@@ -276,7 +282,7 @@ class DataLakeDataManager:
                     LOGGER.debug(f"Error closing search client: {e}")
 
         # Close managed identity credential
-        if hasattr(self, "_credential"):
+        if hasattr(self, "_credential") and self._credential is not None:
             try:
                 loop = asyncio.get_running_loop()
                 # We're inside a running loop — schedule close as a task

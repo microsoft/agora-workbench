@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ...code_execution.data_access.fetchers import BlobFetcher
 from ...code_execution.data_access.manager import DataLakeDataManager
 
 
@@ -43,6 +44,14 @@ def _mock_blob_resolver(url: str):
     return AsyncMock(return_value=url)
 
 
+def _get_blob_fetcher(manager: DataLakeDataManager) -> BlobFetcher:
+    """Find the BlobFetcher instance in the manager's fetcher list."""
+    for f in manager._fetchers:
+        if isinstance(f, BlobFetcher):
+            return f
+    raise RuntimeError("BlobFetcher not found in manager._fetchers")
+
+
 class TestDataLakeDataManagerInit:
     """Test DataLakeDataManager initialization."""
 
@@ -52,7 +61,7 @@ class TestDataLakeDataManagerInit:
 
         assert manager._credential is not None
         assert manager._cache_index == {}
-        assert len(manager._fetchers) == 1
+        assert len(manager._fetchers) == 2
         assert manager._cache_dir.exists()
 
     def test_init_creates_temp_cache_dir(self):
@@ -62,6 +71,24 @@ class TestDataLakeDataManagerInit:
         assert manager._cache_dir.exists()
         assert manager._cache_dir.is_dir()
         assert "data_lake_cache_" in manager._cache_dir.name
+
+    def test_init_local_only_mode(self, monkeypatch):
+        """Test initialization without Azure endpoint runs in local-only mode."""
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        manager = DataLakeDataManager()
+
+        assert manager._credential is None
+        assert manager._search_client is None
+        assert len(manager._fetchers) == 1
+        assert manager._cache_dir.exists()
+
+
+def _get_blob_fetcher(manager: DataLakeDataManager) -> BlobFetcher:
+    """Find the BlobFetcher instance in the manager's fetcher list."""
+    for f in manager._fetchers:
+        if isinstance(f, BlobFetcher):
+            return f
+    raise RuntimeError("BlobFetcher not found in manager._fetchers")
 
 
 class TestGetCachePath:
@@ -79,7 +106,7 @@ class TestGetCachePath:
 
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file),
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file),
         ):
             cache_path = await manager.get_cache_path(qualified_name)
 
@@ -108,7 +135,7 @@ class TestGetCachePath:
 
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file) as mock_fetch,
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file) as mock_fetch,
         ):
             # First call - should fetch
             cache_path1 = await manager.get_cache_path(qualified_name)
@@ -128,7 +155,7 @@ class TestGetCachePath:
 
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=ValueError("Blob not found")),
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=ValueError("Blob not found")),
         ):
             with pytest.raises(ValueError, match="Blob not found"):
                 await manager.get_cache_path(qualified_name)
@@ -163,7 +190,7 @@ class TestFileExtensionPreservation:
         mock_fetch_to_file = create_mock_fetch_to_file(data)
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file),
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file),
         ):
             cache_path = await manager.get_cache_path(qualified_name)
             return cache_path
@@ -214,7 +241,7 @@ class TestUtilityMethods:
         mock_fetch_to_file = create_mock_fetch_to_file(mock_data)
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file),
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file),
         ):
             await manager.get_cache_path(qualified_name)
 
@@ -241,7 +268,7 @@ class TestUtilityMethods:
         for artifact_id, blob_url in artifacts:
             with (
                 patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-                patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file),
+                patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file),
             ):
                 await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
 
@@ -264,7 +291,7 @@ class TestCleanup:
         mock_fetch_to_file = create_mock_fetch_to_file(b"test")
         with (
             patch.object(manager, "_get_blob_url_from_artifact_id", _mock_blob_resolver(blob_url)),
-            patch.object(manager._fetchers[0], "fetch_to_file", side_effect=mock_fetch_to_file),
+            patch.object(_get_blob_fetcher(manager), "fetch_to_file", side_effect=mock_fetch_to_file),
         ):
             await manager.get_cache_path("<blob>cleanup_test</blob>")
 

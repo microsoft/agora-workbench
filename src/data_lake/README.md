@@ -46,6 +46,28 @@ services:
 
 The agent discovers the artifact via the catalog, sees `storage_url: "./data/weather/daily_obs.csv"`, and generates code like `pd.read_csv("/data/weather/daily_obs.csv")` to run in the execution environment.
 
+### Data Fetching
+
+The code execution module includes a `LocalFileFetcher` (in `code_execution/data_access/fetchers.py`) that can read local files directly — no Azure credentials required. It supports absolute paths, `./` relative paths, and `file://` URIs.
+
+**Path sandboxing:** `LocalFileFetcher` accepts an `allowed_roots` parameter to restrict which directories it can read from. This prevents path traversal attacks (e.g., an agent generating `../../etc/passwd`).
+
+```python
+from code_execution.code_execution.data_access.fetchers import LocalFileFetcher
+
+# Restrict to specific directories
+fetcher = LocalFileFetcher(allowed_roots=["/data", "./datasets"])
+
+# Permissive mode (only use inside sandboxed containers)
+fetcher = LocalFileFetcher()  # allowed_roots=None permits all paths
+```
+
+When `DATA_LAKE_SEARCH_ENDPOINT` is not set, the `DataLakeDataManager` runs in local-only mode — it registers `LocalFileFetcher` automatically and skips Azure Blob fetcher setup. To fetch a local artifact, use the `<local>` tag format:
+
+```
+<local>/data/weather/daily_obs.csv</local>
+```
+
 ## Architecture
 
 The system has three primary components:
