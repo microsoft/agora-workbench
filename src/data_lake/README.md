@@ -2,6 +2,27 @@
 
 A unified data discovery and governance system for blob storage artifacts, combining Azure AI Search, Microsoft Purview, and Azure OpenAI to enable semantic search with RBAC-aware artifact retrieval.
 
+## Local Development (No Azure Credentials)
+
+For local-only development, you can use a file-backed catalog instead of Azure services:
+
+1. Set `DATA_LAKE_LOCAL_CATALOG` to a YAML file path (example catalog: `tools/adapters/catalog.yaml`).
+2. Leave `DATA_LAKE_SEARCH_ENDPOINT` unset.
+3. Use data lake tools as usual; search runs locally using BM25 keyword ranking over artifact metadata.
+
+Catalog format:
+
+```yaml
+artifacts:
+  - artifact_id: "sample-weather-csv"
+    name: "Daily Weather Observations"
+    description: "NOAA daily weather station data for Pacific Northwest"
+    artifact_type: "blob"
+    domain: "earthscience"
+    source: "local"
+    tags: ["weather", "noaa", "temperature"]
+```
+
 ## Architecture
 
 The system has three primary components:

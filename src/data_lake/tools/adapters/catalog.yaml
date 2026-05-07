@@ -1,0 +1,27 @@
+artifacts:
+  - artifact_id: "sample-weather-csv"
+    name: "Daily Weather Observations"
+    description: "NOAA daily weather station data for the Pacific Northwest."
+    artifact_type: "blob"
+    domain: "earthscience"
+    source: "local"
+    storage_url: "/data/weather/daily_obs.csv"
+    tags: ["weather", "noaa", "temperature"]
+
+  - artifact_id: "sample-grid-lines-geojson"
+    name: "US Transmission Lines"
+    description: "Geospatial transmission line dataset for power grid analysis."
+    artifact_type: "blob"
+    domain: "powergrid"
+    source: "local"
+    storage_url: "/data/grid/transmission_lines.geojson"
+    tags: ["transmission", "grid", "geospatial"]
+
+  - artifact_id: "sample-market-prices-parquet"
+    name: "Wholesale Electricity Prices"
+    description: "Hourly wholesale electricity prices by balancing authority."
+    artifact_type: "blob"
+    domain: "energy"
+    source: "local"
+    storage_url: "/data/market/prices.parquet"
+    tags: ["electricity", "market", "prices"]

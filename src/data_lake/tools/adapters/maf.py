@@ -55,11 +55,9 @@ class DataLakeSearchClientManager:
             DATA_LAKE_SEARCH_ENDPOINT: Required - Azure AI Search service endpoint
             DATA_LAKE_CATALOG_INDEX_NAME: Optional - Artifact registry index name (default: artifact-registry)
         """
-        if not is_data_lake_configured():
-            raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
-
         endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
-        assert endpoint is not None  # type-checking
+        if not endpoint:
+            raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
         index_name = os.getenv("DATA_LAKE_CATALOG_INDEX_NAME", "artifact-registry")
 
         LOGGER.debug(f"DataLake catalog configuration: endpoint={endpoint}, index={index_name}")
@@ -387,9 +385,9 @@ def is_data_lake_configured() -> bool:
     Check if DataLake catalog integration is configured.
 
     Returns:
-        True if DATA_LAKE_SEARCH_ENDPOINT is set, False otherwise
+        True if DATA_LAKE_SEARCH_ENDPOINT or DATA_LAKE_LOCAL_CATALOG is set, False otherwise.
     """
-    return bool(os.getenv("DATA_LAKE_SEARCH_ENDPOINT"))
+    return bool(os.getenv("DATA_LAKE_SEARCH_ENDPOINT") or os.getenv("DATA_LAKE_LOCAL_CATALOG"))
 
 
 async def _discover_available_domains() -> list[str]:
@@ -402,8 +400,21 @@ async def _discover_available_domains() -> list[str]:
         Sorted list of unique domain strings found in the index.
         Returns an empty list on any error (network, auth, missing index).
     """
+    endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
+    local_catalog = os.getenv("DATA_LAKE_LOCAL_CATALOG")
+
+    if local_catalog and not endpoint:
+        try:
+            from .local import discover_local_catalog_domains
+
+            local_domains = discover_local_catalog_domains(local_catalog)
+            LOGGER.info(f"Discovered {len(local_domains)} domain(s) in local catalog: {local_domains}")
+            return local_domains
+        except Exception as e:
+            LOGGER.warning(f"Failed to discover domains from local catalog: {e}")
+            return []
+
     try:
-        endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         index_name = os.getenv("DATA_LAKE_CATALOG_INDEX_NAME", "artifact-registry")
         if not endpoint:
             return []
@@ -507,7 +518,14 @@ async def create_data_lake_search_tool(
         tool = await create_data_lake_search_tool(backend=EnergyOnlyBackend())
     """
     if backend is None:
-        backend = DefaultDataLakeSearchBackend()
+        if os.getenv("DATA_LAKE_SEARCH_ENDPOINT"):
+            backend = DefaultDataLakeSearchBackend()
+        elif os.getenv("DATA_LAKE_LOCAL_CATALOG"):
+            from .local import LocalDataLakeSearchBackend
+
+            backend = LocalDataLakeSearchBackend(os.environ["DATA_LAKE_LOCAL_CATALOG"])
+        else:
+            backend = DefaultDataLakeSearchBackend()
 
     # Discover available domains from the index at tool creation time
     available_domains = await _discover_available_domains()
