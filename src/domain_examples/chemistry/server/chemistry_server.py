@@ -11,12 +11,12 @@ Requires the base image (mcp-server-base:local) to be built first.
 See the README for full instructions.
 """
 
-
 import asyncio
 import os
 
-from code_execution import CodeExecutionServer, EnvironmentConfig
+from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
+from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 
 ENVIRONMENT_YML = """\
 name: chemistry
@@ -62,8 +62,14 @@ class ChemistryServer(CodeExecutionServer):
         return RDKIT_PRELUDE + code
 
 
+# Build the tool registry from domain tool definitions
+tool_registry = ToolRegistry()
+for tool_def in CHEMISTRY_TOOLS:
+    tool_registry.register_tool(tool_def)
+
 server = ChemistryServer(
     environment_config=config,
+    tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )
 

@@ -1,6 +1,6 @@
 ---
 name: chemistry-rdkit
-description: Molecular analysis and cheminformatics using RDKit — SMILES handling, descriptor calculation, fingerprints, substructure search, and reaction enumeration via the execute_chemistry_code tool.
+description: Molecular analysis and cheminformatics using RDKit — SMILES handling, descriptor calculation, fingerprints, substructure search, and reaction enumeration via the execute_chemistry_code tool and domain-specific tools.
 ---
 
 # Chemistry / RDKit
@@ -8,6 +8,22 @@ description: Molecular analysis and cheminformatics using RDKit — SMILES handl
 Use this skill when the user asks about molecules, chemical structures, SMILES,
 molecular properties, similarity, substructure matching, or any cheminformatics
 task. Code runs in the `execute_chemistry_code` tool with RDKit auto-imported.
+
+## Domain Tools
+
+Three domain tools are available as callable functions inside the execution
+environment. Prefer these over writing raw RDKit code when the task matches:
+
+| Tool | Complexity | Use When |
+|------|-----------|----------|
+| `parse_molecule(smiles)` | Low | Validate SMILES, get formula/weight/atom counts |
+| `compute_descriptors(smiles, descriptors=...)` | Medium | Calculate physicochemical properties, check Lipinski |
+| `find_similar_molecules(query, candidates, ...)` | High | Fingerprint-based similarity search and ranking |
+
+See the individual skill files for full signatures and examples:
+- [parse-molecule.md](parse-molecule.md)
+- [compute-descriptors.md](compute-descriptors.md)
+- [find-similar-molecules.md](find-similar-molecules.md)
 
 ## Auto-Imported Modules
 
