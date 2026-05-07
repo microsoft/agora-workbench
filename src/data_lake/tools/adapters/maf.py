@@ -586,6 +586,8 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
     2. Retrieve full metadata
     3. Respect data access permissions (RBAC)
 
+    Supports both Azure AI Search and local catalog backends.
+
     Args:
         qualified_names: List of artifact_ids to validate
 
@@ -597,7 +599,28 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
 
     # Only validate if DataLake is configured
     if not is_data_lake_configured():
-        raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
+        raise ValueError(
+            "DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT or DATA_LAKE_LOCAL_CATALOG."
+        )
+
+    # Use local backend if no Azure endpoint but local catalog is configured
+    local_catalog = os.getenv("DATA_LAKE_LOCAL_CATALOG")
+    if not os.getenv("DATA_LAKE_SEARCH_ENDPOINT") and local_catalog:
+        from .local import LocalDataLakeSearchBackend
+
+        backend = LocalDataLakeSearchBackend(local_catalog)
+        validated_assets = []
+        for artifact_id in qualified_names:
+            # Search with wildcard query and match by artifact_id
+            params = DataLakeSearchParams(query=artifact_id, top=50)
+            results = await backend.search(params)
+            matched = [a for a in results if a.get("artifact_id") == artifact_id]
+            if matched:
+                LOGGER.info(f"[DATA_LAKE] Validated artifact_id (local): {artifact_id!r}")
+                validated_assets.append(matched[0])
+            else:
+                LOGGER.warning(f"Artifact not found in local catalog: {artifact_id}")
+        return validated_assets
 
     validated_assets = []
     client_manager = DataLakeSearchClientManager()

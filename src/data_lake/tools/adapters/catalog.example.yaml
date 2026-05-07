@@ -1,3 +1,7 @@
+# Example local data lake catalog.
+# Copy this file to catalog.yaml (or any name) and set DATA_LAKE_LOCAL_CATALOG to its path.
+# The data files referenced by storage_url are placeholders — replace with real paths.
+
 artifacts:
   - artifact_id: "sample-weather-csv"
     name: "Daily Weather Observations"

@@ -6,7 +6,7 @@ A unified data discovery and governance system for blob storage artifacts, combi
 
 For local-only development, you can use a file-backed catalog instead of Azure services:
 
-1. Set `DATA_LAKE_LOCAL_CATALOG` to a YAML file path (example catalog: `tools/adapters/catalog.yaml`).
+1. Set `DATA_LAKE_LOCAL_CATALOG` to a YAML file path (example catalog: `tools/adapters/catalog.example.yaml`).
 2. Leave `DATA_LAKE_SEARCH_ENDPOINT` unset.
 3. Use data lake tools as usual; search runs locally using BM25 keyword ranking over artifact metadata.
 
@@ -20,8 +20,31 @@ artifacts:
     artifact_type: "blob"
     domain: "earthscience"
     source: "local"
+    storage_url: "./data/weather/daily_obs.csv"
     tags: ["weather", "noaa", "temperature"]
 ```
+
+### Where to Store Data Files
+
+The local catalog is **discovery only** — it tells the agent what data exists but doesn't serve files. The `storage_url` field is metadata the agent uses to generate code that reads the file. Where you place the actual data depends on your setup:
+
+| Scenario | Data location | Notes |
+|----------|--------------|-------|
+| **Local filesystem** | `./data/` or `~/datasets/` | Simplest; use absolute or project-relative paths in `storage_url` |
+| **Docker (MCP server)** | Mounted volume (e.g., `/data/`) | Mount via `docker-compose.yml` so the execution container can access files |
+| **Azurite (blob emulator)** | `http://127.0.0.1:10000/devstoreaccount1/` | Use well-known connection string; `storage_url` is the local blob URL |
+
+Example with a mounted volume for an MCP code execution server:
+
+```yaml
+# docker-compose.yml
+services:
+  chemistry:
+    volumes:
+      - ./data:/data:ro
+```
+
+The agent discovers the artifact via the catalog, sees `storage_url: "./data/weather/daily_obs.csv"`, and generates code like `pd.read_csv("/data/weather/daily_obs.csv")` to run in the execution environment.
 
 ## Architecture
 
