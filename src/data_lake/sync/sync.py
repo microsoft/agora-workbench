@@ -22,11 +22,11 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from azure.core.exceptions import ResourceNotFoundError
-from azure.identity import AzureCliCredential
 from azure.purview.catalog import PurviewCatalogClient
 from azure.search.documents import SearchClient
 from openai import AzureOpenAI
 
+from auth import get_purview_credential, get_search_credential, get_token_provider
 from data_lake.search.registry import ArtifactRegistryDocument
 
 logger = logging.getLogger(__name__)
@@ -72,8 +72,9 @@ class ArtifactRegistrySync:
         self.azure_openai_endpoint = azure_openai_endpoint
         self.azure_openai_embedding_deployment = azure_openai_embedding_deployment
 
-        # Set up credentials using Azure AD RBAC
-        self.credential = AzureCliCredential()
+        # Set up credentials using the centralized auth provider chain
+        self._search_credential = get_search_credential()
+        self._purview_credential = get_purview_credential()
 
         # Initialize clients
         self._init_clients()
@@ -82,9 +83,7 @@ class ArtifactRegistrySync:
         self.openai_client = AzureOpenAI(
             api_version="2023-05-15",
             azure_endpoint=azure_openai_endpoint,
-            azure_ad_token_provider=lambda: self.credential.get_token(
-                "https://cognitiveservices.azure.com/.default"
-            ).token,
+            azure_ad_token_provider=get_token_provider("https://cognitiveservices.azure.com/.default"),
         )
         logger.info(f"Azure OpenAI embeddings enabled: {azure_openai_embedding_deployment}")
 
@@ -101,17 +100,17 @@ class ArtifactRegistrySync:
         self.blob_details_client = SearchClient(
             endpoint=self.search_endpoint,
             index_name=self.blob_details_index,
-            credential=self.credential,
+            credential=self._search_credential,
         )
 
         self.artifact_registry_client = SearchClient(
             endpoint=self.search_endpoint,
             index_name=self.artifact_registry_index,
-            credential=self.credential,
+            credential=self._search_credential,
         )
 
         logger.info(f"Connecting to Purview: {self.purview_endpoint}")
-        self.catalog_client = PurviewCatalogClient(endpoint=self.purview_endpoint, credential=self.credential)
+        self.catalog_client = PurviewCatalogClient(endpoint=self.purview_endpoint, credential=self._purview_credential)
 
     def get_purview_entity(self, qualified_name: str, entity_type: str = "azure_blob_path") -> Optional[Dict[str, Any]]:
         """
@@ -683,8 +682,8 @@ class ArtifactRegistrySync:
             False only if the blob returns 404 (definitively gone)
         """
         try:
-            # AzureCliCredential caches tokens internally, so repeated calls are cheap
-            token = self.credential.get_token("https://storage.azure.com/.default").token
+            # The token provider uses a credential chain (CLI → Managed Identity) with internal caching
+            token = get_token_provider("https://storage.azure.com/.default")()
             client = self._get_http_client()
             response = client.head(
                 blob_url,

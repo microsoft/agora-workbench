@@ -13,15 +13,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from azure.identity import AzureCliCredential
+from auth import get_token_provider
 from jinja2 import Template
 
 
-def get_credential_and_token() -> tuple[AzureCliCredential, str]:
-    """Authenticate and get access token."""
-    credential = AzureCliCredential()
-    token = credential.get_token("https://search.azure.com/.default").token
-    return credential, token
+def get_token() -> str:
+    """Acquire a bearer token for Azure AI Search."""
+    return get_token_provider("https://search.azure.com/.default")()
 
 
 def deploy_resource(
@@ -56,7 +54,7 @@ def deploy_resource(
 def deploy_index(args: argparse.Namespace) -> None:
     """Deploy the artifact-registry index and update alias."""
     search_endpoint = f"https://{args.search_service}.search.windows.net"
-    _, token = get_credential_and_token()
+    token = get_token()
 
     index_path = Path(__file__).parent / "index.jinja"
     with open(index_path) as f:

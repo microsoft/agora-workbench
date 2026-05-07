@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from azure.core.credentials import AzureKeyCredential
 
 from auth.providers import (
+    get_purview_credential,
     get_search_credential,
     get_search_credential_async,
     get_storage_connection_string,
@@ -149,3 +150,54 @@ class TestIsKeyBasedAuth:
     def test_returns_false_when_empty(self):
         """Returns False when API key env var is empty."""
         assert is_key_based_auth() is False
+
+
+class TestGetPurviewCredential:
+    """Tests for get_purview_credential."""
+
+    @pytest.mark.unit
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("auth.providers.AzureCliCredential")
+    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("auth.providers.ChainedTokenCredential")
+    def test_returns_chained_credential(self, mock_chained, mock_managed, mock_cli):
+        """Returns ChainedTokenCredential (Entra ID chain)."""
+        mock_credential = MagicMock()
+        mock_chained.return_value = mock_credential
+
+        result = get_purview_credential()
+
+        assert result == mock_credential
+        mock_chained.assert_called_once()
+
+    @pytest.mark.unit
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("auth.providers.AzureCliCredential")
+    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("auth.providers.ChainedTokenCredential")
+    def test_credential_chain_order(self, mock_chained, mock_managed, mock_cli):
+        """Credential chain should be CLI first, then Managed Identity."""
+        mock_cli_instance = MagicMock()
+        mock_managed_instance = MagicMock()
+        mock_cli.return_value = mock_cli_instance
+        mock_managed.return_value = mock_managed_instance
+
+        get_purview_credential()
+
+        call_args = mock_chained.call_args[0]
+        assert call_args[0] == mock_cli_instance
+        assert call_args[1] == mock_managed_instance
+
+    @pytest.mark.unit
+    @patch.dict(
+        "os.environ",
+        {"DEFAULT_IDENTITY_CLIENT_ID": "purview-client-id"},
+        clear=True,
+    )
+    @patch("auth.providers.AzureCliCredential")
+    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("auth.providers.ChainedTokenCredential")
+    def test_passes_managed_identity_client_id(self, mock_chained, mock_managed, mock_cli):
+        """DEFAULT_IDENTITY_CLIENT_ID is passed to ManagedIdentityCredential."""
+        get_purview_credential()
+        mock_managed.assert_called_once_with(client_id="purview-client-id")

@@ -117,7 +117,7 @@ def manifest(monkeypatch):
 @pytest.fixture()
 def orch(manifest):
     """Orchestrator in dry-run mode (no live calls)."""
-    with patch("data_lake.ingest.orchestrator.AzureCliCredential"):
+    with patch("data_lake.ingest.orchestrator.get_purview_credential"):
         o = IngestionOrchestrator(manifest, dry_run=True)
     subfolders = manifest.iter_subfolders()
     if subfolders:
@@ -128,7 +128,7 @@ def orch(manifest):
 @pytest.fixture()
 def orch_live(manifest):
     """Orchestrator with dry_run=False (for mocked live tests)."""
-    with patch("data_lake.ingest.orchestrator.AzureCliCredential"):
+    with patch("data_lake.ingest.orchestrator.get_purview_credential"):
         o = IngestionOrchestrator(manifest, dry_run=False)
     subfolders = manifest.iter_subfolders()
     if subfolders:
@@ -149,15 +149,13 @@ def _make_sync_instance(
 ):
     """Return an ArtifactRegistrySync instance with all clients mocked."""
     with (
-        patch("data_lake.sync.sync.AzureCliCredential") as mock_cred,
+        patch("data_lake.sync.sync.get_search_credential"),
+        patch("data_lake.sync.sync.get_purview_credential"),
+        patch("data_lake.sync.sync.get_token_provider"),
         patch("data_lake.sync.sync.SearchClient"),
         patch("data_lake.sync.sync.PurviewCatalogClient"),
         patch("data_lake.sync.sync.AzureOpenAI"),
     ):
-        mock_cred_instance = MagicMock()
-        mock_cred_instance.get_token.return_value = MagicMock(token="fake-token")
-        mock_cred.return_value = mock_cred_instance
-
         from data_lake.sync.sync import ArtifactRegistrySync
 
         sync = ArtifactRegistrySync(
@@ -1365,7 +1363,8 @@ class TestSyncArtifacts:
 
 
 _CATALOG_PATCH = "data_lake.utilities.utilities.PurviewCatalogClient"
-_CRED_PATCH = "data_lake.utilities.utilities.AzureCliCredential"
+_PURVIEW_CRED_PATCH = "data_lake.utilities.utilities.get_purview_credential"
+_SEARCH_CRED_PATCH = "data_lake.utilities.utilities.get_search_credential"
 
 
 def _make_entity_result(
@@ -1407,7 +1406,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.create_or_update.return_value = MagicMock()
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             update_purview_entity(
@@ -1430,7 +1429,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.create_or_update.return_value = MagicMock()
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             update_purview_entity(
@@ -1453,7 +1452,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.create_or_update.return_value = MagicMock()
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             update_purview_entity(
@@ -1476,7 +1475,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.get_by_unique_attributes.return_value = _make_entity_result()
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             update_purview_entity(
@@ -1497,7 +1496,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.get_by_unique_attributes.side_effect = ResourceNotFoundError("nope")
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             with pytest.raises(ValueError, match="Entity not found"):
@@ -1524,7 +1523,7 @@ class TestUpdatePurviewEntity:
         mock_catalog.entity.create_or_update.return_value = MagicMock()
 
         with (
-            patch(_CRED_PATCH),
+            patch(_PURVIEW_CRED_PATCH),
             patch(_CATALOG_PATCH, return_value=mock_catalog),
         ):
             update_purview_entity(
@@ -1562,7 +1561,7 @@ class TestListArtifactRegistry:
         mock_search_client.search.return_value = iter([doc1, doc2])
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, return_value=mock_search_client),
         ):
             results = list_artifact_registry("test-search")
@@ -1579,7 +1578,7 @@ class TestListArtifactRegistry:
         mock_search_client.search.return_value = iter([])
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, return_value=mock_search_client),
         ):
             list_artifact_registry("test-search", filter_expression="domain eq 'energy'")
@@ -1595,7 +1594,7 @@ class TestListArtifactRegistry:
         mock_search_client.search.return_value = iter([])
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, return_value=mock_search_client),
         ):
             list_artifact_registry("test-search", select_fields=["artifact_id", "name"])
@@ -1617,7 +1616,7 @@ class TestListArtifactRegistry:
             return mock_search_client
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, side_effect=fake_search_client_ctor),
         ):
             list_artifact_registry("test-search")
@@ -1638,7 +1637,7 @@ class TestListArtifactRegistry:
             return mock_search_client
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, side_effect=fake_search_client_ctor),
         ):
             list_artifact_registry("test-search", index_name="my-registry")
@@ -1653,7 +1652,7 @@ class TestListArtifactRegistry:
         mock_search_client.search.return_value = iter([])
 
         with (
-            patch(_CRED_PATCH),
+            patch(_SEARCH_CRED_PATCH),
             patch(_SEARCH_CLIENT_PATCH, return_value=mock_search_client),
         ):
             results = list_artifact_registry("test-search")
