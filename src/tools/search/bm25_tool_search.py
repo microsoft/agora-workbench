@@ -22,9 +22,14 @@ LOGGER = logging.getLogger(__name__)
 # ============================================================================
 
 
-def _tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list[str]:
     """Simple whitespace + punctuation tokenizer with lowercasing."""
     return re.findall(r"[a-z0-9_]+", text.lower())
+
+
+def _tokenize(text: str) -> list[str]:
+    """Backward-compatible alias for internal callers."""
+    return tokenize(text)
 
 
 class BM25Index:

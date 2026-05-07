@@ -25,6 +25,15 @@ from auth import get_search_credential_async
 LOGGER = logging.getLogger(__name__)
 
 
+def format_asset_tag(asset: dict) -> str | None:
+    """Format an artifact into the canonical XML-like asset tag."""
+    artifact_type = asset.get("artifact_type", "")
+    artifact_id = asset.get("artifact_id", "")
+    if artifact_type and artifact_id:
+        return f"<{artifact_type}>{artifact_id}</{artifact_type}>"
+    return None
+
+
 class DataLakeSearchClientManager:
     """
     Manages SearchClient lifecycle with automatic credential refresh on auth errors.
@@ -338,10 +347,9 @@ class DefaultDataLakeSearchBackend(DataLakeSearchBackend):
         async for result in results:
             asset = dict(result)
             # Pre-format asset tag so agents can copy it directly
-            artifact_type = asset.get("artifact_type", "")
-            artifact_id = asset.get("artifact_id", "")
-            if artifact_type and artifact_id:
-                asset["asset_tag"] = f"<{artifact_type}>{artifact_id}</{artifact_type}>"
+            asset_tag = format_asset_tag(asset)
+            if asset_tag:
+                asset["asset_tag"] = asset_tag
             catalog_assets.append(asset)
 
         LOGGER.info(f"Retrieved {len(catalog_assets)} DataLake artifacts for query: '{params.query}'")
@@ -523,7 +531,7 @@ async def create_data_lake_search_tool(
         elif os.getenv("DATA_LAKE_LOCAL_CATALOG"):
             from .local import LocalDataLakeSearchBackend
 
-            backend = LocalDataLakeSearchBackend(os.environ["DATA_LAKE_LOCAL_CATALOG"])
+            backend = LocalDataLakeSearchBackend(os.getenv("DATA_LAKE_LOCAL_CATALOG", ""))
         else:
             backend = DefaultDataLakeSearchBackend()
 
@@ -625,10 +633,9 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
             async for result in results:
                 asset = dict(result)
                 # Pre-format asset tag
-                a_type = asset.get("artifact_type", "")
-                a_id = asset.get("artifact_id", "")
-                if a_type and a_id:
-                    asset["asset_tag"] = f"<{a_type}>{a_id}</{a_type}>"
+                asset_tag = format_asset_tag(asset)
+                if asset_tag:
+                    asset["asset_tag"] = asset_tag
                 LOGGER.info(f"[DATA_LAKE] Validated artifact_id: {artifact_id!r}")
                 validated_assets.append(asset)
                 found = True

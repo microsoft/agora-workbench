@@ -880,7 +880,8 @@ artifacts:
                 top=3,
             )
         )
-        assert [result["name"] for result in results] == sorted([result["name"] for result in results], reverse=True)
+        names = [result["name"] for result in results]
+        assert names == sorted(names, reverse=True)
 
 
 class TestCreateDataLakeSearchToolWithCustomBackend:

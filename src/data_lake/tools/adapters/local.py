@@ -10,19 +10,11 @@ from typing import Any
 import yaml
 
 from data_lake.search.registry import ArtifactRegistryDocument
-from tools.search.bm25_tool_search import _tokenize
+from tools.search.bm25_tool_search import tokenize
 
-from .maf import DataLakeSearchBackend, DataLakeSearchParams
+from .maf import DataLakeSearchBackend, DataLakeSearchParams, format_asset_tag
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _asset_tag(asset: dict[str, Any]) -> str | None:
-    artifact_type = asset.get("artifact_type")
-    artifact_id = asset.get("artifact_id")
-    if artifact_type and artifact_id:
-        return f"<{artifact_type}>{artifact_id}</{artifact_type}>"
-    return None
 
 
 class _CatalogBM25Index:
@@ -42,7 +34,7 @@ class _CatalogBM25Index:
                 f"{doc.get('name', '')} {doc.get('description', '')} "
                 f"{doc.get('domain', '')} {' '.join(str(tag) for tag in tags)}"
             )
-            tokens = _tokenize(text)
+            tokens = tokenize(text)
             self._tokens_by_doc.append(tokens)
             seen: set[str] = set()
             for token in tokens:
@@ -56,7 +48,7 @@ class _CatalogBM25Index:
     def search(self, query: str) -> list[tuple[dict[str, Any], float]]:
         if not self._docs:
             return []
-        query_tokens = _tokenize(query)
+        query_tokens = tokenize(query)
 
         n = len(self._docs)
         scored: list[tuple[dict[str, Any], float]] = []
@@ -113,6 +105,7 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
             validated = ArtifactRegistryDocument.model_validate(artifact).model_dump(mode="json", by_alias=True)
             catalog_doc = dict(validated)
+            # Keep optional free-form tags for BM25 indexing only (not part of registry schema/output).
             if "tags" in artifact:
                 catalog_doc["tags"] = artifact.get("tags")
             self._catalog_docs.append(catalog_doc)
@@ -146,7 +139,7 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
     @staticmethod
     def _project_fields(asset: dict[str, Any], select_fields: list[str] | None) -> dict[str, Any]:
-        asset_tag = _asset_tag(asset)
+        asset_tag = format_asset_tag(asset)
         if not select_fields:
             projected = {k: v for k, v in asset.items() if k != "tags"}
         else:
@@ -157,6 +150,10 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
     @staticmethod
     def _apply_order_by(assets: list[dict[str, Any]], order_by: list[str]) -> list[dict[str, Any]]:
+        def sort_value(asset: dict[str, Any], field: str) -> tuple[bool, str]:
+            value = asset.get(field)
+            return (value is None, str(value or "").lower())
+
         sorted_assets = list(assets)
         criteria: list[tuple[str, bool]] = []
         for clause in order_by:
@@ -169,7 +166,7 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
         for field, descending in reversed(criteria):
             sorted_assets.sort(
-                key=lambda asset: (asset.get(field) is None, str(asset.get(field, "")).lower()),
+                key=lambda asset, order_field=field: sort_value(asset, order_field),
                 reverse=descending,
             )
         return sorted_assets
@@ -177,6 +174,14 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
 
 def discover_local_catalog_domains(catalog_path: str) -> list[str]:
     """Read unique domains from a local YAML catalog."""
-    backend = LocalDataLakeSearchBackend(catalog_path=catalog_path)
-    return backend.available_domains
+    catalog = Path(catalog_path)
+    if not catalog.exists():
+        raise FileNotFoundError(f"Local DataLake catalog file not found: {catalog}")
 
+    raw = yaml.safe_load(catalog.read_text(encoding="utf-8")) or {}
+    artifacts = raw.get("artifacts") or []
+    if not isinstance(artifacts, list):
+        raise ValueError("Local DataLake catalog must define a top-level 'artifacts' list.")
+
+    domains = {str(artifact.get("domain")) for artifact in artifacts if isinstance(artifact, dict) and artifact.get("domain")}
+    return sorted(domains)
