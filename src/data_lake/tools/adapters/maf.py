@@ -525,15 +525,7 @@ async def create_data_lake_search_tool(
 
         tool = await create_data_lake_search_tool(backend=EnergyOnlyBackend())
     """
-    if backend is None:
-        if os.getenv("DATA_LAKE_SEARCH_ENDPOINT"):
-            backend = DefaultDataLakeSearchBackend()
-        elif os.getenv("DATA_LAKE_LOCAL_CATALOG"):
-            from .local import LocalDataLakeSearchBackend
-
-            backend = LocalDataLakeSearchBackend(os.getenv("DATA_LAKE_LOCAL_CATALOG", ""))
-        else:
-            backend = DefaultDataLakeSearchBackend()
+    active_backend = backend
 
     # Discover available domains from the index at tool creation time
     available_domains = await _discover_available_domains()
@@ -566,7 +558,18 @@ async def create_data_lake_search_tool(
             if isinstance(params, dict):
                 params = SearchParamsModel(**params)
 
-            assets = await backend.search(params)
+            nonlocal active_backend
+            if active_backend is None:
+                if os.getenv("DATA_LAKE_SEARCH_ENDPOINT"):
+                    active_backend = DefaultDataLakeSearchBackend()
+                elif os.getenv("DATA_LAKE_LOCAL_CATALOG"):
+                    from .local import LocalDataLakeSearchBackend
+
+                    active_backend = LocalDataLakeSearchBackend(os.getenv("DATA_LAKE_LOCAL_CATALOG", ""))
+                else:
+                    active_backend = DefaultDataLakeSearchBackend()
+
+            assets = await active_backend.search(params)
             return json.dumps(assets, indent=2)
 
         except Exception as e:

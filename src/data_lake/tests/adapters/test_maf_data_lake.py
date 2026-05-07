@@ -993,3 +993,19 @@ artifacts:
         result_data = json.loads(result)
         assert len(result_data) == 1
         assert result_data[0]["artifact_id"] == "local-1"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_no_backend_with_missing_local_catalog_returns_error_on_invoke(self, monkeypatch):
+        """Missing local catalog does not fail tool creation and returns error when called."""
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", "/tmp/does-not-exist-local-catalog.yaml")
+
+        tool = await create_data_lake_search_tool()
+        result = await tool(DataLakeSearchParams(query="weather"))
+        result_data = json.loads(result)
+
+        assert isinstance(result_data, list)
+        assert len(result_data) == 1
+        assert "error" in result_data[0]
+        assert "Local DataLake catalog file not found" in result_data[0]["error"]
