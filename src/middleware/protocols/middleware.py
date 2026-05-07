@@ -90,6 +90,11 @@ class FunctionInvocationContext(Protocol):
         """The arguments being passed to the tool."""
         ...
 
+    @arguments.setter
+    def arguments(self, value: dict[str, Any]) -> None:
+        """Override the arguments (e.g., for repair loops)."""
+        ...
+
     @property
     def result(self) -> ToolResult | None:
         """The tool's result (available after call_next)."""
@@ -205,6 +210,44 @@ class FunctionMiddleware(ABC):
         ------
         MiddlewareTermination
             To block tool execution and return an alternative result.
+        """
+        ...
+
+
+@runtime_checkable
+class ChatClient(Protocol):
+    """Protocol for making LLM completion calls.
+
+    Implementations wrap specific LLM clients (MAF, OpenAI Agents SDK, etc.)
+    and provide a uniform interface for completion requests so that
+    middleware (e.g. :class:`~middleware.decision_log.DecisionLogChatMiddleware`)
+    can call the LLM without depending on a specific framework.
+
+    Example
+    -------
+    ```python
+    class MyClient:
+        async def complete(self, messages):
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": m.role, "content": m.content} for m in messages],
+            )
+            return response.choices[0].message.content
+    ```
+    """
+
+    async def complete(self, messages: Sequence[Message]) -> str:
+        """Send messages to the LLM and return the text response.
+
+        Parameters
+        ----------
+        messages : Sequence[Message]
+            The messages to send (system prompt, user turns, etc.).
+
+        Returns
+        -------
+        str
+            The LLM's text response.
         """
         ...
 

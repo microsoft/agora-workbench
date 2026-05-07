@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("agent_framework")
-
 from middleware.tool_learning.models import (
     AntiPattern,
     MatchSpec,
@@ -13,6 +11,7 @@ from middleware.tool_learning.models import (
     Vignette,
 )
 from middleware.tool_learning.adapters.maf_function import _check_hard_violations
+from middleware.protocols import FunctionInfo
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +72,6 @@ class TestCheckHardViolations:
                 severity="soft",
             ),
         )
-        # Even if the key is missing, soft rules should not produce violations
         violations = _check_hard_violations([v], {})
         assert violations == []
 
@@ -100,88 +98,21 @@ class TestCheckHardViolations:
 
 
 # ---------------------------------------------------------------------------
-# VignetteRunMiddleware tests
+# VignetteRunMiddleware tests (now a ContextProvider)
 # ---------------------------------------------------------------------------
 
 
-class TestExtractToolNames:
-    """Test the _extract_tool_names helper."""
+class TestVignetteRunMiddlewareProvide:
+    """Test VignetteRunMiddleware.provide() with dynamic discovery and caching."""
 
-    def _make_context(self, tools=None, mcp_tools=None):
-        """Build a minimal mock AgentContext."""
+    def _make_context(self, tool_names=None):
+        """Build a minimal mock Agora AgentContext."""
         from unittest.mock import MagicMock
-
-        agent = MagicMock()
-        agent.default_options = {"tools": tools or []}
-        agent.mcp_tools = mcp_tools or []
 
         ctx = MagicMock()
-        ctx.agent = agent
+        ctx.tools = [FunctionInfo(name=n) for n in (tool_names or [])]
+        ctx.extend_messages = MagicMock()
         return ctx
-
-    def _make_tool(self, name: str):
-        from unittest.mock import MagicMock
-
-        tool = MagicMock()
-        tool.name = name
-        return tool
-
-    @pytest.mark.unit
-    def test_extracts_from_default_options(self):
-        from middleware.tool_learning.adapters.maf_run import _extract_tool_names
-
-        ctx = self._make_context(tools=[self._make_tool("search_tools")])
-        assert _extract_tool_names(ctx) == ["search_tools"]
-
-    @pytest.mark.unit
-    def test_extracts_from_mcp_tools(self):
-        from middleware.tool_learning.adapters.maf_run import _extract_tool_names
-
-        ctx = self._make_context(mcp_tools=[self._make_tool("execute_grid_code")])
-        assert _extract_tool_names(ctx) == ["execute_grid_code"]
-
-    @pytest.mark.unit
-    def test_combines_both_sources(self):
-        from middleware.tool_learning.adapters.maf_run import _extract_tool_names
-
-        ctx = self._make_context(
-            tools=[self._make_tool("search_tools")],
-            mcp_tools=[self._make_tool("execute_grid_code")],
-        )
-        names = _extract_tool_names(ctx)
-        assert "search_tools" in names
-        assert "execute_grid_code" in names
-        assert len(names) == 2
-
-    @pytest.mark.unit
-    def test_empty_when_no_tools(self):
-        from middleware.tool_learning.adapters.maf_run import _extract_tool_names
-
-        ctx = self._make_context()
-        assert _extract_tool_names(ctx) == []
-
-
-class TestVignetteRunMiddlewareProcess:
-    """Test VignetteRunMiddleware.process() with dynamic discovery and caching."""
-
-    def _make_context(self, tools=None, messages=None):
-        from unittest.mock import MagicMock
-
-        agent = MagicMock()
-        agent.default_options = {"tools": tools or []}
-        agent.mcp_tools = []
-
-        ctx = MagicMock(spec=["agent", "messages"])
-        ctx.agent = agent
-        ctx.messages = messages or []
-        return ctx
-
-    def _make_tool(self, name: str):
-        from unittest.mock import MagicMock
-
-        tool = MagicMock()
-        tool.name = name
-        return tool
 
     def _make_middleware(self, search_repo=None, **kwargs):
         """Create middleware with a mocked search repo (bypass config validation)."""
@@ -203,58 +134,53 @@ class TestVignetteRunMiddlewareProcess:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_discovers_tool_names_from_context(self):
-        """When no explicit tool_names, middleware discovers from agent."""
-        from unittest.mock import MagicMock, AsyncMock
+    async def test_discovers_tool_names_from_context_tools(self):
+        """When no explicit tool_names, middleware discovers from context.tools."""
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
 
         mw = self._make_middleware(search_repo=search_repo)
-        ctx = self._make_context(tools=[self._make_tool("my_tool")])
-        call_next = AsyncMock()
+        ctx = self._make_context(tool_names=["my_tool"])
 
-        await mw.process(ctx, call_next)
+        await mw.provide(ctx)
 
         search_repo.search_vignettes.assert_called_once()
         args = search_repo.search_vignettes.call_args
         assert args[0][1] == "my_tool"
-        call_next.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_uses_explicit_tool_names_over_discovery(self):
         """When explicit tool_names provided, middleware ignores agent tools."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
 
         mw = self._make_middleware(search_repo=search_repo, tool_names=["override_tool"])
-        ctx = self._make_context(tools=[self._make_tool("agent_tool")])
-        call_next = AsyncMock()
+        ctx = self._make_context(tool_names=["agent_tool"])
 
-        await mw.process(ctx, call_next)
+        await mw.provide(ctx)
 
         args = search_repo.search_vignettes.call_args
         assert args[0][1] == "override_tool"
-        call_next.assert_awaited_once()
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_caches_vignette_results(self):
         """Repeated calls with same tool set use cached vignettes."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
 
         mw = self._make_middleware(search_repo=search_repo)
-        ctx = self._make_context(tools=[self._make_tool("my_tool")])
-        call_next = AsyncMock()
+        ctx = self._make_context(tool_names=["my_tool"])
 
-        await mw.process(ctx, call_next)
-        await mw.process(ctx, call_next)
+        await mw.provide(ctx)
+        await mw.provide(ctx)
 
         # search_vignettes called only once — second call hits cache
         assert search_repo.search_vignettes.call_count == 1
@@ -263,19 +189,18 @@ class TestVignetteRunMiddlewareProcess:
     @pytest.mark.unit
     async def test_cache_miss_on_different_tool_set(self):
         """Different tool sets produce separate cache entries."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         search_repo.search_vignettes.return_value = []
 
         mw = self._make_middleware(search_repo=search_repo)
-        call_next = AsyncMock()
 
-        ctx1 = self._make_context(tools=[self._make_tool("tool_a")])
-        await mw.process(ctx1, call_next)
+        ctx1 = self._make_context(tool_names=["tool_a"])
+        await mw.provide(ctx1)
 
-        ctx2 = self._make_context(tools=[self._make_tool("tool_b")])
-        await mw.process(ctx2, call_next)
+        ctx2 = self._make_context(tool_names=["tool_b"])
+        await mw.provide(ctx2)
 
         assert search_repo.search_vignettes.call_count == 2
 
@@ -283,28 +208,92 @@ class TestVignetteRunMiddlewareProcess:
     @pytest.mark.unit
     async def test_no_search_when_no_repo(self):
         """When search repo is unavailable, middleware is a no-op."""
-        from unittest.mock import AsyncMock
 
         mw = self._make_middleware(search_repo=None)
-        ctx = self._make_context(tools=[self._make_tool("my_tool")])
-        call_next = AsyncMock()
+        ctx = self._make_context(tool_names=["my_tool"])
 
-        await mw.process(ctx, call_next)
-
-        call_next.assert_awaited_once()
+        # Should not raise
+        await mw.provide(ctx)
+        ctx.extend_messages.assert_not_called()
 
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_no_search_when_no_tools(self):
         """When no tools are registered, middleware is a no-op."""
-        from unittest.mock import MagicMock, AsyncMock
+        from unittest.mock import MagicMock
 
         search_repo = MagicMock()
         mw = self._make_middleware(search_repo=search_repo)
-        ctx = self._make_context(tools=[])
-        call_next = AsyncMock()
+        ctx = self._make_context(tool_names=[])
 
-        await mw.process(ctx, call_next)
+        await mw.provide(ctx)
 
         search_repo.search_vignettes.assert_not_called()
-        call_next.assert_awaited_once()
+        ctx.extend_messages.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_injects_guardrails_when_vignettes_found(self):
+        """When vignettes are returned, guardrails are injected via extend_messages."""
+        from unittest.mock import MagicMock
+
+        vignette = Vignette(
+            vignette_id="v-001",
+            kind="anti_pattern",
+            scope="user",
+            tenant_id="t1",
+            user_id="u1",
+            tool=ToolSignature(tool_name="calendar.create_event"),
+            match=MatchSpec(arg_keys=["timezone"]),
+            title="Timezone required",
+            summary="Must supply timezone.",
+            anti_pattern=AntiPattern(
+                rule="Do not omit 'timezone' for calendar.create_event.",
+                severity="soft",
+            ),
+        )
+
+        search_repo = MagicMock()
+        search_repo.search_vignettes.return_value = [vignette]
+
+        mw = self._make_middleware(search_repo=search_repo)
+        ctx = self._make_context(tool_names=["calendar.create_event"])
+
+        await mw.provide(ctx)
+
+        # extend_messages should have been called with source_id and a system message
+        ctx.extend_messages.assert_called_once()
+        call_args = ctx.extend_messages.call_args
+        source_id = call_args[0][0]
+        messages = call_args[0][1]
+
+        assert source_id == "vignette_guardrails"
+        assert len(messages) == 1
+        assert messages[0].role == "system"
+        # The injected content should mention the anti-pattern rule
+        assert "timezone" in messages[0].content.lower()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_resolve_tool_names_uses_context_tools(self):
+        """_resolve_tool_names uses context.tools (Agora protocol), not MAF internals."""
+        from middleware.tool_learning.adapters.maf_run import VignetteRunMiddleware
+        from middleware.tool_learning.config import ToolLearningConfig
+
+        config = ToolLearningConfig(
+            search_endpoint="https://fake.search.windows.net",
+            search_index_name="test-index",
+        )
+        mw = VignetteRunMiddleware.__new__(VignetteRunMiddleware)
+        mw._config = config
+        mw._explicit_tool_names = None
+        mw._tenant_id = None
+        mw._user_id = None
+        mw._search_repo = None
+        mw._cache = {}
+
+        ctx = self._make_context(tool_names=["search_tools", "execute_grid_code"])
+        names = mw._resolve_tool_names(ctx)
+        assert "search_tools" in names
+        assert "execute_grid_code" in names
+        assert len(names) == 2

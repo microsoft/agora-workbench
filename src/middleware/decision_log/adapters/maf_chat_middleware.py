@@ -1,13 +1,32 @@
-"""ChatMiddleware-based decision log recorder.
+"""Decision log chat middleware.
 
-This module provides :class:`DecisionLogChatMiddleware`, a MAF
-:class:`~agent_framework.ChatMiddleware` that observes every LLM round-trip
-within an ``agent.run()`` call.  It accumulates events in a buffer and
-synthesises a :class:`~middleware.decision_log.DecisionLogEntry` at
-meaningful boundaries — when the LLM finishes a reasoning chain (no tool
-calls in the response) or when the buffer exceeds a configurable size.
+This module provides :class:`DecisionLogChatMiddleware`, an Agora
+:class:`~middleware.protocols.ChatMiddleware` that observes every LLM
+round-trip and accumulates events in a buffer, synthesising a
+:class:`~middleware.decision_log.DecisionLogEntry` at meaningful boundaries.
 
-Synthesis is performed by a small LLM in a FIFO background queue so that
+The middleware is framework-agnostic.  To use it inside a MAF agent, wrap it
+with :func:`~middleware.decision_log.adapters.maf_protocols.wrap_chat_middleware`
+and supply a :class:`~middleware.decision_log.adapters.maf_protocols.MAFChatClientAdapter`
+as the *chat_client*:
+
+    from middleware.decision_log import DecisionLog
+    from middleware.decision_log.adapters import DecisionLogChatMiddleware
+    from middleware.decision_log.adapters.maf_protocols import (
+        MAFChatClientAdapter,
+        wrap_chat_middleware,
+    )
+
+    log = DecisionLog()
+    agora_mw = DecisionLogChatMiddleware(
+        log,
+        agent_name="my_agent",
+        chat_client=MAFChatClientAdapter(maf_client),
+    )
+    maf_mw = wrap_chat_middleware(agora_mw)
+    agent = Agent(..., middleware=[maf_mw])
+
+Synthesis is performed by a small LLM via a FIFO background queue so that
 it never blocks the main agent's execution.  The resulting entries are
 appended to a shared :class:`~middleware.decision_log.DecisionLog` instance
 that can be read by a companion
@@ -23,13 +42,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-try:
-    from agent_framework import Agent, ChatContext, ChatMiddleware, Message
-except ImportError as e:
-    raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
-    ) from e
+from middleware.protocols import ChatClient, ChatContext, ChatMiddleware, Message
 
 from ..entry import DecisionLogEntry
 from ..log import DecisionLog
@@ -97,54 +110,33 @@ def _strip_markdown_fence(text: str) -> str:
 # ------------------------------------------------------------------
 
 
-def _response_has_tool_calls(response: Any) -> bool:
-    """Return ``True`` if *response* contains tool/function call messages."""
-    if response is None:
-        return False
-    messages = getattr(response, "messages", None) or []
-    for msg in messages:
-        items = getattr(msg, "items", None) or []
-        for item in items:
-            content_type = getattr(item, "type", None)
-            if content_type and "function_call" in content_type:
-                return True
-    return False
-
-
-def _capture_event(context: Any, response: Any) -> dict[str, Any]:
+def _capture_event(context: ChatContext) -> dict[str, Any]:
     """Extract a lightweight snapshot of a single LLM round-trip.
 
     Args:
-        context: The :class:`~agent_framework.ChatContext`.
-        response: The :class:`~agent_framework.ChatResponse`.
+        context: The :class:`~middleware.protocols.ChatContext` after
+            ``call_next()`` has completed.
 
     Returns:
-        A dict with ``input_summary`` and ``output_summary`` strings.
+        A dict with ``input_summary``, ``output_summary``, and
+        ``has_tool_calls`` keys.
     """
     # Summarise input messages (last few, to avoid repeating full history)
     input_parts: list[str] = []
-    messages = getattr(context, "messages", None) or []
-    # Only capture the tail — earlier messages are conversation history
-    for msg in messages[-3:]:
-        role = getattr(msg, "role", "?")
-        text = getattr(msg, "text", "") or ""
-        if text:
-            input_parts.append(f"[{role}] {text[:_MAX_MSG_CHARS]}")
+    for msg in context.messages[-3:]:
+        if msg.content:
+            input_parts.append(f"[{msg.role}] {msg.content[:_MAX_MSG_CHARS]}")
 
-    # Summarise output messages
+    # Summarise output (result message)
     output_parts: list[str] = []
-    if response is not None:
-        resp_msgs = getattr(response, "messages", None) or []
-        for msg in resp_msgs:
-            role = getattr(msg, "role", "assistant")
-            text = getattr(msg, "text", "") or ""
-            if text:
-                output_parts.append(f"[{role}] {text[:_MAX_MSG_CHARS]}")
+    result = context.result
+    if result and result.content:
+        output_parts.append(f"[{result.role}] {result.content[:_MAX_MSG_CHARS]}")
 
     return {
         "input_summary": "\n".join(input_parts) if input_parts else "(no input)",
         "output_summary": "\n".join(output_parts) if output_parts else "(no output)",
-        "has_tool_calls": _response_has_tool_calls(response),
+        "has_tool_calls": bool(context.tool_calls),
     }
 
 
@@ -165,7 +157,11 @@ def _format_buffer(buffer: list[dict[str, Any]]) -> str:
 
 
 class DecisionLogChatMiddleware(ChatMiddleware):
-    """MAF ChatMiddleware that records agent decisions at each LLM round-trip.
+    """Agora ChatMiddleware that records agent decisions at each LLM round-trip.
+
+    Implements :class:`~middleware.protocols.ChatMiddleware` — wrap it with
+    :func:`~middleware.decision_log.adapters.maf_protocols.wrap_chat_middleware`
+    to use it inside a MAF agent.
 
     Events are accumulated in a buffer and synthesised into
     :class:`~middleware.decision_log.DecisionLogEntry` objects at meaningful
@@ -183,7 +179,10 @@ class DecisionLogChatMiddleware(ChatMiddleware):
         decision_log: Shared :class:`~middleware.decision_log.DecisionLog`
             instance to append entries to.
         agent_name: Name of the agent being tracked.
-        chat_client: MAF chat client for the synthesis LLM.
+        chat_client: :class:`~middleware.protocols.ChatClient` for the
+            synthesis LLM.  Use
+            :class:`~middleware.decision_log.adapters.maf_protocols.MAFChatClientAdapter`
+            to wrap a MAF client.
         max_buffer_size: Maximum accumulated events before forcing a
             synthesis (default ``5``).
     """
@@ -192,7 +191,7 @@ class DecisionLogChatMiddleware(ChatMiddleware):
         self,
         decision_log: DecisionLog,
         agent_name: str,
-        chat_client: Any,
+        chat_client: ChatClient,
         max_buffer_size: int = 5,
     ) -> None:
         self._log = decision_log
@@ -212,10 +211,8 @@ class DecisionLogChatMiddleware(ChatMiddleware):
         """Intercept each LLM round-trip, accumulate, and synthesise at boundaries."""
         await call_next()
 
-        response = context.result
-        has_tool_calls = _response_has_tool_calls(response)
-
-        self._buffer.append(_capture_event(context, response))
+        self._buffer.append(_capture_event(context))
+        has_tool_calls = self._buffer[-1]["has_tool_calls"]
 
         should_synthesize = not has_tool_calls or len(self._buffer) >= self._max_buffer_size
 
@@ -310,41 +307,32 @@ class DecisionLogChatMiddleware(ChatMiddleware):
         Returns:
             A :class:`DecisionLogEntry`, or ``None`` if synthesis fails.
         """
-        synthesis_agent = Agent(
-            client=self._chat_client,
-            name="decision_log_synthesiser",
-        )
-        session = synthesis_agent.create_session()
-
         messages = [
-            Message(role="system", contents=[DECISION_SYNTHESIS_PROMPT]),
+            Message(role="system", content=DECISION_SYNTHESIS_PROMPT),
             Message(
                 role="user",
-                contents=[
+                content=(
                     "Given these observed events, produce a concise "
                     "decision log entry.\n\nObserved events:\n" + events_text
-                ],
+                ),
             ),
         ]
 
         try:
-            result = await synthesis_agent.run(messages=messages, session=session)
+            raw_text = await self._chat_client.complete(messages)
         except Exception:
             LOGGER.exception("Decision log: LLM synthesis call failed; skipping entry")
             return None
 
-        output: Optional[_SynthesisOutput] = getattr(result, "value", None)
-        if not isinstance(output, _SynthesisOutput):
-            raw_text = result.text or ""
-            try:
-                cleaned = _strip_markdown_fence(raw_text)
-                output = _SynthesisOutput.model_validate_json(cleaned)
-            except Exception:
-                LOGGER.warning(
-                    "Decision log: could not parse LLM synthesis output; skipping entry. Raw text: %r",
-                    raw_text[:200],
-                )
-                return None
+        try:
+            cleaned = _strip_markdown_fence(raw_text)
+            output = _SynthesisOutput.model_validate_json(cleaned)
+        except Exception:
+            LOGGER.warning(
+                "Decision log: could not parse LLM synthesis output; skipping entry. Raw text: %r",
+                raw_text[:200],
+            )
+            return None
 
         return DecisionLogEntry(
             timestamp=timestamp,

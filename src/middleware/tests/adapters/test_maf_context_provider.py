@@ -4,16 +4,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-pytest.importorskip("agent_framework")
-
-
 from middleware.decision_log.adapters.maf_context_provider import DecisionLogContextProvider
 from middleware.decision_log.entry import DecisionLogEntry
 from middleware.decision_log.log import DecisionLog
+from middleware.protocols import Message
 
 
-def _make_context() -> MagicMock:
+def _make_agent_context() -> MagicMock:
+    """Build a minimal mock Agora AgentContext."""
     ctx = MagicMock()
+    ctx.tools = []
     ctx.extend_messages = MagicMock()
     return ctx
 
@@ -45,7 +45,7 @@ class TestConstruction:
         assert provider._chat_middleware is mw
 
 
-class TestBeforeRun:
+class TestProvide:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_injects_context_when_enabled(self):
@@ -58,21 +58,23 @@ class TestBeforeRun:
             )
         )
         provider = DecisionLogContextProvider(log, inject_context=True)
-        context = _make_context()
-        await provider.before_run(agent=MagicMock(), session=MagicMock(), context=context, state={})
+        context = _make_agent_context()
+        await provider.provide(context)
         context.extend_messages.assert_called_once()
-        messages = context.extend_messages.call_args[0][1]
+        source_id, messages = context.extend_messages.call_args[0]
+        assert source_id == "decision_log"
         assert len(messages) == 1
-        assert "decision_log" in messages[0].text
-        assert "Thinking hard" in messages[0].text
+        assert isinstance(messages[0], Message)
+        assert "decision_log" in messages[0].content
+        assert "Thinking hard" in messages[0].content
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_skips_injection_when_disabled(self):
         log = DecisionLog()
         provider = DecisionLogContextProvider(log, inject_context=False)
-        context = _make_context()
-        await provider.before_run(agent=MagicMock(), session=MagicMock(), context=context, state={})
+        context = _make_agent_context()
+        await provider.provide(context)
         context.extend_messages.assert_not_called()
 
     @pytest.mark.unit
@@ -88,9 +90,10 @@ class TestBeforeRun:
                 )
             )
         provider = DecisionLogContextProvider(log, inject_context=True, max_context_entries=3)
-        context = _make_context()
-        await provider.before_run(agent=MagicMock(), session=MagicMock(), context=context, state={})
-        injected_text = context.extend_messages.call_args[0][1][0].text
+        context = _make_agent_context()
+        await provider.provide(context)
+        _, messages = context.extend_messages.call_args[0]
+        injected_text = messages[0].content
         assert "Decision 9" in injected_text
         assert "Decision 8" in injected_text
         assert "Decision 7" in injected_text
@@ -103,17 +106,28 @@ class TestBeforeRun:
         mock_mw = MagicMock()
         mock_mw.flush = AsyncMock()
         provider = DecisionLogContextProvider(log, inject_context=True, chat_middleware=mock_mw)
-        context = _make_context()
-        await provider.before_run(agent=MagicMock(), session=MagicMock(), context=context, state={})
+        context = _make_agent_context()
+        await provider.provide(context)
         mock_mw.flush.assert_awaited_once()
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_no_flush_when_no_middleware(self):
-        """before_run works fine without a chat_middleware reference."""
+        """provide() works fine without a chat_middleware reference."""
         log = DecisionLog()
         provider = DecisionLogContextProvider(log, inject_context=True)
-        context = _make_context()
-        # Should not raise
-        await provider.before_run(agent=MagicMock(), session=MagicMock(), context=context, state={})
+        context = _make_agent_context()
+        await provider.provide(context)
         context.extend_messages.assert_called_once()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_message_role_is_user(self):
+        """The injected message should have role 'user'."""
+        log = DecisionLog()
+        log._append(DecisionLogEntry(timestamp="2026-01-01T00:00:00Z", agent="a", summary="Did something"))
+        provider = DecisionLogContextProvider(log)
+        context = _make_agent_context()
+        await provider.provide(context)
+        _, messages = context.extend_messages.call_args[0]
+        assert messages[0].role == "user"
