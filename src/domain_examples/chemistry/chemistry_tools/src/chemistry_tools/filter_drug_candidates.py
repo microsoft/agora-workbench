@@ -37,6 +37,13 @@ def filter_drug_candidates(
 
     for smi in smiles_list:
         if not isinstance(smi, str):
+            failed.append(
+                {
+                    "input_smiles": repr(smi),
+                    "canonical_smiles": None,
+                    "reasons": ["not a string"],
+                }
+            )
             continue
         mol = Chem.MolFromSmiles(smi)
         if mol is None:

@@ -24,23 +24,20 @@ entry point; downstream tools have prerequisite states that guide workflow
 planning.
 
 ```
-parse_molecule ─────► chemistry.molecule_parsed
-                              │
-              ┌───────────────┼───────────────────┐
-              ▼               ▼                   ▼
-   enumerate_functional  compute_descriptors  compute_fingerprints
-      _groups               │                    │
-              │             ▼                    ├──────────────┐
-              ▼     chemistry.descriptors_       ▼              ▼
-   chemistry.groups_    computed         chemistry.fingerprints_ │
-    identified          │                  computed              │
-                        ▼                    │                   │
-               filter_drug_candidates        ▼                  ▼
-                        │           find_similar_molecules  cluster_molecules
-                        ▼                    │                   │
-               chemistry.candidates_         ▼                   ▼
-                 filtered           chemistry.similarity_  chemistry.molecules_
-                                     computed               clustered
+parse_molecule
+  → chemistry.molecule_parsed
+        │
+        ├── enumerate_functional_groups → chemistry.groups_identified
+        │
+        ├── compute_descriptors → chemistry.descriptors_computed
+        │       │
+        │       └── filter_drug_candidates → chemistry.candidates_filtered
+        │
+        └── compute_fingerprints → chemistry.fingerprints_computed
+                │
+                ├── find_similar_molecules → chemistry.similarity_computed
+                │
+                └── cluster_molecules → chemistry.molecules_clustered
 ```
 
 ## Workflow Skills

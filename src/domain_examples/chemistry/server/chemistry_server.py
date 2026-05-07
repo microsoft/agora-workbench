@@ -35,6 +35,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
+  - pip
   - rdkit
   - numpy
   - pandas
