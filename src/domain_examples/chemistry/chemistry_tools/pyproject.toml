@@ -1,0 +1,16 @@
+[project]
+name = "chemistry-tools"
+version = "0.1.0"
+description = "RDKit-based cheminformatics tool implementations for the Chemistry MCP server."
+requires-python = ">=3.11"
+# No dependencies — RDKit and scientific packages are provided by the
+# conda execution environment.  This package contains only pure-Python
+# wrapper functions that call into those libraries at runtime.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

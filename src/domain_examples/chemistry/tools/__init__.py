@@ -1,25 +1,28 @@
-"""Chemistry domain tools for the RDKit MCP server.
+"""Chemistry domain tool definitions.
 
-Exports ``CHEMISTRY_TOOLS``, a list of all tool definitions in this package.
-Import this in the server module to register them with the ToolRegistry.
+Exports ``CHEMISTRY_TOOLS``, a list of all ``ToolDefinition`` objects.
+These are server-side metadata only — implementations live in the
+``chemistry_tools`` package installed in the execution environment.
 """
 
-from .cluster_molecules import TOOL_DEFINITION as _cluster_molecules
-from .compute_descriptors import TOOL_DEFINITION as _compute_descriptors
-from .compute_fingerprints import TOOL_DEFINITION as _compute_fingerprints
-from .enumerate_functional_groups import TOOL_DEFINITION as _enumerate_functional_groups
-from .filter_drug_candidates import TOOL_DEFINITION as _filter_drug_candidates
-from .find_similar_molecules import TOOL_DEFINITION as _find_similar_molecules
-from .parse_molecule import TOOL_DEFINITION as _parse_molecule
+from .definitions import (
+    cluster_molecules,
+    compute_descriptors,
+    compute_fingerprints,
+    enumerate_functional_groups,
+    filter_drug_candidates,
+    find_similar_molecules,
+    parse_molecule,
+)
 
 CHEMISTRY_TOOLS = [
-    _parse_molecule,
-    _enumerate_functional_groups,
-    _compute_descriptors,
-    _filter_drug_candidates,
-    _compute_fingerprints,
-    _find_similar_molecules,
-    _cluster_molecules,
+    parse_molecule,
+    enumerate_functional_groups,
+    compute_descriptors,
+    filter_drug_candidates,
+    compute_fingerprints,
+    find_similar_molecules,
+    cluster_molecules,
 ]
 
 __all__ = ["CHEMISTRY_TOOLS"]

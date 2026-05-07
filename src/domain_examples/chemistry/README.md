@@ -105,6 +105,32 @@ This example uses `create_noop_auth_config()` (no authentication required). For 
 
 In addition to the general `execute_chemistry_code` tool, the server registers domain-specific tools that are injected into the execution kernel as callable functions. These tools form a **state graph** demonstrating how tool transitions model workflows at increasing levels of complexity.
 
+### Architecture: Installed Tools Package
+
+Tool **implementations** live in `chemistry_tools/`, a standalone pip-installable Python package. This package is installed into the conda execution environment at build time via `additional_commands`. The server holds only the **metadata** (`ToolDefinition` objects in `tools/definitions.py`) — schemas, state transitions, and affordances.
+
+```
+chemistry/
+├── chemistry_tools/          # Pip package installed in the kernel environment
+│   ├── pyproject.toml
+│   └── src/chemistry_tools/  # Pure implementation functions (no server deps)
+│       ├── parse_molecule.py
+│       ├── compute_descriptors.py
+│       └── ...
+├── tools/                    # Server-side metadata only (ToolDefinition objects)
+│   ├── __init__.py           # Exports CHEMISTRY_TOOLS list
+│   └── definitions.py       # All ToolDefinition objects (module="chemistry_tools.xxx")
+├── states.py                 # State vocabulary enum + affordances
+├── skills/                   # Workflow-oriented skill guides
+└── server/
+    └── chemistry_server.py   # Registers tools, installs package via additional_commands
+```
+
+This separation means:
+- The kernel can `from chemistry_tools.parse_molecule import parse_molecule` directly
+- Implementation code has zero dependencies on the server framework
+- The package can be tested independently with just RDKit installed
+
 ### State Graph
 
 ```

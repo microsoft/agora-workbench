@@ -1,12 +1,6 @@
-"""
-Tool: enumerate_functional_groups — Low complexity (chain step 2).
+"""Identify common functional groups in a molecule using SMARTS patterns."""
 
-Identifies common functional groups present in a molecule using SMARTS
-pattern matching. Chains from ``parse_molecule`` via the
-``chemistry.molecule_parsed`` → ``chemistry.groups_identified`` state edge.
-"""
-
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from rdkit import Chem
 
 # SMARTS patterns for common functional groups
 _FUNCTIONAL_GROUPS: dict[str, str] = {
@@ -43,8 +37,6 @@ def enumerate_functional_groups(smiles: str) -> dict:
     Raises:
         ValueError: If the SMILES string is invalid.
     """
-    from rdkit import Chem
-
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         raise ValueError(f"Invalid SMILES: {smiles!r}")
@@ -70,36 +62,3 @@ def enumerate_functional_groups(smiles: str) -> dict:
         "groups_found": groups_found,
         "num_groups_found": len(groups_found),
     }
-
-
-TOOL_DEFINITION = ToolDefinition(
-    name="enumerate_functional_groups",
-    description=(
-        "Identify common functional groups (hydroxyl, carboxyl, amine, ester, "
-        "etc.) in a molecule using SMARTS pattern matching. Returns group names, "
-        "match counts, and atom indices."
-    ),
-    required_parameters=[
-        ToolParameter(name="smiles", type=str, description="SMILES string for the molecule"),
-    ],
-    return_spec=[
-        ReturnSpec(name="smiles", type=str, description="Canonical SMILES"),
-        ReturnSpec(
-            name="groups_found",
-            type=list,
-            description="List of identified functional groups with counts and atom indices",
-        ),
-        ReturnSpec(name="num_groups_found", type=int, description="Number of distinct functional group types found"),
-    ],
-    module="domain_examples.chemistry.tools.enumerate_functional_groups",
-    state_transition=StateTransition(
-        requires=frozenset({"chemistry.molecule_parsed"}),
-        produces=frozenset({"chemistry.groups_identified"}),
-    ),
-    affordances=[
-        "identify functional groups",
-        "find hydroxyl or carboxyl groups",
-        "SMARTS substructure matching",
-        "characterize molecule reactivity",
-    ],
-)

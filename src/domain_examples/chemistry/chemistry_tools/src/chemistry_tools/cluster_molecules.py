@@ -1,14 +1,8 @@
-"""
-Tool: cluster_molecules — High complexity (chain step 3).
+"""Cluster molecules by fingerprint similarity using Butina clustering."""
 
-Clusters a set of molecules by fingerprint similarity using Butina
-clustering (Taylor–Butina). Chains from ``compute_fingerprints`` via the
-``chemistry.fingerprints_computed`` → ``chemistry.molecules_clustered``
-state edge, demonstrating a branching graph where both this tool and
-``find_similar_molecules`` share the same prerequisite state.
-"""
-
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem, MACCSkeys, RDKFingerprint
+from rdkit.ML.Cluster import Butina
 
 SUPPORTED_FINGERPRINTS = ("morgan", "rdkit", "maccs")
 
@@ -43,10 +37,6 @@ def cluster_molecules(
         ValueError: If smiles_list has fewer than 2 valid molecules or
             cutoff is out of range.
     """
-    from rdkit import Chem, DataStructs
-    from rdkit.Chem import AllChem, MACCSkeys, RDKFingerprint
-    from rdkit.ML.Cluster import Butina
-
     if not smiles_list or not isinstance(smiles_list, list):
         raise ValueError("smiles_list must be a non-empty list of SMILES strings.")
 
@@ -130,66 +120,3 @@ def cluster_molecules(
         "fingerprint_type": fp_type,
         "clusters": clusters,
     }
-
-
-TOOL_DEFINITION = ToolDefinition(
-    name="cluster_molecules",
-    description=(
-        "Cluster a set of molecules by fingerprint similarity using Butina "
-        "(sphere-exclusion) clustering. Groups molecules whose Tanimoto "
-        "distance is within a cutoff of a cluster centroid. Returns cluster "
-        "assignments with centroids and members."
-    ),
-    required_parameters=[
-        ToolParameter(
-            name="smiles_list",
-            type=list,
-            description="List of SMILES strings to cluster",
-        ),
-    ],
-    optional_parameters=[
-        ToolParameter(
-            name="cutoff",
-            type=float,
-            description="Tanimoto distance cutoff (0.0–1.0). Smaller = tighter clusters",
-            default=0.5,
-        ),
-        ToolParameter(
-            name="fingerprint_type",
-            type=str,
-            description='Fingerprint algorithm: "morgan" (default), "rdkit", or "maccs"',
-            default="morgan",
-        ),
-        ToolParameter(
-            name="radius",
-            type=int,
-            description="Morgan fingerprint radius (only for morgan type)",
-            default=2,
-        ),
-        ToolParameter(
-            name="n_bits",
-            type=int,
-            description="Bit-vector length for Morgan/RDKit fingerprints",
-            default=2048,
-        ),
-    ],
-    return_spec=[
-        ReturnSpec(name="num_molecules", type=int, description="Valid molecules clustered"),
-        ReturnSpec(name="num_clusters", type=int, description="Number of clusters formed"),
-        ReturnSpec(name="cutoff", type=float, description="Distance cutoff used"),
-        ReturnSpec(name="fingerprint_type", type=str, description="Fingerprint algorithm used"),
-        ReturnSpec(name="clusters", type=list, description="Cluster assignments with centroids and members"),
-    ],
-    module="domain_examples.chemistry.tools.cluster_molecules",
-    state_transition=StateTransition(
-        requires=frozenset({"chemistry.fingerprints_computed"}),
-        produces=frozenset({"chemistry.molecules_clustered"}),
-    ),
-    affordances=[
-        "cluster a molecular library",
-        "group similar molecules",
-        "Butina clustering",
-        "chemical series analysis",
-        "diversity analysis",
-    ],
-)

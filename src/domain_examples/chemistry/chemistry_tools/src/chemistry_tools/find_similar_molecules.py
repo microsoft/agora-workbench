@@ -1,12 +1,7 @@
-"""
-Tool: find_similar_molecules — High complexity.
+"""Fingerprint-based molecular similarity search."""
 
-Performs fingerprint-based molecular similarity search against a candidate list.
-Demonstrates multiple required and optional parameters, list I/O, algorithm
-selection, input validation, and ranked output.
-"""
-
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from rdkit import Chem, DataStructs
+from rdkit.Chem import AllChem, MACCSkeys, RDKFingerprint
 
 SUPPORTED_FINGERPRINTS = ("morgan", "rdkit", "maccs")
 
@@ -40,10 +35,6 @@ def find_similar_molecules(
         ValueError: If query SMILES is invalid, candidate list is empty, or
             fingerprint_type is unsupported.
     """
-    from rdkit import Chem, DataStructs
-    from rdkit.Chem import AllChem, MACCSkeys, RDKFingerprint
-
-    # --- Validate inputs ---
     if not candidate_smiles_list or not isinstance(candidate_smiles_list, list):
         raise ValueError("candidate_smiles_list must be a non-empty list of SMILES strings.")
 
@@ -60,7 +51,6 @@ def find_similar_molecules(
     if query_mol is None:
         raise ValueError(f"Invalid query SMILES: {query_smiles!r}")
 
-    # --- Fingerprint helper ---
     def _compute_fp(mol):
         if fp_type == "morgan":
             return AllChem.GetMorganFingerprintAsBitVect(mol, radius, nBits=n_bits)
@@ -71,7 +61,6 @@ def find_similar_molecules(
 
     query_fp = _compute_fp(query_mol)
 
-    # --- Search ---
     matches = []
     for idx, candidate_smi in enumerate(candidate_smiles_list):
         if not isinstance(candidate_smi, str):
@@ -104,67 +93,3 @@ def find_similar_molecules(
         "num_matches": len(matches),
         "matches": matches,
     }
-
-
-TOOL_DEFINITION = ToolDefinition(
-    name="find_similar_molecules",
-    description=(
-        "Search a list of candidate molecules for those similar to a query molecule "
-        "using fingerprint-based Tanimoto similarity. Supports Morgan, RDKit, and "
-        "MACCS fingerprints. Returns ranked matches above a similarity threshold."
-    ),
-    required_parameters=[
-        ToolParameter(name="query_smiles", type=str, description="SMILES string for the query molecule"),
-        ToolParameter(
-            name="candidate_smiles_list",
-            type=list,
-            description="List of SMILES strings to search against",
-        ),
-    ],
-    optional_parameters=[
-        ToolParameter(
-            name="threshold",
-            type=float,
-            description="Minimum Tanimoto similarity (0.0–1.0) to include in results",
-            default=0.7,
-        ),
-        ToolParameter(
-            name="fingerprint_type",
-            type=str,
-            description='Fingerprint algorithm: "morgan" (default), "rdkit", or "maccs"',
-            default="morgan",
-        ),
-        ToolParameter(
-            name="radius",
-            type=int,
-            description="Morgan fingerprint radius (only for morgan type)",
-            default=2,
-        ),
-        ToolParameter(
-            name="n_bits",
-            type=int,
-            description="Bit-vector length for Morgan/RDKit fingerprints",
-            default=2048,
-        ),
-    ],
-    return_spec=[
-        ReturnSpec(name="query_smiles", type=str, description="Canonical SMILES of the query"),
-        ReturnSpec(name="fingerprint_type", type=str, description="Fingerprint algorithm used"),
-        ReturnSpec(name="threshold", type=float, description="Similarity threshold applied"),
-        ReturnSpec(name="num_candidates", type=int, description="Total candidates evaluated"),
-        ReturnSpec(name="num_matches", type=int, description="Number of matches above threshold"),
-        ReturnSpec(name="matches", type=list, description="Ranked list of matching molecules with similarity scores"),
-    ],
-    module="domain_examples.chemistry.tools.find_similar_molecules",
-    state_transition=StateTransition(
-        requires=frozenset({"chemistry.fingerprints_computed"}),
-        produces=frozenset({"chemistry.similarity_computed"}),
-    ),
-    affordances=[
-        "find similar molecules",
-        "molecular similarity search",
-        "compare molecules by fingerprint",
-        "Tanimoto similarity screening",
-        "virtual screening by similarity",
-    ],
-)

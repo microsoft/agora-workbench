@@ -1,12 +1,7 @@
-"""
-Tool: filter_drug_candidates — Medium complexity (chain step 2).
+"""Screen molecules against drug-likeness rules (Lipinski, Veber)."""
 
-Screens a list of molecules against drug-likeness rules (Lipinski, Veber,
-or combined). Chains from ``compute_descriptors`` via the
-``chemistry.descriptors_computed`` → ``chemistry.candidates_filtered`` state edge.
-"""
-
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from rdkit import Chem
+from rdkit.Chem import Descriptors
 
 SUPPORTED_RULES = ("lipinski", "veber", "both")
 
@@ -30,9 +25,6 @@ def filter_drug_candidates(
     Raises:
         ValueError: If smiles_list is empty or rules is unsupported.
     """
-    from rdkit import Chem
-    from rdkit.Chem import Descriptors
-
     if not smiles_list or not isinstance(smiles_list, list):
         raise ValueError("smiles_list must be a non-empty list of SMILES strings.")
 
@@ -110,48 +102,3 @@ def filter_drug_candidates(
         "passed": passed,
         "failed": failed,
     }
-
-
-TOOL_DEFINITION = ToolDefinition(
-    name="filter_drug_candidates",
-    description=(
-        "Screen a list of molecules against drug-likeness rules. Supports "
-        "Lipinski's Rule of Five, Veber's rules (rotatable bonds ≤ 10, "
-        "TPSA ≤ 140 Å²), or both combined. Returns passed and failed "
-        "molecules with computed properties and failure reasons."
-    ),
-    required_parameters=[
-        ToolParameter(
-            name="smiles_list",
-            type=list,
-            description="List of SMILES strings to screen",
-        ),
-    ],
-    optional_parameters=[
-        ToolParameter(
-            name="rules",
-            type=str,
-            description='Rule set: "lipinski" (default), "veber", or "both"',
-            default="lipinski",
-        ),
-    ],
-    return_spec=[
-        ReturnSpec(name="rules", type=str, description="Rule set applied"),
-        ReturnSpec(name="num_input", type=int, description="Total molecules evaluated"),
-        ReturnSpec(name="num_passed", type=int, description="Molecules passing all rules"),
-        ReturnSpec(name="num_failed", type=int, description="Molecules failing one or more rules"),
-        ReturnSpec(name="passed", type=list, description="Molecules that passed with properties"),
-        ReturnSpec(name="failed", type=list, description="Molecules that failed with reasons"),
-    ],
-    module="domain_examples.chemistry.tools.filter_drug_candidates",
-    state_transition=StateTransition(
-        requires=frozenset({"chemistry.descriptors_computed"}),
-        produces=frozenset({"chemistry.candidates_filtered"}),
-    ),
-    affordances=[
-        "screen compounds for drug-likeness",
-        "filter by Lipinski's Rule of Five",
-        "filter by Veber's rules",
-        "identify drug candidates from a library",
-    ],
-)
