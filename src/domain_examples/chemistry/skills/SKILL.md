@@ -23,8 +23,8 @@ import pandas as pd
 ## Critical: SMILES Validation
 
 **Always** check that `Chem.MolFromSmiles()` did not return `None` before using
-the molecule. Invalid SMILES silently return `None`, causing `AttributeError`
-on the next operation.
+the molecule. Invalid SMILES silently return `None`, causing an exception on
+the next operation.
 
 ```python
 # CORRECT
@@ -36,7 +36,7 @@ else:
 
 # WRONG — will crash on invalid input
 mol = Chem.MolFromSmiles(user_smiles)
-mw = Descriptors.MolWt(mol)  # AttributeError if mol is None
+mw = Descriptors.MolWt(mol)  # Exception if mol is None
 ```
 
 ## SMILES vs SMARTS
