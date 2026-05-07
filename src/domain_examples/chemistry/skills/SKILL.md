@@ -47,9 +47,9 @@ mw = Descriptors.MolWt(mol)  # AttributeError if mol is None
 
 ## Fingerprints and Similarity
 
-- Use `GetMorganFingerprintAsBitVect` (not `GetMorganFingerprint`) when computing
-  Tanimoto similarity — the count-based version is incompatible with
-  `DataStructs.TanimotoSimilarity()`
+- Prefer `GetMorganFingerprintAsBitVect` over `GetMorganFingerprint` when
+  computing Tanimoto similarity for consistent behavior and easier downstream
+  handling
 - Standard defaults: **radius=2, nBits=2048**. Use radius=3 for higher specificity.
 
 ```python
