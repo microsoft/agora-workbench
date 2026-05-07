@@ -75,6 +75,8 @@ class ArtifactRegistrySync:
         # Set up credentials using the centralized auth provider chain
         self._search_credential = get_search_credential()
         self._purview_credential = get_purview_credential()
+        # Storage token provider — created once and reused to benefit from internal token caching
+        self._storage_token_provider = get_token_provider("https://storage.azure.com/.default")
 
         # Initialize clients
         self._init_clients()
@@ -682,8 +684,8 @@ class ArtifactRegistrySync:
             False only if the blob returns 404 (definitively gone)
         """
         try:
-            # The token provider uses a credential chain (CLI → Managed Identity) with internal caching
-            token = get_token_provider("https://storage.azure.com/.default")()
+            # Reuse the per-instance token provider to benefit from internal token caching
+            token = self._storage_token_provider()
             client = self._get_http_client()
             response = client.head(
                 blob_url,
