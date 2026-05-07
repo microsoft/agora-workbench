@@ -59,7 +59,7 @@ class DataLakeDataManager:
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
 
         # Initialize fetchers
-        self._fetchers = [
+        self._fetchers: list[LocalFileFetcher | BlobFetcher] = [
             LocalFileFetcher(allowed_roots=allowed_local_roots),
         ]
 

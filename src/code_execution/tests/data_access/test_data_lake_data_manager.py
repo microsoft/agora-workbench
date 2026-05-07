@@ -83,14 +83,6 @@ class TestDataLakeDataManagerInit:
         assert manager._cache_dir.exists()
 
 
-def _get_blob_fetcher(manager: DataLakeDataManager) -> BlobFetcher:
-    """Find the BlobFetcher instance in the manager's fetcher list."""
-    for f in manager._fetchers:
-        if isinstance(f, BlobFetcher):
-            return f
-    raise RuntimeError("BlobFetcher not found in manager._fetchers")
-
-
 class TestGetCachePath:
     """Test get_cache_path functionality."""
 
