@@ -299,13 +299,21 @@ async def build_conda_environment(config: "EnvironmentConfig"):
         for i, command in enumerate(config.additional_commands, 1):
             LOGGER.info(f"Running additional command {i}/{len(config.additional_commands)}: {command}")
 
-            # Run command in the conda environment
-            cmd = [conda_bin, "run", "--prefix", str(build_dir), "--no-capture-output", "bash", "-c", command]
+            # Run command with the conda environment's bin/ on PATH.
+            # Avoid ``conda run`` / ``mamba run`` which generate wrapper
+            # scripts using ``exec --`` — a syntax not supported by all
+            # bash versions bundled in conda environments.
+            env = os.environ.copy()
+            env["PATH"] = f"{build_dir / 'bin'}:{env.get('PATH', '')}"
+            env["CONDA_PREFIX"] = str(build_dir)
+            env["CONDA_DEFAULT_ENV"] = build_dir.name
+            cmd = ["bash", "-c", command]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await process.communicate()
 
