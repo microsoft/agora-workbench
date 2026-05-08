@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from azure.identity.aio import ManagedIdentityCredential
 from azure.search.documents.aio import SearchClient
 
-from .fetchers import BlobFetcher, LocalFileFetcher
+from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ..types import AssetId
 
 LOGGER = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class DataLakeDataManager:
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
 
         # Initialize fetchers
-        self._fetchers: list[LocalFileFetcher | BlobFetcher] = [
+        self._fetchers: list[AssetFetcher] = [
             LocalFileFetcher(allowed_roots=allowed_local_roots),
         ]
 
