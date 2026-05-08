@@ -220,9 +220,11 @@ async def build_uv_environment(config: "EnvironmentConfig"):
         for i, command in enumerate(config.additional_commands, 1):
             LOGGER.info(f"Running additional command {i}/{len(config.additional_commands)}: {command}")
 
-            # Run command using the venv's Python
+            # Run command using the venv's Python. Skip bash profile/rc to
+            # avoid inheriting host shell init (e.g. conda/mamba activation
+            # of an unrelated base env) that can shadow our PATH.
             activate_script = shlex.quote(str(build_dir / "bin" / "activate"))
-            cmd = ["bash", "-c", f"source {activate_script} && {command}"]
+            cmd = ["bash", "--noprofile", "--norc", "-c", f"source {activate_script} && {command}"]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -232,10 +234,12 @@ async def build_uv_environment(config: "EnvironmentConfig"):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else stdout.decode()
-                LOGGER.warning(f"Additional command failed (continuing anyway): {error_msg}")
-            else:
-                LOGGER.info(f"Additional command {i} completed successfully")
+                error_msg = (stderr.decode() if stderr else "") + (stdout.decode() if stdout else "")
+                raise RuntimeError(
+                    f"Additional command {i}/{len(config.additional_commands)} failed "
+                    f"(exit={process.returncode}): {command!r}\n{error_msg.strip()}"
+                )
+            LOGGER.info(f"Additional command {i} completed successfully")
 
     # Mark environment as successfully built
     marker_file = build_dir / ".env_build_complete"
@@ -302,12 +306,15 @@ async def build_conda_environment(config: "EnvironmentConfig"):
             # Run command with the conda environment's bin/ on PATH.
             # Avoid ``conda run`` / ``mamba run`` which generate wrapper
             # scripts using ``exec --`` — a syntax not supported by all
-            # bash versions bundled in conda environments.
+            # bash versions bundled in conda environments. Also pass
+            # ``--noprofile --norc`` so any host shell init (e.g. a
+            # miniforge3 install in the base image that re-activates an
+            # unrelated base env) cannot shadow the PATH we set here.
             env = os.environ.copy()
             env["PATH"] = f"{build_dir / 'bin'}:{env.get('PATH', '')}"
             env["CONDA_PREFIX"] = str(build_dir)
             env["CONDA_DEFAULT_ENV"] = build_dir.name
-            cmd = ["bash", "-c", command]
+            cmd = ["bash", "--noprofile", "--norc", "-c", command]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -318,10 +325,12 @@ async def build_conda_environment(config: "EnvironmentConfig"):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else stdout.decode()
-                LOGGER.warning(f"Additional command failed (continuing anyway): {error_msg}")
-            else:
-                LOGGER.info(f"Additional command {i} completed successfully")
+                error_msg = (stderr.decode() if stderr else "") + (stdout.decode() if stdout else "")
+                raise RuntimeError(
+                    f"Additional command {i}/{len(config.additional_commands)} failed "
+                    f"(exit={process.returncode}): {command!r}\n{error_msg.strip()}"
+                )
+            LOGGER.info(f"Additional command {i} completed successfully")
 
 
 async def build_pip_environment(config: "EnvironmentConfig"):
@@ -389,9 +398,11 @@ async def build_pip_environment(config: "EnvironmentConfig"):
         for i, command in enumerate(config.additional_commands, 1):
             LOGGER.info(f"Running additional command {i}/{len(config.additional_commands)}: {command}")
 
-            # Run command using the venv's Python
+            # Run command using the venv's Python. Skip bash profile/rc to
+            # avoid inheriting host shell init (e.g. conda/mamba activation
+            # of an unrelated base env) that can shadow our PATH.
             activate_script = shlex.quote(str(build_dir / "bin" / "activate"))
-            cmd = ["bash", "-c", f"source {activate_script} && {command}"]
+            cmd = ["bash", "--noprofile", "--norc", "-c", f"source {activate_script} && {command}"]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -401,7 +412,9 @@ async def build_pip_environment(config: "EnvironmentConfig"):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                error_msg = stderr.decode() if stderr else stdout.decode()
-                LOGGER.warning(f"Additional command failed (continuing anyway): {error_msg}")
-            else:
-                LOGGER.info(f"Additional command {i} completed successfully")
+                error_msg = (stderr.decode() if stderr else "") + (stdout.decode() if stdout else "")
+                raise RuntimeError(
+                    f"Additional command {i}/{len(config.additional_commands)} failed "
+                    f"(exit={process.returncode}): {command!r}\n{error_msg.strip()}"
+                )
+            LOGGER.info(f"Additional command {i} completed successfully")
