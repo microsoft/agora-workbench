@@ -16,14 +16,14 @@ from ...code_execution.data_access.manager import DataLakeDataManager
 
 
 @pytest.fixture(autouse=True)
-def mock_managed_identity():
-    """Mock ManagedIdentityCredential for all tests."""
-    with patch("code_execution.code_execution.data_access.manager.ManagedIdentityCredential") as mock_mi:
-        mock_cred = MagicMock()
-        mock_cred.get_token = AsyncMock(return_value=MagicMock(token="mock-token", expires_on=9999999999))
-        mock_cred.close = AsyncMock()
-        mock_mi.return_value = mock_cred
-        yield mock_cred
+def mock_entra_credential_provider():
+    """Mock EntraCredentialProvider for all tests."""
+    with patch("code_execution.code_execution.data_access.manager.EntraCredentialProvider") as mock_provider_cls:
+        mock_provider = MagicMock()
+        mock_provider.get_token = AsyncMock(return_value=MagicMock(token="mock-token", expires_on=9999999999))
+        mock_provider.close = AsyncMock()
+        mock_provider_cls.return_value = mock_provider
+        yield mock_provider
 
 
 def create_mock_fetch_to_file(data: bytes):
