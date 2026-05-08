@@ -15,11 +15,11 @@ from types import TracebackType
 from typing import Optional
 
 import jwt
-from azure.core.credentials import AccessToken as AzureAccessToken
+from azure.core.credentials import AccessToken
 from jwt import PyJWKClient
 
 from .base import (
-    AccessToken,
+    AccessToken as AuthAccessToken,
     AuthConfig,
     CredentialError,
     CredentialProvider,
@@ -134,10 +134,10 @@ class EntraCredentialProvider(CredentialProvider):
         else:
             LOGGER.info("EntraCredentialProvider: using system-assigned managed identity")
 
-    async def get_token(self, scope: str) -> AccessToken:
+    async def get_token(self, scope: str) -> AuthAccessToken:
         try:
             token = await self._credential.get_token(scope)
-            return AccessToken(token.token, token.expires_on)
+            return AuthAccessToken(token.token, token.expires_on)
         except Exception as e:
             raise CredentialError(
                 f"Failed to acquire token for scope '{scope}': {e}",
@@ -155,13 +155,13 @@ class CredentialProviderTokenCredential:
     def __init__(self, credential_provider: CredentialProvider):
         self._credential_provider = credential_provider
 
-    async def get_token(self, *scopes: str, **kwargs: object) -> AzureAccessToken:
+    async def get_token(self, *scopes: str, **kwargs: object) -> AccessToken:
         del kwargs
         if not scopes:
             raise ValueError("At least one scope is required")
 
         token = await self._credential_provider.get_token(scopes[0])
-        return AzureAccessToken(token=token.token, expires_on=token.expires_on)
+        return AccessToken(token=token.token, expires_on=token.expires_on)
 
     async def close(self) -> None:
         await self._credential_provider.close()
