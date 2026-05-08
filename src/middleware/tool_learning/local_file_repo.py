@@ -104,7 +104,6 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
         if not merged:
             updated.append(vignette)
 
-        updated.sort(key=lambda v: v.confidence, reverse=True)
         self._write_vignettes(path, updated)
 
     def get_vignettes_for_tool(

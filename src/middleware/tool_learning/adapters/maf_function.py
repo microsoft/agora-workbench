@@ -112,7 +112,7 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
         self._write_repo: Optional[VignetteWriteRepo] = None
 
         if storage is not None and storage not in {"table", "local"}:
-            raise ValueError("storage must be 'table' or 'local'")
+            raise ValueError("storage must be 'table', 'local', or None")
 
         try:
             self._search_repo = SearchVignetteRepo(config=config, credential=credential)
