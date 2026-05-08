@@ -9,6 +9,8 @@ Components:
   - config: Environment/config wiring
   - render: Deterministic renderer for prompt injection
   - table_repo: Azure Table Storage CRUD (source of truth)
+  - local_file_repo: local JSON persistence for vignette writes
+  - write_repo: write backend protocol
   - search_repo: Azure AI Search hybrid retrieval
   - compile: Log → vignette compiler
 """
@@ -26,8 +28,10 @@ from .models import (
 )
 from .render import render_guardrails_block, render_repair_block
 from .compile import compile_vignettes
+from .local_file_repo import LocalFileVignetteRepo
 from .table_repo import TableVignetteRepo
 from .search_repo import SearchVignetteRepo
+from .write_repo import VignetteWriteRepo
 
 __all__ = [
     # Config
@@ -47,6 +51,8 @@ __all__ = [
     # Compilation
     "compile_vignettes",
     # Repositories
+    "LocalFileVignetteRepo",
     "TableVignetteRepo",
     "SearchVignetteRepo",
+    "VignetteWriteRepo",
 ]

@@ -1,7 +1,8 @@
 """
 Configuration for the tool-learning memory module.
 
-Reads Azure Table Storage and Azure AI Search settings from environment variables.
+Reads Azure Table Storage, local storage, and Azure AI Search settings from
+environment variables.
 """
 
 import os
@@ -15,6 +16,7 @@ class ToolLearningConfig:
     # Azure Table Storage
     table_storage_endpoint: str = field(default_factory=lambda: os.getenv("TOOL_LEARNING_TABLE_ENDPOINT", ""))
     table_name: str = field(default_factory=lambda: os.getenv("TOOL_LEARNING_TABLE_NAME", "ToolVignettes"))
+    local_storage_dir: str = field(default_factory=lambda: os.getenv("TOOL_LEARNING_LOCAL_DIR", "").strip())
 
     # Azure AI Search
     search_endpoint: str = field(default_factory=lambda: os.getenv("TOOL_LEARNING_SEARCH_ENDPOINT", ""))
