@@ -6,7 +6,7 @@ BYO-LLM factory for the MAF quickstart tutorial.
 from being a hard dependency.
 
 Supported providers:
-    azure_openai_entra  - Azure OpenAI via Entra ID token (default; TRAPI-compatible)
+    azure_openai_entra  - Azure OpenAI via Entra ID token (default)
     azure_openai_apikey - Azure OpenAI via API key
     openai              - OpenAI (api.openai.com or compatible)
     ollama              - Ollama local server (OpenAI-compatible endpoint)
@@ -53,7 +53,7 @@ def build_chat_client():
 
 
 def _build_azure_openai_entra():
-    """Azure OpenAI via Entra ID. Works for both TRAPI and standard AOAI.
+    """Azure OpenAI via Entra ID.
 
     Reads:
         AZURE_OPENAI_ENDPOINT, AOAI_SCOPE, API_VERSION,

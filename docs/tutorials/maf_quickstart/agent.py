@@ -30,7 +30,7 @@ Run from the repo root:
 
 Prerequisites:
   1. ``.env`` populated (see docs/tutorials/maf_quickstart/.env.example)
-  2. ``az login`` (TRAPI / data lake auth use Entra ID by default)
+  2. ``az login`` (LLM and data lake auth use Entra ID by default)
   3. Chemistry MCP server running locally:
        cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
                               -t mcp-server-base:local .
