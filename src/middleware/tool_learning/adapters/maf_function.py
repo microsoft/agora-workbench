@@ -88,11 +88,27 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
 
     Args:
         config: Tool-learning configuration.
-        credential: Azure TokenCredential. Used for Search and table write backend.
+        credential: Azure TokenCredential. Used for Search and the Azure Table
+            write backend. Not required for the local-file write backend.
         tenant_id: Optional tenant ID for scope filtering.
         user_id: Optional user ID for scope filtering.
         write_vignettes: If True, compile and upsert vignettes on successful repair.
-        storage: Optional write backend override ("table" or "local").
+        storage: Optional write-backend override. One of:
+
+            * ``"table"`` — force Azure Table Storage (requires
+              ``config.table_storage_endpoint`` and a usable ``credential``).
+            * ``"local"`` — force the local JSON file backend
+              (:class:`LocalFileVignetteRepo`). Uses
+              ``config.local_storage_dir`` if set, otherwise defaults to
+              ``~/.agora/vignettes``.
+            * ``None`` (default) — auto-select. Picks ``table`` if
+              ``config.table_storage_endpoint`` is set, otherwise ``local``
+              if ``config.local_storage_dir`` is set, otherwise no-ops the
+              write path (vignettes are still observed but not persisted).
+
+        Both backends implement :class:`VignetteWriteRepo` and are
+        interchangeable. Use ``"table"`` for shared/team deployments and
+        ``"local"`` for solo development without Azure dependencies.
     """
 
     def __init__(
