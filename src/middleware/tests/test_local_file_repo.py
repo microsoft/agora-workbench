@@ -6,7 +6,7 @@ import pytest
 
 from middleware.tool_learning.adapters import maf_function
 from middleware.tool_learning.config import ToolLearningConfig
-from middleware.tool_learning.local_file_repo import LocalFileVignetteRepo
+from middleware.tool_learning.local_file_repo import LocalFileVignetteRepo, _CONFIDENCE_INCREMENT
 from middleware.tool_learning.models import AntiPattern, MatchSpec, ToolSignature, Vignette
 
 
@@ -40,7 +40,7 @@ def test_local_file_repo_upsert_and_get_for_tool(tmp_path: Path):
 
     vignettes = repo.get_vignettes_for_tool("calendar.create_event")
     assert len(vignettes) == 1
-    assert vignettes[0].confidence == pytest.approx(0.75)
+    assert vignettes[0].confidence == pytest.approx(_make_vignette().confidence + _CONFIDENCE_INCREMENT)
     assert vignettes[0].tags == ["alpha", "beta"]
 
 

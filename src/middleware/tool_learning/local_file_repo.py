@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
+from pydantic import ValidationError
+
 from .config import ToolLearningConfig
 from .models import Vignette
 from .write_repo import VignetteWriteRepo
@@ -52,7 +54,7 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
             return []
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             LOGGER.warning("Failed to parse local vignette store %s: %s", path, exc)
             return []
 
@@ -64,7 +66,7 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
         for item in payload:
             try:
                 vignettes.append(Vignette.model_validate(item))
-            except Exception as exc:
+            except ValidationError as exc:
                 LOGGER.warning("Skipping malformed local vignette entry in %s: %s", path, exc)
         return vignettes
 
