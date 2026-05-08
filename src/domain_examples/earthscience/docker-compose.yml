@@ -13,7 +13,9 @@ services:
       context: ../..
       dockerfile: domain_examples/earthscience/Dockerfile
     ports:
-      - "8021:8000"
+      # Bind to loopback only — the server uses create_noop_auth_config()
+      # which accepts any bearer token, so it must not be reachable off-host.
+      - "127.0.0.1:8021:8000"
     env_file:
       - ../../../.env
     environment:
