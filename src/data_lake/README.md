@@ -2,6 +2,72 @@
 
 A unified data discovery and governance system for blob storage artifacts, combining Azure AI Search, Microsoft Purview, and Azure OpenAI to enable semantic search with RBAC-aware artifact retrieval.
 
+## Local Development (No Azure Credentials)
+
+For local-only development, you can use a file-backed catalog instead of Azure services:
+
+1. Set `DATA_LAKE_LOCAL_CATALOG` to a YAML file path (example catalog: `tools/adapters/catalog.example.yaml`).
+2. Leave `DATA_LAKE_SEARCH_ENDPOINT` unset.
+3. Use data lake tools as usual; search runs locally using BM25 keyword ranking over artifact metadata.
+
+Catalog format:
+
+```yaml
+artifacts:
+  - artifact_id: "sample-weather-csv"
+    name: "Daily Weather Observations"
+    description: "NOAA daily weather station data for Pacific Northwest"
+    artifact_type: "blob"
+    domain: "earthscience"
+    source: "local"
+    storage_url: "./data/weather/daily_obs.csv"
+    tags: ["weather", "noaa", "temperature"]
+```
+
+### Where to Store Data Files
+
+The local catalog is **discovery only** — it tells the agent what data exists but doesn't serve files. The `storage_url` field is metadata the agent uses to generate code that reads the file. Where you place the actual data depends on your setup:
+
+| Scenario | Data location | Notes |
+|----------|--------------|-------|
+| **Local filesystem** | `./data/` or `~/datasets/` | Simplest; use absolute or project-relative paths in `storage_url` |
+| **Docker (MCP server)** | Mounted volume (e.g., `/data/`) | Mount via `docker-compose.yml` so the execution container can access files |
+| **Azurite (blob emulator)** | `http://127.0.0.1:10000/devstoreaccount1/` | Use well-known connection string; `storage_url` is the local blob URL |
+
+Example with a mounted volume for an MCP code execution server:
+
+```yaml
+# docker-compose.yml
+services:
+  chemistry:
+    volumes:
+      - ./data:/data:ro
+```
+
+The agent discovers the artifact via the catalog, sees `storage_url: "./data/weather/daily_obs.csv"`, and generates code like `pd.read_csv("/data/weather/daily_obs.csv")` to run in the execution environment.
+
+### Data Fetching
+
+The code execution module includes a `LocalFileFetcher` (in `code_execution/data_access/fetchers.py`) that can read local files directly — no Azure credentials required. It supports absolute paths, `./` relative paths, and `file://` URIs.
+
+**Path sandboxing:** `LocalFileFetcher` accepts an `allowed_roots` parameter to restrict which directories it can read from. This prevents path traversal attacks (e.g., an agent generating `../../etc/passwd`).
+
+```python
+from code_execution.code_execution.data_access.fetchers import LocalFileFetcher
+
+# Restrict to specific directories
+fetcher = LocalFileFetcher(allowed_roots=["/data", "./datasets"])
+
+# Permissive mode (only use inside sandboxed containers)
+fetcher = LocalFileFetcher()  # allowed_roots=None permits all paths
+```
+
+When `DATA_LAKE_SEARCH_ENDPOINT` is not set, the `DataLakeDataManager` runs in local-only mode — it registers `LocalFileFetcher` automatically and skips Azure Blob fetcher setup. To fetch a local artifact, use the `<local>` tag format:
+
+```
+<local>/data/weather/daily_obs.csv</local>
+```
+
 ## Architecture
 
 The system has three primary components:

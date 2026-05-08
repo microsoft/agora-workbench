@@ -8,6 +8,7 @@ import pytest
 pytest.importorskip("agent_framework")
 
 
+from data_lake.tools.adapters.local import LocalDataLakeSearchBackend
 from data_lake.tools.adapters.maf import (
     DataLakeSearchBackend,
     DataLakeSearchClientManager,
@@ -17,6 +18,7 @@ from data_lake.tools.adapters.maf import (
     _discover_available_domains,
     create_data_lake_search_tool,
     is_data_lake_configured,
+    validate_assets_against_catalog,
 )
 
 
@@ -39,6 +41,21 @@ class TestIsDataLakeConfigured:
     def test_returns_false_when_endpoint_empty(self, monkeypatch):
         """Test returns False when DATA_LAKE_SEARCH_ENDPOINT is empty string."""
         monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", "")
+        monkeypatch.delenv("DATA_LAKE_LOCAL_CATALOG", raising=False)
+        assert is_data_lake_configured() is False
+
+    @pytest.mark.unit
+    def test_returns_true_when_local_catalog_set(self, monkeypatch):
+        """Test returns True when DATA_LAKE_LOCAL_CATALOG is set."""
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", "/tmp/catalog.yaml")
+        assert is_data_lake_configured() is True
+
+    @pytest.mark.unit
+    def test_returns_false_when_local_catalog_empty(self, monkeypatch):
+        """Test returns False when DATA_LAKE_LOCAL_CATALOG is empty string."""
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", "")
         assert is_data_lake_configured() is False
 
 
@@ -696,6 +713,32 @@ class TestDomainDiscoveryIntegration:
         call_kwargs = mock_client.search.call_args.kwargs
         assert "domain eq 'energy'" in call_kwargs["filter"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_discover_domains_uses_local_catalog_when_no_endpoint(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text(
+            """
+artifacts:
+  - artifact_id: id1
+    name: A
+    artifact_type: blob
+    domain: energy
+    source: local
+  - artifact_id: id2
+    name: B
+    artifact_type: blob
+    domain: climate
+    source: local
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        result = await _discover_available_domains()
+        assert result == ["climate", "energy"]
+
 
 class TestDataLakeSearchBackendABC:
     """Tests for the DataLakeSearchBackend abstract base class."""
@@ -743,6 +786,158 @@ class TestDataLakeSearchBackendABC:
 
         with pytest.raises(TypeError):
             _IncompleteBackend()  # type: ignore[abstract]
+
+
+class TestLocalDataLakeSearchBackend:
+    """Tests for local file-backed DataLake search backend."""
+
+    @staticmethod
+    def _write_catalog(tmp_path) -> str:
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text(
+            """
+artifacts:
+  - artifact_id: weather-1
+    name: Daily Weather Observations
+    description: NOAA weather station temperatures
+    artifact_type: blob
+    domain: earthscience
+    source: local
+    tags: [weather, noaa, temperature]
+  - artifact_id: grid-1
+    name: Transmission Lines
+    description: Power grid transmission line geospatial data
+    artifact_type: blob
+    domain: powergrid
+    source: local
+    tags: [grid, transmission, geospatial]
+  - artifact_id: market-1
+    name: Electricity Market Prices
+    description: Hourly wholesale electricity prices
+    artifact_type: blob
+    domain: energy
+    source: local
+    tags: [market, electricity, prices]
+""".strip(),
+            encoding="utf-8",
+        )
+        return str(catalog)
+
+    @pytest.mark.unit
+    def test_raises_for_missing_catalog_file(self):
+        with pytest.raises(FileNotFoundError):
+            LocalDataLakeSearchBackend("/tmp/does-not-exist-catalog.yaml")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_returns_empty_for_empty_catalog(self, tmp_path):
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text("artifacts: []", encoding="utf-8")
+        backend = LocalDataLakeSearchBackend(str(catalog))
+        results = await backend.search(DataLakeSearchParams(query="weather"))
+        assert results == []
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_bm25_search_ranking(self, tmp_path):
+        backend = LocalDataLakeSearchBackend(self._write_catalog(tmp_path))
+        results = await backend.search(DataLakeSearchParams(query="weather temperature", top=2))
+        assert len(results) == 2
+        assert results[0]["artifact_id"] == "weather-1"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_applies_filters(self, tmp_path):
+        backend = LocalDataLakeSearchBackend(self._write_catalog(tmp_path))
+        results = await backend.search(
+            DataLakeSearchParams(
+                query="data",
+                artifact_types=["blob"],
+                domains=["powergrid"],
+                sources=["local"],
+            )
+        )
+        assert len(results) == 1
+        assert results[0]["artifact_id"] == "grid-1"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_select_fields_projection(self, tmp_path):
+        backend = LocalDataLakeSearchBackend(self._write_catalog(tmp_path))
+        results = await backend.search(DataLakeSearchParams(query="weather", select_fields=["artifact_id", "name"]))
+        assert "artifact_id" in results[0]
+        assert "name" in results[0]
+        assert "description" not in results[0]
+        assert "asset_tag" in results[0]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_order_by_overrides_relevance_order(self, tmp_path):
+        backend = LocalDataLakeSearchBackend(self._write_catalog(tmp_path))
+        results = await backend.search(
+            DataLakeSearchParams(
+                query="data",
+                order_by=["name desc"],
+                top=3,
+            )
+        )
+        names = [result["name"] for result in results]
+        assert names == sorted(names, reverse=True)
+
+
+class TestValidateAssetsAgainstCatalogLocal:
+    """Tests for local-catalog branch in validate_assets_against_catalog."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_returns_only_found_artifacts(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text(
+            """
+artifacts:
+  - artifact_id: weather-1
+    name: Daily Weather Observations
+    description: NOAA weather station temperatures
+    artifact_type: blob
+    domain: earthscience
+    source: local
+  - artifact_id: grid-1
+    name: Transmission Lines
+    description: Power grid transmission line geospatial data
+    artifact_type: blob
+    domain: powergrid
+    source: local
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        validated = await validate_assets_against_catalog(["weather-1", "missing-id"])
+
+        assert len(validated) == 1
+        assert validated[0]["artifact_id"] == "weather-1"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_raises_when_catalog_file_missing(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        missing_catalog = tmp_path / "does-not-exist-validate-assets.yaml"
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(missing_catalog))
+
+        with pytest.raises(FileNotFoundError, match="Local DataLake catalog file not found"):
+            await validate_assets_against_catalog(["weather-1"])
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_local_branch_raises_when_catalog_is_invalid(self, monkeypatch, tmp_path):
+        catalog = tmp_path / "invalid-catalog.yaml"
+        catalog.write_text("artifacts: not-a-list", encoding="utf-8")
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        with pytest.raises(ValueError, match="top-level 'artifacts' list"):
+            await validate_assets_against_catalog(["weather-1"])
 
 
 class TestCreateDataLakeSearchToolWithCustomBackend:
@@ -826,3 +1021,47 @@ class TestCreateDataLakeSearchToolWithCustomBackend:
 
         result_data = json.loads(result)
         assert result_data[0]["name"] == "test_asset"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_no_backend_uses_local_backend_when_only_local_catalog_is_set(self, monkeypatch, tmp_path):
+        """When only DATA_LAKE_LOCAL_CATALOG is set, local backend is auto-selected."""
+        catalog = tmp_path / "catalog.yaml"
+        catalog.write_text(
+            """
+artifacts:
+  - artifact_id: local-1
+    name: Local Weather Data
+    description: NOAA observations
+    artifact_type: blob
+    domain: earthscience
+    source: local
+    tags: [weather]
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", str(catalog))
+
+        tool = await create_data_lake_search_tool()
+        result = await tool(DataLakeSearchParams(query="weather"))
+
+        result_data = json.loads(result)
+        assert len(result_data) == 1
+        assert result_data[0]["artifact_id"] == "local-1"
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_no_backend_with_missing_local_catalog_returns_error_on_invoke(self, monkeypatch):
+        """Missing local catalog does not fail tool creation and returns error when called."""
+        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+        monkeypatch.setenv("DATA_LAKE_LOCAL_CATALOG", "/tmp/does-not-exist-local-catalog.yaml")
+
+        tool = await create_data_lake_search_tool()
+        result = await tool(DataLakeSearchParams(query="weather"))
+        result_data = json.loads(result)
+
+        assert isinstance(result_data, list)
+        assert len(result_data) == 1
+        assert "error" in result_data[0]
+        assert "Local DataLake catalog file not found" in result_data[0]["error"]

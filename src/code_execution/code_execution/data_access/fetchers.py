@@ -12,6 +12,7 @@ Authentication:
 
 import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,13 +25,15 @@ LOGGER = logging.getLogger(__name__)
 class AssetFetcher(ABC):
     """Base class for asset fetchers."""
 
-    def __init__(self, credential: AsyncTokenCredential):
+    def __init__(self, credential: AsyncTokenCredential | None = None):
         """
-        Initialize fetcher with an async token credential.
+        Initialize fetcher with an optional async token credential.
 
         Args:
             credential: An ``AsyncTokenCredential`` that provides tokens for
                        downstream Azure resources (e.g. ManagedIdentityCredential).
+                       May be ``None`` for fetchers that don't require credentials
+                       (e.g. local filesystem).
         """
         self.credential = credential
 
@@ -270,3 +273,119 @@ class BlobFetcher(AssetFetcher):
                 f"Expected format: abfss://container@storage.dfs.core.windows.net/path "
                 f"or https://storage.blob.core.windows.net/container/path"
             ) from e
+
+
+class LocalFileFetcher(AssetFetcher):
+    """
+    Fetcher for local filesystem paths.
+
+    Handles absolute paths, relative paths, and ``file://`` URIs.
+    No credentials are required.
+
+    Security:
+        An ``allowed_roots`` list restricts which directories the fetcher
+        may read from.  Every resolved path is checked against these roots
+        before any I/O occurs.  If *allowed_roots* is empty, **all** paths
+        are permitted (use only inside a sandboxed container).
+    """
+
+    def __init__(self, allowed_roots: list[str] | None = None):
+        """
+        Initialize the local file fetcher.
+
+        Args:
+            allowed_roots: Optional list of directory paths that the fetcher
+                is allowed to read from.  Paths are resolved to absolute form.
+                If ``None`` or empty, all paths are permitted.
+        """
+        super().__init__(credential=None)
+        self._allowed_roots: list[Path] = [Path(r).resolve() for r in (allowed_roots or [])]
+
+    def can_handle(self, qualified_name: str) -> bool:
+        """Check if this is a local filesystem path."""
+        return (
+            qualified_name.startswith("/")
+            or qualified_name.startswith("./")
+            or qualified_name.startswith("../")
+            or qualified_name.startswith("file://")
+        )
+
+    async def fetch(self, qualified_name: str) -> bytes:
+        """
+        Read a local file into memory.
+
+        Args:
+            qualified_name: Local file path or ``file://`` URI.
+
+        Returns:
+            Raw bytes of the file.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            PermissionError: If the resolved path is outside *allowed_roots*.
+        """
+        path = self._resolve_and_check(qualified_name)
+        LOGGER.info(f"Reading local file: {path}")
+        data = path.read_bytes()
+        LOGGER.info(f"Read {len(data)} bytes from {path}")
+        return data
+
+    async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
+        """
+        Copy a local file to *dest_path*.
+
+        Args:
+            qualified_name: Local file path or ``file://`` URI.
+            dest_path: Destination file path.
+
+        Returns:
+            Number of bytes written.
+
+        Raises:
+            FileNotFoundError: If the source file does not exist.
+            PermissionError: If the resolved path is outside *allowed_roots*.
+        """
+        import shutil
+        from pathlib import Path as P
+
+        source = self._resolve_and_check(qualified_name)
+        dest = P(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+        LOGGER.info(f"Copying local file {source} -> {dest}")
+        shutil.copy2(source, dest)
+        size = source.stat().st_size
+        LOGGER.info(f"Copied {size} bytes to {dest}")
+        return size
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_and_check(self, qualified_name: str) -> Path:
+        """Resolve the path and validate against allowed roots."""
+        raw = qualified_name
+        if raw.startswith("file://"):
+            raw = raw[7:]
+
+        path = Path(raw).resolve()
+
+        if not path.exists():
+            raise FileNotFoundError(f"Local file not found: {path}")
+
+        if self._allowed_roots:
+            if not any(self._is_within(path, root) for root in self._allowed_roots):
+                raise PermissionError(
+                    f"Access denied: {path} is outside allowed roots {[str(r) for r in self._allowed_roots]}"
+                )
+
+        return path
+
+    @staticmethod
+    def _is_within(path: Path, root: Path) -> bool:
+        """Check if *path* is under *root* (both must be resolved)."""
+        try:
+            path.relative_to(root)
+            return True
+        except ValueError:
+            return False

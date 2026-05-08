@@ -25,6 +25,15 @@ from auth import get_search_credential_async
 LOGGER = logging.getLogger(__name__)
 
 
+def format_asset_tag(asset: dict) -> str | None:
+    """Format an artifact into the canonical XML-like asset tag."""
+    artifact_type = asset.get("artifact_type", "")
+    artifact_id = asset.get("artifact_id", "")
+    if artifact_type and artifact_id:
+        return f"<{artifact_type}>{artifact_id}</{artifact_type}>"
+    return None
+
+
 class DataLakeSearchClientManager:
     """
     Manages SearchClient lifecycle with automatic credential refresh on auth errors.
@@ -55,11 +64,9 @@ class DataLakeSearchClientManager:
             DATA_LAKE_SEARCH_ENDPOINT: Required - Azure AI Search service endpoint
             DATA_LAKE_CATALOG_INDEX_NAME: Optional - Artifact registry index name (default: artifact-registry)
         """
-        if not is_data_lake_configured():
-            raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
-
         endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
-        assert endpoint is not None  # type-checking
+        if not endpoint:
+            raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
         index_name = os.getenv("DATA_LAKE_CATALOG_INDEX_NAME", "artifact-registry")
 
         LOGGER.debug(f"DataLake catalog configuration: endpoint={endpoint}, index={index_name}")
@@ -340,10 +347,9 @@ class DefaultDataLakeSearchBackend(DataLakeSearchBackend):
         async for result in results:
             asset = dict(result)
             # Pre-format asset tag so agents can copy it directly
-            artifact_type = asset.get("artifact_type", "")
-            artifact_id = asset.get("artifact_id", "")
-            if artifact_type and artifact_id:
-                asset["asset_tag"] = f"<{artifact_type}>{artifact_id}</{artifact_type}>"
+            asset_tag = format_asset_tag(asset)
+            if asset_tag:
+                asset["asset_tag"] = asset_tag
             catalog_assets.append(asset)
 
         LOGGER.info(f"Retrieved {len(catalog_assets)} DataLake artifacts for query: '{params.query}'")
@@ -387,9 +393,9 @@ def is_data_lake_configured() -> bool:
     Check if DataLake catalog integration is configured.
 
     Returns:
-        True if DATA_LAKE_SEARCH_ENDPOINT is set, False otherwise
+        True if DATA_LAKE_SEARCH_ENDPOINT or DATA_LAKE_LOCAL_CATALOG is set, False otherwise.
     """
-    return bool(os.getenv("DATA_LAKE_SEARCH_ENDPOINT"))
+    return bool(os.getenv("DATA_LAKE_SEARCH_ENDPOINT") or os.getenv("DATA_LAKE_LOCAL_CATALOG"))
 
 
 async def _discover_available_domains() -> list[str]:
@@ -402,8 +408,21 @@ async def _discover_available_domains() -> list[str]:
         Sorted list of unique domain strings found in the index.
         Returns an empty list on any error (network, auth, missing index).
     """
+    endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
+    local_catalog = os.getenv("DATA_LAKE_LOCAL_CATALOG")
+
+    if local_catalog and not endpoint:
+        try:
+            from .local import discover_local_catalog_domains
+
+            local_domains = discover_local_catalog_domains(local_catalog)
+            LOGGER.info(f"Discovered {len(local_domains)} domain(s) in local catalog: {local_domains}")
+            return local_domains
+        except Exception as e:
+            LOGGER.warning(f"Failed to discover domains from local catalog: {e}")
+            return []
+
     try:
-        endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         index_name = os.getenv("DATA_LAKE_CATALOG_INDEX_NAME", "artifact-registry")
         if not endpoint:
             return []
@@ -506,8 +525,7 @@ async def create_data_lake_search_tool(
 
         tool = await create_data_lake_search_tool(backend=EnergyOnlyBackend())
     """
-    if backend is None:
-        backend = DefaultDataLakeSearchBackend()
+    active_backend = backend
 
     # Discover available domains from the index at tool creation time
     available_domains = await _discover_available_domains()
@@ -540,7 +558,18 @@ async def create_data_lake_search_tool(
             if isinstance(params, dict):
                 params = SearchParamsModel(**params)
 
-            assets = await backend.search(params)
+            nonlocal active_backend
+            if active_backend is None:
+                if os.getenv("DATA_LAKE_SEARCH_ENDPOINT"):
+                    active_backend = DefaultDataLakeSearchBackend()
+                elif os.getenv("DATA_LAKE_LOCAL_CATALOG"):
+                    from .local import LocalDataLakeSearchBackend
+
+                    active_backend = LocalDataLakeSearchBackend(os.getenv("DATA_LAKE_LOCAL_CATALOG", ""))
+                else:
+                    active_backend = DefaultDataLakeSearchBackend()
+
+            assets = await active_backend.search(params)
             return json.dumps(assets, indent=2)
 
         except Exception as e:
@@ -560,6 +589,8 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
     2. Retrieve full metadata
     3. Respect data access permissions (RBAC)
 
+    Supports both Azure AI Search and local catalog backends.
+
     Args:
         qualified_names: List of artifact_ids to validate
 
@@ -571,7 +602,38 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
 
     # Only validate if DataLake is configured
     if not is_data_lake_configured():
-        raise ValueError("DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT environment variable.")
+        raise ValueError(
+            "DataLake catalog not configured. Set DATA_LAKE_SEARCH_ENDPOINT or DATA_LAKE_LOCAL_CATALOG."
+        )
+
+    # Use local backend if no Azure endpoint but local catalog is configured
+    local_catalog = os.getenv("DATA_LAKE_LOCAL_CATALOG")
+    if not os.getenv("DATA_LAKE_SEARCH_ENDPOINT") and local_catalog:
+        from .local import LocalDataLakeSearchBackend
+
+        backend = LocalDataLakeSearchBackend(local_catalog)
+        validated_assets = []
+
+        # Validate directly from loaded catalog docs, since BM25 search does not
+        # index artifact_id and should not be used for exact ID validation.
+        catalog_docs = backend.get_catalog_docs()
+        artifacts_by_id = {
+            asset.get("artifact_id"): asset for asset in catalog_docs if asset.get("artifact_id")
+        }
+
+        for artifact_id in qualified_names:
+            matched = artifacts_by_id.get(artifact_id)
+            if matched:
+                LOGGER.info(f"[DATA_LAKE] Validated artifact_id (local): {artifact_id!r}")
+                # Keep parity with search output by excluding local-only BM25 tags.
+                asset = {k: v for k, v in matched.items() if k != "tags"}
+                asset_tag = format_asset_tag(asset)
+                if asset_tag:
+                    asset["asset_tag"] = asset_tag
+                validated_assets.append(asset)
+            else:
+                LOGGER.warning(f"Artifact not found in local catalog: {artifact_id}")
+        return validated_assets
 
     validated_assets = []
     client_manager = DataLakeSearchClientManager()
@@ -607,10 +669,9 @@ async def validate_assets_against_catalog(qualified_names: list[str]) -> list[di
             async for result in results:
                 asset = dict(result)
                 # Pre-format asset tag
-                a_type = asset.get("artifact_type", "")
-                a_id = asset.get("artifact_id", "")
-                if a_type and a_id:
-                    asset["asset_tag"] = f"<{a_type}>{a_id}</{a_type}>"
+                asset_tag = format_asset_tag(asset)
+                if asset_tag:
+                    asset["asset_tag"] = asset_tag
                 LOGGER.info(f"[DATA_LAKE] Validated artifact_id: {artifact_id!r}")
                 validated_assets.append(asset)
                 found = True
