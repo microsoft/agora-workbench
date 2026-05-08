@@ -17,6 +17,8 @@ from .write_repo import VignetteWriteRepo
 LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_LOCAL_DIR = "~/.agora/vignettes"
+_TOOL_HASH_LENGTH = 12
+_CONFIDENCE_INCREMENT = 0.05
 
 
 def _safe_path_component(raw: str) -> str:
@@ -42,7 +44,7 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
     def _tool_file_path(self, tenant_id: Optional[str], tool_name: str) -> Path:
         tenant = _safe_path_component(tenant_id or "global")
         tool_safe = _safe_path_component(tool_name)
-        tool_hash = hashlib.sha256(tool_name.encode("utf-8")).hexdigest()[:12]
+        tool_hash = hashlib.sha256(tool_name.encode("utf-8")).hexdigest()[:_TOOL_HASH_LENGTH]
         return self._base_dir / tenant / f"{tool_safe}-{tool_hash}.json"
 
     def _read_vignettes(self, path: Path) -> List[Vignette]:
@@ -88,7 +90,7 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
             updated.append(
                 vignette.model_copy(
                     update={
-                        "confidence": min(current.confidence + 0.05, 1.0),
+                        "confidence": min(current.confidence + _CONFIDENCE_INCREMENT, 1.0),
                         "tags": merged_tags,
                         "created_at": current.created_at,
                         "updated_at": datetime.now(timezone.utc),
