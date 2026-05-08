@@ -214,6 +214,10 @@ async def main() -> int:
     middlewares, context_providers, log, chat_mw = step_f_build_middleware(
         chat_client
     )
+    # MAF's ``middleware=`` kwarg accepts a mixed list of ChatMiddleware and
+    # FunctionMiddleware; broaden the inferred type so step_g's
+    # FunctionMiddleware can be appended without a Pyright complaint.
+    middlewares: list = list(middlewares)
     middlewares.extend(step_g_build_tool_learning_middleware())
     agent = step_d_build_agent_with_middleware(
         chat_client, tools, middlewares, context_providers
