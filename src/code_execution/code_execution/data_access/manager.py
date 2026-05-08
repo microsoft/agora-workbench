@@ -89,6 +89,7 @@ class DataLakeDataManager:
         self._cache_index = {}  # Maps artifact_id -> cache file path
 
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
+        self._credential_init_error: str | None = None
 
         # Initialize fetchers
         self._fetchers: list[AssetFetcher] = [
@@ -97,17 +98,23 @@ class DataLakeDataManager:
 
         if search_endpoint:
             # Azure mode: add blob fetcher and search client
-            mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
-            self._credential = _CredentialProviderTokenCredential(EntraCredentialProvider(client_id=mi_client_id))
-            self._fetchers.append(BlobFetcher(credential=self._credential))
-
             self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
-            self._search_client = SearchClient(
-                endpoint=search_endpoint,
-                index_name=self._blob_details_index,
-                credential=self._credential,
-            )
-            LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
+            try:
+                mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
+                self._credential = _CredentialProviderTokenCredential(EntraCredentialProvider(client_id=mi_client_id))
+                self._fetchers.append(BlobFetcher(credential=self._credential))
+
+                self._search_client = SearchClient(
+                    endpoint=search_endpoint,
+                    index_name=self._blob_details_index,
+                    credential=self._credential,
+                )
+                LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
+            except Exception as e:
+                self._credential_init_error = str(e)
+                self._credential = None
+                self._search_client = None
+                LOGGER.warning(f"Failed to initialize Azure data access components: {e}")
         else:
             self._credential = None
             self._search_client = None
@@ -128,9 +135,14 @@ class DataLakeDataManager:
             ValueError: If the artifact is not found in the index or URL is invalid
         """
         if not self._search_client:
-            raise RuntimeError(
-                "Search client not initialized. "
-                "Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
+            if self._credential_init_error:
+                raise ValueError(
+                    "Blob artifact resolution is unavailable because Azure data access initialization failed. "
+                    f"Details: {self._credential_init_error}"
+                )
+
+            raise ValueError(
+                "Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
             )
 
         try:

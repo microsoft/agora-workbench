@@ -82,6 +82,19 @@ class TestDataLakeDataManagerInit:
         assert len(manager._fetchers) == 1
         assert manager._cache_dir.exists()
 
+    def test_init_credential_provider_failure_is_deferred(self):
+        """Test credential provider init errors are deferred to fetch time."""
+        with patch(
+            "code_execution.code_execution.data_access.manager.EntraCredentialProvider",
+            side_effect=RuntimeError("missing managed identity"),
+        ):
+            manager = DataLakeDataManager()
+
+        assert manager._credential is None
+        assert manager._search_client is None
+        assert len(manager._fetchers) == 1
+        assert manager._credential_init_error == "missing managed identity"
+
 
 class TestGetCachePath:
     """Test get_cache_path functionality."""
@@ -168,6 +181,18 @@ class TestGetCachePath:
 
         with pytest.raises(ValueError, match="Invalid artifact format"):
             await manager.get_cache_path("https://storage.blob.core.windows.net/container/file.nc")
+
+    @pytest.mark.asyncio
+    async def test_blob_lookup_surfaces_credential_init_error(self):
+        """Test blob requests surface deferred Azure init errors to the caller."""
+        with patch(
+            "code_execution.code_execution.data_access.manager.EntraCredentialProvider",
+            side_effect=RuntimeError("missing managed identity"),
+        ):
+            manager = DataLakeDataManager()
+
+        with pytest.raises(ValueError, match="Azure data access initialization failed"):
+            await manager.get_cache_path("<blob>artifact_id_1</blob>")
 
 
 class TestFileExtensionPreservation:
