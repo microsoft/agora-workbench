@@ -15,6 +15,7 @@ from .base import (
     TokenValidator,
 )
 from .entra import (
+    CredentialProviderTokenCredential,
     EntraCredentialProvider,
     EntraIdentityExtractor,
     EntraTokenValidator,
@@ -38,6 +39,7 @@ __all__ = [
     "TokenValidationError",
     "TokenValidator",
     # Entra ID implementations
+    "CredentialProviderTokenCredential",
     "EntraCredentialProvider",
     "EntraIdentityExtractor",
     "EntraTokenValidator",

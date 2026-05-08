@@ -12,48 +12,16 @@ import os
 import re
 import shutil
 import tempfile
-from types import TracebackType
 from pathlib import Path
 from urllib.parse import urlparse
 
-from azure.core.credentials import AccessToken
 from azure.search.documents.aio import SearchClient
 
-from ..auth import CredentialProvider, EntraCredentialProvider
+from ..auth import CredentialProviderTokenCredential, EntraCredentialProvider
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ..types import AssetId
 
 LOGGER = logging.getLogger(__name__)
-
-
-class _CredentialProviderTokenCredential:
-    """Adapter to expose auth.CredentialProvider through Azure's token credential shape."""
-
-    def __init__(self, credential_provider: CredentialProvider):
-        self._credential_provider = credential_provider
-
-    async def get_token(self, *scopes: str, **kwargs: object) -> AccessToken:
-        del kwargs
-        if not scopes:
-            raise ValueError("At least one scope is required")
-
-        token = await self._credential_provider.get_token(scopes[0])
-        return AccessToken(token=token.token, expires_on=token.expires_on)
-
-    async def close(self) -> None:
-        await self._credential_provider.close()
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None = None,
-        exc_value: BaseException | None = None,
-        traceback: TracebackType | None = None,
-    ):
-        del exc_type, exc_value, traceback
-        await self.close()
 
 
 class DataLakeDataManager:
@@ -101,7 +69,7 @@ class DataLakeDataManager:
             self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
             try:
                 mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
-                self._credential = _CredentialProviderTokenCredential(EntraCredentialProvider(client_id=mi_client_id))
+                self._credential = CredentialProviderTokenCredential(EntraCredentialProvider(client_id=mi_client_id))
                 self._fetchers.append(BlobFetcher(credential=self._credential))
 
                 self._search_client = SearchClient(

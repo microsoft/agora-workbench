@@ -11,9 +11,11 @@ identity platform's OpenID configuration endpoint.
 import asyncio
 import logging
 import os
+from types import TracebackType
 from typing import Optional
 
 import jwt
+from azure.core.credentials import AccessToken as AzureAccessToken
 from jwt import PyJWKClient
 
 from .base import (
@@ -145,6 +147,36 @@ class EntraCredentialProvider(CredentialProvider):
 
     async def close(self) -> None:
         await self._credential.close()
+
+
+class CredentialProviderTokenCredential:
+    """Adapter exposing auth.CredentialProvider via Azure token-credential interface."""
+
+    def __init__(self, credential_provider: CredentialProvider):
+        self._credential_provider = credential_provider
+
+    async def get_token(self, *scopes: str, **kwargs: object) -> AzureAccessToken:
+        del kwargs
+        if not scopes:
+            raise ValueError("At least one scope is required")
+
+        token = await self._credential_provider.get_token(scopes[0])
+        return AzureAccessToken(token=token.token, expires_on=token.expires_on)
+
+    async def close(self) -> None:
+        await self._credential_provider.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: TracebackType | None = None,
+    ):
+        del exc_type, exc_value, traceback
+        await self.close()
 
 
 def create_entra_auth_config(
