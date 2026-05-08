@@ -154,7 +154,6 @@ get_item_assets = ToolDefinition(
     ],
     module="earthscience_tools.get_item_assets",
     state_transition=StateTransition(
-        requires=frozenset({"earthscience.items_searched"}),
         produces=frozenset({"earthscience.assets_resolved"}),
     ),
     affordances=[
