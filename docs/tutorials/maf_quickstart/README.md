@@ -52,9 +52,16 @@ state-graph workflow.
 
 - **Docker** — needed only for the chemistry MCP server (Step C). Without
   it, the agent runs with just the data lake tool.
-- **Azure AI Search-backed data lake** — set `DATA_LAKE_SEARCH_ENDPOINT`
-  to enable Step B. If unset, the script logs a skip message and runs
-  with chemistry tools only.
+- **Data lake catalog (Step B)** — pick one of:
+  - **Azure AI Search-backed** — set `DATA_LAKE_SEARCH_ENDPOINT` (and
+    `DATA_LAKE_CATALOG_INDEX_NAME`). Best for shared/production catalogs.
+  - **Local YAML catalog** — set `DATA_LAKE_LOCAL_CATALOG` to a YAML
+    path (e.g. `src/data_lake/tools/adapters/catalog.example.yaml`).
+    Best for solo dev without Azure; BM25 keyword search runs locally.
+    See [Run with a local-only data lake](#run-with-a-local-only-data-lake)
+    below.
+  - Leave both unset to skip Step B entirely; the script logs a skip
+    message and runs with chemistry tools only.
 - **Azure resources for tool-learning middleware** — only used by the
   optional [middleware variant](#optional-middleware-variant); see that
   section for details.
@@ -266,6 +273,44 @@ Drug-likeness screening (Lipinski's Rule of Five):
 
 (Exact values may differ slightly run-to-run depending on which RDKit
 version the chemistry environment resolves.)
+
+## Run with a local-only data lake
+
+If you don't have access to Azure AI Search, you can still exercise Step B
+against a YAML catalog on disk. The repo ships an example at
+[`src/data_lake/tools/adapters/catalog.example.yaml`](../../../src/data_lake/tools/adapters/catalog.example.yaml).
+
+In your `.env`, comment out the Azure search keys and set the local path:
+
+```dotenv
+# DATA_LAKE_SEARCH_ENDPOINT=...        # leave unset/commented
+# DATA_LAKE_CATALOG_INDEX_NAME=...     # leave unset/commented
+DATA_LAKE_LOCAL_CATALOG="src/data_lake/tools/adapters/catalog.example.yaml"
+```
+
+> **Note** — `agent.py` calls `load_dotenv()` with the default
+> `override=False`. If `DATA_LAKE_SEARCH_ENDPOINT` is already set in your
+> shell or `.env`, an empty value in the shell won't override it; either
+> remove the key from `.env` or set it to an empty string in `.env`
+> itself.
+
+Then run the agent as usual:
+
+```bash
+uv run python docs/tutorials/maf_quickstart/agent.py
+```
+
+You should see a startup line like:
+
+```
+Discovered 3 domain(s) in local catalog: ['earthscience', 'energy', 'powergrid']
+Step B: built data lake search tool
+```
+
+The agent's `search_data_lake_catalog` tool now returns hits ranked by
+BM25 over the YAML's `name`/`description`/`tags` fields. Schema details
+and how to point `storage_url` at real files (local FS, mounted volume,
+Azurite) are in [`src/data_lake/README.md`](../../../src/data_lake/README.md#local-development-no-azure-credentials).
 
 ## Optional: middleware variant
 
