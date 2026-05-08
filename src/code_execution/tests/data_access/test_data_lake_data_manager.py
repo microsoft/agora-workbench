@@ -82,7 +82,8 @@ class TestDataLakeDataManagerInit:
         assert len(manager._fetchers) == 1
         assert manager._cache_dir.exists()
 
-    def test_init_credential_provider_failure_is_deferred(self):
+    @pytest.mark.asyncio
+    async def test_init_credential_provider_failure_is_deferred(self):
         """Test credential provider init errors are deferred to fetch time."""
         with patch(
             "code_execution.code_execution.data_access.manager.EntraCredentialProvider",
@@ -93,7 +94,9 @@ class TestDataLakeDataManagerInit:
         assert manager._credential is None
         assert manager._search_client is None
         assert len(manager._fetchers) == 1
-        assert manager._credential_init_error == "missing managed identity"
+        assert manager._credential_init_error == "RuntimeError: missing managed identity"
+        with pytest.raises(ValueError, match="Azure data access initialization failed"):
+            await manager.get_cache_path("<blob>artifact_id_1</blob>")
 
 
 class TestGetCachePath:

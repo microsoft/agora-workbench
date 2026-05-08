@@ -110,8 +110,8 @@ class DataLakeDataManager:
                     credential=self._credential,
                 )
                 LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
-            except Exception as e:
-                self._credential_init_error = str(e)
+            except (ImportError, RuntimeError, TypeError, ValueError) as e:
+                self._credential_init_error = f"{type(e).__name__}: {e}"
                 self._credential = None
                 self._search_client = None
                 LOGGER.warning(f"Failed to initialize Azure data access components: {e}")
@@ -136,9 +136,11 @@ class DataLakeDataManager:
         """
         if not self._search_client:
             if self._credential_init_error:
+                init_error_type = self._credential_init_error.split(":", 1)[0]
                 raise ValueError(
                     "Blob artifact resolution is unavailable because Azure data access initialization failed. "
-                    f"Details: {self._credential_init_error}"
+                    f"Error type: {init_error_type}. "
+                    "Check managed identity and Azure search endpoint configuration."
                 )
 
             raise ValueError(
