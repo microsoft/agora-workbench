@@ -5,8 +5,24 @@ Wires a Microsoft Agent Framework (MAF) agent to two agora-workbench tools:
 
   * ``search_data_lake_catalog`` — discovers datasets in the Azure AI Search-
     backed data lake catalog (via ``data_lake.tools.adapters.maf``)
-  * ``chemistry`` MCP toolset — runs RDKit code in an isolated sandbox
-    (the chemistry MCP server from ``src/domain_examples/chemistry/``)
+  * ``chemistry`` MCP toolset — the chemistry MCP server from
+    ``src/domain_examples/chemistry/``. The server exposes a generic
+    ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
+    ``list_chemistry_domain_tools`` discovery tool that catalogs the
+    domain's typed helpers (``parse_molecule``, ``compute_descriptors``,
+    ``filter_drug_candidates``, ``compute_fingerprints``,
+    ``find_similar_molecules``, ``cluster_molecules``,
+    ``enumerate_functional_groups``).
+
+    The typed helpers are *not* separate MCP tools — they are auto-injected
+    as Python proxy functions in the kernel namespace, so the agent calls
+    them inside ``execute_chemistry_code`` (e.g. ``compute_descriptors("CCO")``)
+    without any explicit import. A ``list_tools()`` function is also
+    available in the kernel.
+
+The chemistry domain ships with a SKILL.md that documents its state-graph
+workflow. The tutorial reads that file at startup and injects it into the
+agent's system prompt so the agent uses tools in the recommended order.
 
 Run from the repo root:
 
@@ -43,6 +59,13 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 load_dotenv(REPO_ROOT / ".env")
 
 LOGGER = logging.getLogger("maf_quickstart")
+
+# Path to the chemistry domain's SKILL.md — a portable workflow guide
+# (state graph, tool ordering, common pitfalls) that we inject into the
+# agent's instructions so it knows how to chain the typed tools.
+CHEMISTRY_SKILL_PATH = (
+    REPO_ROOT / "src" / "domain_examples" / "chemistry" / "skills" / "SKILL.md"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -137,34 +160,77 @@ async def step_c_chemistry_tool():
 # ---------------------------------------------------------------------------
 # Step D — assemble the agent
 # ---------------------------------------------------------------------------
+def _load_chemistry_skill() -> str:
+    """Read the chemistry domain's SKILL.md, stripping the YAML frontmatter.
+
+    Skills are portable workflow guides that travel with the domain. Injecting
+    one into the system prompt is the simplest way to teach the agent how to
+    chain the typed tools (state graph, common pitfalls, default parameters).
+    """
+    if not CHEMISTRY_SKILL_PATH.is_file():
+        LOGGER.warning("Chemistry SKILL.md not found at %s", CHEMISTRY_SKILL_PATH)
+        return ""
+    text = CHEMISTRY_SKILL_PATH.read_text(encoding="utf-8")
+    # Strip the leading YAML frontmatter (--- ... ---) — it's metadata for the
+    # skill loader, not useful in a system prompt.
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            text = text[end + 4 :].lstrip()
+    return text
+
+
 def step_d_build_agent(chat_client, tools):
     """Compose the chat client + tools into a MAF agent."""
+    skill_text = _load_chemistry_skill()
+
     instructions = (
         "You are a chemistry research assistant.\n"
         "\n"
-        "Tools available to you:\n"
+        "MCP tools available to you:\n"
         "  * search_data_lake_catalog — discover datasets in the data lake.\n"
-        "    Call it with a `query` string and optional `domains`/`tags` filters.\n"
-        "  * execute_chemistry_code — run Python with RDKit pre-imported.\n"
-        "    `Chem`, `Descriptors`, `AllChem`, `rdMolDescriptors`, `Draw`,\n"
-        "    `np`, `pd` are already in scope. Print results so the user sees\n"
-        "    the output.\n"
+        "      Call with a `query` string and optional `domains`/`tags`.\n"
+        "  * execute_chemistry_code — run Python in a kernel with RDKit\n"
+        "      pre-imported (`Chem`, `Descriptors`, `AllChem`,\n"
+        "      `rdMolDescriptors`, `np`, `pd`).\n"
+        "  * list_chemistry_domain_tools — catalog of typed helper functions\n"
+        "      auto-injected into the kernel namespace.\n"
         "\n"
-        "Workflow for the user's request:\n"
-        "  1. Search the catalog for relevant chemistry datasets.\n"
-        "  2. Pick one molecule (a SMILES string from the catalog or a well-\n"
-        "     known molecule like aspirin: CC(=O)OC1=CC=CC=C1C(=O)O) and use\n"
-        "     execute_chemistry_code to compute at least one descriptor\n"
-        "     (e.g. molecular weight via Descriptors.MolWt).\n"
-        "  3. Report the descriptor value back in natural language.\n"
+        "Inside execute_chemistry_code the following typed helpers are\n"
+        "available as plain Python functions — no imports needed:\n"
+        "  parse_molecule(smiles)\n"
+        "  enumerate_functional_groups(smiles)\n"
+        "  compute_descriptors(smiles, descriptors=None)\n"
+        "  filter_drug_candidates(smiles_list, rules='lipinski')\n"
+        "  compute_fingerprints(smiles_list, fingerprint_type='morgan', ...)\n"
+        "  find_similar_molecules(query_smiles, candidate_smiles_list, ...)\n"
+        "  cluster_molecules(smiles_list, cutoff=0.4, ...)\n"
+        "Each returns a dict; prefer them over hand-rolled RDKit code.\n"
+        "\n"
+        "General workflow:\n"
+        "  1. If the user asks about datasets, call search_data_lake_catalog.\n"
+        "  2. For chemistry work, call execute_chemistry_code. Inside the\n"
+        "     code, call the typed helpers above (e.g.\n"
+        "     `result = filter_drug_candidates([...], rules='lipinski')`)\n"
+        "     and `print(result)` so the values come back in the tool output.\n"
+        "  3. Follow the state graph in the injected skill: parse_molecule\n"
+        "     first, then downstream helpers.\n"
+        "  4. Report results in natural language with the key numbers inline.\n"
     )
+    if skill_text:
+        instructions += "\n---\n# Chemistry skill (injected from SKILL.md)\n\n"
+        instructions += skill_text
 
     agent = chat_client.as_agent(
         name="chem_quickstart_agent",
         instructions=instructions,
         tools=tools,
     )
-    LOGGER.info("Step D: built agent with %d tool(s)", len(tools))
+    LOGGER.info(
+        "Step D: built agent with %d tool(s); skill injected: %s",
+        len(tools),
+        bool(skill_text),
+    )
     return agent
 
 
@@ -173,8 +239,18 @@ def step_d_build_agent(chat_client, tools):
 # ---------------------------------------------------------------------------
 async def step_e_run(agent):
     prompt = (
-        "Find a chemistry dataset in the data lake. Then compute the molecular "
-        "weight of one example molecule using RDKit and report the value."
+        "Look for chemistry datasets in the data lake (one short query). "
+        "Then, regardless of what's in the catalog, screen this small library "
+        "of well-known molecules for drug-likeness. Inside execute_chemistry_code "
+        "call `filter_drug_candidates(smiles_list, rules='lipinski')` and "
+        "`print(result)` so the values come back. Then for each molecule also "
+        "call `compute_descriptors(smi)` to get MW + LogP.\n"
+        "  - aspirin:      CC(=O)OC1=CC=CC=C1C(=O)O\n"
+        "  - caffeine:     CN1C=NC2=C1C(=O)N(C(=O)N2C)C\n"
+        "  - ibuprofen:    CC(C)CC1=CC=C(C=C1)C(C)C(=O)O\n"
+        "  - atorvastatin: CC(C)c1c(C(=O)Nc2ccccc2)c(-c2ccccc2)c(-c2ccc(F)cc2)"
+        "n1CC[C@@H](O)C[C@@H](O)CC(=O)O\n"
+        "Report which molecules pass and the molecular weight + LogP for each."
     )
     print("\n" + "=" * 70)
     print(f"USER: {prompt}")

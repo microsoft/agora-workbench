@@ -6,23 +6,35 @@ end-to-end.
 
 ## What you'll build
 
-A single MAF agent with two tools:
+A single MAF agent with two tool sources:
 
 ```
-                         ┌──────────────────────────┐
+                         ┌────────────────────────┐
                          │  search_data_lake_catalog│  ← Azure AI Search
               ┌──────────┤  (data_lake adapter)     │     (DATA_LAKE_*)
-              │          └──────────────────────────┘
+              │          └────────────────────────┘
    MAF Agent ─┤
-              │          ┌──────────────────────────┐
+              │          ┌────────────────────────┐
               └──────────┤  chemistry MCP toolset   │  ← local Docker
                          │  (MCPStreamableHTTPTool) │     :8020/mcp
-                         └──────────────────────────┘
+                         └────────────────────────┘
+                              │
+                              ├─ typed tools (parse_molecule,
+                              │    compute_descriptors,
+                              │    filter_drug_candidates,
+                              │    compute_fingerprints,
+                              │    find_similar_molecules,
+                              │    cluster_molecules, …)
+                              └─ execute_chemistry_code (escape hatch)
 ```
 
 The agent receives a prompt, calls `search_data_lake_catalog` to find a
-chemistry dataset, then calls `execute_chemistry_code` (RDKit) to compute a
-molecular descriptor, and reports the result.
+chemistry dataset, then chains the typed chemistry tools (parse →
+compute_descriptors → filter_drug_candidates) to screen a small molecule
+library for drug-likeness, and reports the results. The chemistry domain's
+[`SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md) is
+injected into the system prompt so the agent follows the recommended
+state-graph workflow.
 
 ## Prerequisites
 
@@ -125,13 +137,50 @@ via the `backend=` kwarg. See the docstring in
 
 [`step_c_chemistry_tool`](agent.py) instantiates
 `MCPStreamableHTTPTool(name="chemistry", url=..., approval_mode="never_require")`
-directly. Behind the scenes the chemistry server (see
+directly. The chemistry server (see
 [chemistry_server.py](../../../src/domain_examples/chemistry/server/chemistry_server.py))
-exposes the standard agora-workbench code-execution toolset:
+exposes a small set of MCP tools:
 
-- `execute_chemistry_code` — run Python with RDKit pre-imported
-- `chemistry_list_sessions`, `chemistry_get_session_info`,
-  `chemistry_close_session`, `chemistry_push_object` — session management
+- `execute_chemistry_code` — run Python in a long-lived Jupyter kernel with
+  RDKit pre-imported (`Chem`, `Descriptors`, `AllChem`, `rdMolDescriptors`,
+  `np`, `pd`).
+- `list_chemistry_domain_tools` — discovery tool that prints the catalog of
+  typed helpers below.
+- `check_job`, `chemistry_*` (sessions, parallel execute, push object) —
+  session/lifecycle helpers.
+
+**Typed domain helpers** are *not* separate MCP tools. They live in the
+[`chemistry_tools`](../../../src/domain_examples/chemistry/chemistry_tools/)
+pip package, which is installed into the kernel's conda env at server-build
+time. The server then auto-injects an instrumented Python proxy for each
+helper into the kernel namespace via
+[`tool_proxy.py`](../../../src/code_execution/code_execution/tool_proxy.py),
+so inside `execute_chemistry_code` the agent can simply call them as plain
+Python functions — no imports required:
+
+```python
+# Example body the agent might send to execute_chemistry_code
+result = filter_drug_candidates(
+    ["CC(=O)OC1=CC=CC=C1C(=O)O", "CN1C=NC2=C1C(=O)N(C(=O)N2C)C"],
+    rules="lipinski",
+)
+print(result)
+```
+
+| Helper | Purpose |
+| --- | --- |
+| `parse_molecule` | Canonical SMILES, formula, MW, atom/bond counts |
+| `enumerate_functional_groups` | SMARTS-based functional group detection |
+| `compute_descriptors` | MW, LogP, HBD/HBA, TPSA, rotatable bonds, Lipinski pass/fail |
+| `filter_drug_candidates` | Screen a SMILES list against Lipinski / Veber rules |
+| `compute_fingerprints` | Morgan / RDKit / MACCS fingerprints |
+| `find_similar_molecules` | Tanimoto similarity search vs. a query |
+| `cluster_molecules` | Butina clustering by fingerprint similarity |
+
+Full definitions live in
+[tools/definitions.py](../../../src/domain_examples/chemistry/tools/definitions.py).
+A `list_tools()` function is also injected into the kernel namespace if the
+agent needs to enumerate them at runtime.
 
 The local server uses `create_noop_auth_config()` (any bearer token is
 accepted) so the tutorial passes a dummy `Authorization: Bearer dev-token`
@@ -143,18 +192,21 @@ get a clean skip message instead of a confusing error inside the agent loop.
 
 ### Step D — Build the agent
 
-[`step_d_build_agent`](agent.py) is a one-liner:
+[`step_d_build_agent`](agent.py) reads the chemistry domain's
+[`SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md) (a
+portable workflow guide that documents the tool state-graph, default
+parameters, and common pitfalls) and appends it to the system prompt. This
+is the simplest version of the agora-workbench *skills* pattern — domain
+knowledge travels with the domain instead of being hard-coded into the
+agent. The MAF agent is then built with a single call:
 
 ```python
-agent = chat_client.create_agent(
+agent = chat_client.as_agent(
     name="chem_quickstart_agent",
-    instructions=...,
+    instructions=...,  # base instructions + injected SKILL.md
     tools=tools,
 )
 ```
-
-The system prompt tells the agent how to chain the two tools (search → code
-execution → report).
 
 ### Step E — Run a single turn
 
@@ -170,18 +222,24 @@ A successful run looks roughly like:
 INFO maf_quickstart: Step A: built chat client AzureOpenAIChatClient
 INFO maf_quickstart: Step B: built data lake search tool
 INFO maf_quickstart: Step C: built chemistry MCP tool @ http://localhost:8020/mcp
-INFO maf_quickstart: Step D: built agent with 2 tool(s)
+INFO maf_quickstart: Step D: built agent with 2 tool(s); skill injected: True
 
 ======================================================================
-USER: Find a chemistry dataset in the data lake. Then compute the
-molecular weight of one example molecule using RDKit and report the value.
+USER: Look for chemistry datasets in the data lake … then screen this
+small library of molecules for drug-likeness …
 ======================================================================
 
 AGENT:
-I found <dataset name> in the data lake catalog. Using aspirin
-(SMILES: CC(=O)OC1=CC=CC=C1C(=O)O) as the example molecule, I computed its
-molecular weight with RDKit: ~180.16 g/mol.
+I searched the data lake catalog …
+Drug-likeness screening (Lipinski's Rule of Five):
+  - aspirin       → PASS  (MW ≈ 180.16, LogP ≈ 1.19)
+  - caffeine      → PASS  (MW ≈ 194.19, LogP ≈ -1.03)
+  - ibuprofen     → PASS  (MW ≈ 206.28, LogP ≈ 3.07)
+  - atorvastatin  → FAIL  (MW ≈ 558.65 > 500)
 ```
+
+(Exact values may differ slightly run-to-run depending on which RDKit
+version the chemistry environment resolves.)
 
 ## Troubleshooting
 
@@ -191,6 +249,7 @@ molecular weight with RDKit: ~180.16 g/mol.
 | `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `src/domain_examples/chemistry/`. |
 | `azure.identity` errors / 401s on data lake search | `az login` expired — re-authenticate. |
 | TRAPI 403 / "scope not allowed" | `AOAI_SCOPE` doesn't match the endpoint. Use `api://trapi/.default` for TRAPI, `https://cognitiveservices.azure.com/.default` for standard AOAI. |
+| `NameError: name 'parse_molecule' is not defined` (or any typed helper) inside `execute_chemistry_code` | The `chemistry_tools` package failed to install into the conda env at server-build time (look for `Additional command failed (continuing anyway)` in the container logs). Workaround: `docker exec <chem-container> /home/appuser/.cache/mcp-envs/chemistry/conda/bin/python -m pip install --no-deps /app/domain_examples/chemistry/chemistry_tools`. |
 
 ## Cleanup
 
