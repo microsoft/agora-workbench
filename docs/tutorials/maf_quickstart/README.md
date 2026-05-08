@@ -102,8 +102,9 @@ curl http://localhost:8020/health
 # => {"status":"healthy", ...}
 ```
 
-The first start takes a few minutes because the conda environment is built
-from scratch with RDKit and friends; subsequent starts are fast.
+The conda environment is built into the chemistry image during
+`docker compose up --build`, so the running container does not need to build
+it again on first startup.
 
 ### 3. Run the agent
 

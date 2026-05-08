@@ -1,0 +1,14 @@
+name: chemistry
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - rdkit
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - ipykernel>=6.29.0
+  - dill>=0.3.8

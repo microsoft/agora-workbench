@@ -31,7 +31,9 @@ cd src/domain_examples/chemistry
 docker compose up --build
 ```
 
-The server will be available at `http://localhost:8020`. The first startup takes a few minutes while the conda environment is built (subsequent starts are cached).
+The server will be available at `http://localhost:8020`. The chemistry conda
+environment is built into the image during `docker compose up --build`, so
+container startup does not need to build it on first run.
 
 ### 3. Verify
 

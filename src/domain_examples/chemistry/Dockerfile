@@ -14,4 +14,12 @@ FROM ${BASE_IMAGE}
 # full package path consistently at runtime.
 COPY --chown=appuser:appuser domain_examples/chemistry /app/domain_examples/chemistry
 
+# Pre-build the chemistry conda environment in the image so container startup
+# does not depend on network/DNS availability.
+RUN mamba env create \
+      --prefix /home/appuser/.cache/mcp-envs/chemistry/conda \
+      --file /app/domain_examples/chemistry/environment.yml \
+      --yes \
+    && /home/appuser/.cache/mcp-envs/chemistry/conda/bin/python -m pip install --no-deps /app/domain_examples/chemistry/chemistry_tools
+
 CMD ["python", "-m", "domain_examples.chemistry.server.chemistry_server"]
