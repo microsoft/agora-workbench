@@ -11,9 +11,9 @@ class TestGetSearchCredentialEntraPath:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_returns_chained_credential(self, mock_managed, mock_cli, mock_chained):
         """Test that function returns a ChainedTokenCredential when no API key."""
         mock_credential = MagicMock()
@@ -26,9 +26,9 @@ class TestGetSearchCredentialEntraPath:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_credential_chain_order(self, mock_managed, mock_cli, mock_chained):
         """Test that credentials are tried in correct order (CLI then ManagedIdentity)."""
         mock_cli_instance = MagicMock()
@@ -45,9 +45,9 @@ class TestGetSearchCredentialEntraPath:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {"DEFAULT_IDENTITY_CLIENT_ID": "test-client-id-12345"}, clear=True)
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_handles_default_identity_client_id_present(self, mock_managed, mock_cli, mock_chained):
         """Test that DEFAULT_IDENTITY_CLIENT_ID is passed to ManagedIdentityCredential when present."""
         get_search_credential()
@@ -55,9 +55,9 @@ class TestGetSearchCredentialEntraPath:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_handles_default_identity_client_id_absent(self, mock_managed, mock_cli, mock_chained):
         """Test that ManagedIdentityCredential is created with None when DEFAULT_IDENTITY_CLIENT_ID is not set."""
         get_search_credential()
@@ -65,9 +65,9 @@ class TestGetSearchCredentialEntraPath:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_creates_both_credential_types(self, mock_managed, mock_cli, mock_chained):
         """Test that both AzureCliCredential and ManagedIdentityCredential are instantiated."""
         get_search_credential()
@@ -79,10 +79,10 @@ class TestGetTokenProvider:
     """Test cases for get_token_provider."""
 
     @pytest.mark.unit
-    @patch("auth.providers.get_bearer_token_provider")
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.get_bearer_token_provider")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_returns_get_token_callback(self, mock_managed, mock_cli, mock_chained, mock_get_bearer):
         """Test that function returns a get_token callback."""
         mock_credential = MagicMock()
@@ -97,10 +97,10 @@ class TestGetTokenProvider:
         mock_get_bearer.assert_called_once_with(mock_credential, scope)
 
     @pytest.mark.unit
-    @patch("auth.providers.get_bearer_token_provider")
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.get_bearer_token_provider")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_works_with_different_scopes(self, mock_managed, mock_cli, mock_chained, mock_get_bearer):
         """Test that different scopes are handled correctly."""
         mock_credential = MagicMock()
@@ -113,10 +113,10 @@ class TestGetTokenProvider:
         mock_get_bearer.assert_called_once_with(mock_credential, custom_scope)
 
     @pytest.mark.unit
-    @patch("auth.providers.get_bearer_token_provider")
-    @patch("auth.providers.ChainedTokenCredential")
-    @patch("auth.providers.AzureCliCredential")
-    @patch("auth.providers.ManagedIdentityCredential")
+    @patch("utilities.auth.providers.get_bearer_token_provider")
+    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("utilities.auth.providers.AzureCliCredential")
+    @patch("utilities.auth.providers.ManagedIdentityCredential")
     def test_credential_chain_order(self, mock_managed, mock_cli, mock_chained, mock_get_bearer):
         """Test that credentials are tried in correct order (CLI then ManagedIdentity)."""
         mock_cli_instance = MagicMock()
