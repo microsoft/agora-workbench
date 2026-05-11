@@ -45,7 +45,7 @@ jobs:
         id: auth_tests
         continue-on-error: true
         run: |
-          uv run pytest src/auth/tests/ -m "not live" -v --json-report --json-report-file=auth-report.json
+          uv run pytest src/utilities/auth/tests/ -m "not live" -v --json-report --json-report-file=auth-report.json
 
       - name: Run middleware tests
         id: middleware_tests
