@@ -17,12 +17,28 @@ D = TypeVar("D")
 
 
 def tokenize(text: str) -> list[str]:
-    """Whitespace + punctuation tokenizer with lowercasing."""
+    """Whitespace + punctuation tokenizer with lowercasing.
+
+    Splits on anything that isn't ``[a-z0-9_]`` after lowercasing.
+    """
     return re.findall(r"[a-z0-9_]+", text.lower())
 
 
 class BM25Index(Generic[D]):
-    """In-process Okapi BM25 index over arbitrary documents."""
+    """In-process Okapi BM25 index over arbitrary documents.
+
+    The index is keyed on opaque document objects of type ``D``; the
+    indexable text is supplied separately at ``add()`` time. Supports
+    incremental additions; the average-document-length statistic is
+    recomputed after each add.
+
+    Args:
+        k1: BM25 term-frequency saturation parameter. Typical values
+            ``[1.2, 2.0]``. Defaults to ``1.5``.
+        b: BM25 length-normalization parameter in ``[0, 1]``. ``0``
+            disables length normalization, ``1`` fully normalizes.
+            Defaults to ``0.75``.
+    """
 
     def __init__(self, k1: float = 1.5, b: float = 0.75):
         self.k1 = k1
@@ -49,7 +65,14 @@ class BM25Index(Generic[D]):
         self._avgdl = total_tokens / len(self._docs) if self._docs else 0.0
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[D, float]]:
-        """Score all documents against *query* and return the top ``top_k``."""
+        """Score all documents against *query* and return the top ``top_k``.
+
+        Returns:
+            ``(document, score)`` pairs sorted by descending score. Empty
+            list when the index is empty or the query has no tokens.
+            Documents with score ``0`` are still included if they fall
+            within ``top_k``.
+        """
         if not self._docs:
             return []
 
