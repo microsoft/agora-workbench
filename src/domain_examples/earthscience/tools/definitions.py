@@ -203,7 +203,7 @@ compute_ndvi = ToolDefinition(
         ReturnSpec(name="output_path", type=str, description="Path to the written NDVI GeoTIFF."),
         ReturnSpec(name="shape", type=list, description="[height, width] of the NDVI raster."),
         ReturnSpec(name="crs", type=str, description="CRS of the NDVI raster."),
-        ReturnSpec(name="bounds", type=list, description="Geographic bounds of the NDVI raster."),
+        ReturnSpec(name="bounds", type=list, description="Bounds of the NDVI raster in the raster CRS; see `crs`."),
         ReturnSpec(name="ndvi_min", type=float, description="Minimum NDVI over valid pixels."),
         ReturnSpec(name="ndvi_max", type=float, description="Maximum NDVI over valid pixels."),
         ReturnSpec(name="ndvi_mean", type=float, description="Mean NDVI over valid pixels."),
