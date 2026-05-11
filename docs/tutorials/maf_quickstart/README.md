@@ -138,10 +138,16 @@ MAF's `ChatClient` protocol works. The tutorial factory dispatches on
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
 | --- | --- | --- | --- |
-| `azure_openai_entra` *(default)* | `agent_framework.azure.AzureOpenAIChatClient` | Entra (`get_token_provider`) | `AZURE_OPENAI_ENDPOINT`, `AOAI_SCOPE`, `API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME` (or `MODEL_DEPLOYMENT_NAME`) |
+| `azure_openai_entra` *(default)* | `agent_framework.openai.OpenAIChatClient` (Azure mode via `azure_endpoint=`) | Entra (`get_token_provider`) | `AZURE_OPENAI_ENDPOINT`, `AOAI_SCOPE`, `API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME` (or `MODEL_DEPLOYMENT_NAME`) |
 | `azure_openai_apikey` | same | API key | `+ AZURE_OPENAI_API_KEY` (no `AOAI_SCOPE`) |
 | `openai` | `agent_framework.openai.OpenAIChatClient` | API key | `OPENAI_API_KEY`, `OPENAI_MODEL` |
 | `ollama` | same with custom `base_url` | none | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
+
+> **`agent-framework` 1.2 note** — earlier versions exposed a separate
+> `agent_framework.azure.AzureOpenAIChatClient`. As of `agent-framework`
+> 1.2, that class was removed and the unified
+> `agent_framework.openai.OpenAIChatClient` accepts an `azure_endpoint=`
+> kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to [`auth.providers.get_token_provider()`](../../../src/auth/providers.py),
 which returns a callable backed by the same `AzureCliCredential → ManagedIdentityCredential`
@@ -151,6 +157,13 @@ chain used everywhere else in the repo. No new credentials are needed.
 > `https://cognitiveservices.azure.com/.default`. Some internal/gateway
 > endpoints require a different scope; set `AOAI_SCOPE` to whatever your
 > endpoint owner specifies.
+
+> **API version on the Responses API** — `OpenAIChatClient` calls the
+> `/responses` endpoint. Public Azure OpenAI accepts the usual dated
+> previews (e.g. `2025-04-01-preview`). Some internal gateways only
+> accept the floating tags `preview` or `v1` on `/responses` and return
+> `BadRequest: API version not supported` for dated strings — if you see
+> that, set `API_VERSION="preview"`.
 
 ### Step B — Data lake search tool
 
@@ -252,7 +265,7 @@ right tool → result feeds back into the conversation → repeat until done).
 A successful run looks roughly like:
 
 ```
-INFO maf_quickstart: Step A: built chat client AzureOpenAIChatClient
+INFO maf_quickstart: Step A: built chat client OpenAIChatClient
 INFO maf_quickstart: Step B: built data lake search tool
 INFO maf_quickstart: Step C: built chemistry MCP tool @ http://localhost:8020/mcp
 INFO maf_quickstart: Step D: built agent with 2 tool(s); skill injected: True
@@ -384,6 +397,11 @@ loops, etc.
 | Symptom | Likely cause |
 | --- | --- |
 | `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
+| `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [llm.py](llm.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
+| `BadRequest: API version not supported` from `/responses` | The Responses API on your endpoint doesn't accept the configured `API_VERSION`. Try `API_VERSION="preview"` (some internal gateways only accept floating tags; public AOAI typically wants a dated preview like `2025-04-01-preview`). |
+| `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
+| `Bind for 127.0.0.1:8020 failed: port is already allocated` | A previous chemistry container (or unrelated process) is still holding the port. Find it with `docker ps \| grep 8020` and remove with `docker rm -f <name>`, then retry `docker compose up -d`. |
+| Container exits immediately with `Could not resolve host: conda.anaconda.org` | Transient DNS / network blip while the conda env is being built on first start. Retry: `docker compose down && docker compose up -d`. |
 | `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `src/domain_examples/chemistry/`. |
 | `azure.identity` errors / 401s on data lake search | `az login` expired — re-authenticate. |
 | AOAI 403 / "scope not allowed" | `AOAI_SCOPE` doesn't match the endpoint. Standard AOAI uses `https://cognitiveservices.azure.com/.default`; some internal/gateway endpoints require a different scope — check with your endpoint owner. |
