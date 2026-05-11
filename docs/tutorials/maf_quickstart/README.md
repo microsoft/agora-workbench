@@ -405,7 +405,7 @@ loops, etc.
 | `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `src/domain_examples/chemistry/`. |
 | `azure.identity` errors / 401s on data lake search | `az login` expired — re-authenticate. |
 | AOAI 403 / "scope not allowed" | `AOAI_SCOPE` doesn't match the endpoint. Standard AOAI uses `https://cognitiveservices.azure.com/.default`; some internal/gateway endpoints require a different scope — check with your endpoint owner. |
-| `NameError: name 'parse_molecule' is not defined` (or any typed helper) inside `execute_chemistry_code` | The `chemistry_tools` package failed to install into the conda env at server-build time (look for `Additional command failed (continuing anyway)` in the container logs). Workaround: `docker exec <chem-container> /home/appuser/.cache/mcp-envs/chemistry/conda/bin/python -m pip install --no-deps /app/domain_examples/chemistry/chemistry_tools`. |
+| Container exits during startup with `RuntimeError: Additional command 1/1 failed` | The `chemistry_tools` pip-install step inside the conda env failed; the build now surfaces this instead of silently continuing. Read the surrounding container logs for the underlying pip error (network, missing build dep, etc.) and rebuild with `docker compose up --build`. |
 
 ## Cleanup
 

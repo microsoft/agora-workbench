@@ -173,3 +173,77 @@ def test_environment_config_custom_build_dir(tmp_path):
     )
 
     assert config.get_build_dir() == custom_dir
+
+
+# ---------------------------------------------------------------------------
+# additional_commands behaviour
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
+async def test_additional_command_runs_inside_env(tmp_path: Path) -> None:
+    """``additional_commands`` must execute against the env's interpreter.
+
+    Regression test for the bug where host shell init (e.g. a miniforge
+    install in the base image that activates an unrelated base env on
+    interactive bash startup) would shadow the env's PATH, causing
+    ``python -m pip install ...`` to be intercepted by a mamba wrapper
+    and fail. We pass ``--noprofile --norc`` to bash to keep this honest.
+    """
+    marker = tmp_path / "which_python.txt"
+    config = EnvironmentConfig(
+        name="test_addcmd_ok",
+        description="additional_commands sanity",
+        type="uv",
+        dependency_file="\n",
+        auto_build=True,
+        build_dir=tmp_path / "test_addcmd_ok" / "uv",
+        additional_commands=[
+            # Resolve the actual ``python`` on PATH inside the activated
+            # venv and write it to a marker file. We then assert the
+            # resolved interpreter lives under the venv's build_dir.
+            f"command -v python > {marker}",
+        ],
+    )
+
+    parent_dir = config.build_dir.parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    (parent_dir / "requirements.txt").write_text(config.dependency_file)
+
+    await build_uv_environment(config)
+
+    written = marker.read_text().strip()
+    assert str(config.build_dir) in written, (
+        f"additional_command ran outside the env: python={written!r} "
+        f"build_dir={config.build_dir}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not shutil.which("uv"), reason="uv not installed")
+async def test_additional_command_failure_raises(tmp_path: Path) -> None:
+    """A failing ``additional_commands`` step must surface as a build error.
+
+    Regression test: previously failures were swallowed with
+    ``LOGGER.warning("...continuing anyway")``, which let servers come up
+    with a half-built environment (e.g. a domain-tools pip package that
+    silently failed to install). The build now raises ``RuntimeError``.
+    """
+    config = EnvironmentConfig(
+        name="test_addcmd_fail",
+        description="additional_commands failure",
+        type="uv",
+        dependency_file="\n",
+        auto_build=True,
+        build_dir=tmp_path / "test_addcmd_fail" / "uv",
+        additional_commands=["false"],  # exits 1
+    )
+
+    parent_dir = config.build_dir.parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    (parent_dir / "requirements.txt").write_text(config.dependency_file)
+
+    with pytest.raises(RuntimeError, match="Additional command 1/1 failed"):
+        await build_uv_environment(config)
+
