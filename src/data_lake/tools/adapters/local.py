@@ -3,85 +3,37 @@
 from __future__ import annotations
 
 import logging
-import math
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from data_lake.search.registry import ArtifactRegistryDocument
-from tools.search.bm25_tool_search import tokenize
+from utilities.bm25 import BM25Index
 
 from .maf import DataLakeSearchBackend, DataLakeSearchParams, format_asset_tag
 
 LOGGER = logging.getLogger(__name__)
 
 
-class _CatalogBM25Index:
-    """Small BM25 index for local catalog artifacts."""
+def _catalog_doc_text(doc: dict[str, Any]) -> str:
+    """Derive the indexable text for a catalog artifact document."""
+    tags = doc.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+    return (
+        f"{doc.get('name', '')} {doc.get('description', '')} "
+        f"{doc.get('domain', '')} {' '.join(str(tag) for tag in tags)}"
+    )
 
-    def __init__(self, docs: list[dict[str, Any]]):
-        self._docs = docs
-        self._tokens_by_doc: list[list[str]] = []
-        self._df: dict[str, int] = {}
-        self._avgdl = 0.0
 
-        for doc in docs:
-            tags = doc.get("tags") or []
-            if not isinstance(tags, list):
-                tags = []
-            text = (
-                f"{doc.get('name', '')} {doc.get('description', '')} "
-                f"{doc.get('domain', '')} {' '.join(str(tag) for tag in tags)}"
-            )
-            tokens = tokenize(text)
-            self._tokens_by_doc.append(tokens)
-            seen: set[str] = set()
-            for token in tokens:
-                if token not in seen:
-                    self._df[token] = self._df.get(token, 0) + 1
-                    seen.add(token)
+def _build_catalog_index(docs: list[dict[str, Any]]) -> BM25Index[dict[str, Any]]:
+    """Build a BM25 index over local catalog artifact documents."""
+    index: BM25Index[dict[str, Any]] = BM25Index()
+    for doc in docs:
+        index.add(doc, _catalog_doc_text(doc))
+    return index
 
-        if self._tokens_by_doc:
-            self._avgdl = sum(len(tokens) for tokens in self._tokens_by_doc) / len(self._tokens_by_doc)
-
-    def search(self, query: str) -> list[tuple[dict[str, Any], float]]:
-        if not self._docs:
-            return []
-        query_tokens = tokenize(query)
-
-        n = len(self._docs)
-        scored: list[tuple[dict[str, Any], float]] = []
-        for doc, doc_tokens in zip(self._docs, self._tokens_by_doc):
-            if not query_tokens:
-                scored.append((doc, 0.0))
-                continue
-
-            tf_map: dict[str, int] = {}
-            for token in doc_tokens:
-                tf_map[token] = tf_map.get(token, 0) + 1
-
-            dl = len(doc_tokens)
-            score = 0.0
-            for query_token in query_tokens:
-                df = self._df.get(query_token)
-                if not df:
-                    continue
-                tf = tf_map.get(query_token, 0)
-                if tf == 0:
-                    continue
-
-                idf = math.log((n - df + 0.5) / (df + 0.5) + 1.0)
-                if self._avgdl == 0:
-                    tf_norm = (tf * 2.5) / (tf + 1.5)
-                else:
-                    tf_norm = (tf * 2.5) / (tf + 1.5 * (1 - 0.75 + 0.75 * dl / self._avgdl))
-                score += idf * tf_norm
-
-            scored.append((doc, score))
-
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return scored
 
 
 class LocalDataLakeSearchBackend(DataLakeSearchBackend):
@@ -110,7 +62,7 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
                 catalog_doc["tags"] = artifact.get("tags")
             self._catalog_docs.append(catalog_doc)
 
-        self._index = _CatalogBM25Index(self._catalog_docs)
+        self._index = _build_catalog_index(self._catalog_docs)
 
     def get_catalog_docs(self) -> list[dict[str, Any]]:
         """Return a copy of loaded catalog documents."""
@@ -122,7 +74,7 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
         return sorted(domains)
 
     async def search(self, params: DataLakeSearchParams) -> list[dict]:
-        scored = self._index.search(params.query)
+        scored = self._index.search(params.query, top_k=len(self._index))
         filtered = [dict(doc) for doc, _ in scored if self._matches_filters(doc, params)]
 
         if params.order_by:
