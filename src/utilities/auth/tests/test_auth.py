@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from auth import get_search_credential, get_token_provider
+from utilities.auth import get_search_credential, get_token_provider
 
 
 class TestGetSearchCredentialEntraPath:

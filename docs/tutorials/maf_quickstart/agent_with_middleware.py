@@ -125,7 +125,7 @@ def step_g_build_tool_learning_middleware():
         )
         return []
 
-    from auth import get_purview_credential
+    from utilities.auth import get_purview_credential
     from middleware.decision_log.adapters.maf_protocols import (
         wrap_function_middleware,
     )

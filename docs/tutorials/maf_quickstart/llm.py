@@ -66,7 +66,7 @@ def _build_azure_openai_entra():
 
     # Reuse the repo's central credential factory so this picks up the same
     # AzureCli -> ManagedIdentity chain used everywhere else.
-    from auth import get_token_provider
+    from utilities.auth import get_token_provider
 
     endpoint = _require("AZURE_OPENAI_ENDPOINT")
     scope = _require("AOAI_SCOPE")

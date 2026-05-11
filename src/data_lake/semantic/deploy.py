@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 from azure.purview.administration.account import PurviewAccountClient
 from azure.purview.scanning import PurviewScanningClient
-from auth import get_purview_credential
+from utilities.auth import get_purview_credential
 
 logger = logging.getLogger(__name__)
 

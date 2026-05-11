@@ -16,7 +16,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from auth import get_token_provider
+from utilities.auth import get_token_provider
 from tools.mcp.mcp_server_registry import get_mcp_registry
 
 LOGGER = logging.getLogger(__name__)

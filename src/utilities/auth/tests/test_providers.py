@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from azure.core.credentials import AzureKeyCredential
 
-from auth.providers import (
+from utilities.auth.providers import (
     get_purview_credential,
     get_search_credential,
     get_search_credential_async,

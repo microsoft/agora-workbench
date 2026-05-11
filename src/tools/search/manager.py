@@ -22,7 +22,7 @@ from uuid import uuid4
 import httpx
 from jinja2 import Template
 
-from auth import get_search_credential, get_search_credential_async
+from utilities.auth import get_search_credential, get_search_credential_async
 from tools.search.build_tool_list import ToolInfo
 from tools.search._constants import (
     TOOL_SEARCH_ENDPOINT_ENV,
@@ -217,7 +217,7 @@ class ToolSearchIndexManager:
 
         texts = [f"{doc['name']} {doc['description']} {doc.get('affordances', '')}".strip() for doc in documents]
 
-        from auth import get_token_provider
+        from utilities.auth import get_token_provider
 
         token_provider = get_token_provider("https://cognitiveservices.azure.com/.default")
 

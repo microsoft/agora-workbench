@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from auth import get_token_provider
+from utilities.auth import get_token_provider
 from jinja2 import Template
 
 
