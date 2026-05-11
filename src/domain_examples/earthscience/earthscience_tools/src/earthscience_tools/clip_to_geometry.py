@@ -37,7 +37,6 @@ def clip_to_geometry(
     import rasterio
     from rasterio.mask import mask as rio_mask
     from rasterio.warp import transform_geom
-    from shapely.geometry import shape
 
     geoms_4326 = _extract_geometries(geometry_geojson)
     if not geoms_4326:
