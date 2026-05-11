@@ -46,7 +46,6 @@ def zonal_statistics(
     import rasterio
     from rasterio.mask import mask as rio_mask
     from rasterio.warp import transform_geom
-    from shapely.geometry import shape
 
     requested = list(stats) if stats else list(_DEFAULT_STATS)
     invalid = [s for s in requested if s not in _VALID_STATS]
