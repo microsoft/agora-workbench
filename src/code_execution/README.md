@@ -212,6 +212,26 @@ The middleware is registered automatically when `TOOL_LEARNING_TABLE_ENDPOINT` o
 - **Table only** — write-only: failures are recorded but never surfaced to agents. Useful for data collection before enabling retrieval.
 - **Search only** — read-only: vignettes are retrieved and returned to agents, but new failures are not persisted. Useful when vignettes are populated externally or via a separate pipeline.
 
+For the client-side MAF adapters (`middleware.tool_learning.adapters.VignetteFunctionMiddleware`), you can also set `TOOL_LEARNING_LOCAL_DIR` to persist write-path vignettes locally (without Azure Table Storage).
+
+### Write backends: Azure Table vs. local file
+
+`VignetteFunctionMiddleware` supports two interchangeable write backends, both implementing `VignetteWriteRepo`:
+
+| Backend | Class | Best for | Requires |
+|---|---|---|---|
+| Azure Table | `TableVignetteRepo` | Shared/team deployments, production | `TOOL_LEARNING_TABLE_ENDPOINT`, Azure credential with `Storage Table Data Contributor` |
+| Local JSON | `LocalFileVignetteRepo` | Solo development, no-Azure setups, CI | filesystem access only |
+
+**Selection precedence** (in `VignetteFunctionMiddleware.__init__`):
+
+1. Explicit `storage="table"` or `storage="local"` constructor arg, if provided.
+2. Otherwise, `TOOL_LEARNING_TABLE_ENDPOINT` set → Azure Table.
+3. Otherwise, `TOOL_LEARNING_LOCAL_DIR` set → local JSON.
+4. Otherwise → write path is a no-op (observation/retrieval still work).
+
+The local backend stores one JSON file per `(tenant, tool)` under `TOOL_LEARNING_LOCAL_DIR` (defaulting to `~/.agora/vignettes` when the middleware is instantiated with `storage="local"` but the env var is empty). It performs the same row-key dedupe and confidence reinforcement as the Table backend, so the two are functionally equivalent for write-path semantics — only the read side (`SearchVignetteRepo`) requires Azure AI Search.
+
 Authentication uses the server credential (`AzureCliCredential` in simulation mode, `ManagedIdentityCredential` in production) — see `auth/server_credential.py`.
 
 ### Azure Resource Setup
@@ -283,6 +303,7 @@ See `deployment/tool_learning_middleware/README.md` for full details on the inde
 |---|---|---|
 | `TOOL_LEARNING_TABLE_ENDPOINT` | Table Storage endpoint (e.g. `https://<account>.table.core.windows.net`) | _(disabled)_ |
 | `TOOL_LEARNING_TABLE_NAME` | Table name for vignette entities | `ToolVignettes` |
+| `TOOL_LEARNING_LOCAL_DIR` | Local vignette directory for client-side MAF write backend when table endpoint is unset | _(disabled)_ |
 | `TOOL_LEARNING_SEARCH_ENDPOINT` | AI Search endpoint (e.g. `https://<service>.search.windows.net`) | _(disabled)_ |
 | `TOOL_LEARNING_SEARCH_INDEX` | AI Search index name | `tool-vignettes` |
 | `TOOL_LEARNING_TOP_K` | Max vignettes retrieved per tool | `5` |

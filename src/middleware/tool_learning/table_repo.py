@@ -18,6 +18,7 @@ from azure.data.tables import TableServiceClient, TableClient
 
 from .config import ToolLearningConfig
 from .models import Vignette
+from .write_repo import VignetteWriteRepo
 
 LOGGER = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def _entity_to_vignette(entity: dict) -> Vignette:
     return Vignette.model_validate_json(entity["payload_json"])
 
 
-class TableVignetteRepo:
+class TableVignetteRepo(VignetteWriteRepo):
     """
     Azure Table Storage repository for Vignette entities.
 
