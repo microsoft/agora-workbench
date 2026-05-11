@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -73,7 +76,21 @@ class LocalFileVignetteRepo(VignetteWriteRepo):
     def _write_vignettes(self, path: Path, vignettes: List[Vignette]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = [v.model_dump(mode="json") for v in vignettes]
-        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        data = json.dumps(payload, ensure_ascii=False, indent=2)
+        # Atomic write: flush to a temp file in the same directory, then
+        # rename so readers never see a partially-written file.
+        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            # Clean up the temp file on any failure.
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     def upsert_vignette(self, vignette: Vignette) -> None:
         path = self._tool_file_path(vignette.tenant_id, vignette.tool.tool_name)

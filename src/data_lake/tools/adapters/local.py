@@ -74,7 +74,13 @@ class LocalDataLakeSearchBackend(DataLakeSearchBackend):
         return sorted(domains)
 
     async def search(self, params: DataLakeSearchParams) -> list[dict]:
+        if not self._index:
+            return []
         scored = self._index.search(params.query, top_k=len(self._index))
+        # BM25Index returns [] for empty/no-token queries; fall back to
+        # returning all documents (scored 0) so filter-only searches work.
+        if not scored:
+            scored = [(doc, 0.0) for doc in self._catalog_docs]
         filtered = [dict(doc) for doc, _ in scored if self._matches_filters(doc, params)]
 
         if params.order_by:
