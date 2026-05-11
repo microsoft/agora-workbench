@@ -11,7 +11,7 @@ from typing import Optional
 
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from tools.search.build_tool_list import ToolInfo
-from tools.search._bm25 import BM25Index as _GenericBM25Index, tokenize
+from utilities.bm25 import BM25Index as _GenericBM25Index, tokenize
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ _tokenize = tokenize
 class BM25Index:
     """BM25 index keyed on :class:`ToolInfo` documents.
 
-    Thin wrapper around :class:`tools.search._bm25.BM25Index` that knows
+    Thin wrapper around :class:`utilities.bm25.BM25Index` that knows
     how to derive the indexable text from a ``ToolInfo`` (name +
     description + affordances). Kept as a public class for backward
     compatibility with existing callers and tests.

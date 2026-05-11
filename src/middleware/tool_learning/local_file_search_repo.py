@@ -3,7 +3,7 @@
 Provides :class:`LocalFileSearchVignetteRepo`, a dependency-free retrieval
 backend that reads vignettes from the same on-disk layout used by
 :class:`~.local_file_repo.LocalFileVignetteRepo` and ranks them with the
-shared :class:`~tools.search._bm25.BM25Index`.
+shared :class:`~utilities.bm25.BM25Index`.
 
 This is the read-side complement to the local write backend and lets
 callers run the tool-learning middleware end-to-end without Azure AI
@@ -19,7 +19,7 @@ from typing import List, Optional, Tuple
 
 from pydantic import ValidationError
 
-from tools.search._bm25 import BM25Index
+from utilities.bm25 import BM25Index
 
 from .config import ToolLearningConfig
 from .local_file_repo import LocalFileVignetteRepo
