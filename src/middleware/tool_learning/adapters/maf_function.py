@@ -43,6 +43,8 @@ from middleware.protocols import (
 from ..compile import compile_vignettes
 from ..config import ToolLearningConfig
 from ..local_file_repo import LocalFileVignetteRepo
+from ..local_file_search_repo import LocalFileSearchVignetteRepo
+from ..read_repo import VignetteSearchRepo
 from ..render import render_repair_block
 from ..search_repo import SearchVignetteRepo
 from ..table_repo import TableVignetteRepo
@@ -109,6 +111,20 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
         Both backends implement :class:`VignetteWriteRepo` and are
         interchangeable. Use ``"table"`` for shared/team deployments and
         ``"local"`` for solo development without Azure dependencies.
+
+        search: Optional read-backend override. One of:
+
+            * ``"azure"`` — force Azure AI Search
+              (:class:`SearchVignetteRepo`); requires
+              ``config.search_endpoint`` and a ``credential``.
+            * ``"local"`` — force local BM25 over JSON files
+              (:class:`LocalFileSearchVignetteRepo`); reads from
+              ``config.local_storage_dir`` (defaults to
+              ``~/.agora/vignettes``).
+            * ``None`` (default) — auto-select. Picks ``azure`` if
+              ``config.search_endpoint`` is set, otherwise ``local`` if
+              ``config.local_storage_dir`` is set, otherwise no-ops the
+              read path (no guardrails or repair templates retrieved).
     """
 
     def __init__(
@@ -119,19 +135,31 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
         user_id: Optional[str] = None,
         write_vignettes: bool = True,
         storage: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> None:
         self._config = config
         self._tenant_id = tenant_id
         self._user_id = user_id
         self._write_vignettes = write_vignettes
-        self._search_repo: Optional[SearchVignetteRepo] = None
+        self._search_repo: Optional[VignetteSearchRepo] = None
         self._write_repo: Optional[VignetteWriteRepo] = None
 
         if storage is not None and storage not in {"table", "local"}:
             raise ValueError("storage must be 'table', 'local', or None")
+        if search is not None and search not in {"azure", "local"}:
+            raise ValueError("search must be 'azure', 'local', or None")
 
         try:
-            self._search_repo = SearchVignetteRepo(config=config, credential=credential)
+            if search == "local":
+                self._search_repo = LocalFileSearchVignetteRepo(config=config)
+            elif search == "azure":
+                self._search_repo = SearchVignetteRepo(config=config, credential=credential)
+            elif config.search_endpoint:
+                self._search_repo = SearchVignetteRepo(config=config, credential=credential)
+            elif config.local_storage_dir:
+                self._search_repo = LocalFileSearchVignetteRepo(config=config)
+            else:
+                LOGGER.debug("VignetteFunctionMiddleware: no search backend configured, skipping reads.")
         except Exception as e:
             LOGGER.warning("VignetteFunctionMiddleware: search repo unavailable: %s", e)
 
@@ -149,6 +177,34 @@ class VignetteFunctionMiddleware(FunctionMiddleware):
                     LOGGER.debug("VignetteFunctionMiddleware: no write backend configured, skipping writes.")
             except Exception as e:
                 LOGGER.warning("VignetteFunctionMiddleware: write repo unavailable: %s", e)
+
+        self._warn_if_backends_disagree()
+
+    def _warn_if_backends_disagree(self) -> None:
+        """Warn when the read and write backends point at different stores.
+
+        The local file repos and the Azure repos are independent data
+        stores. If the middleware is configured to read from one and
+        write to the other, vignettes written during a session will not
+        be visible to retrieval (and vice versa). This is almost always
+        a configuration mistake worth surfacing at startup.
+        """
+        if self._search_repo is None or self._write_repo is None:
+            return
+        read_is_local = isinstance(self._search_repo, LocalFileSearchVignetteRepo)
+        write_is_local = isinstance(self._write_repo, LocalFileVignetteRepo)
+        if read_is_local == write_is_local:
+            return
+        read_kind = "local" if read_is_local else "azure"
+        write_kind = "local" if write_is_local else "azure"
+        LOGGER.warning(
+            "VignetteFunctionMiddleware: read backend (%s) and write backend (%s) "
+            "target different stores; vignettes written this session will not be "
+            "visible to retrieval. Set `search=` and `storage=` explicitly, or "
+            "configure both Azure or both local endpoints.",
+            read_kind,
+            write_kind,
+        )
 
     async def process(
         self,

@@ -7,118 +7,75 @@ generic :func:`tools.search.core.create_search_tools_function` factory.
 """
 
 import logging
-import math
-import re
 from typing import Optional
 
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from tools.search.build_tool_list import ToolInfo
+from tools.search._bm25 import BM25Index as _GenericBM25Index, tokenize
 
 LOGGER = logging.getLogger(__name__)
 
 
+# Backward-compatible alias kept for callers that imported the private name.
+_tokenize = tokenize
+
+
 # ============================================================================
-# BM25 Implementation
+# BM25 Implementation — ToolInfo-specific wrapper around the generic index
 # ============================================================================
-
-
-def tokenize(text: str) -> list[str]:
-    """Simple whitespace + punctuation tokenizer with lowercasing."""
-    return re.findall(r"[a-z0-9_]+", text.lower())
-
-
-def _tokenize(text: str) -> list[str]:
-    """Backward-compatible alias for internal callers."""
-    return tokenize(text)
 
 
 class BM25Index:
-    """
-    Lightweight BM25 (Okapi BM25) index over tool info objects.
+    """BM25 index keyed on :class:`ToolInfo` documents.
 
-    Indexes on tool name + description + affordances. Supports incremental additions.
+    Thin wrapper around :class:`tools.search._bm25.BM25Index` that knows
+    how to derive the indexable text from a ``ToolInfo`` (name +
+    description + affordances). Kept as a public class for backward
+    compatibility with existing callers and tests.
     """
 
     def __init__(self, k1: float = 1.5, b: float = 0.75):
-        self.k1 = k1
-        self.b = b
-        self._docs: list[tuple[ToolInfo, list[str]]] = []  # (tool_info, tokens)
-        self._df: dict[str, int] = {}  # document frequency per term
-        self._avgdl: float = 0.0
+        self._index: _GenericBM25Index[ToolInfo] = _GenericBM25Index(k1=k1, b=b)
+
+    @property
+    def k1(self) -> float:
+        return self._index.k1
+
+    @property
+    def b(self) -> float:
+        return self._index.b
+
+    # Internal-state accessors. Kept as properties (not attributes) so the
+    # wrapper stays a thin façade over the generic index. Existing tests
+    # poke these directly.
+    @property
+    def _docs(self):
+        return self._index._docs
+
+    @property
+    def _df(self):
+        return self._index._df
+
+    @property
+    def _avgdl(self) -> float:
+        return self._index._avgdl
 
     def add(self, tool_info: ToolInfo) -> None:
         """Add a tool info entry to the index."""
         text = f"{tool_info.name} {tool_info.description} {' '.join(tool_info.affordances)}"
-        tokens = _tokenize(text)
-        self._docs.append((tool_info, tokens))
-
-        # Update document frequencies
-        seen = set()
-        for token in tokens:
-            if token not in seen:
-                self._df[token] = self._df.get(token, 0) + 1
-                seen.add(token)
-
-        # Recompute average document length
-        total_tokens = sum(len(toks) for _, toks in self._docs)
-        self._avgdl = total_tokens / len(self._docs) if self._docs else 0.0
+        self._index.add(tool_info, text)
 
     def search(self, query: str, top_k: int = 1) -> list[tuple[ToolInfo, float]]:
-        """
-        Search for tools matching the query.
+        """Search for tools matching the query.
 
         Args:
             query: Natural language search query
             top_k: Number of top results to return
 
         Returns:
-            List of (ToolInfo, score) tuples sorted by descending score
+            List of ``(ToolInfo, score)`` tuples sorted by descending score.
         """
-        if not self._docs:
-            return []
-
-        query_tokens = _tokenize(query)
-        if not query_tokens:
-            return []
-
-        n = len(self._docs)
-        scores: list[tuple[ToolInfo, float]] = []
-
-        for tool_info, doc_tokens in self._docs:
-            score = 0.0
-            dl = len(doc_tokens)
-
-            # Build term frequency map for this document
-            tf_map: dict[str, int] = {}
-            for token in doc_tokens:
-                tf_map[token] = tf_map.get(token, 0) + 1
-
-            for qt in query_tokens:
-                if qt not in self._df:
-                    continue
-                df = self._df[qt]
-                tf = tf_map.get(qt, 0)
-                if tf == 0:
-                    continue
-
-                # IDF component (BM25 variant)
-                idf = math.log((n - df + 0.5) / (df + 0.5) + 1.0)
-
-                # TF component with length normalization
-                if self._avgdl == 0:
-                    # Edge case: no tokens across all documents, fall back to
-                    # BM25 formula without length normalization.
-                    tf_norm = (tf * (self.k1 + 1)) / (tf + self.k1)
-                else:
-                    tf_norm = (tf * (self.k1 + 1)) / (tf + self.k1 * (1 - self.b + self.b * dl / self._avgdl))
-
-                score += idf * tf_norm
-
-            scores.append((tool_info, score))
-
-        # Sort by score descending
-        scores.sort(key=lambda x: x[1], reverse=True)
-        return scores[:top_k]
+        return self._index.search(query, top_k=top_k)
 
 
 # ============================================================================

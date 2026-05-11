@@ -29,6 +29,8 @@ from .models import (
 from .render import render_guardrails_block, render_repair_block
 from .compile import compile_vignettes
 from .local_file_repo import LocalFileVignetteRepo
+from .local_file_search_repo import LocalFileSearchVignetteRepo
+from .read_repo import VignetteSearchRepo
 from .table_repo import TableVignetteRepo
 from .search_repo import SearchVignetteRepo
 from .write_repo import VignetteWriteRepo
@@ -52,7 +54,9 @@ __all__ = [
     "compile_vignettes",
     # Repositories
     "LocalFileVignetteRepo",
+    "LocalFileSearchVignetteRepo",
     "TableVignetteRepo",
     "SearchVignetteRepo",
+    "VignetteSearchRepo",
     "VignetteWriteRepo",
 ]
