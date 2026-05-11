@@ -59,7 +59,10 @@ def _build_azure_openai_entra():
         AZURE_OPENAI_ENDPOINT, AOAI_SCOPE, API_VERSION,
         AZURE_OPENAI_DEPLOYMENT_NAME (preferred) or MODEL_DEPLOYMENT_NAME (fallback)
     """
-    from agent_framework.azure import AzureOpenAIChatClient
+    # In agent_framework >= 1.2, AzureOpenAIChatClient was unified into
+    # OpenAIChatClient (which accepts azure_endpoint + api_version +
+    # credential for the Azure path).
+    from agent_framework.openai import OpenAIChatClient
 
     # Reuse the repo's central credential factory so this picks up the same
     # AzureCli -> ManagedIdentity chain used everywhere else.
@@ -73,17 +76,17 @@ def _build_azure_openai_entra():
     )
 
     token_provider = get_token_provider(scope)
-    return AzureOpenAIChatClient(
-        endpoint=endpoint,
+    return OpenAIChatClient(
+        azure_endpoint=endpoint,
         api_version=api_version,
-        deployment_name=deployment,
+        model=deployment,
         credential=token_provider,
     )
 
 
 def _build_azure_openai_apikey():
     """Azure OpenAI via API key (no Entra)."""
-    from agent_framework.azure import AzureOpenAIChatClient
+    from agent_framework.openai import OpenAIChatClient
 
     endpoint = _require("AZURE_OPENAI_ENDPOINT")
     api_key = _require("AZURE_OPENAI_API_KEY")
@@ -92,10 +95,10 @@ def _build_azure_openai_apikey():
         "MODEL_DEPLOYMENT_NAME"
     )
 
-    return AzureOpenAIChatClient(
-        endpoint=endpoint,
+    return OpenAIChatClient(
+        azure_endpoint=endpoint,
         api_version=api_version,
-        deployment_name=deployment,
+        model=deployment,
         api_key=api_key,
     )
 
