@@ -173,7 +173,7 @@ compute_ndvi = ToolDefinition(
         "Compute NDVI = (NIR − Red) / (NIR + Red) from two band hrefs (e.g. "
         "Sentinel-2 B04 + B08, or Landsat red + nir08), optionally subset "
         "to a bbox and downsampled to honour max_pixels. Writes the result "
-        "as a Cloud-Optimized GeoTIFF and returns summary stats."
+        "as a GeoTIFF and returns summary stats."
     ),
     required_parameters=[
         ToolParameter(name="red_href", type=str, description="URL or path to the red-band raster."),
