@@ -25,7 +25,7 @@ class TestToolInfoText:
             name="t",
             description="d",
             server_name="s",
-            affordances=["read", "write"],
+            affordances=("read", "write"),
         )
         text = _tool_info_text(tool)
         assert "read" in text
@@ -83,6 +83,7 @@ class TestBM25ToolSearchBackend:
         backend = BM25ToolSearchBackend(tools=sample_tools)
         results = await backend.search("network", top=2)
         assert len(results) == 2
+        assert results[0].score is not None and results[1].score is not None
         assert results[0].score >= results[1].score
 
     @pytest.mark.unit
