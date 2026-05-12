@@ -13,10 +13,6 @@ Supported ``$LLM_PROVIDER`` values:
 Contract: any object satisfying agent_framework's ChatClient protocol works.
 The factory pattern is just a convenience; users can replace this entirely
 with their own client construction.
-
-See:
-    * ``docs/ABSTRACTION_LAYERS.md`` (Future Abstraction #1)
-    * ``docs/LLM_ABSTRACTION_PLAN.md``
 """
 
 from __future__ import annotations
