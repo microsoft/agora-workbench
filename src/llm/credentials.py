@@ -1,6 +1,6 @@
 """Default credential factory wiring agora's Azure credential chain.
 
-Kept in its own module so :mod:`agora_agent.llm.spec` and the framework
+Kept in its own module so :mod:`llm.spec` and the framework
 factories don't take a hard dependency on :mod:`auth` — tests can substitute
 a fake factory without touching auth at all.
 """
@@ -13,7 +13,7 @@ from typing import Any, Callable
 def default_credential_factory(scope: str) -> Callable[[], Any]:
     """Return a zero-arg callable that yields a credential for ``scope``.
 
-    The returned callable is what :class:`~agora_agent.llm.spec.ModelSpec`
+    The returned callable is what :class:`~llm.spec.ModelSpec`
     stores in its ``credential_factory`` field. Each call constructs a fresh
     bearer-token provider via :func:`auth.providers.get_token_provider`,
     which itself uses the standard ``AzureCli → ManagedIdentity`` chain.
