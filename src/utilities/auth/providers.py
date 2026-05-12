@@ -88,7 +88,7 @@ def get_search_credential() -> SearchCredential:
         ChainedTokenCredential (AzureCLI → ManagedIdentity).
 
     Example:
-        >>> from auth.providers import get_search_credential
+        >>> from utilities.auth.providers import get_search_credential
         >>> from azure.search.documents import SearchClient
         >>> credential = get_search_credential()
         >>> client = SearchClient(endpoint=endpoint, index_name=index, credential=credential)
@@ -114,7 +114,7 @@ def get_search_credential_async() -> AsyncSearchCredential:
         async ChainedTokenCredential (AzureCLI → ManagedIdentity).
 
     Example:
-        >>> from auth.providers import get_search_credential_async
+        >>> from utilities.auth.providers import get_search_credential_async
         >>> from azure.search.documents.aio import SearchClient
         >>> credential = get_search_credential_async()
         >>> client = SearchClient(endpoint=endpoint, index_name=index, credential=credential)
@@ -167,7 +167,7 @@ def get_purview_credential() -> ChainedTokenCredential:
         ChainedTokenCredential (AzureCLI → ManagedIdentity).
 
     Example:
-        >>> from auth.providers import get_purview_credential
+        >>> from utilities.auth.providers import get_purview_credential
         >>> from azure.purview.catalog import PurviewCatalogClient
         >>> credential = get_purview_credential()
         >>> client = PurviewCatalogClient(endpoint=endpoint, credential=credential)
@@ -200,7 +200,7 @@ def get_token_provider(scope: str) -> Callable[[], str]:
         Token provider function that can be called to get bearer tokens.
 
     Example:
-        >>> from auth import get_token_provider
+        >>> from utilities.auth import get_token_provider
         >>> token_provider = get_token_provider("https://cognitiveservices.azure.com/.default")
         >>> token = token_provider()
     """
@@ -224,7 +224,7 @@ def get_storage_connection_string() -> str | None:
         otherwise None (caller should fall back to Entra credential).
 
     Example:
-        >>> from auth.providers import get_storage_connection_string
+        >>> from utilities.auth.providers import get_storage_connection_string
         >>> conn_str = get_storage_connection_string()
         >>> if conn_str:
         ...     client = BlobServiceClient.from_connection_string(conn_str)

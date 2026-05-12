@@ -26,7 +26,7 @@ from azure.purview.catalog import PurviewCatalogClient
 from azure.search.documents import SearchClient
 from openai import AzureOpenAI
 
-from auth import get_purview_credential, get_search_credential, get_token_provider
+from utilities.auth import get_purview_credential, get_search_credential, get_token_provider
 from data_lake.search.registry import ArtifactRegistryDocument
 
 logger = logging.getLogger(__name__)

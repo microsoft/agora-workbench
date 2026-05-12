@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from auth import get_purview_credential, get_search_credential
+from utilities.auth import get_purview_credential, get_search_credential
 from azure.purview.catalog import PurviewCatalogClient
 from azure.search.documents import SearchClient
 

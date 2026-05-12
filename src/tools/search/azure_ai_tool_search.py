@@ -27,7 +27,7 @@ from azure.core.exceptions import HttpResponseError
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.models import VectorizedQuery
 
-from auth import get_search_credential_async
+from utilities.auth import get_search_credential_async
 from tools.tool_search import ToolSearchBackend, ToolSearchResult
 from .build_tool_list import build_tool_list
 from ._constants import (

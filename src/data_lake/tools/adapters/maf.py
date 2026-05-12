@@ -20,7 +20,7 @@ from azure.search.documents.aio import SearchClient
 from pydantic import BaseModel, Field
 
 from ..permissions import check_resource_permissions
-from auth import get_search_credential_async
+from utilities.auth import get_search_credential_async
 
 LOGGER = logging.getLogger(__name__)
 
@@ -401,7 +401,7 @@ def is_data_lake_configured() -> bool:
 async def _discover_available_domains() -> list[str]:
     """Query the artifact registry index to discover distinct domain values.
 
-    Uses the async SearchClient with credentials from auth.providers so it
+    Uses the async SearchClient with credentials from utilities.auth.providers so it
     works with both API key and Entra authentication.
 
     Returns:
