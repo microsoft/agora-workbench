@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 Provider = Literal["azure_openai", "openai", "ollama", "litellm"]
+AuthMode = Literal["auto", "entra", "api_key"]
 
 # Default OAuth scope for Azure OpenAI when no AOAI_SCOPE env var is set.
 # Matches the public Azure Cognitive Services audience.
@@ -97,6 +98,7 @@ class ModelSpec:
         prefix: str = "AZURE_OPENAI",
         *,
         provider: Provider = "azure_openai",
+        auth_mode: AuthMode = "auto",
     ) -> "ModelSpec":
         """Build a :class:`ModelSpec` from environment variables.
 
@@ -104,15 +106,21 @@ class ModelSpec:
 
         * ``{prefix}_ENDPOINT`` \u2014 required
         * ``{prefix}_DEPLOYMENT_NAME`` (preferred) or ``MODEL_DEPLOYMENT_NAME``
-        * ``{prefix}_API_KEY`` \u2014 optional; when set, key auth is used
-        * ``API_VERSION`` \u2014 required
-        * ``AOAI_SCOPE`` \u2014 optional, defaults to the public AOAI scope
-        * ``LLM_TEMPERATURE`` / ``LLM_MAX_TOKENS`` \u2014 optional inference defaults
+        * ``{prefix}_API_KEY`` — see ``auth_mode`` below
+        * ``API_VERSION`` — required
+        * ``AOAI_SCOPE`` — optional, defaults to the public AOAI scope
+        * ``LLM_TEMPERATURE`` / ``LLM_MAX_TOKENS`` — optional inference defaults
 
-        If ``{prefix}_API_KEY`` is set, ``credential_factory`` is left as
-        ``None`` and the key is used directly. Otherwise the default
-        credential factory (Entra ID via the agora auth chain) is wired up
-        with the configured ``scope``.
+        ``auth_mode`` controls Azure OpenAI authentication selection (ignored
+        by non-Azure providers, which always use ``api_key``):
+
+        * ``"auto"`` (default) — use ``{prefix}_API_KEY`` if set, otherwise
+          fall back to the Entra credential factory.
+        * ``"entra"`` — always use the Entra credential factory; ignore any
+          ``{prefix}_API_KEY`` in the environment. Useful when callers know
+          their intent and don't want a stale env var to silently flip auth.
+        * ``"api_key"`` — require ``{prefix}_API_KEY`` to be set; raise
+          ``ValueError`` if not.
 
         ``provider="openai"`` reads:
 
@@ -139,7 +147,7 @@ class ModelSpec:
             If a required environment variable is missing.
         """
         if provider == "azure_openai":
-            return cls._from_env_azure_openai(prefix)
+            return cls._from_env_azure_openai(prefix, auth_mode)
         if provider == "openai":
             return cls._from_env_openai()
         if provider == "ollama":
@@ -151,14 +159,21 @@ class ModelSpec:
     # -- per-provider env loaders -------------------------------------
 
     @classmethod
-    def _from_env_azure_openai(cls, prefix: str) -> "ModelSpec":
+    def _from_env_azure_openai(cls, prefix: str, auth_mode: AuthMode) -> "ModelSpec":
         endpoint = _require_env(f"{prefix}_ENDPOINT")
         api_version = _require_env("API_VERSION")
         model = os.getenv(f"{prefix}_DEPLOYMENT_NAME") or _require_env(
             "MODEL_DEPLOYMENT_NAME"
         )
         scope = os.getenv("AOAI_SCOPE", _DEFAULT_AOAI_SCOPE)
-        api_key = os.getenv(f"{prefix}_API_KEY") or None
+
+        # Resolve auth based on the explicit mode.
+        if auth_mode == "entra":
+            api_key: str | None = None
+        elif auth_mode == "api_key":
+            api_key = _require_env(f"{prefix}_API_KEY")
+        else:  # "auto" — env-driven heuristic
+            api_key = os.getenv(f"{prefix}_API_KEY") or None
 
         credential_factory: Callable[[], Any] | None
         if api_key:

@@ -163,6 +163,49 @@ class TestFromEnvAzureOpenAI:
             ModelSpec.from_env()
 
 
+class TestFromEnvAzureAuthMode:
+    """Explicit auth_mode overrides the env-driven heuristic."""
+
+    def _set_required_azure(self, env):
+        env.setenv("AZURE_OPENAI_ENDPOINT", "https://x.openai.azure.com")
+        env.setenv("API_VERSION", "preview")
+        env.setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o")
+
+    def test_entra_ignores_stale_api_key(self, clean_env):
+        self._set_required_azure(clean_env)
+        clean_env.setenv("AZURE_OPENAI_API_KEY", "stale-key")
+
+        spec = ModelSpec.from_env(auth_mode="entra")
+
+        assert spec.api_key is None
+        assert spec.credential_factory is not None
+
+    def test_api_key_required_when_explicit(self, clean_env):
+        self._set_required_azure(clean_env)
+        # No AZURE_OPENAI_API_KEY set
+
+        with pytest.raises(ValueError, match="AZURE_OPENAI_API_KEY"):
+            ModelSpec.from_env(auth_mode="api_key")
+
+    def test_api_key_uses_env(self, clean_env):
+        self._set_required_azure(clean_env)
+        clean_env.setenv("AZURE_OPENAI_API_KEY", "sk-test")
+
+        spec = ModelSpec.from_env(auth_mode="api_key")
+
+        assert spec.api_key == "sk-test"
+        assert spec.credential_factory is None
+
+    def test_auto_is_default(self, clean_env):
+        """auto behavior is unchanged: env-driven."""
+        self._set_required_azure(clean_env)
+        clean_env.setenv("AZURE_OPENAI_API_KEY", "sk-test")
+
+        spec = ModelSpec.from_env()  # default auth_mode="auto"
+
+        assert spec.api_key == "sk-test"
+
+
 # ---------------------------------------------------------------------------
 # from_env: openai
 # ---------------------------------------------------------------------------

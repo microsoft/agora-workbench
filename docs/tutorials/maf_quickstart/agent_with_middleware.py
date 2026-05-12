@@ -44,7 +44,7 @@ import sys
 from pathlib import Path
 
 # Make the repo's `src/` packages importable when running this script directly,
-# and make sibling tutorial modules (``llm.py``, ``agent.py``) importable too.
+# and make sibling tutorial modules (``chat_client.py``, ``agent.py``) importable too.
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))

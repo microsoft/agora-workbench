@@ -42,7 +42,7 @@ state-graph workflow.
 
 - [`uv`](https://github.com/astral-sh/uv) installed.
 - An LLM you can call. The default path is **Azure OpenAI via Entra ID**
-  (run `az login` first), but the BYO-LLM factory in [llm.py](llm.py) also
+  (run `az login` first), but the BYO-LLM factory in [chat_client.py](chat_client.py) also
   supports Azure OpenAI API keys, OpenAI, and Ollama — see Step A.
 - `.env` populated at the repo root. Copy entries from
   [.env.example](.env.example) and the repo-level
@@ -132,9 +132,11 @@ own function so you can map README sections to code.
 ### Step A — Build the chat client (BYO LLM)
 
 [`step_a_chat_client`](agent.py) calls `build_chat_client()` from
-[llm.py](llm.py). agora-workbench is **BYO LLM**: any object that satisfies
-MAF's `ChatClient` protocol works. The tutorial factory dispatches on
-`$LLM_PROVIDER`:
+[chat_client.py](chat_client.py). agora-workbench is **BYO LLM**: any object that satisfies
+MAF's `ChatClient` protocol works. The tutorial factory is a thin wrapper around
+the framework-agnostic [`ModelSpec`](../../../src/llm/spec.py) +
+[`make_maf_client`](../../../src/llm/factories/maf.py) abstraction in `src/llm/`,
+and dispatches on `$LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
 | --- | --- | --- | --- |
@@ -397,7 +399,7 @@ loops, etc.
 | Symptom | Likely cause |
 | --- | --- |
 | `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
-| `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [llm.py](llm.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
+| `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [chat_client.py](chat_client.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
 | `BadRequest: API version not supported` from `/responses` | The Responses API on your endpoint doesn't accept the configured `API_VERSION`. Try `API_VERSION="preview"` (some internal gateways only accept floating tags; public AOAI typically wants a dated preview like `2025-04-01-preview`). |
 | `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
 | `Bind for 127.0.0.1:8020 failed: port is already allocated` | A previous chemistry container (or unrelated process) is still holding the port. Find it with `docker ps \| grep 8020` and remove with `docker rm -f <name>`, then retry `docker compose up -d`. |

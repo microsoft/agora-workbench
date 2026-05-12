@@ -72,8 +72,8 @@ CHEMISTRY_SKILL_PATH = (
 # Step A — build the chat client (BYO LLM)
 # ---------------------------------------------------------------------------
 def step_a_chat_client():
-    """Return a MAF ChatClient based on $LLM_PROVIDER (see llm.py)."""
-    from llm import build_chat_client  # local import: tutorial-only module
+    """Return a MAF ChatClient based on $LLM_PROVIDER (see chat_client.py)."""
+    from chat_client import build_chat_client  # local import: tutorial-only module
 
     client = build_chat_client()
     LOGGER.info("Step A: built chat client %s", type(client).__name__)
