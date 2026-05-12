@@ -82,6 +82,13 @@ jobs:
         continue-on-error: true
         run: |
           uv run pytest src/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
+
+      - name: Run llm tests
+        id: llm_tests
+        continue-on-error: true
+        run: |
+          uv sync --extra maf
+          uv run pytest src/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
       
       - name: Test Summary
         if: always()
@@ -93,6 +100,7 @@ jobs:
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           planning_status="${{ steps.planning_tests.outcome }}"
           domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
+          llm_status="${{ steps.llm_tests.outcome }}"
           
           echo "## Test Results"
           if [ "$auth_status" == "success" ]; then
@@ -136,8 +144,14 @@ jobs:
           else
             echo "❌ Domain examples tests failed"
           fi
+
+          if [ "$llm_status" == "success" ]; then
+            echo "✅ LLM tests passed"
+          else
+            echo "❌ LLM tests failed"
+          fi
           
-          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domain_examples_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$middleware_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ]; then
             exit 0
           else
             exit 1
