@@ -100,35 +100,58 @@ class ModelSpec:
     ) -> "ModelSpec":
         """Build a :class:`ModelSpec` from environment variables.
 
-        Reads (for the default ``azure_openai`` provider):
+        ``provider="azure_openai"`` (default) reads:
 
-        * ``{prefix}_ENDPOINT`` — required
+        * ``{prefix}_ENDPOINT`` \u2014 required
         * ``{prefix}_DEPLOYMENT_NAME`` (preferred) or ``MODEL_DEPLOYMENT_NAME``
-        * ``{prefix}_API_KEY`` — optional; when set, key auth is used
-        * ``API_VERSION`` — required
-        * ``AOAI_SCOPE`` — optional, defaults to the public AOAI scope
-        * ``LLM_TEMPERATURE`` / ``LLM_MAX_TOKENS`` — optional inference defaults
+        * ``{prefix}_API_KEY`` \u2014 optional; when set, key auth is used
+        * ``API_VERSION`` \u2014 required
+        * ``AOAI_SCOPE`` \u2014 optional, defaults to the public AOAI scope
+        * ``LLM_TEMPERATURE`` / ``LLM_MAX_TOKENS`` \u2014 optional inference defaults
 
         If ``{prefix}_API_KEY`` is set, ``credential_factory`` is left as
         ``None`` and the key is used directly. Otherwise the default
         credential factory (Entra ID via the agora auth chain) is wired up
         with the configured ``scope``.
 
+        ``provider="openai"`` reads:
+
+        * ``OPENAI_API_KEY`` \u2014 required
+        * ``OPENAI_MODEL`` \u2014 optional, defaults to ``"gpt-4o"``
+        * ``OPENAI_BASE_URL`` \u2014 optional override (e.g. an OpenAI-compatible proxy)
+
+        ``provider="ollama"`` reads:
+
+        * ``OLLAMA_BASE_URL`` \u2014 optional, defaults to ``"http://localhost:11434/v1"``
+        * ``OLLAMA_MODEL`` \u2014 optional, defaults to ``"llama3.1"``
+        * api_key is hard-coded to ``"ollama"`` (Ollama doesn't validate it
+          but the OpenAI client requires a non-empty value).
+
+        ``provider="litellm"`` reads:
+
+        * ``LITELLM_BASE_URL`` \u2014 required
+        * ``LITELLM_API_KEY`` \u2014 required
+        * ``LITELLM_MODEL`` \u2014 required
+
         Raises
         ------
         ValueError
             If a required environment variable is missing.
-        NotImplementedError
-            If ``provider`` is anything other than ``"azure_openai"`` — other
-            providers will be supported as factories for them land.
         """
-        if provider != "azure_openai":
-            raise NotImplementedError(
-                f"ModelSpec.from_env currently supports provider='azure_openai' "
-                f"only (got {provider!r}). Construct ModelSpec directly for "
-                "other providers."
-            )
+        if provider == "azure_openai":
+            return cls._from_env_azure_openai(prefix)
+        if provider == "openai":
+            return cls._from_env_openai()
+        if provider == "ollama":
+            return cls._from_env_ollama()
+        if provider == "litellm":
+            return cls._from_env_litellm()
+        raise ValueError(f"Unknown provider: {provider!r}")  # pragma: no cover
 
+    # -- per-provider env loaders -------------------------------------
+
+    @classmethod
+    def _from_env_azure_openai(cls, prefix: str) -> "ModelSpec":
         endpoint = _require_env(f"{prefix}_ENDPOINT")
         api_version = _require_env("API_VERSION")
         model = os.getenv(f"{prefix}_DEPLOYMENT_NAME") or _require_env(
@@ -149,13 +172,48 @@ class ModelSpec:
             credential_factory = default_credential_factory(scope)
 
         return cls(
-            provider=provider,
+            provider="azure_openai",
             model=model,
             endpoint=endpoint,
             api_version=api_version,
             credential_factory=credential_factory,
             api_key=api_key,
             scope=scope,
+            temperature=_parse_float(os.getenv("LLM_TEMPERATURE")),
+            max_tokens=_parse_int(os.getenv("LLM_MAX_TOKENS")),
+        )
+
+    @classmethod
+    def _from_env_openai(cls) -> "ModelSpec":
+        return cls(
+            provider="openai",
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
+            endpoint=os.getenv("OPENAI_BASE_URL") or None,
+            api_key=_require_env("OPENAI_API_KEY"),
+            temperature=_parse_float(os.getenv("LLM_TEMPERATURE")),
+            max_tokens=_parse_int(os.getenv("LLM_MAX_TOKENS")),
+        )
+
+    @classmethod
+    def _from_env_ollama(cls) -> "ModelSpec":
+        # Ollama doesn't validate the api_key but the OpenAI client requires
+        # a non-empty string \u2014 use the conventional "ollama" placeholder.
+        return cls(
+            provider="ollama",
+            model=os.getenv("OLLAMA_MODEL", "llama3.1"),
+            endpoint=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+            api_key="ollama",
+            temperature=_parse_float(os.getenv("LLM_TEMPERATURE")),
+            max_tokens=_parse_int(os.getenv("LLM_MAX_TOKENS")),
+        )
+
+    @classmethod
+    def _from_env_litellm(cls) -> "ModelSpec":
+        return cls(
+            provider="litellm",
+            model=_require_env("LITELLM_MODEL"),
+            endpoint=_require_env("LITELLM_BASE_URL"),
+            api_key=_require_env("LITELLM_API_KEY"),
             temperature=_parse_float(os.getenv("LLM_TEMPERATURE")),
             max_tokens=_parse_int(os.getenv("LLM_MAX_TOKENS")),
         )
