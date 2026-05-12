@@ -37,10 +37,9 @@ class TestPostInitValidation:
     def test_missing_endpoint_for_provider_raises(self, provider):
         with pytest.raises(ValueError, match="endpoint is required for provider"):
             ModelSpec(
-                provider=provider,  # type: ignore[arg-type]
+                provider=provider,  # type: ignore[arg-type]  # parametrize uses non-literal strings
                 model="m",
                 api_key="k",
-                api_version="preview",
             )
 
     def test_missing_api_version_for_azure_openai_raises(self):
