@@ -49,7 +49,7 @@ class ModelSpec:
         Ignored by non-Azure providers.
     credential_factory :
         Zero-arg callable returning a credential. Mutually exclusive with
-        ``api_key``. See :func:`agora_agent.llm.credentials.default_credential_factory`.
+        ``api_key``. See :func:`llm.credentials.default_credential_factory`.
     api_key :
         Static API key. Mutually exclusive with ``credential_factory``.
     scope :
