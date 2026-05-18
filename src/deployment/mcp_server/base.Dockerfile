@@ -54,8 +54,6 @@ RUN mkdir -p /opt/wheelhouse && \
 # Copy shared code (used by all servers)
 COPY code_execution/code_execution /app/code_execution
 COPY code_execution/requirements.txt /app/requirements.txt
-COPY middleware/__init__.py /app/middleware/__init__.py
-COPY middleware/tool_learning /app/middleware/tool_learning
 
 # Install Python dependencies
 RUN pip install --no-input -r /app/requirements.txt
