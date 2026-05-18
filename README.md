@@ -31,8 +31,6 @@ Key capabilities:
 ```
 src/
 ├── auth/               # Agent-side credentials (ChainedTokenCredential)
-├── middleware/         # Pluggable conversation middleware
-│   └── */adapters/     # MAF-specific wrappers (requires [maf] extra)
 ├── tools/              # Tool search, MCP server registry, tool catalog
 │   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
 │   ├── search/                 # search_tools backends (BM25, Azure AI Search)

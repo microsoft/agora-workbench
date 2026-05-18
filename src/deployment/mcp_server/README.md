@@ -84,4 +84,4 @@ src/deployment/mcp_server/
 
 ## Build Context
 
-The base image must be built with `src/` as the Docker build context so the Dockerfile can copy `code_execution/` and `middleware/` packages. Rebuild the base image after changes to these packages.
+The base image must be built with `src/` as the Docker build context so the Dockerfile can copy the `code_execution/` package. Rebuild the base image after changes to this package.
