@@ -72,7 +72,7 @@ async def search_data_catalog(
     try:
         from azure.search.documents.aio import SearchClient
 
-        from auth import get_search_credential_async
+        from utilities.auth import get_search_credential_async
 
         credential = get_search_credential_async()
         client = SearchClient(
@@ -170,7 +170,7 @@ async def list_catalog_domains():
     try:
         from azure.search.documents.aio import SearchClient
 
-        from auth import get_search_credential_async
+        from utilities.auth import get_search_credential_async
 
         credential = get_search_credential_async()
         client = SearchClient(

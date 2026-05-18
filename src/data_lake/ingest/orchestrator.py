@@ -32,7 +32,7 @@ from jinja2 import Template
 
 from ..manifest.manifest import DataConfigSingle, IngestionManifest
 from ..utilities.utilities import move_entities
-from auth import get_purview_credential, get_token_provider
+from utilities.auth import get_purview_credential, get_token_provider
 
 # Load .env so manifest validators can resolve env-var fallbacks
 load_dotenv(verbose=True, override=False)

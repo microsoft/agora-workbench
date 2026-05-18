@@ -29,7 +29,7 @@ import httpx
 import yaml
 from pydantic import BaseModel, Field
 
-from auth import get_token_provider
+from utilities.auth import get_token_provider
 
 LOGGER = logging.getLogger(__name__)
 

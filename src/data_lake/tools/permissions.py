@@ -18,7 +18,7 @@ from azure.core.exceptions import (
     ResourceNotFoundError,
 )
 
-from auth import get_search_credential
+from utilities.auth import get_search_credential
 
 LOGGER = logging.getLogger(__name__)
 
