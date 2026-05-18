@@ -45,7 +45,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["tools*", "data_lake*", "auth*", "planning*", "gui*", "llm*"]
+include = ["tools*", "data_lake*", "utilities*", "planning*", "gui*", "llm*"]
 exclude = ["tests*", "scripts*"]
 
 [build-system]
