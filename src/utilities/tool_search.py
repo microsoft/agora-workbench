@@ -70,4 +70,4 @@ class ToolSearchBackend(ABC):
         Returns:
             List of :class:`ToolSearchResult` ordered by descending relevance.
         """
-        ...
+        raise NotImplementedError

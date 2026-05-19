@@ -1085,7 +1085,7 @@ class CodeExecutionServer:
             raw = getattr(mod, "STATE_AFFORDANCES", {})
             state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
         except (ImportError, AttributeError):
-            pass
+            LOGGER.debug("No states module found for domain '%s'; skipping affordance lookup", server_name)
 
         infos: list[ToolInfo] = []
         for td in self.tool_registry.tools:
