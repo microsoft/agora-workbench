@@ -552,8 +552,8 @@ class CodeExecutionServer:
             # Register server-side BM25 tool search (search_{name}_tools)
             self._setup_search_tool()
 
-            # Register state-graph and skill tools if state-annotated tools exist
-            self._setup_state_graph_tool()
+            # Register workflow planning and skill tools if state-annotated tools exist
+            self._setup_workflow_planning_tools()
 
         # Setup session management meta tools (prefixed with server name for uniqueness)
         register_session_meta_tools(
@@ -1188,56 +1188,57 @@ class CodeExecutionServer:
             ),
         )(search_server_tools)
 
-    def _setup_state_graph_tool(self) -> None:
-        """Register ``query_state_graph`` and ``load_skill`` as MCP tools on this server.
+    def _setup_workflow_planning_tools(self) -> None:
+        """Register ``plan_{name}_workflow`` and ``load_{name}_skill`` as MCP tools.
 
         Builds the domain state graph from the server's own tool catalog
-        so that agents can navigate workflow states without any client-side
+        so that agents can plan workflow sequences without any client-side
         infrastructure.  Only registered when the server has state-annotated
         tools (i.e. tools with ``state_requires`` or ``state_produces``).
         """
         from tools.search.state_graph_tools import (
-            create_query_state_graph_descriptor,
+            create_plan_workflow_descriptor,
             create_load_skill_descriptor,
         )
 
+        server_name = self.environment_config.name
         tool_infos = self._build_tool_infos()
         has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
 
         if not has_state_tools:
             LOGGER.debug(
-                "No state-annotated tools found for '%s'; skipping query_state_graph registration.",
-                self.environment_config.name,
+                "No state-annotated tools found for '%s'; skipping workflow planning registration.",
+                server_name,
             )
             return
 
-        # Register query_state_graph — explicit parameters so FastMCP can build the schema.
-        qsg_descriptor = create_query_state_graph_descriptor(tools=tool_infos)
-        _qsg_func = qsg_descriptor.func
+        # Register plan_{name}_workflow — explicit parameters so FastMCP can build the schema.
+        pw_descriptor = create_plan_workflow_descriptor(server_name=server_name, tools=tool_infos)
+        _pw_func = pw_descriptor.func
 
-        async def _query_state_graph(
+        async def _plan_workflow(
             domain: str = "",
             mode: str = "overview",
-            state: str = "",
+            current_state: str = "",
             target_state: str = "",
             tool_name: str = "",
         ) -> str:
-            """Query the domain workflow state graph."""
-            return await _qsg_func(
+            """Plan and navigate domain workflow states."""
+            return await _pw_func(
                 domain=domain,
                 mode=mode,
-                state=state,
+                current_state=current_state,
                 target_state=target_state,
                 tool_name=tool_name,
             )
 
         self.mcp.tool(
-            name=qsg_descriptor.name,
-            description=qsg_descriptor.description,
-        )(_query_state_graph)
+            name=pw_descriptor.name,
+            description=pw_descriptor.description,
+        )(_plan_workflow)
 
-        # Register load_skill — explicit parameters so FastMCP can build the schema.
-        ls_descriptor = create_load_skill_descriptor()
+        # Register load_{name}_skill — explicit parameters so FastMCP can build the schema.
+        ls_descriptor = create_load_skill_descriptor(server_name=server_name)
         _ls_func = ls_descriptor.func
 
         async def _load_skill(skill_name: str) -> str:
@@ -1250,8 +1251,9 @@ class CodeExecutionServer:
         )(_load_skill)
 
         LOGGER.info(
-            "Registered query_state_graph and load_skill for '%s' (%d state-annotated tools)",
-            self.environment_config.name,
+            "Registered plan_%s_workflow and load_%s_skill (%d state-annotated tools)",
+            server_name,
+            server_name,
             len([t for t in tool_infos if t.state_requires or t.state_produces]),
         )
 

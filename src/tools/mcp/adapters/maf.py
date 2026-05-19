@@ -9,12 +9,12 @@ management tools that the agent uses directly.
 import logging
 
 from ..mcp_server_registry import get_mcp_registry
+
 try:
     from agent_framework import MCPStreamableHTTPTool
 except ImportError as e:
     raise ImportError(
-        "agent-framework is required for MAF adapters. "
-        "Install with: pip install agora-workbench[maf]"
+        "agent-framework is required for MAF adapters. Install with: pip install agora-workbench[maf]"
     ) from e
 
 LOGGER = logging.getLogger(__name__)
@@ -27,8 +27,8 @@ def create_mcp_tools(mcp_server_name: str) -> "MCPStreamableHTTPTool | None":
 
     - ``execute_{name}_code`` — run Python code in the domain environment
     - ``search_{name}_tools`` — BM25 search over the server's tool catalog
-    - ``query_state_graph`` — navigate domain workflow states (if registered)
-    - ``load_skill`` — load skill instructions by name (if registered)
+    - ``plan_{name}_workflow`` — navigate domain workflow states (if registered)
+    - ``load_{name}_skill`` — load skill instructions by name (if registered)
     - ``{name}_list_sessions``, ``{name}_get_session_info``, ``{name}_close_session``
     - ``{name}_push_object`` — cross-server object transfer
 
@@ -62,12 +62,12 @@ def create_mcp_tools(mcp_server_name: str) -> "MCPStreamableHTTPTool | None":
 
     # Session tools are prefixed with server name to avoid collisions
     # (mirrors register_session_meta_tools(name_prefix=...))
-    # search_{name}_tools is now registered server-side and exposed via MCP.
+    # All tools are server-name-prefixed for multi-server safety.
     allowed_tool_names = {
         code_exec_tool_name,
         f"search_{descriptor.name}_tools",
-        "query_state_graph",
-        "load_skill",
+        f"plan_{descriptor.name}_workflow",
+        f"load_{descriptor.name}_skill",
         f"{descriptor.name}_list_sessions",
         f"{descriptor.name}_get_session_info",
         f"{descriptor.name}_close_session",

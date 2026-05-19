@@ -248,7 +248,7 @@ class TestPipelinePropagation:
 
 
 class TestStateGraphQueryTool:
-    """Test the StateGraph class and query_state_graph FunctionTool."""
+    """Test the StateGraph class and plan_{name}_workflow tool."""
 
     def _make_graph(self):  # noqa: F821
         from utilities.tool_search import ToolInfo
@@ -359,104 +359,6 @@ class TestStateGraphQueryTool:
         graph = self._make_graph()
         result = graph.tool_lookup("nonexistent_tool")
         assert "error" in result
-
-
-# ---------------------------------------------------------------------------
-# StateGraphToolSearchBackend
-# ---------------------------------------------------------------------------
-
-
-class TestStateGraphToolSearchBackend:
-    """Test the ToolSearchBackend implementation backed by StateGraph."""
-
-    def _make_backend(self):
-        from utilities.tool_search import ToolInfo
-        from tools.search.state_graph import StateGraph, StateGraphToolSearchBackend
-
-        tools = [
-            ToolInfo(
-                name="search_compounds",
-                description="Search compound database",
-                server_name="sim",
-                state_produces=("sim.compounds_available",),
-                affordances=("find chemicals", "lookup molecules"),
-            ),
-            ToolInfo(
-                name="create_flowsheet",
-                description="Create a simulation flowsheet",
-                server_name="sim",
-                state_requires=("sim.compounds_available",),
-                state_produces=("sim.flowsheet_exists",),
-            ),
-            ToolInfo(
-                name="solve_flowsheet",
-                description="Solve and converge the flowsheet",
-                server_name="sim",
-                state_requires=("sim.flowsheet_exists",),
-                state_produces=("sim.flowsheet_solved",),
-            ),
-        ]
-        graph = StateGraph(tools)
-        return StateGraphToolSearchBackend(graph)
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_search_by_tool_name(self):
-        backend = self._make_backend()
-        results = await backend.search("solve_flowsheet", top=3)
-        assert len(results) >= 1
-        assert results[0].name == "solve_flowsheet"
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_search_by_state_token(self):
-        backend = self._make_backend()
-        results = await backend.search("flowsheet_exists", top=3)
-        names = {r.name for r in results}
-        # Tools that require or produce sim.flowsheet_exists should match
-        assert "create_flowsheet" in names or "solve_flowsheet" in names
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_search_empty_query(self):
-        backend = self._make_backend()
-        results = await backend.search("", top=3)
-        assert results == []
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_search_no_match_returns_empty(self):
-        backend = self._make_backend()
-        results = await backend.search("zzz_totally_unrelated_xyz", top=3)
-        assert results == []
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_result_contains_state_metadata(self):
-        backend = self._make_backend()
-        results = await backend.search("create_flowsheet", top=1)
-        assert len(results) == 1
-        r = results[0]
-        assert "sim.compounds_available" in r.state_requires
-        assert "sim.flowsheet_exists" in r.state_produces
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_result_is_instance_of_tool_search_result(self):
-        from tools.tool_search import ToolSearchResult
-
-        backend = self._make_backend()
-        results = await backend.search("flowsheet", top=5)
-        for r in results:
-            assert isinstance(r, ToolSearchResult)
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_top_limits_results(self):
-        backend = self._make_backend()
-        results = await backend.search("flowsheet", top=1)
-        assert len(results) <= 1
-
 
 
 class TestSkillFrontmatter:

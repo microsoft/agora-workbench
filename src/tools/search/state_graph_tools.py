@@ -1,15 +1,15 @@
 """
-Framework-agnostic descriptor factories for state-graph and skill-loader tools.
+Framework-agnostic descriptor factories for workflow planning and skill-loader tools.
 
 Provides:
 
-* :func:`create_query_state_graph_descriptor` — builds the
-  ``query_state_graph`` :class:`~tools.tool_descriptor.ToolDescriptor`.
-* :func:`create_load_skill_descriptor` — builds the ``load_skill``
+* :func:`create_plan_workflow_descriptor` — builds the
+  ``plan_{name}_workflow`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+* :func:`create_load_skill_descriptor` — builds the ``load_{name}_skill``
   :class:`~tools.tool_descriptor.ToolDescriptor`.
 
-No agent-framework imports.  MAF wrappers live in
-``tools/search/adapters/maf_state_graph.py``.
+No agent-framework imports.  These tools are registered server-side by
+each MCP server's :meth:`~code_execution.server.CodeExecutionServer._setup_workflow_planning_tools`.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -32,26 +33,26 @@ LOGGER = logging.getLogger(__name__)
 # ============================================================================
 
 
-class QueryStateGraphInput(BaseModel):
-    """Input model for the ``query_state_graph`` tool."""
+class PlanWorkflowInput(BaseModel):
+    """Input model for the ``plan_{name}_workflow`` tool."""
 
     domain: str = Field(
         default="",
         description="Domain name (e.g. 'powergrid'). Empty string returns all domains.",
     )
-    mode: str = Field(
+    mode: Literal["overview", "next_steps", "path", "tool"] = Field(
         default="overview",
         description=(
             "Query mode. "
             "'overview': full graph with states, transitions, and skills. "
-            "'from_state': tools and skills reachable from a given state. "
+            "'next_steps': tools and skills reachable from the current state. "
             "'path': suggested path between two states. "
             "'tool': state transition details for a specific tool."
         ),
     )
-    state: str = Field(
+    current_state: str = Field(
         default="",
-        description="State token for 'from_state' mode (e.g. 'powergrid.network_loaded').",
+        description="State token for 'next_steps' / 'path' modes (e.g. 'powergrid.network_loaded').",
     )
     target_state: str = Field(
         default="",
@@ -69,7 +70,7 @@ class LoadSkillInput(BaseModel):
     skill_name: str = Field(
         description=(
             "Name of the skill to load (e.g. 'flowsheet-setup', "
-            "'grid-converter').  Use query_state_graph to "
+            "'grid-converter').  Use plan_{name}_workflow to "
             "discover available skill names."
         ),
     )
@@ -80,15 +81,19 @@ class LoadSkillInput(BaseModel):
 # ============================================================================
 
 
-def create_query_state_graph_descriptor(
+def create_plan_workflow_descriptor(
+    server_name: str,
     tools: list[ToolInfo] | None = None,
     domains_dir: Path = _DOMAINS_DIR,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
-    """Create a ``query_state_graph`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+    """Create a ``plan_{name}_workflow`` :class:`~tools.tool_descriptor.ToolDescriptor`.
 
     Parameters
     ----------
+    server_name : str
+        MCP server / domain name (e.g. ``"powergrid"``).  Used to generate
+        the tool name ``plan_{server_name}_workflow``.
     tools : list[ToolInfo] | None
         Tool metadata to index in the state graph.  Defaults to an empty
         list (no state-annotated tools).  When used server-side, pass the
@@ -101,73 +106,68 @@ def create_query_state_graph_descriptor(
     Returns
     -------
     ToolDescriptor
-        Named ``query_state_graph``.
+        Named ``plan_{server_name}_workflow``.
     """
     if tools is None:
         tools = []
     graph = StateGraph(tools, domains_dir, extra_skill_dirs)
 
-    async def _ensure_graph() -> StateGraph:
-        return graph
-
-    async def query_state_graph(
+    async def plan_workflow(
         domain: str = "",
         mode: str = "overview",
-        state: str = "",
+        current_state: str = "",
         target_state: str = "",
         tool_name: str = "",
     ) -> str:
-        """Query the domain workflow state graph.
+        """Plan and navigate domain workflow states.
 
         Use this tool to understand workflow structure, plan sequences of
         tool calls, and discover skills that cover common workflows.
 
         Args:
             domain: Domain name (e.g. 'powergrid'). Empty for all domains.
-            mode: Query mode — 'overview', 'from_state', 'path', or 'tool'.
-            state: State token for 'from_state' / 'path' modes.
+            mode: Query mode — 'overview', 'next_steps', 'path', or 'tool'.
+            current_state: State token for 'next_steps' / 'path' modes.
             target_state: Target state for 'path' mode.
             tool_name: Tool name for 'tool' mode.
         """
         try:
-            graph = await _ensure_graph()
             if mode == "overview":
                 result = graph.overview(domain)
-            elif mode == "from_state":
-                result = graph.from_state(state)
+            elif mode == "next_steps":
+                result = graph.from_state(current_state)
             elif mode == "path":
-                result = graph.path(state, target_state)
+                result = graph.path(current_state, target_state)
             elif mode == "tool":
                 result = graph.tool_lookup(tool_name)
             else:
-                result = {"error": f"Unknown mode '{mode}'. Use: overview, from_state, path, tool."}
+                result = {"error": f"Unknown mode '{mode}'. Use: overview, next_steps, path, tool."}
             return json.dumps(result)
         except Exception as exc:
-            LOGGER.error("query_state_graph failed: %s", exc, exc_info=True)
+            LOGGER.error("plan_%s_workflow failed: %s", server_name, exc, exc_info=True)
             return json.dumps({"error": f"{type(exc).__name__}: {exc}"})
 
     return ToolDescriptor(
-        name="query_state_graph",
+        name=f"plan_{server_name}_workflow",
         description=(
-            "Query the domain workflow state graph to understand available "
-            "workflow states, transitions between them, and which tools and "
-            "skills are relevant at each stage.  Use 'overview' mode at the "
-            "start of a task to see the full workflow map, 'from_state' to "
-            "explore what's possible from your current position, and 'path' "
-            "to plan a route between two workflow states.  The state graph "
-            "describes well-known paths — for tasks not covered, use "
-            "execute_{domain}_code directly."
+            f"Plan and navigate {server_name} workflow states.  Use 'overview' "
+            f"mode at the start of a task to see the full workflow map, "
+            f"'next_steps' to explore what's possible from your current state, "
+            f"and 'path' to plan a route between two workflow states.  "
+            f"The state graph describes well-known paths — for tasks not "
+            f"covered, use execute_{server_name}_code directly."
         ),
-        input_model=QueryStateGraphInput,
-        func=query_state_graph,
+        input_model=PlanWorkflowInput,
+        func=plan_workflow,
     )
 
 
 def create_load_skill_descriptor(
+    server_name: str,
     domains_dir: Path = _DOMAINS_DIR,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
-    """Create a ``load_skill`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+    """Create a ``load_{name}_skill`` :class:`~tools.tool_descriptor.ToolDescriptor`.
 
     The tool reads the full SKILL.md content for a named skill and returns
     it so the agent can follow the skill's instructions.  Skills are
@@ -175,6 +175,9 @@ def create_load_skill_descriptor(
 
     Parameters
     ----------
+    server_name : str
+        MCP server / domain name (e.g. ``"powergrid"``).  Used to generate
+        the tool name ``load_{server_name}_skill``.
     domains_dir : Path
         Root of the ``domains/`` directory tree.
     extra_skill_dirs : list[Path] | None
@@ -183,7 +186,7 @@ def create_load_skill_descriptor(
     Returns
     -------
     ToolDescriptor
-        Named ``load_skill``.
+        Named ``load_{server_name}_skill``.
     """
     _index: dict[str, str] | None = None
 
@@ -193,14 +196,14 @@ def create_load_skill_descriptor(
         if _index is None:
             skills = _discover_skills(domains_dir, extra_skill_dirs)
             _index = {s["name"]: s["abs_path"] for s in skills}
-            LOGGER.info("load_skill index built with %d skills", len(_index))
+            LOGGER.info("load_%s_skill index built with %d skills", server_name, len(_index))
         return _index
 
     async def load_skill(skill_name: str) -> str:
         """Load the full content of a skill by name.
 
         Returns the SKILL.md markdown body so you can follow its
-        instructions.  Use ``query_state_graph`` first to discover
+        instructions.  Use ``plan_{name}_workflow`` first to discover
         which skill to load.
 
         Args:
@@ -220,17 +223,17 @@ def create_load_skill_descriptor(
             content = Path(abs_path).read_text(encoding="utf-8")
             return content
         except OSError as exc:
-            LOGGER.error("load_skill failed to read %s: %s", abs_path, exc)
+            LOGGER.error("load_%s_skill failed to read %s: %s", server_name, abs_path, exc)
             return json.dumps({"error": f"Failed to read skill file: {exc}"})
 
     return ToolDescriptor(
-        name="load_skill",
+        name=f"load_{server_name}_skill",
         description=(
-            "Load the full content of a skill by name.  Skills contain "
-            "step-by-step instructions, best practices, and sub-skill "
-            "references for domain workflows.  Use query_state_graph to "
-            "discover available skill names, then call load_skill to get "
-            "the detailed instructions before starting a workflow."
+            f"Load the full content of a {server_name} skill by name.  Skills "
+            f"contain step-by-step instructions, best practices, and sub-skill "
+            f"references for domain workflows.  Use plan_{server_name}_workflow "
+            f"to discover available skill names, then call load_{server_name}_skill "
+            f"to get the detailed instructions before starting a workflow."
         ),
         input_model=LoadSkillInput,
         func=load_skill,

@@ -16,8 +16,7 @@ from utilities.tool_search import ToolInfo
 from .search import (
     BM25ToolSearchBackend,
     StateGraph,
-    StateGraphToolSearchBackend,
-    create_query_state_graph_descriptor,
+    create_plan_workflow_descriptor,
     create_load_skill_descriptor,
 )
 
@@ -36,8 +35,7 @@ __all__ = [
     # Search implementations
     "BM25ToolSearchBackend",
     "StateGraph",
-    "StateGraphToolSearchBackend",
     # Framework-agnostic descriptor factories
-    "create_query_state_graph_descriptor",
+    "create_plan_workflow_descriptor",
     "create_load_skill_descriptor",
 ]

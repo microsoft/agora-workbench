@@ -199,15 +199,15 @@ class TestSetupSearchTool:
 
 
 # ---------------------------------------------------------------------------
-# _setup_state_graph_tool
+# _setup_workflow_planning_tools
 # ---------------------------------------------------------------------------
 
 
-class TestSetupStateGraphTool:
+class TestSetupWorkflowPlanningTools:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_state_graph_registered_when_state_tools_exist(self):
-        """query_state_graph and load_skill are registered when state-annotated tools exist."""
+    async def test_workflow_tools_registered_when_state_tools_exist(self):
+        """plan_{name}_workflow and load_{name}_skill are registered when state-annotated tools exist."""
         tool = _tool(
             "solve",
             "Solve something",
@@ -218,15 +218,15 @@ class TestSetupStateGraphTool:
         )
         server = _make_server(tools=[tool])
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "query_state_graph" in tool_names
-        assert "load_skill" in tool_names
+        assert "plan_testdomain_workflow" in tool_names
+        assert "load_testdomain_skill" in tool_names
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_state_graph_not_registered_without_state_tools(self):
-        """query_state_graph is NOT registered when no tools have state annotations."""
+    async def test_workflow_tools_not_registered_without_state_tools(self):
+        """plan_{name}_workflow is NOT registered when no tools have state annotations."""
         tools = [_tool("run_opf", "Run OPF")]  # no state_transition
         server = _make_server(tools=tools)
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "query_state_graph" not in tool_names
-        assert "load_skill" not in tool_names
+        assert "plan_testdomain_workflow" not in tool_names
+        assert "load_testdomain_skill" not in tool_names

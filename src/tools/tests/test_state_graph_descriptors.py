@@ -1,4 +1,4 @@
-"""Tests for state-graph and skill-loader descriptor factories."""
+"""Tests for workflow planning and skill-loader descriptor factories."""
 
 import json
 from unittest.mock import patch
@@ -8,9 +8,9 @@ import pytest
 
 from tools.tool_descriptor import ToolDescriptor
 from tools.search.state_graph_tools import (
-    QueryStateGraphInput,
+    PlanWorkflowInput,
     LoadSkillInput,
-    create_query_state_graph_descriptor,
+    create_plan_workflow_descriptor,
     create_load_skill_descriptor,
 )
 
@@ -20,6 +20,7 @@ from tools.search.state_graph_tools import (
 # ---------------------------------------------------------------------------
 
 _EMPTY_TOOLS: list = []
+_TEST_SERVER = "testdomain"
 
 
 def _fake_discover_skills(domains_dir, extra_skill_dirs):
@@ -30,26 +31,27 @@ def _fake_discover_skills(domains_dir, extra_skill_dirs):
 
 
 # ---------------------------------------------------------------------------
-# QueryStateGraphInput
+# PlanWorkflowInput
 # ---------------------------------------------------------------------------
 
 
-class TestQueryStateGraphInput:
+class TestPlanWorkflowInput:
     @pytest.mark.unit
     def test_defaults(self):
-        inp = QueryStateGraphInput()
+        inp = PlanWorkflowInput()
         assert inp.domain == ""
         assert inp.mode == "overview"
-        assert inp.state == ""
+        assert inp.current_state == ""
         assert inp.target_state == ""
         assert inp.tool_name == ""
 
     @pytest.mark.unit
     def test_json_schema_shape(self):
-        schema = QueryStateGraphInput.model_json_schema()
+        schema = PlanWorkflowInput.model_json_schema()
         assert schema["type"] == "object"
         assert "domain" in schema["properties"]
         assert "mode" in schema["properties"]
+        assert "current_state" in schema["properties"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,36 +67,36 @@ class TestLoadSkillInput:
 
 
 # ---------------------------------------------------------------------------
-# create_query_state_graph_descriptor
+# create_plan_workflow_descriptor
 # ---------------------------------------------------------------------------
 
 
-class TestQueryStateGraphDescriptor:
+class TestPlanWorkflowDescriptor:
     @pytest.mark.unit
     def test_returns_tool_descriptor(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
         assert isinstance(descriptor, ToolDescriptor)
 
     @pytest.mark.unit
     def test_descriptor_metadata(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
-        assert descriptor.name == "query_state_graph"
-        assert "state" in descriptor.description.lower()
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
+        assert descriptor.name == f"plan_{_TEST_SERVER}_workflow"
+        assert "workflow" in descriptor.description.lower()
 
     @pytest.mark.unit
     def test_input_model_is_correct(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
-        assert descriptor.input_model is QueryStateGraphInput
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
+        assert descriptor.input_model is PlanWorkflowInput
 
     @pytest.mark.unit
     def test_input_schema_matches_model(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
-        assert descriptor.input_schema == QueryStateGraphInput.model_json_schema()
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
+        assert descriptor.input_schema == PlanWorkflowInput.model_json_schema()
 
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_overview_mode_returns_json(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
         raw = await descriptor.func(domain="", mode="overview")
         parsed = json.loads(raw)
         assert isinstance(parsed, dict)
@@ -102,7 +104,7 @@ class TestQueryStateGraphDescriptor:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_invalid_mode_returns_error(self):
-        descriptor = create_query_state_graph_descriptor(tools=_EMPTY_TOOLS)
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
         raw = await descriptor.func(domain="", mode="bogus")
         parsed = json.loads(raw)
         assert "error" in parsed
@@ -112,10 +114,20 @@ class TestQueryStateGraphDescriptor:
     @pytest.mark.asyncio
     async def test_none_tools_defaults_to_empty(self):
         """When tools=None, the graph is built with an empty tool list."""
-        descriptor = create_query_state_graph_descriptor(tools=None)
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=None)
         raw = await descriptor.func(domain="", mode="overview")
         parsed = json.loads(raw)
         assert isinstance(parsed, dict)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_next_steps_mode(self):
+        """The 'next_steps' mode maps to StateGraph.from_state()."""
+        descriptor = create_plan_workflow_descriptor(server_name=_TEST_SERVER, tools=_EMPTY_TOOLS)
+        raw = await descriptor.func(mode="next_steps", current_state="")
+        parsed = json.loads(raw)
+        # Empty state should return an error hint
+        assert "error" in parsed or "state" in parsed
 
 
 # ---------------------------------------------------------------------------
@@ -126,23 +138,23 @@ class TestQueryStateGraphDescriptor:
 class TestLoadSkillDescriptor:
     @pytest.mark.unit
     def test_returns_tool_descriptor(self):
-        descriptor = create_load_skill_descriptor()
+        descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
         assert isinstance(descriptor, ToolDescriptor)
 
     @pytest.mark.unit
     def test_descriptor_metadata(self):
-        descriptor = create_load_skill_descriptor()
-        assert descriptor.name == "load_skill"
+        descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
+        assert descriptor.name == f"load_{_TEST_SERVER}_skill"
         assert "skill" in descriptor.description.lower()
 
     @pytest.mark.unit
     def test_input_model_is_correct(self):
-        descriptor = create_load_skill_descriptor()
+        descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
         assert descriptor.input_model is LoadSkillInput
 
     @pytest.mark.unit
     def test_input_schema_matches_model(self):
-        descriptor = create_load_skill_descriptor()
+        descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
         assert descriptor.input_schema == LoadSkillInput.model_json_schema()
 
     @pytest.mark.unit
@@ -152,7 +164,7 @@ class TestLoadSkillDescriptor:
             "tools.search.state_graph_tools._discover_skills",
             side_effect=_fake_discover_skills,
         ):
-            descriptor = create_load_skill_descriptor()
+            descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
             raw = await descriptor.func(skill_name="nonexistent")
             parsed = json.loads(raw)
             assert "error" in parsed
@@ -167,7 +179,7 @@ class TestLoadSkillDescriptor:
             "tools.search.state_graph_tools._discover_skills",
             side_effect=_fake_discover_skills,
         ):
-            descriptor = create_load_skill_descriptor()
+            descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
             # The fake path doesn't exist, so reading it should fail
             raw = await descriptor.func(skill_name="flowsheet-setup")
             parsed = json.loads(raw)
@@ -189,7 +201,7 @@ class TestLoadSkillDescriptor:
             "tools.search.state_graph_tools._discover_skills",
             side_effect=_discover,
         ):
-            descriptor = create_load_skill_descriptor()
+            descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
             raw = await descriptor.func(skill_name="test-skill")
             assert "# Test Skill" in raw
             assert "Do the thing." in raw
