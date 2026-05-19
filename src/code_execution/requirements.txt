@@ -40,5 +40,10 @@ azure-data-tables>=12.7.0
 pandas>=2.3.3
 pyarrow>=22.0.0
 
+# Data Catalog
+sqlite-vec>=0.1.9
+sentence-transformers>=3.0.0
+pyyaml>=6.0
+
 # Python 3.11+ compatibility
 typing-extensions>=4.12.0

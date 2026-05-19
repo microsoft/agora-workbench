@@ -6,11 +6,6 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "azure-identity>=1.25.0",
-    "azure-mgmt-authorization>=4.0.0",
-    "azure-purview-catalog>=1.0.0b4",
-    "azure-purview-administration>=1.0.0b1",
-    "azure-purview-scanning>=1.0.0b2",
-    "azure-search-documents>=11.6.0",
     "azure-storage-blob[aio]>=12.28.0",
     "dill>=0.3.8",
     "fastapi>=0.115",
@@ -24,7 +19,10 @@ dependencies = [
     "pydantic>=2.10.4",
     "pyjwt[crypto]>=2.8.0",
     "python-dotenv>=1.1.1",
+    "pyyaml>=6.0",
     "rasterio>=1.4.0",
+    "sentence-transformers>=3.0.0",
+    "sqlite-vec>=0.1.9",
     "tenacity>=9.1.2",
     "tiktoken>=0.11.0",
     "titiler.core>=0.19.0",
@@ -45,7 +43,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["tools*", "data_lake*", "utilities*", "planning*", "gui*", "llm*"]
+include = ["tools*", "utilities*", "planning*", "gui*", "llm*"]
 exclude = ["tests*", "scripts*"]
 
 [build-system]
@@ -66,7 +64,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/utilities/auth/tests", "src/tools/tests", "src/data_lake/tests", "src/domain_examples/tests", "src/llm/tests"]
+testpaths = ["src/utilities/auth/tests", "src/tools/tests", "src/code_execution/tests", "src/domain_examples/tests", "src/llm/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

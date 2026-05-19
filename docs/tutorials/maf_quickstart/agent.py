@@ -1,10 +1,10 @@
 """
 MAF + agora-workbench quickstart tutorial.
 
-Wires a Microsoft Agent Framework (MAF) agent to two agora-workbench tools:
+Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
 
-  * ``search_data_lake_catalog`` — discovers datasets in the Azure AI Search-
-    backed data lake catalog (via ``data_lake.tools.adapters.maf``)
+  * ``search_data`` — discovers datasets in the server-side catalog
+    (provided by the MCP server's catalog tools)
   * ``chemistry`` MCP toolset — the chemistry MCP server from
     ``src/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
@@ -63,9 +63,7 @@ LOGGER = logging.getLogger("maf_quickstart")
 # Path to the chemistry domain's SKILL.md — a portable workflow guide
 # (state graph, tool ordering, common pitfalls) that we inject into the
 # agent's instructions so it knows how to chain the typed tools.
-CHEMISTRY_SKILL_PATH = (
-    REPO_ROOT / "src" / "domain_examples" / "chemistry" / "skills" / "SKILL.md"
-)
+CHEMISTRY_SKILL_PATH = REPO_ROOT / "src" / "domain_examples" / "chemistry" / "skills" / "SKILL.md"
 
 
 # ---------------------------------------------------------------------------
@@ -81,33 +79,24 @@ def step_a_chat_client():
 
 
 # ---------------------------------------------------------------------------
-# Step B — data lake search tool
+# Step B — data catalog search tool (now provided by MCP server)
 # ---------------------------------------------------------------------------
 async def step_b_data_lake_tool():
-    """Build the agora-workbench data lake search tool.
+    """The data catalog search is now a server-side MCP tool.
 
-    Uses the default Azure AI Search-backed backend, which reads
-    ``DATA_LAKE_SEARCH_ENDPOINT`` and ``DATA_LAKE_CATALOG_INDEX_NAME`` from
-    the environment and authenticates via the shared Entra credential chain.
+    The MCP server exposes ``search_data``, ``get_artifact``, and
+    ``list_domains`` tools automatically when a ``catalog.yaml`` is
+    configured. No separate agent-side tool setup is needed — the tools
+    are auto-discovered when connecting to the MCP server.
 
-    Returns ``None`` if the data lake isn't configured — letting the tutorial
-    still demonstrate the agent loop with just the chemistry tool.
+    Returns ``None`` — catalog tools come from the MCP server connection.
     """
-    from data_lake.tools.adapters.maf import (
-        create_data_lake_search_tool,
-        is_data_lake_configured,
+    LOGGER.info(
+        "Step B: data catalog search is now server-side. "
+        "Tools (search_data, get_artifact, list_domains) are auto-discovered "
+        "from the MCP server when catalog.yaml is configured."
     )
-
-    if not is_data_lake_configured():
-        LOGGER.warning(
-            "Step B: DATA_LAKE_SEARCH_ENDPOINT not set — skipping data lake tool. "
-            "Set it in .env to enable catalog search."
-        )
-        return None
-
-    tool = await create_data_lake_search_tool()
-    LOGGER.info("Step B: built data lake search tool")
-    return tool
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -188,8 +177,8 @@ def step_d_build_agent(chat_client, tools):
         "You are a chemistry research assistant.\n"
         "\n"
         "MCP tools available to you:\n"
-        "  * search_data_lake_catalog — discover datasets in the data lake.\n"
-        "      Call with a `query` string and optional `domains`/`tags`.\n"
+        "  * search_data — discover datasets in the catalog.\n"
+        "      Call with a `query` string and optional `domain` filter.\n"
         "  * execute_chemistry_code — run Python in a kernel with RDKit\n"
         "      pre-imported (`Chem`, `Descriptors`, `AllChem`,\n"
         "      `rdMolDescriptors`, `np`, `pd`).\n"
@@ -208,7 +197,7 @@ def step_d_build_agent(chat_client, tools):
         "Each returns a dict; prefer them over hand-rolled RDKit code.\n"
         "\n"
         "General workflow:\n"
-        "  1. If the user asks about datasets, call search_data_lake_catalog.\n"
+        "  1. If the user asks about datasets, call search_data.\n"
         "  2. For chemistry work, call execute_chemistry_code. Inside the\n"
         "     code, call the typed helpers above (e.g.\n"
         "     `result = filter_drug_candidates([...], rules='lipinski')`)\n"
@@ -278,10 +267,7 @@ async def main() -> int:
 
     tools = [t for t in (data_lake_tool, chemistry_tool) if t is not None]
     if not tools:
-        LOGGER.error(
-            "No tools available. Configure the data lake and/or start the "
-            "chemistry MCP server, then re-run."
-        )
+        LOGGER.error("No tools available. Configure the data lake and/or start the chemistry MCP server, then re-run.")
         return 1
 
     agent = step_d_build_agent(chat_client, tools)
