@@ -42,7 +42,7 @@ state-graph workflow.
 
 - [`uv`](https://github.com/astral-sh/uv) installed.
 - An LLM you can call. The default path is **Azure OpenAI via Entra ID**
-  (run `az login` first), but the BYO-LLM factory in [llm.py](llm.py) also
+  (run `az login` first), but the BYO-LLM factory in [chat_client.py](chat_client.py) also
   supports Azure OpenAI API keys, OpenAI, and Ollama — see Step A.
 - `.env` populated at the repo root. Copy entries from
   [.env.example](.env.example) and the repo-level
@@ -62,10 +62,6 @@ state-graph workflow.
     below.
   - Leave both unset to skip Step B entirely; the script logs a skip
     message and runs with chemistry tools only.
-- **Azure resources for tool-learning middleware** — only used by the
-  optional [middleware variant](#optional-middleware-variant); see that
-  section for details.
-
 You need **at least one of** the data lake or the chemistry MCP server
 configured for the agent to have any tools to call.
 
@@ -132,9 +128,11 @@ own function so you can map README sections to code.
 ### Step A — Build the chat client (BYO LLM)
 
 [`step_a_chat_client`](agent.py) calls `build_chat_client()` from
-[llm.py](llm.py). agora-workbench is **BYO LLM**: any object that satisfies
-MAF's `ChatClient` protocol works. The tutorial factory dispatches on
-`$LLM_PROVIDER`:
+[chat_client.py](chat_client.py). agora-workbench is **BYO LLM**: any object that satisfies
+MAF's `ChatClient` protocol works. The tutorial factory is a thin wrapper around
+the framework-agnostic [`ModelSpec`](../../../src/llm/spec.py) +
+[`make_maf_client`](../../../src/llm/factories/maf.py) abstraction in `src/llm/`,
+and dispatches on `$LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
 | --- | --- | --- | --- |
@@ -325,79 +323,12 @@ BM25 over the YAML's `name`/`description`/`tags` fields. Schema details
 and how to point `storage_url` at real files (local FS, mounted volume,
 Azurite) are in [`src/data_lake/README.md`](../../../src/data_lake/README.md#local-development-no-azure-credentials).
 
-## Optional: middleware variant
-
-[`agent_with_middleware.py`](agent_with_middleware.py) is a sibling script
-that wires the same agent with three pieces of agora-workbench middleware.
-It demonstrates the **framework-agnostic protocol + MAF adapter** pattern:
-the middleware classes live in [`src/middleware/`](../../../src/middleware/)
-and implement protocols defined in
-[`src/middleware/protocols/`](../../../src/middleware/protocols/); a thin
-adapter ([`maf_protocols.py`](../../../src/middleware/decision_log/adapters/maf_protocols.py))
-wraps each one for use as a native MAF middleware or context provider.
-
-```bash
-uv run python docs/tutorials/maf_quickstart/agent_with_middleware.py
-```
-
-### What it adds on top of `agent.py`
-
-| Step | Component | What it does |
-| --- | --- | --- |
-| **F** | [`DecisionLogChatMiddleware`](../../../src/middleware/decision_log/adapters/) | Observes every LLM round-trip and asynchronously synthesises a one-line "what did the agent decide" entry into a shared `DecisionLog`. |
-| **F** | [`DecisionLogContextProvider`](../../../src/middleware/decision_log/adapters/) | Before each agent run, prepends the accumulated log as a `<decision_log>` system message so the agent can see its own history. Flushes the synthesis queue first so nothing is missed. |
-| **G** | [`VignetteFunctionMiddleware`](../../../src/middleware/tool_learning/adapters/maf_function.py) | Wraps every tool call to (a) check anti-pattern guardrails before execution, and (b) attempt repair using stored vignettes when a tool call fails. Read-only by default (`write_vignettes=False`). |
-| **D'** | `step_d_build_agent_with_middleware` | Re-builds the agent with the `middleware=` and `context_providers=` kwargs alongside `tools=`. Reuses the system prompt (including the injected `SKILL.md`) from `step_d_build_agent`. |
-
-### Graceful degradation
-
-Each middleware is optional and the script degrades cleanly:
-
-- Step F always runs — `DecisionLogChatMiddleware` only needs the same chat
-  client the agent already uses (it issues a small synthesis call per
-  round-trip).
-- Step G is skipped with an `INFO` log when both
-  `TOOL_LEARNING_SEARCH_ENDPOINT` and `TOOL_LEARNING_TABLE_ENDPOINT` are
-  unset. With only Search configured (`write_vignettes=False`) the
-  pre-call guardrail and post-failure repair paths still work; Azure
-  Tables is only required when `write_vignettes=True`. Tracking issue:
-  [#77](https://github.com/microsoft/agora-workbench/issues/77).
-- Steps B and C degrade exactly as in [agent.py](agent.py).
-
-### What you'll see in a successful run
-
-After the usual `AGENT:` block, the script flushes pending synthesis with
-`await chat_mw.flush()` and prints the captured log:
-
-```
-======================================================================
-DECISION LOG (captured by DecisionLogChatMiddleware)
-======================================================================
-[2026-05-08T16:48:37Z] chem_quickstart_agent: Searched the data lake for
-chemistry datasets and evaluated four molecules for Lipinski compliance,
-finding three passes and atorvastatin failing.
-  Evidence: search_query=chemistry, screening_rule=Lipinski drug-likeness,
-  pass_molecules=aspirin, caffeine, ibuprofen, fail_molecule=atorvastatin,
-  failure_reasons=MW = 558.65 (>= 500); LogP = 6.31 (>= 5)
-```
-
-One entry per LLM round-trip; expect 2–3 per run.
-
-### Why this pattern matters
-
-Because the protocols ([`ChatMiddleware`](../../../src/middleware/protocols/middleware.py),
-`FunctionMiddleware`, `ContextProvider`) are framework-agnostic, the same
-`DecisionLogChatMiddleware` instance can be plugged into any agent runtime
-that implements the protocol — only the adapter changes. This keeps
-agora-workbench middleware portable across MAF, Semantic Kernel, custom
-loops, etc.
-
 ## Troubleshooting
 
 | Symptom | Likely cause |
 | --- | --- |
 | `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
-| `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [llm.py](llm.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
+| `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [chat_client.py](chat_client.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
 | `BadRequest: API version not supported` from `/responses` | The Responses API on your endpoint doesn't accept the configured `API_VERSION`. Try `API_VERSION="preview"` (some internal gateways only accept floating tags; public AOAI typically wants a dated preview like `2025-04-01-preview`). |
 | `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
 | `Bind for 127.0.0.1:8020 failed: port is already allocated` | A previous chemistry container (or unrelated process) is still holding the port. Find it with `docker ps \| grep 8020` and remove with `docker rm -f <name>`, then retry `docker compose up -d`. |
@@ -423,9 +354,6 @@ working, layer in:
   [`tools/search/adapters/maf_core.py`](../../../src/tools/search/adapters/maf_core.py).
 - **Planning tools** — give the agent a persistent step ledger. See
   [`planning/adapters/maf.py`](../../../src/planning/adapters/maf.py).
-- **Middleware** — see the [Optional: middleware variant](#optional-middleware-variant)
-  section above for `DecisionLogChatMiddleware`,
-  `DecisionLogContextProvider`, and `VignetteFunctionMiddleware`.
 - **Local data lake** — when [PR #67](https://github.com/microsoft/agora-workbench/pull/67)
   lands, swap `DefaultDataLakeSearchBackend` for `LocalDataLakeSearchBackend`
   and run fully offline.

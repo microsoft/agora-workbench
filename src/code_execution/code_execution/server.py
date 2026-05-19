@@ -247,35 +247,10 @@ class CodeExecutionServer:
 
         self.mcp = FastMCP(f"{environment_config.name}-executor")
 
-        # FastMCP Middleware Ordering
         # AssetResolutionMiddleware resolves tagged asset references before Pydantic validation.
         self.mcp.add_middleware(AssetResolutionMiddleware(self))
 
-        # ToolLearningMiddleware observes domain tool call results and provides
-        # repair guidance on failures.  Gracefully no-ops when not configured.
-        self._setup_tool_learning_middleware()
-
         self._setup_tools()
-
-    def _setup_tool_learning_middleware(self) -> None:
-        """Register ToolLearningMiddleware if tool-learning config is available."""
-        try:
-            from .tool_learning_middleware import ToolLearningConfig, ToolLearningMiddleware
-
-            config = ToolLearningConfig.from_env()
-            if not config.table_storage_endpoint and not config.search_endpoint:
-                LOGGER.debug("ToolLearningMiddleware: no backends configured, skipping.")
-                return
-
-            from azure.identity import ManagedIdentityCredential
-
-            mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
-            credential = ManagedIdentityCredential(client_id=mi_client_id)
-
-            self.mcp.add_middleware(ToolLearningMiddleware(self, config=config, credential=credential))
-            LOGGER.info("ToolLearningMiddleware registered on %s", self.environment_config.name)
-        except Exception as exc:
-            LOGGER.debug("ToolLearningMiddleware not registered: %s", exc)
 
     # ========================================================================
     # Environment Building

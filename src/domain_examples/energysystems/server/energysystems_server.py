@@ -14,9 +14,15 @@ See the README for full instructions.
 
 import asyncio
 import os
+from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig
+from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
+from domain_examples.energysystems.tools import ENERGYSYSTEMS_TOOLS
+
+# Path to the energysystems_tools package (relative to this file so it works
+# both inside Docker and when running locally from the repo root).
+_ENERGYSYSTEMS_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "energysystems_tools")
 
 ENVIRONMENT_YML = """\
 name: energysystems
@@ -60,6 +66,11 @@ config = EnvironmentConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
+    additional_commands=[
+        # Install the energysystems_tools package into the conda environment
+        # so that tool proxy imports resolve correctly inside the kernel.
+        f"python -m pip install --no-deps {_ENERGYSYSTEMS_TOOLS_PKG}",
+    ],
 )
 
 
@@ -91,8 +102,14 @@ class EnergySystemsServer(CodeExecutionServer):
         return "".join(lines[:insert_at]) + PYPSA_PRELUDE + "".join(lines[insert_at:])
 
 
+# Build the tool registry from domain tool definitions
+tool_registry = ToolRegistry()
+for tool_def in ENERGYSYSTEMS_TOOLS:
+    tool_registry.register_tool(tool_def)
+
 server = EnergySystemsServer(
     environment_config=config,
+    tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )
 
