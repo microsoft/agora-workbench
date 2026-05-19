@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Agora Activity (placeholder)</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        margin: 0;
+        padding: 20px;
+        background: #0d1117;
+        color: #c9d1d9;
+      }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .sub { color: #8b949e; margin-bottom: 16px; }
+      .event {
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        padding: 10px 12px;
+      }
+      .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+      .badge {
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        background: #1f6feb33;
+        color: #79c0ff;
+      }
+      .server { color: #d2a8ff; }
+      .ts { color: #6e7681; font-size: 12px; margin-left: auto; }
+      .desc { margin-top: 4px; color: #c9d1d9; }
+      details { margin-top: 6px; }
+      summary { cursor: pointer; color: #58a6ff; font-size: 12px; }
+      pre {
+        background: #161b22;
+        border: 1px solid #30363d;
+        padding: 8px;
+        overflow-x: auto;
+        font-size: 12px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .empty { color: #6e7681; font-style: italic; }
+      .ok { color: #56d364; }
+      .fail { color: #f85149; }
+    </style>
+  </head>
+  <body>
+    <h1>Agora Activity</h1>
+    <div class="sub">
+      Placeholder feed — React UI lands later. Live events stream via SSE
+      from <code>/stream</code>; recent history at <code>/events/recent</code>.
+    </div>
+    <div id="feed">
+      <div class="empty">Waiting for events…</div>
+    </div>
+
+    <script>
+      const feed = document.getElementById('feed');
+      let hasEvents = false;
+
+      function fmtTs(t) {
+        const d = new Date(t * 1000);
+        return d.toLocaleTimeString();
+      }
+
+      function renderEvent(e) {
+        if (!hasEvents) {
+          feed.innerHTML = '';
+          hasEvents = true;
+        }
+        const wrap = document.createElement('div');
+        wrap.className = 'event';
+
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = `
+          <span class="badge">${e.type}</span>
+          <span class="server">${e.server || '?'}</span>
+          ${typeof e.success === 'boolean'
+            ? `<span class="${e.success ? 'ok' : 'fail'}">${e.success ? '✓' : '✗'}</span>`
+            : ''}
+          <span class="ts">${fmtTs(e.timestamp)}</span>
+        `;
+        wrap.appendChild(row);
+
+        if (e.description) {
+          const d = document.createElement('div');
+          d.className = 'desc';
+          d.textContent = e.description;
+          wrap.appendChild(d);
+        }
+
+        const expandable = ['code', 'stdout', 'stderr', 'error', 'tool_calls'];
+        for (const k of expandable) {
+          const v = e[k];
+          if (v === null || v === undefined) continue;
+          if (typeof v === 'string' && v === '') continue;
+          if (Array.isArray(v) && v.length === 0) continue;
+          const det = document.createElement('details');
+          const sum = document.createElement('summary');
+          sum.textContent = k;
+          det.appendChild(sum);
+          const pre = document.createElement('pre');
+          pre.textContent = typeof v === 'string' ? v : JSON.stringify(v, null, 2);
+          det.appendChild(pre);
+          wrap.appendChild(det);
+        }
+
+        // Newest first.
+        feed.insertBefore(wrap, feed.firstChild);
+      }
+
+      // Replay buffer first so a refresh doesn't lose context.
+      fetch('/events/recent')
+        .then((r) => r.json())
+        .then((events) => {
+          events.forEach(renderEvent);
+        })
+        .catch((err) => console.error('recent fetch failed', err));
+
+      const es = new EventSource('/stream');
+      es.addEventListener('activity', (msg) => {
+        try {
+          renderEvent(JSON.parse(msg.data));
+        } catch (err) {
+          console.error('bad event', err, msg.data);
+        }
+      });
+      es.addEventListener('error', () => {
+        // EventSource auto-reconnects; just log.
+        console.warn('SSE connection error');
+      });
+    </script>
+  </body>
+</html>
