@@ -1,17 +1,22 @@
-"""Persistent Azure AI Search backend for server-side tool search."""
+"""Ephemeral Azure AI Search backend for server-side tool search."""
 
 from __future__ import annotations
 
+import atexit
 import asyncio
+import functools
 import hashlib
 import inspect
 import logging
 import os
 import re
+import uuid
 from typing import Any
 
 import httpx
+from azure.core.exceptions import ResourceNotFoundError
 from azure.search.documents.aio import SearchClient
+from azure.search.documents.indexes import SearchIndexClient as SyncSearchIndexClient
 from azure.search.documents.indexes.aio import SearchIndexClient
 from azure.search.documents.indexes.models import (
     HnswAlgorithmConfiguration,
@@ -29,7 +34,12 @@ from azure.search.documents.indexes.models import (
 )
 from azure.search.documents.models import VectorizedQuery
 
-from utilities.auth import BearerTokenAuth, get_search_credential_async, get_token_provider
+from utilities.auth import (
+    BearerTokenAuth,
+    get_search_credential,
+    get_search_credential_async,
+    get_token_provider,
+)
 from utilities.tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult
 
 from ._constants import (
@@ -74,22 +84,42 @@ def _tool_embedding_text(tool: ToolInfo) -> str:
 
 
 def _sanitize_index_name(server_name: str) -> str:
-    """Normalize a server name into a valid Azure AI Search index name."""
+    """Normalize a server name into a valid Azure AI Search index slug."""
     normalized = re.sub(r"[^a-z0-9-]", "-", server_name.lower())
     normalized = re.sub(r"-+", "-", normalized).strip("-")
-    if not normalized:
-        normalized = "default"
-    base = f"tool-search-{normalized}"
-    if len(base) <= 128:
-        return base
-    suffix = hashlib.sha256(server_name.encode("utf-8")).hexdigest()[:8]
-    return f"{base[:119].rstrip('-')}-{suffix}"
+    return normalized or "default"
+
+
+def _build_ephemeral_index_name(server_name: str) -> str:
+    """Build a unique per-instance Azure AI Search index name."""
+    base = f"tool-search-{_sanitize_index_name(server_name)}"
+    suffix = uuid.uuid4().hex[:8]
+    if len(base) > 119:
+        base = base[:119].rstrip("-")
+    return f"{base}-{suffix}"
+
+
+def _delete_index_at_exit(endpoint: str, index_name: str) -> None:
+    """Best-effort synchronous index deletion for interpreter shutdown."""
+    credential = get_search_credential()
+    client = SyncSearchIndexClient(endpoint=endpoint, credential=credential)
+    try:
+        client.delete_index(index_name)
+    except ResourceNotFoundError:
+        return
+    except Exception:
+        LOGGER.warning("Failed to delete Azure AI Search index '%s' during interpreter shutdown", index_name)
+    finally:
+        client.close()
+        close_credential = getattr(credential, "close", None)
+        if callable(close_credential):
+            close_credential()
 
 
 class AzureAIToolSearchBackend(ToolSearchBackend):
     """Azure AI Search implementation of ToolSearchBackend.
 
-    Creates a persistent search index per server and performs hybrid
+    Creates an ephemeral search index per server instance and performs hybrid
     (keyword + vector + semantic) retrieval with automatic fallback.
 
     Required environment variables:
@@ -109,16 +139,18 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         derived_server_name = server_name or (tools[0].server_name if tools else "default")
         self._tools = tools
         self.server_name = derived_server_name
-        self.index_name = index_name or _sanitize_index_name(derived_server_name)
+        self.index_name = index_name or _build_ephemeral_index_name(derived_server_name)
         self.endpoint = endpoint or os.getenv(TOOL_SEARCH_ENDPOINT_ENV)
         self._credential = get_search_credential_async()
         self._index_client: SearchIndexClient | None = None
         self._search_client: SearchClient | None = None
         self._http_client: httpx.AsyncClient | None = None
+        self._atexit_cleanup: Any | None = None
+        self._index_created = False
         self._initialized = False
 
     async def initialize(self) -> None:
-        """Create/update the index and upload tool documents. Call once at startup."""
+        """Create a fresh index and upload tool documents. Call once at startup."""
         if self._initialized:
             return
 
@@ -132,6 +164,8 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
         self._index_client = SearchIndexClient(endpoint=self.endpoint, credential=self._credential)
         await self._index_client.create_or_update_index(self._build_index(embedding_dimensions))
+        self._index_created = True
+        self._register_atexit_cleanup()
 
         self._search_client = SearchClient(
             endpoint=self.endpoint,
@@ -142,10 +176,14 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
             await self._search_client.merge_or_upload_documents(documents=documents)
 
         self._initialized = True
-        LOGGER.info("Azure AI Search tool index '%s' synced with %d tools", self.index_name, len(self._tools))
+        LOGGER.info(
+            "Azure AI Search tool index '%s' created for this server instance with %d tools",
+            self.index_name,
+            len(self._tools),
+        )
 
     async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
-        """Search the persistent Azure AI Search tool index."""
+        """Search the ephemeral Azure AI Search tool index."""
         if top <= 0:
             return []
         if not self._initialized:
@@ -189,7 +227,16 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         return await self._collect_results(results)
 
     async def close(self) -> None:
-        """Close network clients without deleting the persistent index."""
+        """Delete the ephemeral index and close associated network clients."""
+        self._unregister_atexit_cleanup()
+        if self._index_client is not None and self._index_created:
+            try:
+                await self._index_client.delete_index(self.index_name)
+            except ResourceNotFoundError:
+                pass
+            except Exception:
+                LOGGER.warning("Failed to delete Azure AI Search index '%s' during shutdown", self.index_name)
+            self._index_created = False
         await self._close_resource(self._search_client)
         await self._close_resource(self._index_client)
         await self._close_resource(self._http_client)
@@ -198,6 +245,28 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         self._index_client = None
         self._http_client = None
         self._initialized = False
+
+    async def cleanup(self) -> None:
+        """Alias for :meth:`close` to make lifecycle management explicit."""
+        await self.close()
+
+    def _register_atexit_cleanup(self) -> None:
+        """Register best-effort interpreter-shutdown cleanup for the ephemeral index."""
+        if self._atexit_cleanup is not None or not self.endpoint:
+            return
+        self._atexit_cleanup = functools.partial(
+            _delete_index_at_exit,
+            endpoint=self.endpoint,
+            index_name=self.index_name,
+        )
+        atexit.register(self._atexit_cleanup)
+
+    def _unregister_atexit_cleanup(self) -> None:
+        """Unregister the interpreter-shutdown cleanup hook if present."""
+        if self._atexit_cleanup is None:
+            return
+        atexit.unregister(self._atexit_cleanup)
+        self._atexit_cleanup = None
 
     def _build_index(self, embedding_dimensions: int) -> SearchIndex:
         """Construct the Azure AI Search index schema."""
