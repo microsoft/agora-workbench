@@ -39,7 +39,6 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync
-          uv pip install pytest pytest-json-report
       
       - name: Run auth tests
         id: auth_tests
