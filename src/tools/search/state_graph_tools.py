@@ -20,7 +20,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from tools.search.build_tool_list import ToolInfo
+from utilities.tool_search import ToolInfo
 from tools.search.state_graph import StateGraph, _discover_skills, _DOMAINS_DIR
 from tools.tool_descriptor import ToolDescriptor
 
@@ -90,9 +90,9 @@ def create_query_state_graph_descriptor(
     Parameters
     ----------
     tools : list[ToolInfo] | None
-        Tool metadata (typically from :func:`build_tool_list`).
-        If ``None``, the graph will lazily discover tools from MCP
-        servers on first query so that domain meta-tools are available.
+        Tool metadata to index in the state graph.  Defaults to an empty
+        list (no state-annotated tools).  When used server-side, pass the
+        server's own tool catalog converted to :class:`~utilities.tool_search.ToolInfo`.
     domains_dir : Path
         Root of the ``domains/`` directory tree.
     extra_skill_dirs : list[Path] | None
@@ -103,22 +103,12 @@ def create_query_state_graph_descriptor(
     ToolDescriptor
         Named ``query_state_graph``.
     """
-    _graph_holder: dict[str, StateGraph | None] = {"graph": None}
-
-    if tools is not None:
-        _graph_holder["graph"] = StateGraph(tools, domains_dir, extra_skill_dirs)
+    if tools is None:
+        tools = []
+    graph = StateGraph(tools, domains_dir, extra_skill_dirs)
 
     async def _ensure_graph() -> StateGraph:
-        if _graph_holder["graph"] is None:
-            from tools.search.build_tool_list import build_tool_list
-
-            discovered = await build_tool_list()
-            _graph_holder["graph"] = StateGraph(discovered, domains_dir, extra_skill_dirs)
-            LOGGER.info(
-                "StateGraph lazily built with %d state-annotated tools",
-                len([t for t in discovered if t.state_requires or t.state_produces]),
-            )
-        return _graph_holder["graph"]
+        return graph
 
     async def query_state_graph(
         domain: str = "",

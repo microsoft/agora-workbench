@@ -110,15 +110,12 @@ class TestQueryStateGraphDescriptor:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_lazy_graph_build(self):
-        """When tools=None, graph is lazily built on first call."""
-        with patch("tools.search.build_tool_list.build_tool_list") as mock_build:
-            mock_build.return_value = []
-            descriptor = create_query_state_graph_descriptor(tools=None)
-            raw = await descriptor.func(domain="", mode="overview")
-            parsed = json.loads(raw)
-            assert isinstance(parsed, dict)
-            mock_build.assert_called_once()
+    async def test_none_tools_defaults_to_empty(self):
+        """When tools=None, the graph is built with an empty tool list."""
+        descriptor = create_query_state_graph_descriptor(tools=None)
+        raw = await descriptor.func(domain="", mode="overview")
+        parsed = json.loads(raw)
+        assert isinstance(parsed, dict)
 
 
 # ---------------------------------------------------------------------------

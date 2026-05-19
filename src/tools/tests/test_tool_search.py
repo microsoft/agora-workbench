@@ -100,17 +100,3 @@ class TestToolSearchBackendABC:
 
         backend = BM25ToolSearchBackend(tools=[])
         assert isinstance(backend, ToolSearchBackend)
-
-    @pytest.mark.unit
-    def test_azure_backend_is_subclass(self):
-        """AzureAIToolSearchBackend inherits from ToolSearchBackend."""
-        from unittest.mock import patch, MagicMock
-
-        with patch(
-            "tools.search.azure_ai_tool_search.get_search_credential_async",
-            return_value=MagicMock(),
-        ):
-            from tools.search.azure_ai_tool_search import AzureAIToolSearchBackend
-
-            backend = AzureAIToolSearchBackend("test-index")
-            assert isinstance(backend, ToolSearchBackend)

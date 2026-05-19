@@ -3,13 +3,14 @@ State graph for workflow-oriented tool and skill discovery.
 
 The graph is built from two sources:
 
-1. Tool state transitions (via :func:`build_tool_list`)
+1. Tool state transitions supplied via :class:`~utilities.tool_search.ToolInfo` metadata
 2. Skill state annotations (``states`` field in SKILL.md frontmatter)
 """
 
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import re
 from collections import defaultdict
@@ -19,7 +20,7 @@ from typing import Any, Optional
 
 import yaml
 
-from tools.search.build_tool_list import ToolInfo
+from utilities.tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult
 
 LOGGER = logging.getLogger(__name__)
 
@@ -427,3 +428,95 @@ class StateGraph:
         return result
 
 
+# ============================================================================
+# StateGraph as a ToolSearchBackend
+# ============================================================================
+
+
+class StateGraphToolSearchBackend(ToolSearchBackend):
+    """A :class:`~utilities.tool_search.ToolSearchBackend` backed by a :class:`StateGraph`.
+
+    Searches the state graph using keyword matching against tool names,
+    descriptions, required states, and produced states.  Results include
+    state-transition metadata that helps the agent plan multi-step workflows.
+
+    This backend is designed for server-side use alongside
+    :class:`~tools.search.bm25_tool_search.BM25ToolSearchBackend`.  When
+    registered together they provide complementary views of the tool catalog:
+    BM25 gives fast text-similarity search while this backend surfaces
+    workflow-oriented structure.
+
+    Args:
+        graph: A pre-built :class:`StateGraph` over the server's domain tools.
+    """
+
+    def __init__(self, graph: StateGraph) -> None:
+        super().__init__()
+        self._graph = graph
+
+    async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
+        """Search the state graph for tools relevant to *query*.
+
+        Scores each state-annotated tool by counting how many tokens from
+        *query* appear in the concatenated text of its name, description,
+        required states, and produced states.  Returns the top-*top* hits
+        in descending score order.
+
+        Args:
+            query: Natural-language description or tool name.
+            top: Maximum number of results to return.
+
+        Returns:
+            List of :class:`~utilities.tool_search.ToolSearchResult` ordered
+            by descending relevance.  May include fewer than *top* results if
+            the graph has few state-annotated tools.
+        """
+        if not query:
+            return []
+
+        query_tokens = set(re.findall(r"[a-z0-9_]+", query.lower()))
+        if not query_tokens:
+            return []
+
+        scored: list[tuple[ToolInfo, float]] = []
+        for tool in self._graph._tools:
+            text = (
+                f"{tool.name} {tool.description} "
+                f"{' '.join(tool.state_requires)} {' '.join(tool.state_produces)} "
+                f"{' '.join(tool.affordances)}"
+            )
+            tool_tokens = set(re.findall(r"[a-z0-9_]+", text.lower()))
+            score = float(len(query_tokens & tool_tokens))
+            if score > 0:
+                scored.append((tool, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        results: list[ToolSearchResult] = []
+        for tool, score in scored[:top]:
+            results.append(
+                ToolSearchResult(
+                    name=tool.name,
+                    server_name=tool.server_name,
+                    description=tool.description,
+                    execution_type="mcp",
+                    score=score,
+                    state_requires=list(tool.state_requires),
+                    state_produces=list(tool.state_produces),
+                )
+            )
+        return results
+
+    def overview_json(self, domain: str = "") -> str:
+        """Return the full state-graph overview as a JSON string.
+
+        This is equivalent to calling ``query_state_graph`` with
+        ``mode='overview'`` and subsumes the old ``list_{name}_domain_tools``
+        meta-tool when ``top=999`` is used on the search tool.
+
+        Args:
+            domain: Filter to a specific domain, or empty for all domains.
+
+        Returns:
+            JSON string of the overview dict.
+        """
+        return json.dumps(self._graph.overview(domain))

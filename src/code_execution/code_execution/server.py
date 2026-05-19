@@ -548,9 +548,12 @@ class CodeExecutionServer:
         # Setup general code execution tool
         self._setup_code_execution_tool()
 
-        # Expose domain tool catalog as an MCP meta-tool for tool search discovery
         if self.tool_registry:
-            self._setup_domain_tools_meta_tool()
+            # Register server-side BM25 tool search (search_{name}_tools)
+            self._setup_search_tool()
+
+            # Register state-graph and skill tools if state-annotated tools exist
+            self._setup_state_graph_tool()
 
         # Setup session management meta tools (prefixed with server name for uniqueness)
         register_session_meta_tools(
@@ -985,9 +988,11 @@ class CodeExecutionServer:
     def _setup_domain_tools_meta_tool(self) -> None:
         """Register an MCP tool that returns the domain tool catalog as structured JSON.
 
-        This tool is used by the tool search layer to discover what domain tools
-        are available on this server, without requiring individual MCP tool
-        registration for each domain tool.
+        .. deprecated::
+            This method is superseded by :meth:`_setup_search_tool`, which registers
+            ``search_{name}_tools`` as an MCP tool.  Calling ``search_{name}_tools``
+            with ``top=999`` replicates the full catalog listing that this tool
+            previously provided.  This method will be removed in a future release.
         """
         tool_name = f"list_{self.environment_config.name}_domain_tools"
         registry = self.tool_registry
@@ -1058,6 +1063,200 @@ class CodeExecutionServer:
 
         self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
             list_domain_tools
+        )
+
+    def _build_tool_infos(self) -> "list[Any]":
+        """Convert the server's :class:`~tool_registry.ToolRegistry` entries to
+        :class:`~utilities.tool_search.ToolInfo` objects suitable for indexing.
+
+        Returns an empty list when no tool registry is configured.
+        """
+        from utilities.tool_search import ToolInfo
+
+        if not self.tool_registry:
+            return []
+
+        server_name = self.environment_config.name
+
+        # Load state→affordance phrases from the domain's states module (if present).
+        state_aff_lookup: dict[str, list[str]] = {}
+        try:
+            mod = importlib.import_module(f"domains.{server_name}.states")
+            raw = getattr(mod, "STATE_AFFORDANCES", {})
+            state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
+        except (ImportError, AttributeError):
+            pass
+
+        infos: list[ToolInfo] = []
+        for td in self.tool_registry.tools:
+            # Merge state-derived affordances (from produced states) with tool-specific ones.
+            aff: list[str] = []
+            seen_aff: set[str] = set()
+            for state_token in sorted(td.state_transition.produces):
+                for phrase in state_aff_lookup.get(state_token, []):
+                    key = phrase.strip().lower()
+                    if key not in seen_aff:
+                        seen_aff.add(key)
+                        aff.append(phrase)
+            for phrase in td.affordances:
+                key = phrase.strip().lower()
+                if key not in seen_aff:
+                    seen_aff.add(key)
+                    aff.append(phrase)
+
+            infos.append(
+                ToolInfo(
+                    name=td.name,
+                    description=td.description,
+                    server_name=server_name,
+                    affordances=tuple(aff),
+                    state_requires=tuple(sorted(td.state_transition.requires)),
+                    state_produces=tuple(sorted(td.state_transition.produces)),
+                )
+            )
+        return infos
+
+    def _setup_search_tool(self) -> None:
+        """Register ``search_{name}_tools`` as an MCP tool on this server.
+
+        Builds a BM25 index at startup over the server's own tool catalog
+        (from :attr:`tool_registry`).  The index is shared across all sessions
+        and rebuilt on each server restart.
+
+        The registered tool is named ``search_{server_name}_tools`` so that
+        agents can distinguish catalogs when connected to multiple servers.
+
+        **Replacing** ``list_{name}_domain_tools``:
+        Call ``search_{server_name}_tools`` with ``query=""`` and ``top=999``
+        to retrieve the full domain tool catalog in ranked order.
+        """
+        from utilities.tool_search import ToolSearchResult
+        from tools.search.bm25_tool_search import BM25ToolSearchBackend
+
+        server_name = self.environment_config.name
+        tool_name = f"search_{server_name}_tools"
+
+        tool_infos = self._build_tool_infos()
+        backend = BM25ToolSearchBackend(tools=tool_infos)
+
+        LOGGER.info(
+            "Server-side tool search index built for '%s' with %d tools",
+            server_name,
+            len(tool_infos),
+        )
+
+        async def search_server_tools(query: str, top: int = 5) -> str:
+            """Search this server's tool catalog by name or description.
+
+            Args:
+                query: Natural-language description or tool name to search for.
+                    Pass an empty string with ``top=999`` to retrieve the full
+                    catalog (replaces ``list_{name}_domain_tools``).
+                top: Maximum number of results to return (default 5).
+
+            Returns:
+                JSON object with a ``results`` array of matching tools, each
+                containing ``name``, ``server_name``, ``description``,
+                ``execution_type``, ``score``, ``state_requires``, and
+                ``state_produces``.
+            """
+            LOGGER.info(
+                "search_%s_tools called with query=%r top=%d",
+                server_name,
+                query,
+                top,
+            )
+            try:
+                results: list[ToolSearchResult] = await backend.search(query, top)
+                return json.dumps({"results": [r.model_dump() for r in results]})
+            except Exception as exc:
+                LOGGER.error(
+                    "search_%s_tools failed for query %r: %s",
+                    server_name,
+                    query,
+                    exc,
+                    exc_info=True,
+                )
+                return json.dumps({"results": [], "error": f"{type(exc).__name__}: {exc}"})
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                f"Search {server_name} domain tools by name or description. "
+                f"Returns matching tools with relevance scores. "
+                f"Pass an empty query with top=999 to list all {server_name} tools."
+            ),
+        )(search_server_tools)
+
+    def _setup_state_graph_tool(self) -> None:
+        """Register ``query_state_graph`` and ``load_skill`` as MCP tools on this server.
+
+        Builds the domain state graph from the server's own tool catalog
+        so that agents can navigate workflow states without any client-side
+        infrastructure.  Only registered when the server has state-annotated
+        tools (i.e. tools with ``state_requires`` or ``state_produces``).
+        """
+        from tools.search.state_graph import StateGraph, StateGraphToolSearchBackend
+        from tools.search.state_graph_tools import (
+            create_query_state_graph_descriptor,
+            create_load_skill_descriptor,
+        )
+
+        tool_infos = self._build_tool_infos()
+        has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
+
+        if not has_state_tools:
+            LOGGER.debug(
+                "No state-annotated tools found for '%s'; skipping query_state_graph registration.",
+                self.environment_config.name,
+            )
+            return
+
+        graph = StateGraph(tool_infos)
+        _backend = StateGraphToolSearchBackend(graph)  # noqa: F841 — kept for future use
+
+        # Register query_state_graph — explicit parameters so FastMCP can build the schema.
+        qsg_descriptor = create_query_state_graph_descriptor(tools=tool_infos)
+        _qsg_func = qsg_descriptor.func
+
+        async def _query_state_graph(
+            domain: str = "",
+            mode: str = "overview",
+            state: str = "",
+            target_state: str = "",
+            tool_name: str = "",
+        ) -> str:
+            """Query the domain workflow state graph."""
+            return await _qsg_func(
+                domain=domain,
+                mode=mode,
+                state=state,
+                target_state=target_state,
+                tool_name=tool_name,
+            )
+
+        self.mcp.tool(
+            name=qsg_descriptor.name,
+            description=qsg_descriptor.description,
+        )(_query_state_graph)
+
+        # Register load_skill — explicit parameters so FastMCP can build the schema.
+        ls_descriptor = create_load_skill_descriptor()
+        _ls_func = ls_descriptor.func
+
+        async def _load_skill(skill_name: str) -> str:
+            """Load a skill by name."""
+            return await _ls_func(skill_name=skill_name)
+
+        self.mcp.tool(
+            name=ls_descriptor.name,
+            description=ls_descriptor.description,
+        )(_load_skill)
+
+        LOGGER.info(
+            "Registered query_state_graph and load_skill for '%s' (%d state-annotated tools)",
+            self.environment_config.name,
+            len([t for t in tool_infos if t.state_requires or t.state_produces]),
         )
 
     def _setup_transfer_tool(self) -> None:

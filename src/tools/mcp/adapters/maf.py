@@ -23,14 +23,18 @@ LOGGER = logging.getLogger(__name__)
 def create_mcp_tools(mcp_server_name: str) -> "MCPStreamableHTTPTool | None":
     """
     Configure the ``MCPStreamableHTTPTool`` for an MCP code-execution server
-    so that it exposes the core tools (``execute_{name}_code``,
-    ``{name}_list_sessions``, ``{name}_get_session_info``,
-    ``{name}_close_session``, ``{name}_push_object``) that the agent uses
-    directly.
+    so that it exposes the core tools that the agent uses directly:
+
+    - ``execute_{name}_code`` — run Python code in the domain environment
+    - ``search_{name}_tools`` — BM25 search over the server's tool catalog
+    - ``query_state_graph`` — navigate domain workflow states (if registered)
+    - ``load_skill`` — load skill instructions by name (if registered)
+    - ``{name}_list_sessions``, ``{name}_get_session_info``, ``{name}_close_session``
+    - ``{name}_push_object`` — cross-server object transfer
 
     Domain-specific tools are **not** exposed as individual MCP tools.
-    Instead, the agent discovers them via ``search_tools`` and invokes them
-    programmatically inside ``execute_{name}_code``.
+    Instead, the agent discovers them via ``search_{name}_tools`` and invokes
+    them programmatically inside ``execute_{name}_code``.
 
     Session management tools are prefixed with the server name to avoid
     collisions when multiple MCP servers are connected simultaneously.
@@ -58,8 +62,12 @@ def create_mcp_tools(mcp_server_name: str) -> "MCPStreamableHTTPTool | None":
 
     # Session tools are prefixed with server name to avoid collisions
     # (mirrors register_session_meta_tools(name_prefix=...))
+    # search_{name}_tools is now registered server-side and exposed via MCP.
     allowed_tool_names = {
         code_exec_tool_name,
+        f"search_{descriptor.name}_tools",
+        "query_state_graph",
+        "load_skill",
         f"{descriptor.name}_list_sessions",
         f"{descriptor.name}_get_session_info",
         f"{descriptor.name}_close_session",
