@@ -1080,9 +1080,23 @@ class CodeExecutionServer:
                 }
             catalog.append(entry)
         catalog_json = json.dumps(catalog)
+        tool_names_snapshot = [entry["name"] for entry in catalog]
 
-        async def list_domain_tools() -> str:
+        async def list_domain_tools(ctx: Context) -> str:
             """Return a JSON array describing all domain tools available on this server."""
+            session_id = None
+            try:
+                session_id = ctx.session_id
+            except (RuntimeError, AttributeError):
+                pass
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "tools_listed",
+                    "description": f"Agent retrieved tool catalog ({len(tool_names_snapshot)} tools)",
+                    "tool_names": tool_names_snapshot,
+                    "session_id": session_id,
+                }
+            )
             return catalog_json
 
         self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
@@ -1448,6 +1462,7 @@ else:
         code: str,
         timeout: int,
         result_variable: str,
+        batch_id: str,
         semaphore: Optional[asyncio.Semaphore] = None,
     ) -> None:
         """Execute a parallel job in a dedicated session.
@@ -1481,6 +1496,22 @@ else:
                             "result_payload": payload,
                         }
                     )
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "code_executed" if result.success else "code_failed",
+                        "description": f"Parallel job {job_id} {status}",
+                        "code": code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "success": result.success,
+                        "duration_ms": (result.execution_time or 0.0) * 1000.0,
+                        "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                        "error": result.error,
+                        "session_id": session_id,
+                        "job_id": job_id,
+                        "batch_id": batch_id,
+                    }
+                )
             finally:
                 if semaphore is not None:
                     semaphore.release()
@@ -1488,6 +1519,18 @@ else:
         except asyncio.CancelledError:
             async with self._parallel_state_lock:
                 self._parallel_jobs[job_id].update({"status": "cancelled", "completed_at": time.monotonic()})
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} cancelled",
+                    "code": code,
+                    "success": False,
+                    "error": "cancelled",
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
             raise
         except Exception as exc:
             LOGGER.error("Parallel job %s failed: %s", job_id, exc, exc_info=True)
@@ -1499,6 +1542,18 @@ else:
                         "result": CodeExecutionResult(success=False, error=str(exc)).model_dump(),
                     }
                 )
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} failed",
+                    "code": code,
+                    "success": False,
+                    "error": str(exc),
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
 
     async def _cleanup_parallel_batch_sessions(self, batch_id: str) -> None:
         """Close child sessions for a completed/cancelled batch once."""
@@ -1675,6 +1730,7 @@ else:
                         code=full_code,
                         timeout=timeout,
                         result_variable=result_variable,
+                        batch_id=batch_id,
                         semaphore=self._parallel_semaphore,
                     )
                 )

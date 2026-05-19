@@ -239,9 +239,9 @@ def step_d_build_agent(chat_client, tools):
 # ---------------------------------------------------------------------------
 async def step_e_run(agent):
     prompt = (
-        "Look for chemistry datasets in the data lake (one short query). "
+        "First, list all the chemistry domain tools. Look for chemistry datasets in the data lake (one short query). "
         "Then, regardless of what's in the catalog, screen this small library "
-        "of well-known molecules for drug-likeness. Inside execute_chemistry_code "
+        "of well-known molecules for drug-likeness. Run things in parallel inside:  execute_chemistry_code "
         "call `filter_drug_candidates(smiles_list, rules='lipinski')` and "
         "`print(result)` so the values come back. Then for each molecule also "
         "call `compute_descriptors(smi)` to get MW + LogP.\n"

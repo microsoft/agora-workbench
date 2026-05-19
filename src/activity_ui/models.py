@@ -10,10 +10,8 @@ from pydantic import BaseModel, Field
 EventType = Literal[
     "code_executed",
     "code_failed",
-    "session_created",
-    "session_closed",
     "job_started",
-    "job_finished",
+    "tools_listed",
     "push_object_sent",
     "push_object_received",
 ]
@@ -42,12 +40,17 @@ class ActivityEvent(BaseModel):
     tool_calls: Optional[list[dict[str, Any]]] = None
     error: Optional[str] = None
 
-    # session lifecycle
+    # set on most events so the UI can group by session
     session_id: Optional[str] = None
 
     # background jobs
     job_id: Optional[str] = None
-    job_status: Optional[str] = None
+
+    # parallel_execute correlation (set on per-child code_executed/code_failed)
+    batch_id: Optional[str] = None
+
+    # tools_listed
+    tool_names: Optional[list[str]] = None
 
     # push_object correlation
     transfer_id: Optional[str] = None
