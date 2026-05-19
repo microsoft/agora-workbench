@@ -192,7 +192,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_carries_state_fields(self):
         """ToolSearchResult should include state_requires and state_produces."""
-        from tools.tool_search import ToolSearchResult
+        from utilities.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -208,7 +208,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_defaults_empty(self):
         """ToolSearchResult state fields should default to empty lists."""
-        from tools.tool_search import ToolSearchResult
+        from utilities.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -224,7 +224,7 @@ class TestPipelinePropagation:
     async def test_bm25_backend_propagates_state_fields(self):
         """BM25 search results should include state transition data from ToolInfo."""
         from utilities.tool_search import ToolInfo
-        from tools.search.bm25_tool_search import BM25ToolSearchBackend
+        from code_execution.tools.search.bm25_tool_search import BM25ToolSearchBackend
 
         tools = [
             ToolInfo(
@@ -252,7 +252,7 @@ class TestStateGraphQueryTool:
 
     def _make_graph(self):  # noqa: F821
         from utilities.tool_search import ToolInfo
-        from tools.search.state_graph import StateGraph
+        from code_execution.tools.search.state_graph import StateGraph
 
         tools = [
             ToolInfo(
@@ -367,7 +367,7 @@ class TestSkillFrontmatter:
     @staticmethod
     def _discover_skills_with_states() -> list[dict]:
         """Find all SKILL.md files with a states field in frontmatter."""
-        from tools.search.state_graph import _discover_skills, _DOMAINS_DIR
+        from code_execution.tools.search.state_graph import _discover_skills, _DOMAINS_DIR
 
         return [s for s in _discover_skills(_DOMAINS_DIR) if s.get("states")]
 

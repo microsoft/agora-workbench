@@ -11,7 +11,7 @@ from planning.tools import (
     create_plan_descriptors,
     create_read_only_descriptors,
 )
-from tools.tool_descriptor import ToolDescriptor
+from code_execution.tools.tool_descriptor import ToolDescriptor
 
 
 @pytest.fixture

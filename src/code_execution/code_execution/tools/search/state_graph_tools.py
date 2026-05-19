@@ -4,9 +4,9 @@ Framework-agnostic descriptor factories for workflow planning and skill-loader t
 Provides:
 
 * :func:`create_plan_workflow_descriptor` — builds the
-  ``plan_{name}_workflow`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+  ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 * :func:`create_load_skill_descriptor` — builds the ``load_{name}_skill``
-  :class:`~tools.tool_descriptor.ToolDescriptor`.
+  :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
 No agent-framework imports.  These tools are registered server-side by
 each MCP server's :meth:`~code_execution.server.CodeExecutionServer._setup_workflow_planning_tools`.
@@ -22,8 +22,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from utilities.tool_search import ToolInfo
-from tools.search.state_graph import StateGraph, _discover_skills, _DOMAINS_DIR
-from tools.tool_descriptor import ToolDescriptor
+from .state_graph import StateGraph, _discover_skills, _DOMAINS_DIR
+from ..tool_descriptor import ToolDescriptor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ def create_plan_workflow_descriptor(
     domains_dir: Path = _DOMAINS_DIR,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
-    """Create a ``plan_{name}_workflow`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+    """Create a ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
     Parameters
     ----------
@@ -167,7 +167,7 @@ def create_load_skill_descriptor(
     domains_dir: Path = _DOMAINS_DIR,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
-    """Create a ``load_{name}_skill`` :class:`~tools.tool_descriptor.ToolDescriptor`.
+    """Create a ``load_{name}_skill`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
     The tool reads the full SKILL.md content for a named skill and returns
     it so the agent can follow the skill's instructions.  Skills are

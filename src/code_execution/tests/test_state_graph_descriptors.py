@@ -6,8 +6,8 @@ from unittest.mock import patch
 import pytest
 
 
-from tools.tool_descriptor import ToolDescriptor
-from tools.search.state_graph_tools import (
+from code_execution.tools.tool_descriptor import ToolDescriptor
+from code_execution.tools.search.state_graph_tools import (
     PlanWorkflowInput,
     LoadSkillInput,
     create_plan_workflow_descriptor,
@@ -161,7 +161,7 @@ class TestLoadSkillDescriptor:
     @pytest.mark.asyncio
     async def test_missing_skill_returns_error_with_available(self):
         with patch(
-            "tools.search.state_graph_tools._discover_skills",
+            "code_execution.tools.search.state_graph_tools._discover_skills",
             side_effect=_fake_discover_skills,
         ):
             descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
@@ -176,7 +176,7 @@ class TestLoadSkillDescriptor:
     @pytest.mark.asyncio
     async def test_read_failure_returns_error(self):
         with patch(
-            "tools.search.state_graph_tools._discover_skills",
+            "code_execution.tools.search.state_graph_tools._discover_skills",
             side_effect=_fake_discover_skills,
         ):
             descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
@@ -198,7 +198,7 @@ class TestLoadSkillDescriptor:
             return [{"name": "test-skill", "abs_path": str(skill_file)}]
 
         with patch(
-            "tools.search.state_graph_tools._discover_skills",
+            "code_execution.tools.search.state_graph_tools._discover_skills",
             side_effect=_discover,
         ):
             descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)

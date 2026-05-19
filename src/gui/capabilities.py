@@ -2,9 +2,8 @@
 
 Scans domains/*/skills/ and planning/skills/ directories for SKILL.md
 files, extracts YAML frontmatter (name + description), and groups them
-by domain.  Only skills whose MCP server is currently registered (healthy
-and authenticated) are returned — so the panel never advertises
-capabilities the agent can't actually use.
+by domain. MCP server registry filtering has been removed for now, so all
+discovered skills are returned.
 
 The frontend uses this to power the Skills Panel and the ``/skills``
 chat command.
@@ -68,24 +67,13 @@ def _extract_frontmatter(text: str) -> tuple[str, str] | None:
 
 
 def _get_active_server_names() -> set[str]:
-    """Return the set of MCP server names that are currently registered.
-
-    Only servers that passed health-check and auth validation during
-    auto-discovery are present in the registry.
-
-    Note: ``list_servers()`` may trigger ``_auto_discover()`` which
-    performs blocking I/O (health checks).  This function is designed
-    to be called via ``asyncio.to_thread`` from async endpoints so it
-    never blocks the event loop.
-    """
-    from tools.mcp import get_mcp_registry
-
-    registry = get_mcp_registry()
-    return set(registry.list_servers().keys())
+    """Return the set of active server names used for skill filtering."""
+    # TODO: MCP server registry removed; skill filtering disabled.
+    return set()
 
 
 def _discover_skills() -> list[dict]:
-    """Walk skill directories and return skills for active MCP servers only.
+    """Walk skill directories and return discovered skills.
 
     Each returned dict has keys: name, description, domain.
     Uses the same directory layout and depth limit as the agent framework's
@@ -112,9 +100,9 @@ def _discover_skills() -> list[dict]:
         else:
             domain = "other"
 
-        # Skip domains whose MCP server is not active.
+        # Skip domains whose MCP server is not active when registry data exists.
         # Planning skills are always shown (no dedicated MCP server).
-        if domain not in ("planning", "other") and domain not in active_servers:
+        if active_servers and domain not in ("planning", "other") and domain not in active_servers:
             LOGGER.debug("Skipping skills for inactive domain '%s'", domain)
             continue
 
@@ -143,11 +131,13 @@ def _search_dir(
             if parsed and parsed[0] not in seen_names:
                 name, description = parsed
                 seen_names.add(name)
-                results.append({
-                    "name": name,
-                    "description": description,
-                    "domain": domain,
-                })
+                results.append(
+                    {
+                        "name": name,
+                        "description": description,
+                        "domain": domain,
+                    }
+                )
 
     if depth >= _MAX_SEARCH_DEPTH:
         return

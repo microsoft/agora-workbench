@@ -2,7 +2,7 @@
 Framework-agnostic planning tool descriptor factories.
 
 Provides factory functions that return
-:class:`~tools.tool_descriptor.ToolDescriptor` objects for the planning tools.
+:class:`~code_execution.tools.tool_descriptor.ToolDescriptor` objects for the planning tools.
 No agent-framework imports — this module can be used with any framework.
 
 MAF users should import from ``planning.adapters.maf`` which wraps these
@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from .models import StepStatus
 from .store import PlanStore
-from tools.tool_descriptor import ToolDescriptor
+from code_execution.tools.tool_descriptor import ToolDescriptor
 
 LOGGER = logging.getLogger(__name__)
 

@@ -1048,7 +1048,7 @@ class CodeExecutionServer:
         Pass ``query=""`` and ``top=999`` to retrieve the full catalog.
         """
         from utilities.tool_search import ToolSearchResult
-        from tools.search import create_tool_search_backend
+        from code_execution.tools import create_tool_search_backend
 
         server_name = self.environment_config.name
         tool_name = f"search_{server_name}_tools"
@@ -1116,7 +1116,7 @@ class CodeExecutionServer:
         infrastructure.  Only registered when the server has state-annotated
         tools (i.e. tools with ``state_requires`` or ``state_produces``).
         """
-        from tools.search.state_graph_tools import (
+        from code_execution.tools import (
             create_plan_workflow_descriptor,
             create_load_skill_descriptor,
         )

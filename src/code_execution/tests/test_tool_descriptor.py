@@ -4,7 +4,7 @@ import pytest
 
 from pydantic import BaseModel, Field
 
-from tools.tool_descriptor import ToolDescriptor
+from code_execution.tools.tool_descriptor import ToolDescriptor
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 # Path to the domains/ directory (may not exist if domains have been removed).
-_DOMAINS_DIR = Path(__file__).resolve().parent.parent.parent / "domains"
+_DOMAINS_DIR = Path(__file__).resolve().parents[4] / "domains"
 
 
 # ============================================================================

@@ -6,7 +6,7 @@ agent_framework.  The rest of the package (store.py, models.py, tools.py) is
 framework-agnostic.
 
 Delegates to :mod:`planning.tools` for the core async logic and
-:class:`~tools.tool_descriptor.ToolDescriptor` objects, then wraps each
+:class:`~code_execution.tools.tool_descriptor.ToolDescriptor` objects, then wraps each
 descriptor in a ``FunctionTool``.
 
 Tool factory presets
@@ -35,7 +35,7 @@ from ..tools import (
 
 
 def _to_function_tool(descriptor) -> FunctionTool:
-    """Convert a :class:`~tools.tool_descriptor.ToolDescriptor` to a ``FunctionTool``."""
+    """Convert a :class:`~code_execution.tools.tool_descriptor.ToolDescriptor` to a ``FunctionTool``."""
     return FunctionTool(
         name=descriptor.name,
         description=descriptor.description,
