@@ -31,7 +31,10 @@ def analyze_costs(network_name: str) -> dict:
     """
     n = _get_network(network_name)
 
-    if not hasattr(n, "objective") or n.objective == 0:
+    # Check whether OPF dispatch results exist rather than testing
+    # objective == 0 — a zero objective is valid (e.g. all-wind dispatch).
+    has_dispatch = "p" in n.generators_t and not n.generators_t.p.empty
+    if not has_dispatch:
         raise ValueError(
             f"Network {network_name!r} has no solved OPF. "
             "Run run_optimal_power_flow first."
