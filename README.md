@@ -38,9 +38,6 @@ src/
 │   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
 │   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
 │   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
-├── planning/           # SQLite-backed plan store
-│   ├── tools.py                # create_plan_descriptors (no framework dep)
-│   └── adapters/               # MAF FunctionTool wrappers (requires [maf] extra)
 ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
 │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
 ├── data_lake/          # Artifact registry, sync pipeline, Purview integration
@@ -76,7 +73,6 @@ uv sync --group dev  # include dev tools (pytest, pre-commit, jupyter)
 The base package ships the full framework-agnostic layer:
 - `tools.tool_descriptor.ToolDescriptor` — callable + JSON Schema, usable with any agent framework
 - `tools.search.core` / `tools.search.state_graph_tools` — descriptor factories for search and state-graph tools
-- `planning.tools` — descriptor factories for all plan-management tools
 
 If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
 

@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests auth, tools, data_lake, code_execution, context_managers, and planning packages
+# Tests auth, tools, data_lake, code_execution, context_managers, domain examples, and llm packages
 
 name: Tests
 
@@ -39,7 +39,6 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync
-          uv pip install pytest pytest-json-report
       
       - name: Run auth tests
         id: auth_tests
@@ -65,12 +64,6 @@ jobs:
         run: |
           uv run pytest src/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
-      - name: Run planning tests
-        id: planning_tests
-        continue-on-error: true
-        run: |
-          uv run pytest src/planning/tests/ -m "not live" -v --json-report --json-report-file=planning-report.json
-
       - name: Run domain examples tests
         id: domain_examples_tests
         continue-on-error: true
@@ -91,7 +84,6 @@ jobs:
           tools_status="${{ steps.tools_tests.outcome }}"
           data_lake_status="${{ steps.data_lake_tests.outcome }}"
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
-          planning_status="${{ steps.planning_tests.outcome }}"
           domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
           llm_status="${{ steps.llm_tests.outcome }}"
           
@@ -120,12 +112,6 @@ jobs:
             echo "❌ Code execution tests failed"
           fi
 
-          if [ "$planning_status" == "success" ]; then
-            echo "✅ Planning tests passed"
-          else
-            echo "❌ Planning tests failed"
-          fi
-
           if [ "$domain_examples_status" == "success" ]; then
             echo "✅ Domain examples tests passed"
           else
@@ -138,7 +124,7 @@ jobs:
             echo "❌ LLM tests failed"
           fi
           
-          if [ "$auth_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$planning_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$tools_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ]; then
             exit 0
           else
             exit 1
