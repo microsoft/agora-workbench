@@ -58,7 +58,7 @@ from .tool_proxy import (
 
 if TYPE_CHECKING:
     from .sessions import Session
-    from .tool_registry import ToolDefinition, ToolRegistry
+    from .tool_registry import ToolRegistry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -985,86 +985,6 @@ class CodeExecutionServer:
         lines.append("Call list_tools() in your code for full signatures and documentation.")
         return "\n".join(lines)
 
-    def _setup_domain_tools_meta_tool(self) -> None:
-        """Register an MCP tool that returns the domain tool catalog as structured JSON.
-
-        .. deprecated::
-            This method is superseded by :meth:`_setup_search_tool`, which registers
-            ``search_{name}_tools`` as an MCP tool.  Calling ``search_{name}_tools``
-            with ``top=999`` replicates the full catalog listing that this tool
-            previously provided.  This method will be removed in a future release.
-        """
-        tool_name = f"list_{self.environment_config.name}_domain_tools"
-        registry = self.tool_registry
-        server_name = self.environment_config.name
-
-        def _serialize_parameters(params: list, required_params: list) -> list[dict]:
-            required_set = set(id(p) for p in required_params)
-            return [
-                {
-                    "name": p.name,
-                    "type": p.type.__name__,
-                    "description": p.description,
-                    "required": id(p) in required_set,
-                }
-                for p in params
-            ]
-
-        def _load_state_affordances() -> dict[str, list[str]]:
-            """Build a {state_token: [phrase, ...]} lookup for this server's domain."""
-            try:
-                mod = importlib.import_module(f"domains.{server_name}.states")
-                raw = getattr(mod, "STATE_AFFORDANCES", {})
-                return {enum_val.value: phrases for enum_val, phrases in raw.items()}
-            except (ImportError, AttributeError):
-                return {}
-
-        state_aff_lookup = _load_state_affordances()
-
-        def _effective_affordances(td: "ToolDefinition") -> list[str]:
-            """Merge state-derived and tool-specific affordances."""
-            affordances: list[str] = []
-            for state_token in td.state_transition.produces:
-                affordances.extend(state_aff_lookup.get(state_token, []))
-            affordances.extend(td.affordances)
-            # Deduplicate while preserving order
-            seen: set[str] = set()
-            unique: list[str] = []
-            for a in affordances:
-                key = a.strip().lower()
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(a)
-            return unique
-
-        catalog = []
-        for td in registry.tools:
-            entry: dict = {
-                "name": td.name,
-                "description": td.description,
-                "server_name": server_name,
-                "parameters": _serialize_parameters(
-                    td.required_parameters + td.optional_parameters,
-                    td.required_parameters,
-                ),
-                "affordances": _effective_affordances(td),
-            }
-            if td.state_transition.requires or td.state_transition.produces:
-                entry["state_transition"] = {
-                    "requires": sorted(td.state_transition.requires),
-                    "produces": sorted(td.state_transition.produces),
-                }
-            catalog.append(entry)
-        catalog_json = json.dumps(catalog)
-
-        async def list_domain_tools() -> str:
-            """Return a JSON array describing all domain tools available on this server."""
-            return catalog_json
-
-        self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
-            list_domain_tools
-        )
-
     def _build_tool_infos(self) -> "list[Any]":
         """Convert the server's :class:`~tool_registry.ToolRegistry` entries to
         :class:`~utilities.tool_search.ToolInfo` objects suitable for indexing.
@@ -1125,10 +1045,7 @@ class CodeExecutionServer:
 
         The registered tool is named ``search_{server_name}_tools`` so that
         agents can distinguish catalogs when connected to multiple servers.
-
-        **Replacing** ``list_{name}_domain_tools``:
-        Call ``search_{server_name}_tools`` with ``query=""`` and ``top=999``
-        to retrieve the full domain tool catalog in ranked order.
+        Pass ``query=""`` and ``top=999`` to retrieve the full catalog.
         """
         from utilities.tool_search import ToolSearchResult
         from tools.search.bm25_tool_search import BM25ToolSearchBackend
@@ -1151,7 +1068,7 @@ class CodeExecutionServer:
             Args:
                 query: Natural-language description or tool name to search for.
                     Pass an empty string with ``top=999`` to retrieve the full
-                    catalog (replaces ``list_{name}_domain_tools``).
+                    catalog.
                 top: Maximum number of results to return (default 5).
 
             Returns:
