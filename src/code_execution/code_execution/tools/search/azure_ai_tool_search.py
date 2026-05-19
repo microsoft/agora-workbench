@@ -145,6 +145,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         self._index_client: SearchIndexClient | None = None
         self._search_client: SearchClient | None = None
         self._http_client: httpx.AsyncClient | None = None
+        self._http_client_lock = asyncio.Lock()
         self._atexit_cleanup: Any | None = None
         self._index_created = False
         self._initialized = False
@@ -345,7 +346,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         if not deployment:
             raise ValueError(f"Embedding deployment is required; set {TOOL_SEARCH_VECTORIZER_DEPLOYMENT_ENV}.")
 
-        client = self._get_http_client()
+        client = await self._get_http_client()
         response = await client.post(
             self._embedding_url(),
             json={"input": text},
@@ -378,22 +379,28 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         base_endpoint = endpoint.rstrip("/")
         return f"{base_endpoint}/openai/deployments/{deployment}/embeddings?api-version={_OPENAI_EMBEDDING_API_VERSION}"
 
-    def _get_http_client(self) -> httpx.AsyncClient:
-        """Create the shared HTTP client used for embeddings."""
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """Create or return the shared HTTP client used for embeddings.
+
+        Uses double-checked locking to avoid creating duplicate clients
+        when multiple embedding tasks run concurrently.
+        """
         if self._http_client is None:
-            api_key = os.getenv("AZURE_OPENAI_API_KEY")
-            headers = {"Content-Type": "application/json"}
-            auth = None
-            if api_key:
-                headers["api-key"] = api_key
-            else:
-                scope = os.getenv("AOAI_SCOPE", _DEFAULT_AOAI_SCOPE)
-                auth = BearerTokenAuth(get_token_provider(scope))
-            self._http_client = httpx.AsyncClient(
-                auth=auth,
-                headers=headers,
-                timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
-            )
+            async with self._http_client_lock:
+                if self._http_client is None:
+                    api_key = os.getenv("AZURE_OPENAI_API_KEY")
+                    headers = {"Content-Type": "application/json"}
+                    auth = None
+                    if api_key:
+                        headers["api-key"] = api_key
+                    else:
+                        scope = os.getenv("AOAI_SCOPE", _DEFAULT_AOAI_SCOPE)
+                        auth = BearerTokenAuth(get_token_provider(scope))
+                    self._http_client = httpx.AsyncClient(
+                        auth=auth,
+                        headers=headers,
+                        timeout=httpx.Timeout(connect=10.0, read=30.0, write=30.0, pool=10.0),
+                    )
         return self._http_client
 
     async def _collect_results(self, results: Any) -> list[ToolSearchResult]:
