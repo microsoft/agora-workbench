@@ -1001,11 +1001,26 @@ class CodeExecutionServer:
 
         # Load state→affordance phrases from the domain's states module (if present).
         state_aff_lookup: dict[str, list[str]] = {}
+        domains_dir = self.environment_config.domains_dir
         try:
-            mod = importlib.import_module(f"domains.{server_name}.states")
-            raw = getattr(mod, "STATE_AFFORDANCES", {})
-            state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
-        except (ImportError, AttributeError):
+            if domains_dir is not None:
+                # Load states.py from the configured domains directory
+                import importlib.util as _importlib_util
+
+                states_path = domains_dir / server_name / "states.py"
+                if states_path.is_file():
+                    spec = _importlib_util.spec_from_file_location(f"domains.{server_name}.states", states_path)
+                    if spec and spec.loader:
+                        mod = _importlib_util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        raw = getattr(mod, "STATE_AFFORDANCES", {})
+                        state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
+            else:
+                # Fallback: try importing from the Python path
+                mod = importlib.import_module(f"domains.{server_name}.states")
+                raw = getattr(mod, "STATE_AFFORDANCES", {})
+                state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
+        except (ImportError, AttributeError, OSError):
             LOGGER.debug("No states module found for domain '%s'; skipping affordance lookup", server_name)
 
         infos: list[ToolInfo] = []
@@ -1165,7 +1180,10 @@ class CodeExecutionServer:
         )(_plan_workflow)
 
         # Register load_{name}_skill — explicit parameters so FastMCP can build the schema.
-        ls_descriptor = create_load_skill_descriptor(server_name=server_name)
+        ls_kwargs: dict = {"server_name": server_name}
+        if domains_dir is not None:
+            ls_kwargs["domains_dir"] = domains_dir
+        ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
         _ls_func = ls_descriptor.func
 
         async def _load_skill(skill_name: str) -> str:

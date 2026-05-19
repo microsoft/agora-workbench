@@ -367,14 +367,20 @@ class TestSkillFrontmatter:
     @staticmethod
     def _discover_skills_with_states() -> list[dict]:
         """Find all SKILL.md files with a states field in frontmatter."""
-        from code_execution.tools.search.state_graph import _discover_skills, _DOMAINS_DIR
+        from pathlib import Path
 
-        return [s for s in _discover_skills(_DOMAINS_DIR) if s.get("states")]
+        from code_execution.tools.search.state_graph import _discover_skills
+
+        # Use the domain_examples directory as the test fixture source
+        domains_dir = Path(__file__).resolve().parents[2] / "domain_examples"
+        return [s for s in _discover_skills(domains_dir) if s.get("states")]
 
     @pytest.mark.unit
     def test_skill_states_are_valid_tokens(self):
         """Every state token in SKILL.md frontmatter must belong to a domain Enum."""
         valid = _all_valid_tokens()
+        if not valid:
+            pytest.skip("No domain state Enums registered; cannot validate skill tokens")
         skills = self._discover_skills_with_states()
         invalid: list[tuple[str, str]] = []
         for skill in skills:

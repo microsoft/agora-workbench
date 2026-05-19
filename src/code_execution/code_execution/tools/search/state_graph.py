@@ -24,10 +24,6 @@ from utilities.tool_search import ToolInfo
 LOGGER = logging.getLogger(__name__)
 
 
-# Path to the domains/ directory (may not exist if domains have been removed).
-_DOMAINS_DIR = Path(__file__).resolve().parents[4] / "domains"
-
-
 # ============================================================================
 # Input model
 # ============================================================================
@@ -54,15 +50,16 @@ def _parse_skill_frontmatter(path: Path) -> dict[str, Any]:
 
 
 def _discover_skills(
-    domains_dir: Path = _DOMAINS_DIR,
+    domains_dir: Path | None,
     extra_skill_dirs: list[Path] | None = None,
 ) -> list[dict[str, Any]]:
     """Discover all SKILL.md files under ``domains/*/skills/`` and parse frontmatter.
 
     Parameters
     ----------
-    domains_dir : Path
-        Root of the ``domains/`` directory tree.
+    domains_dir : Path | None
+        Root of the ``domains/`` directory tree.  When None, domain-based
+        skill discovery is skipped.
     extra_skill_dirs : list[Path] | None
         Additional top-level directories to search for SKILL.md files
         (e.g. ``planning/skills``).  Each is searched recursively up to
@@ -71,7 +68,7 @@ def _discover_skills(
     Returns a list of dicts with keys: name, description, domain, states, path.
     """
     skills: list[dict[str, Any]] = []
-    if not domains_dir.is_dir():
+    if domains_dir is None or not domains_dir.is_dir():
         return skills
 
     for domain_dir in sorted(domains_dir.iterdir()):
@@ -131,15 +128,16 @@ class StateGraph:
     ----------
     tools : list[ToolInfo]
         Tool metadata including ``state_requires`` / ``state_produces``.
-    domains_dir : Path, optional
-        Root of the ``domains/`` directory tree.  Defaults to the
-        standard location relative to this file.
+    domains_dir : Path | None
+        Root of the ``domains/`` directory tree containing domain state
+        definitions and skills.  When None, skill and state discovery
+        from the filesystem is skipped.
     """
 
     def __init__(
         self,
         tools: list[ToolInfo],
-        domains_dir: Path = _DOMAINS_DIR,
+        domains_dir: Path | None = None,
         extra_skill_dirs: list[Path] | None = None,
     ) -> None:
         self._domains_dir = domains_dir
@@ -168,7 +166,7 @@ class StateGraph:
 
     def _load_domain_states(self) -> None:
         """Import ``states.py`` from each domain directory."""
-        if not self._domains_dir.is_dir():
+        if self._domains_dir is None or not self._domains_dir.is_dir():
             return
         for domain_dir in sorted(self._domains_dir.iterdir()):
             if not domain_dir.is_dir() or not (domain_dir / "states.py").exists():

@@ -22,7 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from utilities.tool_search import ToolInfo
-from .state_graph import StateGraph, _discover_skills, _DOMAINS_DIR
+from .state_graph import StateGraph, _discover_skills
 from ..tool_descriptor import ToolDescriptor
 
 LOGGER = logging.getLogger(__name__)
@@ -84,7 +84,7 @@ class LoadSkillInput(BaseModel):
 def create_plan_workflow_descriptor(
     server_name: str,
     tools: list[ToolInfo] | None = None,
-    domains_dir: Path = _DOMAINS_DIR,
+    domains_dir: Path | None = None,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
     """Create a ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
@@ -98,8 +98,9 @@ def create_plan_workflow_descriptor(
         Tool metadata to index in the state graph.  Defaults to an empty
         list (no state-annotated tools).  When used server-side, pass the
         server's own tool catalog converted to :class:`~utilities.tool_search.ToolInfo`.
-    domains_dir : Path
-        Root of the ``domains/`` directory tree.
+    domains_dir : Path | None
+        Root of the ``domains/`` directory tree.  When None, skill and
+        state discovery is skipped (only tool state annotations are used).
     extra_skill_dirs : list[Path] | None
         Additional top-level skill directories (e.g. ``planning/skills``).
 
@@ -164,7 +165,7 @@ def create_plan_workflow_descriptor(
 
 def create_load_skill_descriptor(
     server_name: str,
-    domains_dir: Path = _DOMAINS_DIR,
+    domains_dir: Path | None = None,
     extra_skill_dirs: list[Path] | None = None,
 ) -> ToolDescriptor:
     """Create a ``load_{name}_skill`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
@@ -178,8 +179,9 @@ def create_load_skill_descriptor(
     server_name : str
         MCP server / domain name (e.g. ``"powergrid"``).  Used to generate
         the tool name ``load_{server_name}_skill``.
-    domains_dir : Path
-        Root of the ``domains/`` directory tree.
+    domains_dir : Path | None
+        Root of the ``domains/`` directory tree.  When None, no skills
+        are discovered (the tool will report no skills available).
     extra_skill_dirs : list[Path] | None
         Additional top-level skill directories (e.g. ``planning/skills``).
 
