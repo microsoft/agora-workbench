@@ -1196,7 +1196,6 @@ class CodeExecutionServer:
         infrastructure.  Only registered when the server has state-annotated
         tools (i.e. tools with ``state_requires`` or ``state_produces``).
         """
-        from tools.search.state_graph import StateGraph, StateGraphToolSearchBackend
         from tools.search.state_graph_tools import (
             create_query_state_graph_descriptor,
             create_load_skill_descriptor,
@@ -1211,9 +1210,6 @@ class CodeExecutionServer:
                 self.environment_config.name,
             )
             return
-
-        graph = StateGraph(tool_infos)
-        _backend = StateGraphToolSearchBackend(graph)  # noqa: F841 — kept for future use
 
         # Register query_state_graph — explicit parameters so FastMCP can build the schema.
         qsg_descriptor = create_query_state_graph_descriptor(tools=tool_infos)
