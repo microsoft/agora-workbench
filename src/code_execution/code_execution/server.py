@@ -1039,7 +1039,7 @@ class CodeExecutionServer:
     def _setup_search_tool(self) -> None:
         """Register ``search_{name}_tools`` as an MCP tool on this server.
 
-        Builds a BM25 index at startup over the server's own tool catalog
+        Builds a search index at startup over the server's own tool catalog
         (from :attr:`tool_registry`).  The index is shared across all sessions
         and rebuilt on each server restart.
 
@@ -1048,13 +1048,16 @@ class CodeExecutionServer:
         Pass ``query=""`` and ``top=999`` to retrieve the full catalog.
         """
         from utilities.tool_search import ToolSearchResult
-        from tools.search.bm25_tool_search import BM25ToolSearchBackend
+        from tools.search import create_tool_search_backend
 
         server_name = self.environment_config.name
         tool_name = f"search_{server_name}_tools"
 
         tool_infos = self._build_tool_infos()
-        backend = BM25ToolSearchBackend(tools=tool_infos)
+        backend = create_tool_search_backend(
+            backend_type=self.environment_config.tool_search_backend,
+            tools=tool_infos,
+        )
 
         LOGGER.info(
             "Server-side tool search index built for '%s' with %d tools",

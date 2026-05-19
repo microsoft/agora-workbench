@@ -70,6 +70,10 @@ class EnvironmentConfig(BaseModel):
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
     )
+    tool_search_backend: Literal["bm25"] = Field(
+        default="bm25",
+        description="Tool search backend for the server-side search_tools MCP tool. 'bm25' is the default in-process backend.",
+    )
 
     def get_build_dir(self) -> Path:
         """Get the directory where environment will be built."""
