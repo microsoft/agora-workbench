@@ -241,6 +241,10 @@ class CodeExecutionServer:
         self._python_executable: Optional[Path] = None
         self._environment_ready = False
 
+        # Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).
+        from .activity_publisher import ActivityPublisher
+        self.activity_publisher = ActivityPublisher(server_name=environment_config.name)
+
         self.mcp = FastMCP(f"{environment_config.name}-executor")
 
         # FastMCP Middleware Ordering
@@ -1249,13 +1253,34 @@ class CodeExecutionServer:
                     user_token=current_token,
                 )
 
+                # transfer_id correlates source/target events in the activity feed.
+                import uuid as _uuid
+                transfer_id = _uuid.uuid4().hex
+
                 result = await client.push(
                     target_url=target_server_url,
                     variable_name=effective_target_name,
                     serialized_data=serialized,
-                    metadata={"source_server": server.environment_config.name, "source_variable": variable_name},
+                    metadata={
+                        "source_server": server.environment_config.name,
+                        "source_variable": variable_name,
+                        "transfer_id": transfer_id,
+                    },
                     target_session_id=target_session_id or None,
                 )
+
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_sent",
+                        "description": f"Push '{variable_name}' → {target_server_url}",
+                        "transfer_id": transfer_id,
+                        "variable_name": variable_name,
+                        "target_server": target_server_url,
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
+
                 return _json.dumps(
                     {
                         "success": True,
@@ -1264,6 +1289,7 @@ class CodeExecutionServer:
                         "target_variable": effective_target_name,
                         "target_server_url": target_server_url,
                         "size_bytes": len(serialized),
+                        "transfer_id": transfer_id,
                         "target_response": result,
                     },
                     indent=2,
@@ -1829,11 +1855,15 @@ else:
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")
 
+        # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
+        await self.activity_publisher.start()
+
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
+        await self.activity_publisher.stop()
         LOGGER.info("Server shutdown complete")
 
     async def run_http(
@@ -1957,6 +1987,7 @@ else:
             variable_name = body.get("variable_name")
             data_b64 = body.get("data")
             session_id = body.get("session_id")
+            transfer_metadata = body.get("metadata") or {}
 
             if not isinstance(variable_name, str) or not isinstance(data_b64, str):
                 return JSONResponse(
@@ -2073,6 +2104,21 @@ else:
                         {"success": False, "error": f"Kernel injection failed: {error_msg}"},
                         status_code=500,
                     )
+
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_received",
+                        "description": (
+                            f"Received '{variable_name}' from "
+                            f"{transfer_metadata.get('source_server') or 'another server'}"
+                        ),
+                        "transfer_id": transfer_metadata.get("transfer_id"),
+                        "variable_name": variable_name,
+                        "source_server": transfer_metadata.get("source_server"),
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
 
                 return JSONResponse(
                     {
