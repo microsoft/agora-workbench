@@ -168,6 +168,7 @@ class CodeExecutionServer:
         self.environment_config = environment_config
         self.tool_registry = tool_registry
         self._tool_proxies_injected: set[str] = set()
+        self._tool_search_backends: list[Any] = []
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -1057,7 +1058,9 @@ class CodeExecutionServer:
         backend = create_tool_search_backend(
             backend_type=self.environment_config.tool_search_backend,
             tools=tool_infos,
+            server_name=server_name,
         )
+        self._tool_search_backends.append(backend)
 
         LOGGER.info(
             "Server-side tool search index built for '%s' with %d tools",
@@ -1133,7 +1136,11 @@ class CodeExecutionServer:
             return
 
         # Register plan_{name}_workflow — explicit parameters so FastMCP can build the schema.
-        pw_descriptor = create_plan_workflow_descriptor(server_name=server_name, tools=tool_infos)
+        domains_dir = self.environment_config.domains_dir
+        pw_kwargs: dict = {"server_name": server_name, "tools": tool_infos}
+        if domains_dir is not None:
+            pw_kwargs["domains_dir"] = domains_dir
+        pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
         _pw_func = pw_descriptor.func
 
         async def _plan_workflow(
@@ -1911,6 +1918,24 @@ else:
     # Server Lifecycle
     # ========================================================================
 
+    async def _initialize_tool_search_backends(self) -> None:
+        """Initialize any async-capable tool search backends."""
+        for backend in self._tool_search_backends:
+            initialize = getattr(backend, "initialize", None)
+            if callable(initialize):
+                result = initialize()
+                if inspect.isawaitable(result):
+                    await result
+
+    async def _close_tool_search_backends(self) -> None:
+        """Close registered tool search backends."""
+        for backend in self._tool_search_backends:
+            close = getattr(backend, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+
     async def _startup(self):
         """Initialize environment and register kernel on server startup."""
         LOGGER.info("Initializing server...")
@@ -1921,11 +1946,14 @@ else:
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")
 
+        await self._initialize_tool_search_backends()
+
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
+        await self._close_tool_search_backends()
         LOGGER.info("Server shutdown complete")
 
     async def run_http(

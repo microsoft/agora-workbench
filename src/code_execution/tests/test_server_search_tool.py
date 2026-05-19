@@ -2,8 +2,11 @@
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
+
+import code_execution.tools as code_execution_tools
 
 from ..code_execution import CodeExecutionServer, EnvironmentConfig
 from ..code_execution.auth import create_noop_auth_config
@@ -201,6 +204,39 @@ class TestSetupSearchTool:
 # ---------------------------------------------------------------------------
 # _setup_workflow_planning_tools
 # ---------------------------------------------------------------------------
+
+
+class _AsyncSearchBackend:
+    def __init__(self):
+        self.initialized = False
+        self.closed = False
+
+    async def initialize(self):
+        self.initialized = True
+
+    async def search(self, query: str, top: int = 5):
+        return []
+
+    async def close(self):
+        self.closed = True
+
+
+class TestServerSearchBackendLifecycle:
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_async_search_backend_initialized_on_startup(self, monkeypatch: pytest.MonkeyPatch):
+        backend = _AsyncSearchBackend()
+        monkeypatch.setattr(code_execution_tools, "create_tool_search_backend", lambda *args, **kwargs: backend)
+
+        server = _make_server(tools=[_tool("run_opf", "Run optimal power flow")])
+        server._ensure_environment = AsyncMock()
+        server._register_kernel = AsyncMock()
+
+        await server._startup()
+        assert backend.initialized is True
+
+        await server._shutdown()
+        assert backend.closed is True
 
 
 class TestSetupWorkflowPlanningTools:
