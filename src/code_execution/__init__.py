@@ -4,7 +4,7 @@ import sys
 
 from .code_execution import CodeExecutionServer
 from .code_execution import tools as tools
-from .code_execution.code_execution_models import EnvironmentConfig
+from .code_execution.code_execution_models import AssetSpec, EnvironmentConfig
 from .code_execution.tool_registry import (
     ReturnSpec,
     StateTransition,
@@ -16,6 +16,7 @@ from .code_execution.tool_registry import (
 sys.modules[__name__ + ".tools"] = tools
 
 __all__ = [
+    "AssetSpec",
     "CodeExecutionServer",
     "EnvironmentConfig",
     "ReturnSpec",

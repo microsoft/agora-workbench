@@ -7,6 +7,7 @@ in isolated environments with specific package dependencies.
 
 from .server import CodeExecutionServer
 from .code_execution_models import (
+    AssetSpec,
     CodeExecutionResult,
     EnvironmentConfig,
     ToolCallRecord,
@@ -29,6 +30,7 @@ __all__ = [
     "ASSET_TAG_RE",
     "ASSET_TAG_UNCLOSED_RE",
     "AssetId",
+    "AssetSpec",
     "CodeExecutionServer",
     "CodeExecutionResult",
     "EnvironmentConfig",

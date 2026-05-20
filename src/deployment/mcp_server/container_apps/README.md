@@ -94,6 +94,69 @@ The Container App receives these at runtime:
 | `AZURE_CLIENT_ID` | Bicep parameter | Managed identity client ID |
 | `OBO_SIMULATION_MODE` | hardcoded `false` | Must be false in production |
 
+## Environment caching with Azure Files
+
+For servers that build Python environments at startup or provision large assets
+(model weights, data files), mount an Azure File Share so the cache persists
+across container restarts and scale events.
+
+### 1. Create a storage account and file share
+
+```bash
+az storage account create \
+  --name agoramcpstorage \
+  --resource-group agora-mcp-rg \
+  --location eastus2 \
+  --sku Standard_LRS
+
+az storage share create \
+  --name env-cache \
+  --account-name agoramcpstorage
+```
+
+### 2. Link storage to the ACA environment
+
+```bash
+STORAGE_KEY=$(az storage account keys list \
+  --account-name agoramcpstorage \
+  --query '[0].value' -o tsv)
+
+az containerapp env storage set \
+  --name agora-mcp-envs \
+  --resource-group agora-mcp-rg \
+  --storage-name envcache \
+  --azure-file-account-name agoramcpstorage \
+  --azure-file-account-key "$STORAGE_KEY" \
+  --azure-file-share-name env-cache \
+  --access-mode ReadWrite
+```
+
+### 3. Deploy with the storage link
+
+Add to your `.env`:
+
+```bash
+ACA_STORAGE_LINK=envcache
+# ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-envs  # default, override if needed
+```
+
+Then deploy as usual — `deploy.sh` passes the storage parameters to Bicep:
+
+```bash
+./deploy.sh --server my-server --dockerfile /path/to/Dockerfile --context /path/to/context
+```
+
+Or pass explicitly:
+
+```bash
+./deploy.sh --server my-server \
+  --storage-link envcache \
+  --dockerfile /path/to/Dockerfile --context /path/to/context
+```
+
+The first container replica will build the environment and provision assets into
+the file share. Subsequent replicas (and restarts) reuse the cached content.
+
 ## Adding a new server
 
 1. Copy `parameters/office.bicepparam` to `parameters/<name>.bicepparam`.

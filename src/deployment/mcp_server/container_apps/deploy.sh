@@ -56,6 +56,8 @@ IDENTITY_ID="${ACA_IDENTITY_ID:-}"
 IDENTITY_CLIENT_ID="${ACA_IDENTITY_CLIENT_ID:-}"
 ENTRA_CLIENT_ID_VAL="${ENTRA_CLIENT_ID:-}"
 ENTRA_TENANT_ID_VAL="${ENTRA_TENANT_ID:-}"
+STORAGE_LINK="${ACA_STORAGE_LINK:-}"
+CACHE_MOUNT_PATH="${ACA_CACHE_MOUNT_PATH:-/home/appuser/.cache/mcp-envs}"
 
 SERVER_NAME=""
 IMAGE_TAG=""                         # auto-set to git short SHA if empty
@@ -77,6 +79,8 @@ Optional:
   --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env
   --tag, -t             TAG     Docker image tag (default: git short SHA)
   --acr-name            NAME    Override ACA_ACR_NAME from .env
+  --storage-link        NAME    ACA environment storage link name for Azure Files cache
+  --cache-mount-path    PATH    Container mount path for cache (default: /home/appuser/.cache/mcp-envs)
   --param-file          PATH    Bicep parameter file override
   -h, --help                    Show this help message
 EOF
@@ -93,6 +97,8 @@ while [[ $# -gt 0 ]]; do
         --context|-c)         BUILD_CONTEXT="$2";   shift 2 ;;
         --tag|-t)             IMAGE_TAG="$2";       shift 2 ;;
         --acr-name)           ACR_NAME="$2";        shift 2 ;;
+        --storage-link)       STORAGE_LINK="$2";    shift 2 ;;
+        --cache-mount-path)   CACHE_MOUNT_PATH="$2"; shift 2 ;;
         --param-file)         PARAM_FILE="$2";      shift 2 ;;
         -h|--help)            usage ;;
         *)                    echo "Unknown option: $1"; usage ;;
@@ -219,6 +225,15 @@ echo ""
 # ── 4. Deploy Bicep ──────────────────────────────────────────────────────────
 
 echo ">> Deploying Container App via Bicep..."
+
+# Build storage parameters (only passed when configured)
+STORAGE_PARAMS=""
+if [[ -n "$STORAGE_LINK" ]]; then
+    STORAGE_PARAMS="storageLink=$STORAGE_LINK cacheMountPath=$CACHE_MOUNT_PATH"
+    echo "  Storage link:    $STORAGE_LINK"
+    echo "  Cache mount:     $CACHE_MOUNT_PATH"
+fi
+
 az deployment group create \
     --resource-group "$RESOURCE_GROUP" \
     --template-file "$SCRIPT_DIR/main.bicep" \
@@ -232,6 +247,7 @@ az deployment group create \
         entraClientId="$ENTRA_CLIENT_ID_VAL" \
         entraTenantId="$ENTRA_TENANT_ID_VAL" \
         extraEnvVars="$EXTRA_ENV_JSON" \
+        $STORAGE_PARAMS \
     --output none
 
 # ── 5. Report ────────────────────────────────────────────────────────────────

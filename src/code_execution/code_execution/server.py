@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import environment_builders
+from . import asset_provisioner
 from . import code_execution as execution_defaults
 from .code_execution_models import (
     CodeExecutionResult,
@@ -271,10 +272,8 @@ class CodeExecutionServer:
             self._python_executable = expected_python
             self._environment_ready = True
             LOGGER.info(f"Found existing environment: {self._python_executable}")
-            return
-
-        # Build environment if auto_build is enabled
-        if config.auto_build:
+        elif config.auto_build:
+            # Build environment if auto_build is enabled
             LOGGER.info(f"Building {config.type} environment: {config.name}")
             await self._build_environment(config)
             self._python_executable = config.get_python_path()
@@ -285,6 +284,10 @@ class CodeExecutionServer:
                 f"Python environment not found at {expected_python} and auto_build is disabled. "
                 f"Either build the environment manually or set auto_build=True in EnvironmentConfig."
             )
+
+        # Provision large assets (model weights, data files) after env is ready
+        if config.assets and config.auto_provision:
+            await asset_provisioner.provision_assets(config)
 
     async def _build_environment(self, config: EnvironmentConfig):
         """Build the Python environment based on config."""
