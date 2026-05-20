@@ -34,6 +34,7 @@ def clip_to_geometry(
         Dictionary with ``output_path``, ``shape`` ``[height, width]``,
         ``crs``, ``bounds``, ``num_features``.
     """
+    import numpy as np
     import rasterio
     from rasterio.mask import mask as rio_mask
     from rasterio.warp import transform_geom
@@ -48,6 +49,10 @@ def clip_to_geometry(
         )
 
     with rasterio.open(raster_path) as src:
+        nodata = src.nodata
+        if nodata is None and np.dtype(src.dtypes[0]).kind == "f":
+            nodata = float("nan")
+
         # Reproject geometries from EPSG:4326 to the raster CRS.
         reprojected = [
             transform_geom("EPSG:4326", src.crs, g.__geo_interface__)
@@ -59,6 +64,7 @@ def clip_to_geometry(
             crop=True,
             all_touched=all_touched,
             filled=True,
+            nodata=nodata,
         )
 
         out_meta = src.meta.copy()
@@ -72,6 +78,8 @@ def clip_to_geometry(
                 "tiled": True,
             }
         )
+        if nodata is not None:
+            out_meta["nodata"] = nodata
 
         with rasterio.open(output_path, "w", **out_meta) as dst:
             dst.write(clipped)
