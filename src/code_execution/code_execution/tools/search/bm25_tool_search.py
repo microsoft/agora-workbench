@@ -1,9 +1,9 @@
 """
 BM25-based tool search.
 
-Exposes :class:`BM25ToolSearchBackend`, a :class:`~utilities.tool_search.ToolSearchBackend`
+Exposes :class:`BM25ToolSearchBackend`, a :class:`~code_execution.tools.tool_search.ToolSearchBackend`
 implementation backed by an in-process BM25 index.  The index is built
-eagerly from a list of :class:`~utilities.tool_search.ToolInfo` objects at
+eagerly from a list of :class:`~code_execution.tools.tool_search.ToolInfo` objects at
 construction time, making it suitable for server-side use where the tool
 catalog is known at startup.
 """
@@ -11,7 +11,7 @@ catalog is known at startup.
 import logging
 from typing import Any
 
-from utilities.tool_search import (
+from ..tool_search import (
     SearchCategory,
     ToolInfo,
     ToolSearchBackend,
@@ -37,7 +37,7 @@ def _skill_info_text(skill: dict[str, Any]) -> str:
 
 
 class BM25ToolSearchBackend(ToolSearchBackend):
-    """BM25-based implementation of :class:`~utilities.tool_search.ToolSearchBackend`.
+    """BM25-based implementation of :class:`~code_execution.tools.tool_search.ToolSearchBackend`.
 
     Builds lightweight in-process BM25 indexes over tools and skills at
     construction time.  Separate indexes ensure that ``category`` filtering

@@ -993,11 +993,11 @@ class CodeExecutionServer:
 
     def _build_tool_infos(self) -> "list[Any]":
         """Convert the server's :class:`~tool_registry.ToolRegistry` entries to
-        :class:`~utilities.tool_search.ToolInfo` objects suitable for indexing.
+        :class:`~code_execution.tools.tool_search.ToolInfo` objects suitable for indexing.
 
         Returns an empty list when no tool registry is configured.
         """
-        from utilities.tool_search import ToolInfo
+        from code_execution.tools.tool_search import ToolInfo
 
         if not self.tool_registry:
             return []
@@ -1067,7 +1067,7 @@ class CodeExecutionServer:
         The registered tool is named ``search_{server_name}_tools`` so that
         agents can distinguish catalogs when connected to multiple servers.
         """
-        from utilities.tool_search import ToolSearchResult
+        from code_execution.tools.tool_search import ToolSearchResult
         from code_execution.tools import create_tool_search_backend
         from code_execution.tools.search.state_graph import _discover_skills
 

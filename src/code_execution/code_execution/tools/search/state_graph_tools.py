@@ -21,7 +21,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from utilities.tool_search import ToolInfo
+from ..tool_search import ToolInfo
 from .state_graph import StateGraph, _discover_skills
 from ..tool_descriptor import ToolDescriptor
 
@@ -97,7 +97,7 @@ def create_plan_workflow_descriptor(
     tools : list[ToolInfo] | None
         Tool metadata to index in the state graph.  Defaults to an empty
         list (no state-annotated tools).  When used server-side, pass the
-        server's own tool catalog converted to :class:`~utilities.tool_search.ToolInfo`.
+        server's own tool catalog converted to :class:`~code_execution.tools.tool_search.ToolInfo`.
     domains_dir : Path | None
         Root of the ``domains/`` directory tree.  When None, skill and
         state discovery is skipped (only tool state annotations are used).

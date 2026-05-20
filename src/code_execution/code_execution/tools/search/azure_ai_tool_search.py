@@ -40,7 +40,7 @@ from utilities.auth import (
     get_search_credential_async,
     get_token_provider,
 )
-from utilities.tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult, SearchCategory
+from ..tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult, SearchCategory
 
 from ._constants import (
     TOOL_SEARCH_ENDPOINT_ENV,

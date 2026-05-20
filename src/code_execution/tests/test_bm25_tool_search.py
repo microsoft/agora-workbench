@@ -7,7 +7,7 @@ from code_execution.tools.search.bm25_tool_search import (
     _tool_info_text,
     _skill_info_text,
 )
-from utilities.tool_search import ToolInfo
+from code_execution.tools.tool_search import ToolInfo
 
 
 class TestToolInfoText:
