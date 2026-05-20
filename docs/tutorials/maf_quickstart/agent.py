@@ -1,14 +1,14 @@
 """
 MAF + agora-workbench quickstart tutorial.
 
-Wires a Microsoft Agent Framework (MAF) agent to three agora-workbench tools:
+Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
 
-  * ``search_data_lake_catalog`` — discovers datasets in the agora-workbench
-    data lake catalog (via ``data_lake.tools.adapters.maf``). The backend
-    is selected automatically from the environment: ``DATA_LAKE_SEARCH_ENDPOINT``
-    enables the Azure AI Search-backed catalog, while ``DATA_LAKE_LOCAL_CATALOG``
-    points at a YAML file on disk for fully-local development (BM25 ranking,
-    no Azure credentials required).
+  * ``search_data`` / ``get_artifact`` / ``list_domains`` — data catalog
+    tools provided by the MCP server itself when a ``catalog.yaml`` is
+    configured (see ``src/code_execution/catalog.example.yaml``). The
+    server indexes the declared sources on startup and exposes hybrid
+    keyword + vector search as MCP tools — no client-side data lake
+    adapter is required.
   * ``chemistry`` MCP toolset — the chemistry MCP server from
     ``src/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
@@ -47,7 +47,7 @@ Run from the repo root:
 
 Prerequisites:
   1. ``.env`` populated (see docs/tutorials/maf_quickstart/.env.example)
-  2. ``az login`` (LLM and data lake auth use Entra ID by default)
+  2. ``az login`` (LLM auth uses Entra ID by default)
   3. Chemistry MCP server running locally:
        cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
                               -t mcp-server-base:local .
@@ -106,34 +106,22 @@ def step_a_chat_client():
 # Step B — data lake search tool
 # ---------------------------------------------------------------------------
 async def step_b_data_lake_tool():
-    """Build the agora-workbench data lake search tool.
+    """The data catalog is now served by the MCP server itself.
 
-    The backend is chosen automatically from the environment:
+    When an MCP server is launched with a ``catalog.yaml`` (see
+    ``src/code_execution/catalog.example.yaml``), it indexes the declared
+    sources on startup and auto-registers ``search_data``, ``get_artifact``,
+    and ``list_domains`` as MCP tools. No client-side data lake adapter is
+    needed — those tools are discovered when the agent connects to the
+    server via ``MCPStreamableHTTPTool``.
 
-      * ``DATA_LAKE_SEARCH_ENDPOINT`` (+ optional ``DATA_LAKE_CATALOG_INDEX_NAME``)
-        — use the Azure AI Search-backed catalog. Authenticates via the shared
-        Entra credential chain.
-      * ``DATA_LAKE_LOCAL_CATALOG`` — path to a local YAML catalog. BM25
-        keyword ranking runs in-process; no Azure credentials required.
-
-    Returns ``None`` if neither is configured — letting the tutorial still
-    demonstrate the agent loop with just the MCP tools.
+    Returns ``None`` — kept as a numbered step purely for tutorial clarity.
     """
-    from data_lake.tools.adapters.maf import (
-        create_data_lake_search_tool,
-        is_data_lake_configured,
+    LOGGER.info(
+        "Step B: data catalog tools (search_data, get_artifact, list_domains) "
+        "are auto-discovered from any MCP server configured with a catalog.yaml."
     )
-
-    if not is_data_lake_configured():
-        LOGGER.warning(
-            "Step B: neither DATA_LAKE_SEARCH_ENDPOINT nor DATA_LAKE_LOCAL_CATALOG "
-            "is set — skipping data lake tool. Set one in .env to enable catalog search."
-        )
-        return None
-
-    tool = await create_data_lake_search_tool()
-    LOGGER.info("Step B: built data lake search tool")
-    return tool
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +250,10 @@ def step_d_build_agent(chat_client, tools):
         "and power systems engineering.\n"
         "\n"
         "MCP tools available to you:\n"
-        "  * search_data_lake_catalog — discover datasets in the data lake.\n"
-        "      Call with a `query` string and optional `domains`/`tags`.\n"
+        "  * search_data — hybrid keyword + vector search over the MCP\n"
+        "      server's data catalog. Call with a `query` string and\n"
+        "      optional `domain` / `source_type` filters. Only available\n"
+        "      when the server is configured with a catalog.yaml.\n"
         "  * execute_chemistry_code — run Python in a kernel with RDKit\n"
         "      pre-imported (`Chem`, `Descriptors`, `AllChem`,\n"
         "      `rdMolDescriptors`, `np`, `pd`).\n"
@@ -302,7 +292,7 @@ def step_d_build_agent(chat_client, tools):
         "Each returns a dict; prefer them over hand-rolled PyPSA code.\n"
         "\n"
         "General workflow:\n"
-        "  1. If the user asks about datasets, call search_data_lake_catalog.\n"
+        "  1. If the user asks about datasets, call search_data.\n"
         "  2. For chemistry work, call execute_chemistry_code. Inside the\n"
         "     code, call the typed helpers above (e.g.\n"
         "     `result = filter_drug_candidates([...], rules='lipinski')`)\n"
