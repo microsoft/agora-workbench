@@ -58,7 +58,7 @@ from .tool_proxy import (
 
 if TYPE_CHECKING:
     from .sessions import Session
-    from .tool_registry import ToolDefinition, ToolRegistry
+    from .tool_registry import ToolRegistry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -168,6 +168,7 @@ class CodeExecutionServer:
         self.environment_config = environment_config
         self.tool_registry = tool_registry
         self._tool_proxies_injected: set[str] = set()
+        self._tool_search_backends: list[Any] = []
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -240,6 +241,11 @@ class CodeExecutionServer:
         self.working_dir = working_dir
         self._python_executable: Optional[Path] = None
         self._environment_ready = False
+
+        # Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).
+        from .activity_publisher import ActivityPublisher
+
+        self.activity_publisher = ActivityPublisher(server_name=environment_config.name)
 
         self.mcp = FastMCP(f"{environment_config.name}-executor")
 
@@ -548,9 +554,12 @@ class CodeExecutionServer:
         # Setup general code execution tool
         self._setup_code_execution_tool()
 
-        # Expose domain tool catalog as an MCP meta-tool for tool search discovery
         if self.tool_registry:
-            self._setup_domain_tools_meta_tool()
+            # Register server-side BM25 tool search (search_{name}_tools)
+            self._setup_search_tool()
+
+            # Register workflow planning and skill tools if state-annotated tools exist
+            self._setup_workflow_planning_tools()
 
         # Setup session management meta tools (prefixed with server name for uniqueness)
         register_session_meta_tools(
@@ -982,82 +991,220 @@ class CodeExecutionServer:
         lines.append("Call list_tools() in your code for full signatures and documentation.")
         return "\n".join(lines)
 
-    def _setup_domain_tools_meta_tool(self) -> None:
-        """Register an MCP tool that returns the domain tool catalog as structured JSON.
+    def _build_tool_infos(self) -> "list[Any]":
+        """Convert the server's :class:`~tool_registry.ToolRegistry` entries to
+        :class:`~utilities.tool_search.ToolInfo` objects suitable for indexing.
 
-        This tool is used by the tool search layer to discover what domain tools
-        are available on this server, without requiring individual MCP tool
-        registration for each domain tool.
+        Returns an empty list when no tool registry is configured.
         """
-        tool_name = f"list_{self.environment_config.name}_domain_tools"
-        registry = self.tool_registry
+        from utilities.tool_search import ToolInfo
+
+        if not self.tool_registry:
+            return []
+
         server_name = self.environment_config.name
 
-        def _serialize_parameters(params: list, required_params: list) -> list[dict]:
-            required_set = set(id(p) for p in required_params)
-            return [
-                {
-                    "name": p.name,
-                    "type": p.type.__name__,
-                    "description": p.description,
-                    "required": id(p) in required_set,
-                }
-                for p in params
-            ]
+        # Load state→affordance phrases from the domain's states module (if present).
+        state_aff_lookup: dict[str, list[str]] = {}
+        domains_dir = self.environment_config.domains_dir
+        try:
+            if domains_dir is not None:
+                # Load states.py from the configured domains directory
+                import importlib.util as _importlib_util
 
-        def _load_state_affordances() -> dict[str, list[str]]:
-            """Build a {state_token: [phrase, ...]} lookup for this server's domain."""
-            try:
+                states_path = domains_dir / server_name / "states.py"
+                if states_path.is_file():
+                    spec = _importlib_util.spec_from_file_location(f"domains.{server_name}.states", states_path)
+                    if spec and spec.loader:
+                        mod = _importlib_util.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        raw = getattr(mod, "STATE_AFFORDANCES", {})
+                        state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
+            else:
+                # Fallback: try importing from the Python path
                 mod = importlib.import_module(f"domains.{server_name}.states")
                 raw = getattr(mod, "STATE_AFFORDANCES", {})
-                return {enum_val.value: phrases for enum_val, phrases in raw.items()}
-            except (ImportError, AttributeError):
-                return {}
+                state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
+        except (ImportError, AttributeError, OSError):
+            LOGGER.debug("No states module found for domain '%s'; skipping affordance lookup", server_name)
 
-        state_aff_lookup = _load_state_affordances()
+        infos: list[ToolInfo] = []
+        for td in self.tool_registry.tools:
+            # Merge state-derived affordances (from produced states) with tool-specific ones.
+            aff: list[str] = []
+            seen_aff: set[str] = set()
+            for state_token in sorted(td.state_transition.produces):
+                for phrase in state_aff_lookup.get(state_token, []):
+                    key = phrase.strip().lower()
+                    if key not in seen_aff:
+                        seen_aff.add(key)
+                        aff.append(phrase)
+            for phrase in td.affordances:
+                key = phrase.strip().lower()
+                if key not in seen_aff:
+                    seen_aff.add(key)
+                    aff.append(phrase)
 
-        def _effective_affordances(td: "ToolDefinition") -> list[str]:
-            """Merge state-derived and tool-specific affordances."""
-            affordances: list[str] = []
-            for state_token in td.state_transition.produces:
-                affordances.extend(state_aff_lookup.get(state_token, []))
-            affordances.extend(td.affordances)
-            # Deduplicate while preserving order
-            seen: set[str] = set()
-            unique: list[str] = []
-            for a in affordances:
-                key = a.strip().lower()
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(a)
-            return unique
+            infos.append(
+                ToolInfo(
+                    name=td.name,
+                    description=td.description,
+                    server_name=server_name,
+                    affordances=tuple(aff),
+                    state_requires=tuple(sorted(td.state_transition.requires)),
+                    state_produces=tuple(sorted(td.state_transition.produces)),
+                )
+            )
+        return infos
 
-        catalog = []
-        for td in registry.tools:
-            entry: dict = {
-                "name": td.name,
-                "description": td.description,
-                "server_name": server_name,
-                "parameters": _serialize_parameters(
-                    td.required_parameters + td.optional_parameters,
-                    td.required_parameters,
-                ),
-                "affordances": _effective_affordances(td),
-            }
-            if td.state_transition.requires or td.state_transition.produces:
-                entry["state_transition"] = {
-                    "requires": sorted(td.state_transition.requires),
-                    "produces": sorted(td.state_transition.produces),
-                }
-            catalog.append(entry)
-        catalog_json = json.dumps(catalog)
+    def _setup_search_tool(self) -> None:
+        """Register ``search_{name}_tools`` as an MCP tool on this server.
 
-        async def list_domain_tools() -> str:
-            """Return a JSON array describing all domain tools available on this server."""
-            return catalog_json
+        Builds a search index at startup over the server's own tool catalog
+        (from :attr:`tool_registry`).  The index is shared across all sessions
+        and rebuilt on each server restart.
 
-        self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
-            list_domain_tools
+        The registered tool is named ``search_{server_name}_tools`` so that
+        agents can distinguish catalogs when connected to multiple servers.
+        Pass ``query=""`` and ``top=999`` to retrieve the full catalog.
+        """
+        from utilities.tool_search import ToolSearchResult
+        from code_execution.tools import create_tool_search_backend
+
+        server_name = self.environment_config.name
+        tool_name = f"search_{server_name}_tools"
+
+        tool_infos = self._build_tool_infos()
+        backend = create_tool_search_backend(
+            backend_type=self.environment_config.tool_search_backend,
+            tools=tool_infos,
+            server_name=server_name,
+        )
+        self._tool_search_backends.append(backend)
+
+        LOGGER.info(
+            "Server-side tool search index built for '%s' with %d tools",
+            server_name,
+            len(tool_infos),
+        )
+
+        async def search_server_tools(query: str, top: int = 5) -> str:
+            """Search this server's tool catalog by name or description.
+
+            Args:
+                query: Natural-language description or tool name to search for.
+                    Pass an empty string with ``top=999`` to retrieve the full
+                    catalog.
+                top: Maximum number of results to return (default 5).
+
+            Returns:
+                JSON object with a ``results`` array of matching tools, each
+                containing ``name``, ``server_name``, ``description``,
+                ``execution_type``, ``score``, ``state_requires``, and
+                ``state_produces``.
+            """
+            LOGGER.info(
+                "search_%s_tools called with query=%r top=%d",
+                server_name,
+                query,
+                top,
+            )
+            try:
+                results: list[ToolSearchResult] = await backend.search(query, top)
+                return json.dumps({"results": [r.model_dump() for r in results]})
+            except Exception as exc:
+                LOGGER.error(
+                    "search_%s_tools failed for query %r: %s",
+                    server_name,
+                    query,
+                    exc,
+                    exc_info=True,
+                )
+                return json.dumps({"results": [], "error": f"{type(exc).__name__}: {exc}"})
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                f"Search {server_name} domain tools by name or description. "
+                f"Returns matching tools with relevance scores. "
+                f"Pass an empty query with top=999 to list all {server_name} tools."
+            ),
+        )(search_server_tools)
+
+    def _setup_workflow_planning_tools(self) -> None:
+        """Register ``plan_{name}_workflow`` and ``load_{name}_skill`` as MCP tools.
+
+        Builds the domain state graph from the server's own tool catalog
+        so that agents can plan workflow sequences without any client-side
+        infrastructure.  Only registered when the server has state-annotated
+        tools (i.e. tools with ``state_requires`` or ``state_produces``).
+        """
+        from code_execution.tools import (
+            create_plan_workflow_descriptor,
+            create_load_skill_descriptor,
+        )
+
+        server_name = self.environment_config.name
+        tool_infos = self._build_tool_infos()
+        has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
+
+        if not has_state_tools:
+            LOGGER.debug(
+                "No state-annotated tools found for '%s'; skipping workflow planning registration.",
+                server_name,
+            )
+            return
+
+        # Register plan_{name}_workflow — explicit parameters so FastMCP can build the schema.
+        domains_dir = self.environment_config.domains_dir
+        pw_kwargs: dict = {"server_name": server_name, "tools": tool_infos}
+        if domains_dir is not None:
+            pw_kwargs["domains_dir"] = domains_dir
+        pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
+        _pw_func = pw_descriptor.func
+
+        async def _plan_workflow(
+            domain: str = "",
+            mode: str = "overview",
+            current_state: str = "",
+            target_state: str = "",
+            tool_name: str = "",
+        ) -> str:
+            """Plan and navigate domain workflow states."""
+            return await _pw_func(
+                domain=domain,
+                mode=mode,
+                current_state=current_state,
+                target_state=target_state,
+                tool_name=tool_name,
+            )
+
+        self.mcp.tool(
+            name=pw_descriptor.name,
+            description=pw_descriptor.description,
+        )(_plan_workflow)
+
+        # Register load_{name}_skill — explicit parameters so FastMCP can build the schema.
+        ls_kwargs: dict = {"server_name": server_name}
+        if domains_dir is not None:
+            ls_kwargs["domains_dir"] = domains_dir
+        ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
+        _ls_func = ls_descriptor.func
+
+        async def _load_skill(skill_name: str) -> str:
+            """Load a skill by name."""
+            return await _ls_func(skill_name=skill_name)
+
+        self.mcp.tool(
+            name=ls_descriptor.name,
+            description=ls_descriptor.description,
+        )(_load_skill)
+
+        LOGGER.info(
+            "Registered plan_%s_workflow and load_%s_skill (%d state-annotated tools)",
+            server_name,
+            server_name,
+            len([t for t in tool_infos if t.state_requires or t.state_produces]),
         )
 
     def _setup_transfer_tool(self) -> None:
@@ -1224,13 +1371,35 @@ class CodeExecutionServer:
                     user_token=current_token,
                 )
 
+                # transfer_id correlates source/target events in the activity feed.
+                import uuid as _uuid
+
+                transfer_id = _uuid.uuid4().hex
+
                 result = await client.push(
                     target_url=target_server_url,
                     variable_name=effective_target_name,
                     serialized_data=serialized,
-                    metadata={"source_server": server.environment_config.name, "source_variable": variable_name},
+                    metadata={
+                        "source_server": server.environment_config.name,
+                        "source_variable": variable_name,
+                        "transfer_id": transfer_id,
+                    },
                     target_session_id=target_session_id or None,
                 )
+
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_sent",
+                        "description": f"Push '{variable_name}' → {target_server_url}",
+                        "transfer_id": transfer_id,
+                        "variable_name": variable_name,
+                        "target_server": target_server_url,
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
+
                 return _json.dumps(
                     {
                         "success": True,
@@ -1239,6 +1408,7 @@ class CodeExecutionServer:
                         "target_variable": effective_target_name,
                         "target_server_url": target_server_url,
                         "size_bytes": len(serialized),
+                        "transfer_id": transfer_id,
                         "target_response": result,
                     },
                     indent=2,
@@ -1397,6 +1567,7 @@ else:
         code: str,
         timeout: int,
         result_variable: str,
+        batch_id: str,
         semaphore: Optional[asyncio.Semaphore] = None,
     ) -> None:
         """Execute a parallel job in a dedicated session.
@@ -1430,6 +1601,22 @@ else:
                             "result_payload": payload,
                         }
                     )
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "code_executed" if result.success else "code_failed",
+                        "description": f"Parallel job {job_id} {status}",
+                        "code": code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "success": result.success,
+                        "duration_ms": (result.execution_time or 0.0) * 1000.0,
+                        "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                        "error": result.error,
+                        "session_id": session_id,
+                        "job_id": job_id,
+                        "batch_id": batch_id,
+                    }
+                )
             finally:
                 if semaphore is not None:
                     semaphore.release()
@@ -1437,6 +1624,18 @@ else:
         except asyncio.CancelledError:
             async with self._parallel_state_lock:
                 self._parallel_jobs[job_id].update({"status": "cancelled", "completed_at": time.monotonic()})
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} cancelled",
+                    "code": code,
+                    "success": False,
+                    "error": "cancelled",
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
             raise
         except Exception as exc:
             LOGGER.error("Parallel job %s failed: %s", job_id, exc, exc_info=True)
@@ -1448,6 +1647,18 @@ else:
                         "result": CodeExecutionResult(success=False, error=str(exc)).model_dump(),
                     }
                 )
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} failed",
+                    "code": code,
+                    "success": False,
+                    "error": str(exc),
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
 
     async def _cleanup_parallel_batch_sessions(self, batch_id: str) -> None:
         """Close child sessions for a completed/cancelled batch once."""
@@ -1624,6 +1835,7 @@ else:
                         code=full_code,
                         timeout=timeout,
                         result_variable=result_variable,
+                        batch_id=batch_id,
                         semaphore=self._parallel_semaphore,
                     )
                 )
@@ -1794,6 +2006,24 @@ else:
     # Server Lifecycle
     # ========================================================================
 
+    async def _initialize_tool_search_backends(self) -> None:
+        """Initialize any async-capable tool search backends."""
+        for backend in self._tool_search_backends:
+            initialize = getattr(backend, "initialize", None)
+            if callable(initialize):
+                result = initialize()
+                if inspect.isawaitable(result):
+                    await result
+
+    async def _close_tool_search_backends(self) -> None:
+        """Close registered tool search backends."""
+        for backend in self._tool_search_backends:
+            close = getattr(backend, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+
     async def _startup(self):
         """Initialize environment and register kernel on server startup."""
         LOGGER.info("Initializing server...")
@@ -1804,11 +2034,25 @@ else:
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")
 
+        await self._initialize_tool_search_backends()
+
+        # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
+        # Wrapped defensively: observability must never block server startup.
+        try:
+            await self.activity_publisher.start()
+        except Exception:
+            LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
+
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
+        await self._close_tool_search_backends()
+        try:
+            await self.activity_publisher.stop()
+        except Exception:
+            LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
         LOGGER.info("Server shutdown complete")
 
     async def run_http(
@@ -1932,6 +2176,7 @@ else:
             variable_name = body.get("variable_name")
             data_b64 = body.get("data")
             session_id = body.get("session_id")
+            transfer_metadata = body.get("metadata") or {}
 
             if not isinstance(variable_name, str) or not isinstance(data_b64, str):
                 return JSONResponse(
@@ -2048,6 +2293,21 @@ else:
                         {"success": False, "error": f"Kernel injection failed: {error_msg}"},
                         status_code=500,
                     )
+
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_received",
+                        "description": (
+                            f"Received '{variable_name}' from "
+                            f"{transfer_metadata.get('source_server') or 'another server'}"
+                        ),
+                        "transfer_id": transfer_metadata.get("transfer_id"),
+                        "variable_name": variable_name,
+                        "source_server": transfer_metadata.get("source_server"),
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
 
                 return JSONResponse(
                     {
