@@ -10,7 +10,6 @@ import httpx
 import pytest
 
 from utilities.mcp_clients import (
-    McpServer,
     _build_http_client,
     _is_local,
     _load_registry,
