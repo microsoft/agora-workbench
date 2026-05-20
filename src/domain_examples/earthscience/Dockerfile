@@ -11,8 +11,7 @@ ARG BASE_IMAGE=mcp-server-base:local
 FROM ${BASE_IMAGE}
 
 # Copy the earthscience package tree so Python module execution can resolve
-# the full package path consistently at runtime, and so the conda env's
-# additional_commands step can pip-install ``earthscience_tools/``.
+# the full package path consistently at runtime.
 COPY --chown=appuser:appuser domain_examples/earthscience /app/domain_examples/earthscience
 
 CMD ["python", "-m", "domain_examples.earthscience.server.earthscience_server"]
