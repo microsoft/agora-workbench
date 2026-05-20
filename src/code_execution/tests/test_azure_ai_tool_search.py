@@ -8,7 +8,7 @@ import pytest
 
 import code_execution.tools.search.azure_ai_tool_search as azure_tool_search
 from code_execution.tools.search.azure_ai_tool_search import AzureAIToolSearchBackend
-from utilities.tool_search import ToolInfo, ToolSearchResult
+from code_execution.tools.tool_search import ToolInfo, ToolSearchResult
 
 
 class FakeEmbeddingResponse:

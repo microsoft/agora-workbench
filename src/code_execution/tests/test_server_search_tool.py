@@ -149,7 +149,7 @@ class TestSetupSearchTool:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_search_tool_returns_json(self):
-        """Calling search_testdomain_tools returns a valid JSON object."""
+        """Calling search_testdomain_tools returns a valid JSON object with grouped results."""
         tools = [_tool("run_opf", "Run optimal power flow")]
         server = _make_server(tools=tools)
 
@@ -158,8 +158,10 @@ class TestSetupSearchTool:
         result = await mcp_tool.run({"query": "power flow", "top": 5})
         raw = result.content[0].text
         parsed = json.loads(raw)
-        assert "results" in parsed
-        assert isinstance(parsed["results"], list)
+        assert "tools" in parsed
+        assert "skills" in parsed
+        assert isinstance(parsed["tools"], list)
+        assert isinstance(parsed["skills"], list)
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -175,8 +177,8 @@ class TestSetupSearchTool:
         result = await mcp_tool.run({"query": "run_opf", "top": 5})
         raw = result.content[0].text
         parsed = json.loads(raw)
-        assert len(parsed["results"]) >= 1
-        assert parsed["results"][0]["name"] == "run_opf"
+        assert len(parsed["tools"]) >= 1
+        assert parsed["tools"][0]["name"] == "run_opf"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -189,7 +191,8 @@ class TestSetupSearchTool:
         result = await mcp_tool.run({"query": "zzz_no_match_xyz", "top": 5})
         raw = result.content[0].text
         parsed = json.loads(raw)
-        assert parsed["results"] == []
+        assert parsed["tools"] == []
+        assert parsed["skills"] == []
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -199,6 +202,48 @@ class TestSetupSearchTool:
         server = _make_server(tools=tools)
         tool_names = {t.name for t in await server.mcp.list_tools()}
         assert "list_testdomain_domain_tools" not in tool_names
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_search_tool_accepts_category_param(self):
+        """search_testdomain_tools accepts the category parameter."""
+        tools = [_tool("run_opf", "Run optimal power flow")]
+        server = _make_server(tools=tools)
+
+        mcp_tool = await server.mcp.get_tool("search_testdomain_tools")
+        result = await mcp_tool.run({"query": "power flow", "top": 5, "category": "tools"})
+        raw = result.content[0].text
+        parsed = json.loads(raw)
+        assert "tools" in parsed
+        assert "skills" in parsed
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_search_tool_invalid_category_returns_error(self):
+        """Invalid category value returns a structured error."""
+        tools = [_tool("run_opf", "Run optimal power flow")]
+        server = _make_server(tools=tools)
+
+        mcp_tool = await server.mcp.get_tool("search_testdomain_tools")
+        result = await mcp_tool.run({"query": "power", "top": 5, "category": "invalid"})
+        raw = result.content[0].text
+        parsed = json.loads(raw)
+        assert "error" in parsed
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_search_tool_result_has_type_field(self):
+        """Tool results include a type field set to 'tool'."""
+        tools = [_tool("run_opf", "Run optimal power flow")]
+        server = _make_server(tools=tools)
+
+        mcp_tool = await server.mcp.get_tool("search_testdomain_tools")
+        result = await mcp_tool.run({"query": "power flow", "top": 5})
+        raw = result.content[0].text
+        parsed = json.loads(raw)
+        assert len(parsed["tools"]) >= 1
+        assert parsed["tools"][0]["type"] == "tool"
+        assert "to_access" in parsed["tools"][0]
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +287,8 @@ class TestServerSearchBackendLifecycle:
 class TestSetupWorkflowPlanningTools:
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_workflow_tools_registered_when_state_tools_exist(self):
-        """plan_{name}_workflow and load_{name}_skill are registered when state-annotated tools exist."""
+    async def test_plan_workflow_registered_when_state_tools_exist(self):
+        """plan_{name}_workflow is registered when state-annotated tools exist."""
         tool = _tool(
             "solve",
             "Solve something",
@@ -255,7 +300,23 @@ class TestSetupWorkflowPlanningTools:
         server = _make_server(tools=[tool])
         tool_names = {t.name for t in await server.mcp.list_tools()}
         assert "plan_testdomain_workflow" in tool_names
-        assert "load_testdomain_skill" in tool_names
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_load_skill_not_registered_without_skills(self):
+        """load_{name}_skill is NOT registered when no skills are discoverable."""
+        tool = _tool(
+            "solve",
+            "Solve something",
+            state_transition=StateTransition(
+                requires=frozenset({"sim.ready"}),
+                produces=frozenset({"sim.solved"}),
+            ),
+        )
+        server = _make_server(tools=[tool])
+        tool_names = {t.name for t in await server.mcp.list_tools()}
+        # No domains_dir configured → no skills → load_skill not registered
+        assert "load_testdomain_skill" not in tool_names
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -265,4 +326,5 @@ class TestSetupWorkflowPlanningTools:
         server = _make_server(tools=tools)
         tool_names = {t.name for t in await server.mcp.list_tools()}
         assert "plan_testdomain_workflow" not in tool_names
-        assert "load_testdomain_skill" not in tool_names
+        # load_skill may or may not be registered depending on skill discovery
+        # (no domains_dir configured in test → no skills → not registered)

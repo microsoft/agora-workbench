@@ -3,7 +3,7 @@ State graph for workflow-oriented tool and skill discovery.
 
 The graph is built from two sources:
 
-1. Tool state transitions supplied via :class:`~utilities.tool_search.ToolInfo` metadata
+1. Tool state transitions supplied via :class:`~code_execution.tools.tool_search.ToolInfo` metadata
 2. Skill state annotations (``states`` field in SKILL.md frontmatter)
 """
 
@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 import yaml
 
-from utilities.tool_search import ToolInfo
+from ..tool_search import ToolInfo
 
 LOGGER = logging.getLogger(__name__)
 

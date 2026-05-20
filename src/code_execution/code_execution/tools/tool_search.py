@@ -10,9 +10,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+#: Valid categories for filtering search results.
+SearchCategory = Literal["all", "tools", "skills"]
 
 #: ``(server_name, tool_name)`` – uniquely identifies a tool across MCP servers.
 ToolKey = tuple[str, str]
@@ -46,6 +49,11 @@ class ToolSearchResult(BaseModel):
     server_name: str = Field(..., description="MCP server name (empty string for local tools)")
     description: str = Field(..., description="Tool description")
     execution_type: str = Field(..., description="Execution type (e.g. 'mcp', 'foundry')")
+    type: str = Field(default="tool", description="Result type: 'tool' or 'skill'")
+    to_access: str = Field(
+        default="",
+        description="Instruction for how to access this result (e.g. the tool call to make)",
+    )
     score: Optional[float] = Field(default=None, description="Relevance score from the search backend")
     state_requires: list[str] = Field(default_factory=list, description="State tokens required before this tool runs")
     state_produces: list[str] = Field(default_factory=list, description="State tokens produced after a successful run")
@@ -60,12 +68,14 @@ class ToolSearchBackend(ABC):
     """
 
     @abstractmethod
-    async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
-        """Search for tools matching *query*.
+    async def search(self, query: str, top: int = 5, category: SearchCategory = "all") -> list[ToolSearchResult]:
+        """Search for tools and/or skills matching *query*.
 
         Args:
             query: Natural-language description or tool name.
             top: Maximum number of results to return.
+            category: Filter results by type — ``"all"``, ``"tools"``, or
+                ``"skills"``.
 
         Returns:
             List of :class:`ToolSearchResult` ordered by descending relevance.

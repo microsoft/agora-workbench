@@ -40,7 +40,7 @@ from utilities.auth import (
     get_search_credential_async,
     get_token_provider,
 )
-from utilities.tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult
+from ..tool_search import ToolInfo, ToolSearchBackend, ToolSearchResult, SearchCategory
 
 from ._constants import (
     TOOL_SEARCH_ENDPOINT_ENV,
@@ -63,6 +63,7 @@ _SELECT_FIELDS = [
     "affordances",
     "state_requires",
     "state_produces",
+    "type",
 ]
 
 
@@ -80,6 +81,22 @@ def _tool_embedding_text(tool: ToolInfo) -> str:
         parts.append("Requires: " + ", ".join(tool.state_requires))
     if tool.state_produces:
         parts.append("Produces: " + ", ".join(tool.state_produces))
+    return "\n".join(part for part in parts if part)
+
+
+def _skill_document_id(skill: dict[str, Any]) -> str:
+    """Derive a stable document ID for a skill."""
+    domain = skill.get("domain", "")
+    name = skill.get("name", "")
+    return hashlib.sha256(f"skill:{domain}:{name}".encode("utf-8")).hexdigest()
+
+
+def _skill_embedding_text(skill: dict[str, Any]) -> str:
+    """Build the text used to embed a skill document."""
+    parts = [skill.get("name", ""), skill.get("description", "")]
+    states = skill.get("states", [])
+    if states:
+        parts.append("States: " + ", ".join(states))
     return "\n".join(part for part in parts if part)
 
 
@@ -132,12 +149,14 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         self,
         tools: list[ToolInfo],
         server_name: str = "",
+        skills: list[dict[str, Any]] | None = None,
         index_name: str | None = None,
         endpoint: str | None = None,
     ):
         super().__init__()
         derived_server_name = server_name or (tools[0].server_name if tools else "default")
         self._tools = tools
+        self._skills = skills or []
         self.server_name = derived_server_name
         self.index_name = index_name or _build_ephemeral_index_name(derived_server_name)
         self.endpoint = endpoint or os.getenv(TOOL_SEARCH_ENDPOINT_ENV)
@@ -178,13 +197,18 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
         self._initialized = True
         LOGGER.info(
-            "Azure AI Search tool index '%s' created for this server instance with %d tools",
+            "Azure AI Search tool index '%s' created with %d tools and %d skills",
             self.index_name,
             len(self._tools),
+            len(self._skills),
         )
 
-    async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
-        """Search the ephemeral Azure AI Search tool index."""
+    async def search(self, query: str, top: int = 5, category: SearchCategory = "all") -> list[ToolSearchResult]:
+        """Search the ephemeral Azure AI Search tool index.
+
+        Supports filtering by ``category`` using Azure's OData filter on the
+        ``type`` field.
+        """
         if top <= 0:
             return []
         if not self._initialized:
@@ -193,6 +217,13 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
             return []
 
         search_text = query.strip() or "*"
+
+        # Build OData filter for category
+        filter_expr: str | None = None
+        if category == "tools":
+            filter_expr = "type eq 'tool'"
+        elif category == "skills":
+            filter_expr = "type eq 'skill'"
 
         if query.strip():
             try:
@@ -203,6 +234,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
                     query_type="semantic",
                     semantic_configuration_name=_SEMANTIC_CONFIGURATION_NAME,
                     select=_SELECT_FIELDS,
+                    filter=filter_expr,
                     top=top,
                     vector_queries=[
                         VectorizedQuery(
@@ -223,6 +255,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         results = await self._search_client.search(
             search_text=search_text,
             select=_SELECT_FIELDS,
+            filter=filter_expr,
             top=top,
         )
         return await self._collect_results(results)
@@ -279,6 +312,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
             SearchableField(name="affordances", collection=True),
             SearchableField(name="state_requires", collection=True, filterable=True),
             SearchableField(name="state_produces", collection=True, filterable=True),
+            SimpleField(name="type", type=SearchFieldDataType.String, filterable=True),
             SearchField(
                 name="description_vector",
                 type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
@@ -321,24 +355,48 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         )
 
     async def _build_documents(self) -> list[dict[str, Any]]:
-        """Embed and serialize tool metadata for indexing."""
-        if not self._tools:
-            return []
+        """Embed and serialize tool and skill metadata for indexing."""
+        documents: list[dict[str, Any]] = []
 
-        embeddings = await asyncio.gather(*(self._embed_text(_tool_embedding_text(tool)) for tool in self._tools))
-        return [
-            {
-                "id": _tool_document_id(tool),
-                "name": tool.name,
-                "server_name": tool.server_name,
-                "description": tool.description,
-                "affordances": list(tool.affordances),
-                "state_requires": list(tool.state_requires),
-                "state_produces": list(tool.state_produces),
-                "description_vector": embedding,
-            }
-            for tool, embedding in zip(self._tools, embeddings, strict=True)
-        ]
+        if self._tools:
+            tool_embeddings = await asyncio.gather(
+                *(self._embed_text(_tool_embedding_text(tool)) for tool in self._tools)
+            )
+            for tool, embedding in zip(self._tools, tool_embeddings, strict=True):
+                documents.append(
+                    {
+                        "id": _tool_document_id(tool),
+                        "name": tool.name,
+                        "server_name": tool.server_name,
+                        "description": tool.description,
+                        "affordances": list(tool.affordances),
+                        "state_requires": list(tool.state_requires),
+                        "state_produces": list(tool.state_produces),
+                        "type": "tool",
+                        "description_vector": embedding,
+                    }
+                )
+
+        if self._skills:
+            skill_embeddings = await asyncio.gather(
+                *(self._embed_text(_skill_embedding_text(skill)) for skill in self._skills)
+            )
+            for skill, embedding in zip(self._skills, skill_embeddings, strict=True):
+                documents.append(
+                    {
+                        "id": _skill_document_id(skill),
+                        "name": skill.get("name", ""),
+                        "server_name": self.server_name,
+                        "description": skill.get("description", ""),
+                        "affordances": skill.get("states", []),
+                        "state_requires": [],
+                        "state_produces": [],
+                        "type": "skill",
+                        "description_vector": embedding,
+                    }
+                )
+
+        return documents
 
     async def _embed_text(self, text: str) -> list[float]:
         """Generate an embedding for *text* using Azure OpenAI over HTTP."""
@@ -407,12 +465,24 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         """Convert Azure search documents into ToolSearchResult objects."""
         output: list[ToolSearchResult] = []
         async for document in results:
+            doc_type = str(document.get("type", "tool"))
+            name = str(document.get("name", ""))
+
+            if doc_type == "skill":
+                to_access = f'Load with load_{self.server_name}_skill(skill_name="{name}")'
+                execution_type = "skill"
+            else:
+                to_access = f"Call via execute_{self.server_name}_code"
+                execution_type = "mcp"
+
             output.append(
                 ToolSearchResult(
-                    name=str(document.get("name", "")),
+                    name=name,
                     server_name=str(document.get("server_name", "")),
                     description=str(document.get("description", "")),
-                    execution_type="mcp",
+                    execution_type=execution_type,
+                    type=doc_type,
+                    to_access=to_access,
                     score=self._extract_score(document),
                     state_requires=[str(value) for value in document.get("state_requires", [])],
                     state_produces=[str(value) for value in document.get("state_produces", [])],
