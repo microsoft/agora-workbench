@@ -56,6 +56,16 @@ def compute_ndvi(
         )
 
     with rasterio.open(red_href) as red_src, rasterio.open(nir_href) as nir_src:
+        if (
+            red_src.crs != nir_src.crs
+            or red_src.width != nir_src.width
+            or red_src.height != nir_src.height
+            or not red_src.transform.almost_equals(nir_src.transform)
+        ):
+            raise ValueError(
+                "Red and NIR rasters must share the same CRS, transform, width, and height."
+            )
+
         # Determine read window
         if bbox is not None:
             from rasterio.warp import transform_bounds
