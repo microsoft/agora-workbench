@@ -50,9 +50,7 @@ def zonal_statistics(
     requested = list(stats) if stats else list(_DEFAULT_STATS)
     invalid = [s for s in requested if s not in _VALID_STATS]
     if invalid:
-        raise ValueError(
-            f"Unsupported statistic(s) {invalid!r}. Valid: {sorted(_VALID_STATS)!r}"
-        )
+        raise ValueError(f"Unsupported statistic(s) {invalid!r}. Valid: {sorted(_VALID_STATS)!r}")
 
     features = _extract_features(polygons_geojson)
     if not features:
@@ -74,7 +72,7 @@ def zonal_statistics(
                 )
             except ValueError:
                 # Polygon does not intersect raster.
-                clipped = np.ma.masked_all((1, 1), dtype="float32")
+                clipped = np.ma.masked_all((1, 1), dtype="float32")  # type: ignore[reportArgumentType]
 
             data = clipped if isinstance(clipped, np.ma.MaskedArray) else np.ma.asarray(clipped)
             data = data.astype("float64")
