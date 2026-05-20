@@ -44,12 +44,16 @@ the recommended order.
 > **Data catalog — currently a placeholder.** The repo includes a
 > server-side catalog package
 > ([`catalog_tools.py`](../../../src/code_execution/code_execution/catalog_tools.py))
-> that auto-registers `search_data`, `get_artifact`, and `list_domains`
-> MCP tools when a server is launched with a `catalog.yaml` (see
+> that can register `search_data`, `get_artifact`, `list_domains`, and
+> `query_catalog` MCP tools from a catalog configuration such as
 > [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)).
-> The bundled chemistry and energy systems servers don't yet wire it in,
-> so `step_b_data_lake_tool` in this tutorial is a no-op log — kept as a
-> numbered step for forward-compatibility with future quickstarts.
+> This is not wired in automatically by `CodeExecutionServer` or the
+> bundled domain example servers: to expose these tools, a server must
+> explicitly load `catalog.yaml`, run any catalog indexing/setup, and call
+> `register_catalog_tools(...)` during startup. The bundled chemistry and
+> energy systems servers don't yet do this, so `step_b_data_lake_tool` in
+> this tutorial is a no-op log — kept as a numbered step for
+> forward-compatibility with future quickstarts.
 
 ## Prerequisites
 
