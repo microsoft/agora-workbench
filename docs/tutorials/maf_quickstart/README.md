@@ -271,7 +271,7 @@ A successful run looks roughly like:
 INFO maf_quickstart: Step A: built chat client OpenAIChatClient
 INFO maf_quickstart: Step B: built data lake search tool
 INFO maf_quickstart: Step C: built chemistry MCP tool @ http://localhost:8020/mcp
-INFO maf_quickstart: Step D: built agent with 2 tool(s); skills injected: chemistry=True, energy=False
+INFO maf_quickstart: Step D: built agent with 2 tool(s); skills injected: chemistry=True, energy=True
 
 ======================================================================
 USER: Look for chemistry datasets in the data lake … then screen this
