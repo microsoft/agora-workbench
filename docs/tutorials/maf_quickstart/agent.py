@@ -3,12 +3,11 @@ MAF + agora-workbench quickstart tutorial.
 
 Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
 
-  * ``search_data`` / ``get_artifact`` / ``list_domains`` — data catalog
-    tools provided by the MCP server itself when a ``catalog.yaml`` is
-    configured (see ``src/code_execution/catalog.example.yaml``). The
-    server indexes the declared sources on startup and exposes hybrid
-    keyword + vector search as MCP tools — no client-side data lake
-    adapter is required.
+  * ``search_data`` / ``query_catalog`` / ``get_artifact`` / ``list_domains`` —
+    data catalog tools exposed by MCP servers that explicitly wire catalog
+    indexing plus ``register_catalog_tools(...)`` at startup (see
+    ``src/code_execution/catalog.example.yaml`` and
+    ``src/code_execution/code_execution/catalog_tools.py``).
   * ``chemistry`` MCP toolset — the chemistry MCP server from
     ``src/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
@@ -108,18 +107,18 @@ def step_a_chat_client():
 async def step_b_data_lake_tool():
     """The data catalog is now served by the MCP server itself.
 
-    When an MCP server is launched with a ``catalog.yaml`` (see
-    ``src/code_execution/catalog.example.yaml``), it indexes the declared
-    sources on startup and auto-registers ``search_data``, ``get_artifact``,
-    and ``list_domains`` as MCP tools. No client-side data lake adapter is
-    needed — those tools are discovered when the agent connects to the
-    server via ``MCPStreamableHTTPTool``.
+    If an MCP server startup path wires catalog indexing plus
+    ``register_catalog_tools(...)`` (see
+    ``src/code_execution/code_execution/catalog_tools.py``), the agent can
+    discover ``search_data``, ``query_catalog``, ``get_artifact``, and
+    ``list_domains`` when it connects via ``MCPStreamableHTTPTool``.
 
     Returns ``None`` — kept as a numbered step purely for tutorial clarity.
     """
     LOGGER.info(
-        "Step B: data catalog tools (search_data, get_artifact, list_domains) "
-        "are auto-discovered from any MCP server configured with a catalog.yaml."
+        "Step B: data catalog tools (search_data, query_catalog, get_artifact, "
+        "list_domains) are discovered from MCP servers that wire catalog "
+        "indexing plus register_catalog_tools(...) at startup."
     )
     return None
 
