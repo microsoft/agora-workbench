@@ -234,7 +234,7 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
             try:
                 await self._index_client.delete_index(self.index_name)
             except ResourceNotFoundError:
-                pass
+                pass  # Index already deleted — nothing to clean up.
             except Exception:
                 LOGGER.warning("Failed to delete Azure AI Search index '%s' during shutdown", self.index_name)
             self._index_created = False
