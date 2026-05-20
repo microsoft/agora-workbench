@@ -27,6 +27,7 @@ os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 
 from ..code_execution import CodeExecutionServer, EnvironmentConfig
 from ..code_execution.sessions import SessionManager, SessionConfig, set_current_session
+from code_execution import ToolDefinition, ToolParameter, ToolRegistry
 
 
 # Test authentication token for all tests
@@ -113,6 +114,36 @@ def azure_cli_token():
         pytest.skip("Azure CLI not found. Install it to run live tests.")
     except subprocess.CalledProcessError as e:
         pytest.skip(f"Failed to get Azure CLI token: {e.stderr}")
+
+
+@pytest.fixture
+def sample_tool():
+    """Sample tool definition for testing."""
+    return ToolDefinition(
+        name="solve_network",
+        description="Solve power network optimization",
+        required_parameters=[ToolParameter(name="network_id", type=str, description="Network identifier")],
+        optional_parameters=[ToolParameter(name="solver", type=str, description="Solver name", default="highs")],
+        module="test.tools.solvers",
+    )
+
+
+@pytest.fixture
+def another_tool():
+    """Another sample tool definition for testing."""
+    return ToolDefinition(
+        name="build_network",
+        description="Build base network topology",
+        required_parameters=[ToolParameter(name="region", type=str, description="Region name")],
+        optional_parameters=[],
+        module="test.tools.network",
+    )
+
+
+@pytest.fixture
+def empty_registry():
+    """Empty tool registry for testing."""
+    return ToolRegistry()
 
 
 @pytest_asyncio.fixture

@@ -74,6 +74,21 @@ class EnvironmentConfig(BaseModel):
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
     )
+    domains_dir: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Path to the domains/ directory containing domain state definitions and skills. "
+            "Used by workflow planning and skill loading tools. "
+            "When None, these features are disabled unless tools carry state annotations directly."
+        ),
+    )
+    tool_search_backend: Literal["bm25", "azure_ai_search"] = Field(
+        default="bm25",
+        description=(
+            "Tool search backend for the server-side search_tools MCP tool. "
+            "Supported values: 'bm25' (default) and 'azure_ai_search'."
+        ),
+    )
 
     def get_build_dir(self) -> Path:
         """Get the directory where environment will be built."""

@@ -167,7 +167,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_tool_info_carries_state_fields(self):
         """ToolInfo should accept and store state_requires and state_produces."""
-        from tools.search.build_tool_list import ToolInfo
+        from utilities.tool_search import ToolInfo
 
         ti = ToolInfo(
             name="test_tool",
@@ -183,7 +183,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_tool_info_defaults_empty(self):
         """ToolInfo state fields should default to empty tuples."""
-        from tools.search.build_tool_list import ToolInfo
+        from utilities.tool_search import ToolInfo
 
         ti = ToolInfo(name="test", description="desc", server_name="s")
         assert ti.state_requires == ()
@@ -192,7 +192,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_carries_state_fields(self):
         """ToolSearchResult should include state_requires and state_produces."""
-        from tools.tool_search import ToolSearchResult
+        from utilities.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -208,7 +208,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_defaults_empty(self):
         """ToolSearchResult state fields should default to empty lists."""
-        from tools.tool_search import ToolSearchResult
+        from utilities.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -223,8 +223,8 @@ class TestPipelinePropagation:
     @pytest.mark.asyncio
     async def test_bm25_backend_propagates_state_fields(self):
         """BM25 search results should include state transition data from ToolInfo."""
-        from tools.search.build_tool_list import ToolInfo
-        from tools.search.bm25_tool_search import BM25ToolSearchBackend
+        from utilities.tool_search import ToolInfo
+        from code_execution.tools.search.bm25_tool_search import BM25ToolSearchBackend
 
         tools = [
             ToolInfo(
@@ -248,11 +248,11 @@ class TestPipelinePropagation:
 
 
 class TestStateGraphQueryTool:
-    """Test the StateGraph class and query_state_graph FunctionTool."""
+    """Test the StateGraph class and plan_{name}_workflow tool."""
 
     def _make_graph(self):  # noqa: F821
-        from tools.search.build_tool_list import ToolInfo
-        from tools.search.state_graph import StateGraph
+        from utilities.tool_search import ToolInfo
+        from code_execution.tools.search.state_graph import StateGraph
 
         tools = [
             ToolInfo(
@@ -361,25 +361,26 @@ class TestStateGraphQueryTool:
         assert "error" in result
 
 
-# ---------------------------------------------------------------------------
-# SKILL.md frontmatter validation
-# ---------------------------------------------------------------------------
-
-
 class TestSkillFrontmatter:
     """Validate SKILL.md frontmatter state annotations."""
 
     @staticmethod
     def _discover_skills_with_states() -> list[dict]:
         """Find all SKILL.md files with a states field in frontmatter."""
-        from tools.search.state_graph import _discover_skills, _DOMAINS_DIR
+        from pathlib import Path
 
-        return [s for s in _discover_skills(_DOMAINS_DIR) if s.get("states")]
+        from code_execution.tools.search.state_graph import _discover_skills
+
+        # Use the domain_examples directory as the test fixture source
+        domains_dir = Path(__file__).resolve().parents[2] / "domain_examples"
+        return [s for s in _discover_skills(domains_dir) if s.get("states")]
 
     @pytest.mark.unit
     def test_skill_states_are_valid_tokens(self):
         """Every state token in SKILL.md frontmatter must belong to a domain Enum."""
         valid = _all_valid_tokens()
+        if not valid:
+            pytest.skip("No domain state Enums registered; cannot validate skill tokens")
         skills = self._discover_skills_with_states()
         invalid: list[tuple[str, str]] = []
         for skill in skills:

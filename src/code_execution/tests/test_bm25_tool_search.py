@@ -2,11 +2,11 @@
 
 import pytest
 
-from tools.search.bm25_tool_search import (
+from code_execution.tools.search.bm25_tool_search import (
     BM25ToolSearchBackend,
     _tool_info_text,
 )
-from tools.search.build_tool_list import ToolInfo
+from utilities.tool_search import ToolInfo
 
 
 class TestToolInfoText:

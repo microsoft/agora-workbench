@@ -1,17 +1,42 @@
 """
 Shared protocol and models for tool search backends.
 
-Defines the contract that ``tools/`` implements — ``core`` owns the
-interface so there is no reverse dependency from ``core`` → ``tools``.
+This module is the single source of truth for the tool-search contract.
+Both MCP server code (``code_execution``) and client-side orchestration
+can depend on it without creating circular imports.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Optional
 
 from pydantic import BaseModel, Field
 
 #: ``(server_name, tool_name)`` – uniquely identifies a tool across MCP servers.
 ToolKey = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class ToolInfo:
+    """Lightweight tool metadata for search indexing.
+
+    Attributes:
+        name: Tool name as exposed by the MCP server
+        description: Human-readable description of the tool
+        server_name: Name of the MCP server hosting this tool
+        affordances: Natural-language phrases that improve search recall
+        state_requires: State tokens that must hold before this tool can run
+        state_produces: State tokens that hold after a successful run
+    """
+
+    name: str
+    description: str
+    server_name: str
+    affordances: tuple[str, ...] = ()
+    state_requires: tuple[str, ...] = ()
+    state_produces: tuple[str, ...] = ()
 
 
 class ToolSearchResult(BaseModel):
@@ -29,9 +54,9 @@ class ToolSearchResult(BaseModel):
 class ToolSearchBackend(ABC):
     """Abstract base class for searching a tool catalog.
 
-    Subclasses must implement :meth:`search`.  Authentication is handled
-    by the credential factories in ``auth.providers`` — backends obtain
-    credentials directly rather than accepting user tokens.
+    Subclasses must implement :meth:`search`.  Implementations can be
+    injected into :func:`~code_execution.server.CodeExecutionServer` via
+    ``register_search_tool()`` to expose server-side search as an MCP tool.
     """
 
     @abstractmethod
@@ -45,4 +70,4 @@ class ToolSearchBackend(ABC):
         Returns:
             List of :class:`ToolSearchResult` ordered by descending relevance.
         """
-        ...
+        raise NotImplementedError
