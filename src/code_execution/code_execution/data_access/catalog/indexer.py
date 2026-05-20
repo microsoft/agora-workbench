@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import mimetypes
 import os
@@ -17,6 +18,9 @@ LOGGER = logging.getLogger(__name__)
 
 # Batch size for embedding computation
 _EMBEDDING_BATCH_SIZE = 64
+
+# Max concurrent blob source enumerations
+_MAX_BLOB_CONCURRENCY = 8
 
 
 def _build_indexable_text(name: str, description: Optional[str], domain: Optional[str]) -> str:
@@ -86,12 +90,13 @@ class CatalogIndexer:
 
     async def index(self) -> int:
         """
-        Run a full index pass: enumerate files, diff, compute embeddings, upsert.
+        Run a full index pass: enumerate all sources (local + blob),
+        diff against existing entries, compute embeddings, upsert.
 
         Returns:
             Number of artifacts indexed (new + updated).
         """
-        all_artifacts = self._enumerate_sources()
+        all_artifacts = await self._enumerate_all_sources()
 
         if not all_artifacts:
             LOGGER.info("No artifacts found in configured sources.")
@@ -115,7 +120,7 @@ class CatalogIndexer:
             LOGGER.info("Catalog up to date (%d artifacts).", len(all_artifacts))
             return 0
 
-        # Compute embeddings in batches
+        # Compute embeddings in batches and upsert within a transaction
         await self._compute_and_store(to_index)
 
         # Log warning for artifacts without descriptions
@@ -129,19 +134,113 @@ class CatalogIndexer:
         LOGGER.info("Indexed %d new artifacts (%d total).", len(to_index), len(all_artifacts))
         return len(to_index)
 
-    def _enumerate_sources(self) -> list[dict]:
-        """Enumerate files from all configured sources."""
+    async def _enumerate_all_sources(self) -> list[dict]:
+        """Enumerate files from all configured sources (local sync, blob async concurrent)."""
         artifacts: list[dict] = []
+        blob_sources: list[SourceConfig] = []
+
         for source in self._config.sources:
             if source.source_type == "local":
                 artifacts.extend(self._enumerate_local(source))
             elif source.source_type == "blob":
-                LOGGER.warning(
-                    "Blob source enumeration at index time requires async. "
-                    "Blob source '%s' will be skipped during sync enumeration. "
-                    "Use index_blob_source() for async blob indexing.",
-                    source.path,
-                )
+                blob_sources.append(source)
+
+        if blob_sources:
+            blob_artifacts = await self._enumerate_blob_sources_concurrent(blob_sources)
+            artifacts.extend(blob_artifacts)
+
+        return artifacts
+
+    async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> list[dict]:
+        """Enumerate multiple blob sources concurrently with shared credential."""
+        from azure.identity.aio import DefaultAzureCredential
+        from azure.storage.blob.aio import BlobServiceClient
+
+        credential = DefaultAzureCredential()
+        # Reuse clients per storage account to avoid redundant connections
+        clients: dict[str, BlobServiceClient] = {}
+        semaphore = asyncio.Semaphore(_MAX_BLOB_CONCURRENCY)
+
+        async def enumerate_one(source: SourceConfig) -> list[dict]:
+            async with semaphore:
+                return await self._enumerate_blob_source(source, credential, clients)
+
+        try:
+            tasks = [enumerate_one(source) for source in sources]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            artifacts: list[dict] = []
+            for source, result in zip(sources, results):
+                if isinstance(result, BaseException):
+                    LOGGER.error("Failed to enumerate blob source '%s': %s", source.path, result)
+                else:
+                    artifacts.extend(result)
+            return artifacts
+        finally:
+            for client in clients.values():
+                await client.close()
+            await credential.close()
+
+    async def _enumerate_blob_source(
+        self,
+        source: SourceConfig,
+        credential: object,
+        clients: dict,
+    ) -> list[dict]:
+        """
+        Enumerate blobs in a single Azure Blob Storage prefix.
+
+        Uses shared credential and client pool for efficiency.
+        """
+        from azure.storage.blob.aio import BlobServiceClient
+
+        account, container, prefix = _parse_blob_path(source.path)
+        service_url = f"https://{account}.blob.core.windows.net"
+
+        # Reuse BlobServiceClient per account
+        if service_url not in clients:
+            clients[service_url] = BlobServiceClient(service_url, credential=credential)
+        client = clients[service_url]
+
+        artifacts: list[dict] = []
+        now = datetime.now(timezone.utc).isoformat()
+
+        container_client = client.get_container_client(container)
+        async for blob in container_client.list_blobs(name_starts_with=prefix):
+            if blob.name.endswith("/"):
+                continue
+            filename = blob.name.split("/")[-1]
+            if filename.startswith("."):
+                continue
+
+            storage_uri = f"az://{account}/{container}/{blob.name}"
+            artifact_id = artifact_id_from_uri(storage_uri)
+
+            description = source.description
+            domain = source.domain
+            if source.files:
+                rel = blob.name[len(prefix) :].lstrip("/") if prefix else blob.name
+                override = source.files.get(rel) or source.files.get(filename)
+                if override:
+                    if override.description:
+                        description = override.description
+                    if override.domain:
+                        domain = override.domain
+
+            artifacts.append(
+                {
+                    "artifact_id": artifact_id,
+                    "name": filename,
+                    "storage_uri": storage_uri,
+                    "description": description,
+                    "domain": domain,
+                    "source_type": "blob",
+                    "content_type": _infer_content_type(filename) or blob.content_settings.content_type,
+                    "size_bytes": blob.size,
+                    "indexed_at": now,
+                }
+            )
+
         return artifacts
 
     def _enumerate_local(self, source: SourceConfig) -> list[dict]:
@@ -196,71 +295,8 @@ class CatalogIndexer:
             "indexed_at": indexed_at,
         }
 
-    async def index_blob_source(self, source: SourceConfig) -> list[dict]:
-        """
-        Enumerate blobs in an Azure Blob Storage prefix.
-
-        Supports both az://account/container/prefix and
-        https://<account>.blob.core.windows.net/container/prefix formats.
-
-        Requires azure-storage-blob with async support.
-        """
-        account, container, prefix = _parse_blob_path(source.path)
-
-        from azure.identity.aio import DefaultAzureCredential
-        from azure.storage.blob.aio import BlobServiceClient
-
-        credential = DefaultAzureCredential()
-        service_url = f"https://{account}.blob.core.windows.net"
-        client = BlobServiceClient(service_url, credential=credential)
-
-        artifacts: list[dict] = []
-        now = datetime.now(timezone.utc).isoformat()
-
-        try:
-            container_client = client.get_container_client(container)
-            async for blob in container_client.list_blobs(name_starts_with=prefix):
-                if blob.name.endswith("/"):
-                    continue
-                filename = blob.name.split("/")[-1]
-                if filename.startswith("."):
-                    continue
-
-                storage_uri = f"az://{account}/{container}/{blob.name}"
-                artifact_id = artifact_id_from_uri(storage_uri)
-
-                description = source.description
-                domain = source.domain
-                if source.files:
-                    rel = blob.name[len(prefix) :].lstrip("/") if prefix else blob.name
-                    override = source.files.get(rel) or source.files.get(filename)
-                    if override:
-                        if override.description:
-                            description = override.description
-                        if override.domain:
-                            domain = override.domain
-
-                artifacts.append(
-                    {
-                        "artifact_id": artifact_id,
-                        "name": filename,
-                        "storage_uri": storage_uri,
-                        "description": description,
-                        "domain": domain,
-                        "source_type": "blob",
-                        "content_type": _infer_content_type(filename) or blob.content_settings.content_type,
-                        "size_bytes": blob.size,
-                        "indexed_at": now,
-                    }
-                )
-        finally:
-            await client.close()
-            await credential.close()
-
-        return artifacts
-
     async def _compute_and_store(self, artifacts: list[dict]) -> None:
-        """Compute embeddings and upsert artifacts into the database."""
+        """Compute embeddings and upsert artifacts into the database in a transaction."""
         # Build texts for embedding
         texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in artifacts]
 
@@ -271,7 +307,8 @@ class CatalogIndexer:
             batch_embeddings = await self.embedding_provider.embed(batch)
             all_embeddings.extend(batch_embeddings)
 
-        # Upsert with embeddings
-        for artifact, embedding in zip(artifacts, all_embeddings):
-            artifact["embedding"] = embedding
-            self._db.upsert_artifact(**artifact)
+        # Upsert all artifacts within a single transaction for efficiency
+        with self._db.conn:
+            for artifact, embedding in zip(artifacts, all_embeddings):
+                artifact["embedding"] = embedding
+                self._db.upsert_artifact(**artifact)
