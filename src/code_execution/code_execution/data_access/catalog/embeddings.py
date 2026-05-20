@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 LOGGER = logging.getLogger(__name__)
 
 
-@runtime_checkable
 class EmbeddingProvider(Protocol):
     """Protocol for embedding computation."""
 
@@ -22,7 +21,7 @@ class EmbeddingProvider(Protocol):
         ...
 
 
-class LocalEmbeddingProvider:
+class LocalEmbeddingProvider(EmbeddingProvider):
     """Embedding provider using sentence-transformers on CPU."""
 
     def __init__(self, model_name: str = "nomic-ai/nomic-embed-text-v1.5"):
@@ -55,7 +54,7 @@ class LocalEmbeddingProvider:
         return embeddings
 
 
-class AzureOpenAIEmbeddingProvider:
+class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
     """Embedding provider using Azure OpenAI."""
 
     def __init__(self, endpoint: str, deployment: str, dimensions: int = 3072):
