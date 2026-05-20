@@ -18,26 +18,28 @@ class EarthscienceState(str, Enum):
 
     The graph flows:
 
-        list_collections / search_stac_items ─► ITEMS_SEARCHED
-                                                    │
-                                                    ▼
-                                          get_item_assets
-                                                    │
-                                                    ▼
-                                            ASSETS_RESOLVED
-                                                    │
-                                                    ▼
-                                              compute_ndvi
-                                                    │
-                                                    ▼
-                                             NDVI_COMPUTED
-                                                    │
-                                          ┌─────────┴─────────┐
-                                          ▼                   ▼
-                                  clip_to_geometry    zonal_statistics
-                                          │                   │
-                                          ▼                   ▼
-                                   RASTER_CLIPPED   ZONAL_STATS_COMPUTED
+        (optional pre-step) list_collections
+
+                    search_stac_items ─► ITEMS_SEARCHED
+                                              │
+                                              ▼
+                                    get_item_assets
+                                              │
+                                              ▼
+                                      ASSETS_RESOLVED
+                                              │
+                                              ▼
+                                        compute_ndvi
+                                              │
+                                              ▼
+                                       NDVI_COMPUTED
+                                              │
+                                    ┌─────────┴─────────┐
+                                    ▼                   ▼
+                            clip_to_geometry    zonal_statistics
+                                    │                   │
+                                    ▼                   ▼
+                             RASTER_CLIPPED   ZONAL_STATS_COMPUTED
     """
 
     ITEMS_SEARCHED = "earthscience.items_searched"
