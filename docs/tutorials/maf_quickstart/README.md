@@ -32,9 +32,12 @@ The agent receives a prompt asking for two tasks: screen a small molecule
 library for Lipinski drug-likeness, then build and dispatch a tiny 2-bus
 power grid. It chains the typed helpers in each domain (auto-injected into
 the kernel namespace) and reports the results. Each domain server ships a
-[`SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md) workflow
-guide which is injected into the system prompt so the agent uses tools in
-the recommended order.
+workflow guide —
+[`chemistry/skills/SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md)
+and
+[`energysystems/skills/SKILL.md`](../../../src/domain_examples/energysystems/skills/SKILL.md)
+— which is injected into the system prompt so the agent uses tools in the
+recommended order.
 
 > **Tool search and indexing are server-side.** Each MCP server builds a
 > BM25 index over its own `ToolRegistry` at startup and exposes it as an
