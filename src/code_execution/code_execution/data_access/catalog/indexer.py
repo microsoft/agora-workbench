@@ -63,12 +63,15 @@ def _parse_blob_path(path: str) -> tuple[str, str, str]:
         prefix = parts[2] if len(parts) > 2 else ""
         return account, container, prefix
 
-    if ".blob.core.windows.net" in path:
-        from urllib.parse import urlparse
+    from urllib.parse import urlparse
 
-        parsed = urlparse(path)
+    parsed = urlparse(path)
+    hostname = parsed.hostname or ""
+    if parsed.scheme == "https" and (
+        hostname == "blob.core.windows.net" or hostname.endswith(".blob.core.windows.net")
+    ):
         # hostname: <account>.blob.core.windows.net
-        account = parsed.hostname.split(".")[0] if parsed.hostname else ""
+        account = hostname.split(".")[0] if hostname else ""
         # path: /container/prefix/...
         path_parts = parsed.path.lstrip("/").split("/", 1)
         container = path_parts[0] if path_parts else ""
