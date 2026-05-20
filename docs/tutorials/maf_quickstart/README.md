@@ -188,8 +188,13 @@ exposes a small set of MCP tools:
 - `execute_chemistry_code` — run Python in a long-lived Jupyter kernel with
   RDKit pre-imported (`Chem`, `Descriptors`, `AllChem`, `rdMolDescriptors`,
   `np`, `pd`).
-- `list_chemistry_domain_tools` — discovery tool that prints the catalog of
-  typed helpers below.
+- `search_chemistry_tools` — **server-side** BM25 search over the domain's
+  typed helper catalog. The server builds the index from its own
+  `ToolRegistry` at startup, so no client-side indexing infrastructure is
+  needed. Call with `(query: str, top: int = 5)`; pass `query=""` with
+  `top=999` to enumerate the full catalog. Each result includes `name`,
+  `description`, `execution_type`, `score`, `state_requires`, and
+  `state_produces`.
 - `check_job`, `chemistry_*` (sessions, parallel execute, push object) —
   session/lifecycle helpers.
 
@@ -266,7 +271,7 @@ A successful run looks roughly like:
 INFO maf_quickstart: Step A: built chat client OpenAIChatClient
 INFO maf_quickstart: Step B: built data lake search tool
 INFO maf_quickstart: Step C: built chemistry MCP tool @ http://localhost:8020/mcp
-INFO maf_quickstart: Step D: built agent with 2 tool(s); skill injected: True
+INFO maf_quickstart: Step D: built agent with 2 tool(s); skills injected: chemistry=True, energy=True
 
 ======================================================================
 USER: Look for chemistry datasets in the data lake … then screen this
@@ -349,11 +354,20 @@ cd src/domain_examples/chemistry && docker compose down
 This quickstart deliberately keeps the surface small. Once you've got it
 working, layer in:
 
-- **Tool search** — discover domain tools the agent can call
-  programmatically inside `execute_chemistry_code`. See
-  [`tools/search/adapters/maf_core.py`](../../../src/tools/search/adapters/maf_core.py).
-- **Planning tools** — give the agent a persistent step ledger. See
-  [`planning/adapters/maf.py`](../../../src/planning/adapters/maf.py).
-- **Local data lake** — when [PR #67](https://github.com/microsoft/agora-workbench/pull/67)
-  lands, swap `DefaultDataLakeSearchBackend` for `LocalDataLakeSearchBackend`
-  and run fully offline.
+- **Server-side tool search** — the chemistry and energy systems servers
+  already expose `search_chemistry_tools` and `search_energysystems_tools`
+  as MCP tools, so the agent can discover domain helpers at runtime without
+  any client wiring. The BM25 index is built from each server's
+  `ToolRegistry` at startup; see
+  [`_setup_search_tool`](../../../src/code_execution/code_execution/server.py)
+  in `code_execution/server.py`.
+- **Workflow planning** — servers with state-annotated tools also expose
+  `plan_{name}_workflow` and `load_{name}_skill` MCP tools driven by the
+  state graph in the server's tool catalog. No client-side planning
+  package or middleware is required.
+- **Local data lake file access** — once you have a local catalog working
+  (see ["Run with a local-only data lake"](#run-with-a-local-only-data-lake)),
+  wire `LocalFileFetcher` from
+  [`code_execution/data_access/fetchers.py`](../../../src/code_execution/code_execution/data_access/fetchers.py)
+  into your execution environment so the agent can actually read the files
+  referenced by `storage_url` — no Azure storage credentials needed.
