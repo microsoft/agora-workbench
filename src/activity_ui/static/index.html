@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Agora Activity</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        margin: 0;
+        background: #0d1117;
+        color: #c9d1d9;
+      }
+      header {
+        position: sticky;
+        top: 0;
+        background: #0d1117;
+        border-bottom: 1px solid #30363d;
+        padding: 12px 20px;
+        z-index: 10;
+      }
+      .titlebar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+      h1 { font-size: 16px; margin: 0; }
+      .conn {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: #21262d;
+        color: #8b949e;
+      }
+      .conn.live { background: #1f6feb33; color: #79c0ff; }
+      .conn.live::before { content: "● "; color: #56d364; }
+      .conn.down { background: #f8514922; color: #f85149; }
+      .conn.down::before { content: "● "; }
+      .stats { color: #6e7681; font-size: 11px; margin-left: auto; }
+      .filters { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+      .filter-label { color: #6e7681; font-size: 11px; margin-right: 4px; }
+      .chip {
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        border: 1px solid #30363d;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+      }
+      .chip:hover { border-color: #58a6ff; color: #c9d1d9; }
+      .chip.on {
+        background: #1f6feb33;
+        color: #79c0ff;
+        border-color: #1f6feb;
+      }
+      main { padding: 16px 20px 60px; }
+      .session {
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        overflow: hidden;
+      }
+      .session-header {
+        background: #161b22;
+        padding: 8px 12px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        cursor: pointer;
+        user-select: none;
+      }
+      .session-header:hover { background: #1c2229; }
+      .caret { color: #58a6ff; font-size: 10px; width: 10px; }
+      .session-id { color: #d2a8ff; }
+      .session-meta { color: #6e7681; font-size: 11px; margin-left: auto; }
+      .session-body { display: block; }
+      .session.collapsed .session-body { display: none; }
+      .session.collapsed .caret { transform: rotate(-90deg); display: inline-block; }
+      .event {
+        border-top: 1px solid #21262d;
+        padding: 8px 12px;
+      }
+      .event:first-child { border-top: none; }
+      .row { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+      .badge {
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 11px;
+        background: #1f6feb33;
+        color: #79c0ff;
+        white-space: nowrap;
+      }
+      .badge.code_executed, .badge.code_failed { background: #1f6feb33; color: #79c0ff; }
+      .badge.job_started { background: #ffa65733; color: #ffa657; }
+      .badge.tools_listed { background: #d2a8ff22; color: #d2a8ff; }
+      .badge.push_object_sent, .badge.push_object_received { background: #56d36433; color: #56d364; }
+      .tool-name {
+        display: inline-block;
+        font-size: 11px;
+        padding: 1px 6px;
+        margin: 2px 4px 0 0;
+        border-radius: 3px;
+        background: #21262d;
+        color: #c9d1d9;
+      }
+      .batch-tag { color: #ffa657; font-size: 11px; }
+      .tool-calls {
+        margin-top: 6px;
+        border-left: 2px solid #30363d;
+        padding-left: 8px;
+      }
+      .tool-calls-label {
+        color: #6e7681;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 2px;
+      }
+      .tool-call {
+        font-size: 12px;
+        padding: 2px 0;
+        cursor: pointer;
+        line-height: 1.4;
+      }
+      .tool-call:hover { background: #161b22; }
+      .tool-call .mark { width: 14px; display: inline-block; text-align: center; }
+      .tool-call .tname { color: #79c0ff; }
+      .tool-call .targs { color: #8b949e; }
+      .tool-call .tdur { color: #6e7681; font-size: 10px; margin-left: 6px; }
+      .tool-call .terror { color: #f85149; margin-left: 6px; }
+      .tool-call-detail {
+        display: none;
+        margin: 4px 0 4px 14px;
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 3px;
+        padding: 6px 8px;
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .tool-call.open .tool-call-detail { display: block; }
+      .server { color: #d2a8ff; font-size: 11px; }
+      .ts { color: #6e7681; font-size: 11px; margin-left: auto; }
+      .desc { margin-top: 3px; color: #c9d1d9; }
+      details { margin-top: 4px; }
+      summary { cursor: pointer; color: #58a6ff; font-size: 11px; }
+      pre {
+        background: #161b22;
+        border: 1px solid #30363d;
+        padding: 8px;
+        margin: 4px 0 0;
+        overflow-x: auto;
+        font-size: 11px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .empty { color: #6e7681; font-style: italic; padding: 40px 0; text-align: center; }
+      .ok { color: #56d364; }
+      .fail { color: #f85149; }
+      .toolbar-btn {
+        font: inherit;
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid #30363d;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+        margin-left: 4px;
+      }
+      .toolbar-btn:hover { color: #c9d1d9; border-color: #58a6ff; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="titlebar">
+        <h1>Agora Activity</h1>
+        <span id="conn" class="conn">connecting…</span>
+        <span class="stats" id="stats"></span>
+        <button class="toolbar-btn" id="clear-btn" title="Clear local view (server buffer is unaffected)">clear</button>
+      </div>
+      <div class="filters">
+        <span class="filter-label">servers</span>
+        <span id="server-chips"></span>
+        <span class="filter-label" style="margin-left:12px;">types</span>
+        <span id="type-chips"></span>
+      </div>
+    </header>
+    <main>
+      <div id="feed">
+        <div class="empty">Waiting for events…</div>
+      </div>
+    </main>
+
+    <script>
+      const TYPE_GROUPS = {
+        exec:  ["code_executed", "code_failed"],
+        job:   ["job_started"],
+        tools: ["tools_listed"],
+        push:  ["push_object_sent", "push_object_received"],
+      };
+      const TYPE_TO_GROUP = {};
+      for (const [g, types] of Object.entries(TYPE_GROUPS)) {
+        for (const t of types) TYPE_TO_GROUP[t] = g;
+      }
+
+      // All events, in arrival order. Re-rendered in full on filter change.
+      const events = [];
+      // Filter state: empty Set = show all.
+      const filterServers = new Set();
+      const filterTypeGroups = new Set();
+      const collapsedSessions = new Set();
+      const seenServers = new Set();
+
+      const feed = document.getElementById("feed");
+      const conn = document.getElementById("conn");
+      const stats = document.getElementById("stats");
+      const serverChipsEl = document.getElementById("server-chips");
+      const typeChipsEl = document.getElementById("type-chips");
+
+      function fmtTs(t) {
+        return new Date(t * 1000).toLocaleTimeString();
+      }
+
+      function visible(e) {
+        if (filterServers.size && !filterServers.has(e.server)) return false;
+        const g = TYPE_TO_GROUP[e.type];
+        if (filterTypeGroups.size && (!g || !filterTypeGroups.has(g))) return false;
+        return true;
+      }
+
+      function renderTypeChips() {
+        typeChipsEl.innerHTML = "";
+        for (const g of Object.keys(TYPE_GROUPS)) {
+          const b = document.createElement("button");
+          b.className = "chip" + (filterTypeGroups.has(g) ? " on" : "");
+          b.textContent = g;
+          b.onclick = () => {
+            if (filterTypeGroups.has(g)) filterTypeGroups.delete(g);
+            else filterTypeGroups.add(g);
+            renderTypeChips();
+            renderFeed();
+          };
+          typeChipsEl.appendChild(b);
+        }
+      }
+
+      function renderServerChips() {
+        serverChipsEl.innerHTML = "";
+        const sorted = [...seenServers].sort();
+        if (sorted.length === 0) {
+          const span = document.createElement("span");
+          span.className = "filter-label";
+          span.textContent = "(none yet)";
+          serverChipsEl.appendChild(span);
+          return;
+        }
+        for (const s of sorted) {
+          const b = document.createElement("button");
+          b.className = "chip" + (filterServers.has(s) ? " on" : "");
+          b.textContent = s;
+          b.onclick = () => {
+            if (filterServers.has(s)) filterServers.delete(s);
+            else filterServers.add(s);
+            renderServerChips();
+            renderFeed();
+          };
+          serverChipsEl.appendChild(b);
+        }
+      }
+
+      function fmtArgsInline(args) {
+        if (!args || typeof args !== "object") return "";
+        const parts = [];
+        for (const [k, v] of Object.entries(args)) {
+          let rendered;
+          if (typeof v === "string") {
+            rendered = `"${v.length > 40 ? v.slice(0, 40) + "…" : v}"`;
+          } else if (Array.isArray(v)) {
+            rendered = `[${v.length}]`;
+          } else if (v === null) {
+            rendered = "null";
+          } else if (typeof v === "object") {
+            rendered = "{…}";
+          } else {
+            rendered = String(v);
+          }
+          parts.push(`${k}=${rendered}`);
+        }
+        const joined = parts.join(", ");
+        return joined.length > 90 ? joined.slice(0, 90) + "…" : joined;
+      }
+
+      function buildToolCallRow(tc) {
+        const row = document.createElement("div");
+        row.className = "tool-call";
+        const ok = tc.success !== false;
+        const mark = `<span class="mark ${ok ? "ok" : "fail"}">${ok ? "✓" : "✗"}</span>`;
+        const name = `<span class="tname">${tc.tool_name || "?"}</span>`;
+        const args = `<span class="targs">(${fmtArgsInline(tc.args)})</span>`;
+        const dur = typeof tc.duration_ms === "number" ? `<span class="tdur">${tc.duration_ms.toFixed(2)}ms</span>` : "";
+        const err = tc.error ? `<span class="terror">${tc.error}</span>` : "";
+        row.innerHTML = `${mark} ${name}${args}${dur}${err}`;
+
+        const detail = document.createElement("div");
+        detail.className = "tool-call-detail";
+        const payload = { args: tc.args };
+        if (tc.result !== undefined) payload.result = tc.result;
+        if (tc.error) payload.error = tc.error;
+        detail.textContent = JSON.stringify(payload, null, 2);
+        row.appendChild(detail);
+
+        row.onclick = () => row.classList.toggle("open");
+        return row;
+      }
+
+      function buildEventEl(e) {
+        const wrap = document.createElement("div");
+        wrap.className = "event";
+
+        const row = document.createElement("div");
+        row.className = "row";
+        const successHtml = typeof e.success === "boolean"
+          ? `<span class="${e.success ? "ok" : "fail"}">${e.success ? "✓" : "✗"}</span>`
+          : "";
+        const batchTag = e.batch_id ? `<span class="batch-tag">batch ${e.batch_id}</span>` : "";
+        row.innerHTML = `
+          <span class="badge ${e.type}">${e.type}</span>
+          <span class="server">${e.server || "?"}</span>
+          ${successHtml}
+          ${batchTag}
+          <span class="ts">${fmtTs(e.timestamp)}</span>
+        `;
+        wrap.appendChild(row);
+
+        if (e.description) {
+          const d = document.createElement("div");
+          d.className = "desc";
+          d.textContent = e.description;
+          wrap.appendChild(d);
+        }
+
+        // tools_listed: show the catalog the agent received inline.
+        if (e.type === "tools_listed" && Array.isArray(e.tool_names) && e.tool_names.length) {
+          const list = document.createElement("div");
+          list.style.marginTop = "4px";
+          for (const name of e.tool_names) {
+            const chip = document.createElement("span");
+            chip.className = "tool-name";
+            chip.textContent = name;
+            list.appendChild(chip);
+          }
+          wrap.appendChild(list);
+        }
+
+        // tool_calls: promoted to a first-class lane (this is the headline content for "what did the agent do").
+        if (Array.isArray(e.tool_calls) && e.tool_calls.length) {
+          const lane = document.createElement("div");
+          lane.className = "tool-calls";
+          const lbl = document.createElement("div");
+          lbl.className = "tool-calls-label";
+          lbl.textContent = `tool calls (${e.tool_calls.length})`;
+          lane.appendChild(lbl);
+          for (const tc of e.tool_calls) {
+            lane.appendChild(buildToolCallRow(tc));
+          }
+          wrap.appendChild(lane);
+        }
+
+        const expandable = ["code", "stdout", "stderr", "error"];
+        for (const k of expandable) {
+          const v = e[k];
+          if (v === null || v === undefined) continue;
+          if (typeof v === "string" && v === "") continue;
+          if (Array.isArray(v) && v.length === 0) continue;
+          const det = document.createElement("details");
+          const sum = document.createElement("summary");
+          sum.textContent = k;
+          det.appendChild(sum);
+          const pre = document.createElement("pre");
+          pre.textContent = typeof v === "string" ? v : JSON.stringify(v, null, 2);
+          det.appendChild(pre);
+          wrap.appendChild(det);
+        }
+
+        return wrap;
+      }
+
+      function renderFeed() {
+        const filtered = events.filter(visible);
+        stats.textContent = `${filtered.length} / ${events.length} events · ${seenServers.size} servers`;
+
+        if (filtered.length === 0) {
+          feed.innerHTML = '<div class="empty">No events match the current filters.</div>';
+          return;
+        }
+
+        // Group by session_id (preserving arrival order for both events and sessions).
+        const ORPHAN = "__orphan__";
+        const groups = new Map(); // session_id -> { events: [], firstSeen, lastSeen, server }
+        for (const e of filtered) {
+          const sid = e.session_id || ORPHAN;
+          let g = groups.get(sid);
+          if (!g) {
+            g = { events: [], firstSeen: e.timestamp, lastSeen: e.timestamp, servers: new Set() };
+            groups.set(sid, g);
+          }
+          g.events.push(e);
+          if (e.timestamp < g.firstSeen) g.firstSeen = e.timestamp;
+          if (e.timestamp > g.lastSeen) g.lastSeen = e.timestamp;
+          if (e.server) g.servers.add(e.server);
+        }
+
+        // Sessions ordered by most-recent activity (newest first).
+        const ordered = [...groups.entries()].sort((a, b) => b[1].lastSeen - a[1].lastSeen);
+
+        feed.innerHTML = "";
+        for (const [sid, g] of ordered) {
+          const sessionEl = document.createElement("div");
+          sessionEl.className = "session" + (collapsedSessions.has(sid) ? " collapsed" : "");
+
+          const header = document.createElement("div");
+          header.className = "session-header";
+          const label = sid === ORPHAN ? "(no session)" : `session ${sid.slice(0, 8)}`;
+          const serverList = [...g.servers].join(", ") || "?";
+          header.innerHTML = `
+            <span class="caret">▼</span>
+            <span class="session-id">${label}</span>
+            <span class="server">${serverList}</span>
+            <span class="session-meta">${g.events.length} events · last ${fmtTs(g.lastSeen)}</span>
+          `;
+          header.onclick = () => {
+            if (collapsedSessions.has(sid)) collapsedSessions.delete(sid);
+            else collapsedSessions.add(sid);
+            sessionEl.classList.toggle("collapsed");
+          };
+          sessionEl.appendChild(header);
+
+          const body = document.createElement("div");
+          body.className = "session-body";
+          // Newest event first inside each session.
+          const ordered = [...g.events].sort((a, b) => b.timestamp - a.timestamp);
+          for (const e of ordered) body.appendChild(buildEventEl(e));
+          sessionEl.appendChild(body);
+
+          feed.appendChild(sessionEl);
+        }
+      }
+
+      function ingest(e) {
+        events.push(e);
+        if (e.server && !seenServers.has(e.server)) {
+          seenServers.add(e.server);
+          renderServerChips();
+        }
+        renderFeed();
+      }
+
+      function setConn(state, text) {
+        conn.className = "conn " + state;
+        conn.textContent = text;
+      }
+
+      document.getElementById("clear-btn").onclick = () => {
+        events.length = 0;
+        renderFeed();
+      };
+
+      renderTypeChips();
+      renderServerChips();
+
+      // Replay buffer first so a refresh keeps context.
+      fetch("/events/recent")
+        .then((r) => r.json())
+        .then((batch) => {
+          batch.forEach((e) => {
+            events.push(e);
+            if (e.server) seenServers.add(e.server);
+          });
+          renderServerChips();
+          renderFeed();
+        })
+        .catch((err) => console.error("recent fetch failed", err));
+
+      setConn("", "connecting…");
+      const es = new EventSource("/stream");
+      es.addEventListener("open", () => setConn("live", "live"));
+      es.addEventListener("activity", (msg) => {
+        try {
+          ingest(JSON.parse(msg.data));
+        } catch (err) {
+          console.error("bad event", err, msg.data);
+        }
+      });
+      es.addEventListener("error", () => {
+        // EventSource auto-reconnects. Reflect the gap in the UI.
+        setConn("down", "disconnected — retrying");
+      });
+    </script>
+  </body>
+</html>

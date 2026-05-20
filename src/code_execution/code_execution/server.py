@@ -59,6 +59,7 @@ from .tool_proxy import (
 if TYPE_CHECKING:
     from .sessions import Session
     from .tool_registry import ToolRegistry
+    from .tool_registry.tool_schema import ToolDefinition
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -241,6 +242,11 @@ class CodeExecutionServer:
         self.working_dir = working_dir
         self._python_executable: Optional[Path] = None
         self._environment_ready = False
+
+        # Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).
+        from .activity_publisher import ActivityPublisher
+
+        self.activity_publisher = ActivityPublisher(server_name=environment_config.name)
 
         self.mcp = FastMCP(f"{environment_config.name}-executor")
 
@@ -552,6 +558,9 @@ class CodeExecutionServer:
         if self.tool_registry:
             # Register server-side BM25 tool search (search_{name}_tools)
             self._setup_search_tool()
+
+            # Register domain tools meta tool (list_{name}_domain_tools)
+            self._setup_domain_tools_meta_tool()
 
             # Register workflow planning and skill tools if state-annotated tools exist
             self._setup_workflow_planning_tools()
@@ -1052,6 +1061,97 @@ class CodeExecutionServer:
             )
         return infos
 
+    def _setup_domain_tools_meta_tool(self) -> None:
+        """Register an MCP tool that returns the domain tool catalog as structured JSON.
+
+        This tool is used by the tool search layer to discover what domain tools
+        are available on this server, without requiring individual MCP tool
+        registration for each domain tool.
+        """
+        tool_name = f"list_{self.environment_config.name}_domain_tools"
+        registry = self.tool_registry
+        server_name = self.environment_config.name
+
+        def _serialize_parameters(params: list, required_params: list) -> list[dict]:
+            required_set = set(id(p) for p in required_params)
+            return [
+                {
+                    "name": p.name,
+                    "type": p.type.__name__,
+                    "description": p.description,
+                    "required": id(p) in required_set,
+                }
+                for p in params
+            ]
+
+        def _load_state_affordances() -> dict[str, list[str]]:
+            """Build a {state_token: [phrase, ...]} lookup for this server's domain."""
+            try:
+                mod = importlib.import_module(f"domains.{server_name}.states")
+                raw = getattr(mod, "STATE_AFFORDANCES", {})
+                return {enum_val.value: phrases for enum_val, phrases in raw.items()}
+            except (ImportError, AttributeError):
+                return {}
+
+        state_aff_lookup = _load_state_affordances()
+
+        def _effective_affordances(td: "ToolDefinition") -> list[str]:
+            """Merge state-derived and tool-specific affordances."""
+            affordances: list[str] = []
+            for state_token in td.state_transition.produces:
+                affordances.extend(state_aff_lookup.get(state_token, []))
+            affordances.extend(td.affordances)
+            seen: set[str] = set()
+            unique: list[str] = []
+            for a in affordances:
+                key = a.strip().lower()
+                if key not in seen:
+                    seen.add(key)
+                    unique.append(a)
+            return unique
+
+        catalog = []
+        for td in registry.tools:
+            entry: dict = {
+                "name": td.name,
+                "description": td.description,
+                "server_name": server_name,
+                "parameters": _serialize_parameters(
+                    td.required_parameters + td.optional_parameters,
+                    td.required_parameters,
+                ),
+                "affordances": _effective_affordances(td),
+            }
+            if td.state_transition.requires or td.state_transition.produces:
+                entry["state_transition"] = {
+                    "requires": sorted(td.state_transition.requires),
+                    "produces": sorted(td.state_transition.produces),
+                }
+            catalog.append(entry)
+        catalog_json = json.dumps(catalog)
+        tool_names_snapshot = [entry["name"] for entry in catalog]
+
+        async def list_domain_tools(ctx: Context) -> str:
+            """Return a JSON array describing all domain tools available on this server."""
+            session_id = None
+            try:
+                session_id = ctx.session_id
+            except (RuntimeError, AttributeError):
+                session_id = None
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "tools_listed",
+                    "description": f"Agent retrieved tool catalog ({len(tool_names_snapshot)} tools)",
+                    "tool_names": tool_names_snapshot,
+                    "session_id": session_id,
+                }
+            )
+            return catalog_json
+
+        self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
+            list_domain_tools
+        )
+
     def _setup_search_tool(self) -> None:
         """Register ``search_{name}_tools`` as an MCP tool on this server.
 
@@ -1366,13 +1466,35 @@ class CodeExecutionServer:
                     user_token=current_token,
                 )
 
+                # transfer_id correlates source/target events in the activity feed.
+                import uuid as _uuid
+
+                transfer_id = _uuid.uuid4().hex
+
                 result = await client.push(
                     target_url=target_server_url,
                     variable_name=effective_target_name,
                     serialized_data=serialized,
-                    metadata={"source_server": server.environment_config.name, "source_variable": variable_name},
+                    metadata={
+                        "source_server": server.environment_config.name,
+                        "source_variable": variable_name,
+                        "transfer_id": transfer_id,
+                    },
                     target_session_id=target_session_id or None,
                 )
+
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_sent",
+                        "description": f"Push '{variable_name}' → {target_server_url}",
+                        "transfer_id": transfer_id,
+                        "variable_name": variable_name,
+                        "target_server": target_server_url,
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
+
                 return _json.dumps(
                     {
                         "success": True,
@@ -1381,6 +1503,7 @@ class CodeExecutionServer:
                         "target_variable": effective_target_name,
                         "target_server_url": target_server_url,
                         "size_bytes": len(serialized),
+                        "transfer_id": transfer_id,
                         "target_response": result,
                     },
                     indent=2,
@@ -1539,6 +1662,7 @@ else:
         code: str,
         timeout: int,
         result_variable: str,
+        batch_id: str,
         semaphore: Optional[asyncio.Semaphore] = None,
     ) -> None:
         """Execute a parallel job in a dedicated session.
@@ -1572,6 +1696,22 @@ else:
                             "result_payload": payload,
                         }
                     )
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "code_executed" if result.success else "code_failed",
+                        "description": f"Parallel job {job_id} {status}",
+                        "code": code,
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "success": result.success,
+                        "duration_ms": (result.execution_time or 0.0) * 1000.0,
+                        "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                        "error": result.error,
+                        "session_id": session_id,
+                        "job_id": job_id,
+                        "batch_id": batch_id,
+                    }
+                )
             finally:
                 if semaphore is not None:
                     semaphore.release()
@@ -1579,6 +1719,18 @@ else:
         except asyncio.CancelledError:
             async with self._parallel_state_lock:
                 self._parallel_jobs[job_id].update({"status": "cancelled", "completed_at": time.monotonic()})
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} cancelled",
+                    "code": code,
+                    "success": False,
+                    "error": "cancelled",
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
             raise
         except Exception as exc:
             LOGGER.error("Parallel job %s failed: %s", job_id, exc, exc_info=True)
@@ -1590,6 +1742,18 @@ else:
                         "result": CodeExecutionResult(success=False, error=str(exc)).model_dump(),
                     }
                 )
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": f"Parallel job {job_id} failed",
+                    "code": code,
+                    "success": False,
+                    "error": str(exc),
+                    "session_id": session_id,
+                    "job_id": job_id,
+                    "batch_id": batch_id,
+                }
+            )
 
     async def _cleanup_parallel_batch_sessions(self, batch_id: str) -> None:
         """Close child sessions for a completed/cancelled batch once."""
@@ -1766,6 +1930,7 @@ else:
                         code=full_code,
                         timeout=timeout,
                         result_variable=result_variable,
+                        batch_id=batch_id,
                         semaphore=self._parallel_semaphore,
                     )
                 )
@@ -1966,12 +2131,23 @@ else:
 
         await self._initialize_tool_search_backends()
 
+        # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
+        # Wrapped defensively: observability must never block server startup.
+        try:
+            await self.activity_publisher.start()
+        except Exception:
+            LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
+
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
         await self._close_tool_search_backends()
+        try:
+            await self.activity_publisher.stop()
+        except Exception:
+            LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
         LOGGER.info("Server shutdown complete")
 
     async def run_http(
@@ -2095,6 +2271,7 @@ else:
             variable_name = body.get("variable_name")
             data_b64 = body.get("data")
             session_id = body.get("session_id")
+            transfer_metadata = body.get("metadata") or {}
 
             if not isinstance(variable_name, str) or not isinstance(data_b64, str):
                 return JSONResponse(
@@ -2211,6 +2388,21 @@ else:
                         {"success": False, "error": f"Kernel injection failed: {error_msg}"},
                         status_code=500,
                     )
+
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_received",
+                        "description": (
+                            f"Received '{variable_name}' from "
+                            f"{transfer_metadata.get('source_server') or 'another server'}"
+                        ),
+                        "transfer_id": transfer_metadata.get("transfer_id"),
+                        "variable_name": variable_name,
+                        "source_server": transfer_metadata.get("source_server"),
+                        "session_id": session.session_id,
+                        "success": True,
+                    }
+                )
 
                 return JSONResponse(
                     {

@@ -6,6 +6,13 @@
 #
 # Then from this directory:
 #   docker compose up --build
+#
+# OPTIONAL — Activity UI observability:
+# To see what your agent is doing in this server (executed code, tool calls,
+# pushes, etc.), uncomment the three lines marked "[activity-ui]" below and:
+#   1) docker network create agora-activity     # once per host
+#   2) cd src/activity_ui && docker compose up -d
+# Then open http://127.0.0.1:8030 to see live activity.
 
 services:
   my-server:
@@ -25,6 +32,11 @@ services:
       # PORT/HOST tell the CodeExecutionServer where to bind inside the container.
       PORT: "8000"
       HOST: "0.0.0.0"
+      # [activity-ui] uncomment to publish events to the shared Activity UI:
+      # ACTIVITY_UI_URL: "http://activity-ui:8030"
+    # [activity-ui] uncomment to join the shared activity network:
+    # networks:
+    #   - agora-activity
     healthcheck:
       # The base image exposes GET /health — compose uses this to report readiness.
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -33,3 +45,8 @@ services:
       retries: 3
       # Gives the server time to start before health checks begin failing.
       start_period: 60s
+
+# [activity-ui] uncomment to declare the shared external network:
+# networks:
+#   agora-activity:
+#     external: true

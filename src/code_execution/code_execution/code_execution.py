@@ -473,11 +473,20 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
     async def execute_code_tool(
         ctx: Context,
         code: str,
+        description: str = "",
         timeout: int = server.default_timeout,
         background: bool = False,
     ) -> str:
         """
         Execute Python code in the isolated environment with persistent state.
+
+        Before executing, set ``description`` to a one-sentence summary of what
+        this code does and why — for example,
+        ``"Compute molecular descriptors for the candidate library"``. The
+        description is surfaced to the end-user watching the server's activity
+        feed so they can follow along with the agent's reasoning. Keep it short
+        and human-readable; leave it empty only for trivial follow-ups (e.g. a
+        ``print(result)`` after a previous call).
 
         Handle IDs (``h_xxxxxxxxxxxx``) and asset tags (``<type>id</type>``)
         embedded as string literals in the code are automatically detected and
@@ -489,6 +498,8 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
 
         Args:
             code: Python code to execute
+            description: One-sentence summary of what the code does (shown in
+                the activity UI). Optional but strongly recommended.
             timeout: Execution timeout in seconds (max: {max_timeout})
             background: When True, submit code to run in the same session kernel
                 and return immediately with a job handle.
@@ -580,14 +591,42 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
 
             if background:
                 job_result = await server._execute_code_background(code, timeout)
+                if description:
+                    job_result["description"] = description
                 server.session_manager.update_session(session.session_id, session)
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "job_started",
+                        "description": description,
+                        "code": code,
+                        "session_id": session.session_id,
+                        "job_id": job_result.get("job_id"),
+                    }
+                )
                 return json.dumps(job_result, indent=2)
 
             # Execute code with persistent namespace from session
             result = await server._execute_code_with_tracing(code, timeout)
+            result.description = description
 
             # Save the session to persist the updated namespace
             server.session_manager.update_session(session.session_id, session)
+
+            # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
+            server.activity_publisher.publish_nowait(
+                {
+                    "type": "code_executed" if result.success else "code_failed",
+                    "description": description,
+                    "code": code,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "success": result.success,
+                    "duration_ms": result.execution_time * 1000.0,
+                    "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                    "error": result.error,
+                    "session_id": session.session_id,
+                }
+            )
 
             # Return result with session_id
             result_dict = result.model_dump()
@@ -597,17 +636,37 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             if e.status_code == 429 and isinstance(e.detail, dict):
                 return json.dumps(e.detail, indent=2)
             LOGGER.error(f"Execution failed: {e}", exc_info=True)
-            error_result = CodeExecutionResult(success=False, error=str(e))
+            error_result = CodeExecutionResult(success=False, error=str(e), description=description)
             error_dict = error_result.model_dump()
             if session:
                 error_dict["session_id"] = session.session_id
+            server.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": description,
+                    "code": code,
+                    "success": False,
+                    "error": str(e),
+                    "session_id": session.session_id if session else None,
+                }
+            )
             return json.dumps(error_dict, indent=2)
         except Exception as e:
             LOGGER.error(f"Execution failed: {e}", exc_info=True)
-            error_result = CodeExecutionResult(success=False, error=str(e))
+            error_result = CodeExecutionResult(success=False, error=str(e), description=description)
             error_dict = error_result.model_dump()
             if session:
                 error_dict["session_id"] = session.session_id
+            server.activity_publisher.publish_nowait(
+                {
+                    "type": "code_failed",
+                    "description": description,
+                    "code": code,
+                    "success": False,
+                    "error": str(e),
+                    "session_id": session.session_id if session else None,
+                }
+            )
             return json.dumps(error_dict, indent=2)
         finally:
             if session:
