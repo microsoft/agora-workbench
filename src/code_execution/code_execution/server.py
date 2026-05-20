@@ -59,7 +59,6 @@ from .tool_proxy import (
 if TYPE_CHECKING:
     from .sessions import Session
     from .tool_registry import ToolRegistry
-    from .tool_registry.tool_schema import ToolDefinition
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -559,9 +558,6 @@ class CodeExecutionServer:
             # Register server-side BM25 tool search (search_{name}_tools)
             self._setup_search_tool()
 
-            # Register domain tools meta tool (list_{name}_domain_tools)
-            self._setup_domain_tools_meta_tool()
-
             # Register workflow planning and skill tools if state-annotated tools exist
             self._setup_workflow_planning_tools()
 
@@ -1060,97 +1056,6 @@ class CodeExecutionServer:
                 )
             )
         return infos
-
-    def _setup_domain_tools_meta_tool(self) -> None:
-        """Register an MCP tool that returns the domain tool catalog as structured JSON.
-
-        This tool is used by the tool search layer to discover what domain tools
-        are available on this server, without requiring individual MCP tool
-        registration for each domain tool.
-        """
-        tool_name = f"list_{self.environment_config.name}_domain_tools"
-        registry = self.tool_registry
-        server_name = self.environment_config.name
-
-        def _serialize_parameters(params: list, required_params: list) -> list[dict]:
-            required_set = set(id(p) for p in required_params)
-            return [
-                {
-                    "name": p.name,
-                    "type": p.type.__name__,
-                    "description": p.description,
-                    "required": id(p) in required_set,
-                }
-                for p in params
-            ]
-
-        def _load_state_affordances() -> dict[str, list[str]]:
-            """Build a {state_token: [phrase, ...]} lookup for this server's domain."""
-            try:
-                mod = importlib.import_module(f"domains.{server_name}.states")
-                raw = getattr(mod, "STATE_AFFORDANCES", {})
-                return {enum_val.value: phrases for enum_val, phrases in raw.items()}
-            except (ImportError, AttributeError):
-                return {}
-
-        state_aff_lookup = _load_state_affordances()
-
-        def _effective_affordances(td: "ToolDefinition") -> list[str]:
-            """Merge state-derived and tool-specific affordances."""
-            affordances: list[str] = []
-            for state_token in td.state_transition.produces:
-                affordances.extend(state_aff_lookup.get(state_token, []))
-            affordances.extend(td.affordances)
-            seen: set[str] = set()
-            unique: list[str] = []
-            for a in affordances:
-                key = a.strip().lower()
-                if key not in seen:
-                    seen.add(key)
-                    unique.append(a)
-            return unique
-
-        catalog = []
-        for td in registry.tools:
-            entry: dict = {
-                "name": td.name,
-                "description": td.description,
-                "server_name": server_name,
-                "parameters": _serialize_parameters(
-                    td.required_parameters + td.optional_parameters,
-                    td.required_parameters,
-                ),
-                "affordances": _effective_affordances(td),
-            }
-            if td.state_transition.requires or td.state_transition.produces:
-                entry["state_transition"] = {
-                    "requires": sorted(td.state_transition.requires),
-                    "produces": sorted(td.state_transition.produces),
-                }
-            catalog.append(entry)
-        catalog_json = json.dumps(catalog)
-        tool_names_snapshot = [entry["name"] for entry in catalog]
-
-        async def list_domain_tools(ctx: Context) -> str:
-            """Return a JSON array describing all domain tools available on this server."""
-            session_id = None
-            try:
-                session_id = ctx.session_id
-            except (RuntimeError, AttributeError):
-                session_id = None
-            self.activity_publisher.publish_nowait(
-                {
-                    "type": "tools_listed",
-                    "description": f"Agent retrieved tool catalog ({len(tool_names_snapshot)} tools)",
-                    "tool_names": tool_names_snapshot,
-                    "session_id": session_id,
-                }
-            )
-            return catalog_json
-
-        self.mcp.tool(name=tool_name, description=f"List all domain tools available in the {server_name} environment.")(
-            list_domain_tools
-        )
 
     def _setup_search_tool(self) -> None:
         """Register ``search_{name}_tools`` as an MCP tool on this server.
