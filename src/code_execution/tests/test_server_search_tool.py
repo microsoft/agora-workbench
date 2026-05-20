@@ -193,12 +193,12 @@ class TestSetupSearchTool:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_list_domain_tools_not_registered(self):
-        """list_testdomain_domain_tools is no longer registered (retired meta-tool)."""
+    async def test_list_domain_tools_registered(self):
+        """list_{name}_domain_tools is registered when a tool registry is present."""
         tools = [_tool("run_opf", "Run optimal power flow")]
         server = _make_server(tools=tools)
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "list_testdomain_domain_tools" not in tool_names
+        assert "list_testdomain_domain_tools" in tool_names
 
 
 # ---------------------------------------------------------------------------
