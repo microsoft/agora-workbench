@@ -299,22 +299,6 @@ class SessionManager:
             # executables may not be discoverable.
             LOGGER.debug("Kernelspec inspection failed; falling back to inherited PATH", exc_info=True)
 
-        # Expose the environment asset cache directory to kernel-side tool
-        # implementations.  Tools read this to locate pre-provisioned assets
-        # (model weights, data files) without hardcoding paths.
-        if "MCP_ASSET_CACHE_DIR" not in env:
-            # Derive from the environment prefix: cache dir is the parent of
-            # the env-type subdirectory (e.g. ~/.cache/mcp-envs/<name>/).
-            try:
-                python_bin = Path(kernel_manager.kernel_spec.argv[0])
-                # bin_dir/.. is the env root (e.g. .../conda or .../uv),
-                # its parent is the named cache dir (e.g. .../mcp-envs/<name>/)
-                env_root = python_bin.parent.parent
-                cache_dir = env_root.parent
-                env["MCP_ASSET_CACHE_DIR"] = str(cache_dir)
-            except Exception:
-                pass
-
         # Explicitly control these variables to avoid inheriting stale values
         # from the server process environment.
         if user_token is not None:
