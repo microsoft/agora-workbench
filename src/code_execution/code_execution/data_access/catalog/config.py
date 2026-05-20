@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import yaml
 from pydantic import BaseModel, Field
@@ -32,8 +33,14 @@ class SourceConfig(BaseModel):
     @property
     def source_type(self) -> str:
         """Infer storage type from path prefix."""
-        if self.path.startswith("az://") or ".blob.core.windows.net" in self.path:
+        if self.path.startswith("az://"):
             return "blob"
+
+        parsed = urlparse(self.path)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme in {"http", "https"} and (host == "blob.core.windows.net" or host.endswith(".blob.core.windows.net")):
+            return "blob"
+
         return "local"
 
 
