@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from typing import Any
 
 import pypsa
 
@@ -47,7 +48,7 @@ def add_components(
     """
     n = _get_network(network_name)
 
-    counts = {
+    counts: dict[str, Any] = {
         "num_buses": 0,
         "num_generators": 0,
         "num_loads": 0,
