@@ -84,6 +84,30 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
         """
         return ctx.db.list_domains()
 
+    async def query_catalog(sql: str, max_rows: int = 100) -> list[dict] | dict:
+        """Run a read-only SQL query against the data catalog database.
+
+        Use this for structured filtering, aggregation, or exploration that
+        goes beyond what search_data provides.
+
+        Available tables:
+          - artifacts (id, name, storage_uri, description, domain,
+                       source_type, content_type, size_bytes, indexed_at)
+          - artifacts_fts (FTS5 virtual table: name, description, domain)
+            Usage: SELECT * FROM artifacts_fts WHERE artifacts_fts MATCH 'query'
+
+        Args:
+            sql: A SELECT query to execute. Write operations are rejected.
+            max_rows: Maximum number of rows to return (default 100).
+
+        Returns:
+            List of result row dictionaries, or an error dict.
+        """
+        try:
+            return ctx.db.execute_readonly(sql, max_rows=max_rows)
+        except (ValueError, Exception) as e:
+            return {"error": str(e)}
+
     mcp.tool(
         name="search_data",
         description=(
@@ -91,6 +115,18 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
             "Supports filtering by domain and storage type. Returns ranked results with metadata."
         ),
     )(search_data)
+
+    mcp.tool(
+        name="query_catalog",
+        description=(
+            "Run a read-only SQL query against the data catalog. "
+            "Use for structured filtering (e.g., by content_type, size_bytes), "
+            "aggregations, or exploration beyond natural language search. "
+            "Table: artifacts (id, name, storage_uri, description, domain, "
+            "source_type, content_type, size_bytes, indexed_at). "
+            "FTS5 table: artifacts_fts (MATCH queries on name, description, domain)."
+        ),
+    )(query_catalog)
 
     mcp.tool(
         name="get_artifact",
@@ -102,4 +138,4 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
         description="List all available data domains in the catalog (e.g., 'earthscience', 'powergrid').",
     )(list_domains)
 
-    LOGGER.info("Registered catalog tools: search_data, get_artifact, list_domains")
+    LOGGER.info("Registered catalog tools: search_data, query_catalog, get_artifact, list_domains")

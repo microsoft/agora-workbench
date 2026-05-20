@@ -135,6 +135,42 @@ class CatalogDB:
             raise RuntimeError("Database not opened. Call open() first.")
         return self._conn
 
+    def execute_readonly(self, sql: str, max_rows: int = 100) -> list[dict]:
+        """Execute a read-only SQL query and return results as dicts.
+
+        Uses a separate read-only connection to prevent any writes.
+
+        Args:
+            sql: SQL query to execute (SELECT only).
+            max_rows: Maximum number of rows to return.
+
+        Returns:
+            List of row dictionaries.
+
+        Raises:
+            sqlite3.OperationalError: If the query attempts a write operation.
+            ValueError: If the query appears to be a write operation.
+        """
+        # Belt-and-suspenders: reject obvious write statements before execution
+        stripped = sql.strip().upper()
+        write_keywords = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE")
+        if any(stripped.startswith(kw) for kw in write_keywords):
+            raise ValueError(f"Write operations are not permitted. Query starts with: {stripped.split()[0]}")
+
+        # Open a separate read-only connection
+        read_conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        read_conn.row_factory = sqlite3.Row
+        read_conn.enable_load_extension(True)
+        sqlite_vec.load(read_conn)
+        read_conn.enable_load_extension(False)
+
+        try:
+            cursor = read_conn.execute(sql)
+            rows = cursor.fetchmany(max_rows)
+            return [{k: row[k] for k in row.keys()} for row in rows]
+        finally:
+            read_conn.close()
+
     def upsert_artifact(
         self,
         artifact_id: str,

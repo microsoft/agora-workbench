@@ -192,3 +192,88 @@ class TestCatalogDBSearch:
         assert d["id"] == "a"
         assert d["name"] == "test.csv"
         assert "score" not in d  # No score unless from search
+
+
+class TestCatalogDBReadonlyQuery:
+    """Tests for execute_readonly."""
+
+    @pytest.fixture
+    def file_db(self, tmp_path):
+        """Create an on-disk catalog database (required for read-only connections)."""
+        db_path = tmp_path / "catalog.db"
+        catalog_db = CatalogDB(db_path=str(db_path), vec_dimensions=4)
+        catalog_db.open()
+        catalog_db.upsert_artifact(
+            artifact_id="a",
+            name="weather.csv",
+            storage_uri="/data/weather.csv",
+            description="Weather data",
+            domain="earthscience",
+            source_type="local",
+            content_type="text/csv",
+            size_bytes=1024,
+            indexed_at="2026-01-01T00:00:00Z",
+        )
+        catalog_db.upsert_artifact(
+            artifact_id="b",
+            name="grid.parquet",
+            storage_uri="/data/grid.parquet",
+            description="Grid topology",
+            domain="powergrid",
+            source_type="local",
+            content_type="application/x-parquet",
+            size_bytes=5000000,
+            indexed_at="2026-01-02T00:00:00Z",
+        )
+        yield catalog_db
+        catalog_db.close()
+
+    def test_select_all(self, file_db):
+        results = file_db.execute_readonly("SELECT id, name FROM artifacts ORDER BY name")
+        assert len(results) == 2
+        assert results[0]["name"] == "grid.parquet"
+        assert results[1]["name"] == "weather.csv"
+
+    def test_filter_by_content_type(self, file_db):
+        results = file_db.execute_readonly("SELECT name FROM artifacts WHERE content_type = 'text/csv'")
+        assert len(results) == 1
+        assert results[0]["name"] == "weather.csv"
+
+    def test_filter_by_size(self, file_db):
+        results = file_db.execute_readonly("SELECT name FROM artifacts WHERE size_bytes > 100000")
+        assert len(results) == 1
+        assert results[0]["name"] == "grid.parquet"
+
+    def test_aggregation(self, file_db):
+        results = file_db.execute_readonly(
+            "SELECT domain, COUNT(*) as cnt FROM artifacts GROUP BY domain ORDER BY domain"
+        )
+        assert len(results) == 2
+        assert results[0]["domain"] == "earthscience"
+        assert results[0]["cnt"] == 1
+
+    def test_max_rows_limit(self, file_db):
+        results = file_db.execute_readonly("SELECT * FROM artifacts", max_rows=1)
+        assert len(results) == 1
+
+    def test_rejects_insert(self, file_db):
+        with pytest.raises(ValueError, match="Write operations"):
+            file_db.execute_readonly(
+                "INSERT INTO artifacts (id, name, storage_uri, indexed_at) VALUES ('x', 'x', 'x', 'x')"
+            )
+
+    def test_rejects_delete(self, file_db):
+        with pytest.raises(ValueError, match="Write operations"):
+            file_db.execute_readonly("DELETE FROM artifacts WHERE id = 'a'")
+
+    def test_rejects_drop(self, file_db):
+        with pytest.raises(ValueError, match="Write operations"):
+            file_db.execute_readonly("DROP TABLE artifacts")
+
+    def test_fts_match_query(self, file_db):
+        results = file_db.execute_readonly(
+            "SELECT a.name FROM artifacts_fts fts JOIN artifacts a ON a.rowid = fts.rowid "
+            "WHERE artifacts_fts MATCH 'weather'"
+        )
+        assert len(results) == 1
+        assert results[0]["name"] == "weather.csv"
