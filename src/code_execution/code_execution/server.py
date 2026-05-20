@@ -1888,14 +1888,21 @@ else:
         await self._register_kernel(kernel_name="tools-py")
 
         # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
-        await self.activity_publisher.start()
+        # Wrapped defensively: observability must never block server startup.
+        try:
+            await self.activity_publisher.start()
+        except Exception:
+            LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
 
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
-        await self.activity_publisher.stop()
+        try:
+            await self.activity_publisher.stop()
+        except Exception:
+            LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
         LOGGER.info("Server shutdown complete")
 
     async def run_http(
