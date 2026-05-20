@@ -1,13 +1,20 @@
-# MCP Server Registry Configuration
+# MCP Server Registry
 #
-# This file defines the available MCP servers and their configurations.
-# It is loaded by core/tools/mcp/mcp_server_registry.py during auto-discovery.
+# Read by utilities.mcp_clients.connect_mcp_servers. Each entry is a server
+# the agent host can connect to. Localhost entries use a dev bearer token
+# automatically; non-localhost entries use utilities.auth.get_token_provider
+# with the entry's scope (or the top-level default).
+#
+# To restrict which servers a particular run connects to, either pass
+# servers=[...] to connect_mcp_servers or set WORKBENCH_SERVERS=name1,name2.
 
-# Base URL for all MCP servers (can be overridden per-server)
-base_url: http://localhost
-
-# Authentication scope for OBO flow (overridden by MCP_SERVER_SCOPE environment variable and can be overridden per-server)
+# Default OAuth scope used for non-localhost servers when an entry omits its own.
 scope: api://12c90937-013c-468e-93cf-eb8083d69ca7/.default
 
-# Server configurations
-servers: []
+servers:
+  - name: chemistry
+    url: http://localhost:8020/mcp
+  - name: earthscience
+    url: http://localhost:8021/mcp
+  - name: energysystems
+    url: http://localhost:8022/mcp
