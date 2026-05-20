@@ -1,0 +1,42 @@
+# Activity UI — shared observability sidecar
+#
+# This compose file runs ONE activity-ui instance that any number of
+# MCP server stacks can publish to. Each MCP server's compose attaches
+# to the same shared external Docker network ("agora-activity"); the
+# server reaches the UI at http://activity-ui:8030.
+#
+# First-time setup (once per host):
+#   docker network create agora-activity
+#
+# Start the UI:
+#   docker compose up -d
+#
+# Then bring up whichever MCP server stacks you want — they'll publish
+# events into this UI as long as ACTIVITY_UI_URL is set in their env.
+# Open http://127.0.0.1:8030 in your browser to see the feed.
+
+services:
+  activity-ui:
+    build:
+      context: ..
+      dockerfile: activity_ui/Dockerfile
+    ports:
+      # Bind to localhost only — no auth yet, do not expose off-host.
+      - "127.0.0.1:8030:8030"
+    environment:
+      ACTIVITY_UI_HOST: "0.0.0.0"
+      ACTIVITY_UI_PORT: "8030"
+    networks:
+      - agora-activity
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/healthz').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  agora-activity:
+    # Shared with every MCP server stack that wants to publish events.
+    # Must be created up-front: `docker network create agora-activity`.
+    external: true

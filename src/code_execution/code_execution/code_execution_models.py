@@ -33,6 +33,10 @@ class ToolCallRecord(BaseModel):
 class CodeExecutionResult(BaseModel):
     """Result of code execution with stdout, stderr, and metadata."""
 
+    description: str = Field(
+        default="",
+        description="One-line agent-supplied summary of what this code does (surfaced in the activity UI)",
+    )
     stdout: str = Field(default="", description="Standard output from code execution")
     stderr: str = Field(default="", description="Standard error from code execution")
     execution_time: float = Field(default=0.0, ge=0, description="Execution time in seconds")

@@ -17,6 +17,11 @@ Use this skill when the user asks about molecules, chemical structures, SMILES,
 molecular properties, similarity, substructure matching, or any cheminformatics
 task. Code runs in the `execute_chemistry_code` tool with RDKit auto-imported.
 
+When calling `execute_chemistry_code`, always set `description` to a one-line
+summary of what the code does (e.g. `"Screen 4 molecules for Lipinski drug-
+likeness"`). The description is shown to the user watching the server, so it
+should narrate *what* and *why*, not low-level syntax.
+
 ## State Graph Overview
 
 The domain tools form a directed graph of workflows. `parse_molecule` is the
