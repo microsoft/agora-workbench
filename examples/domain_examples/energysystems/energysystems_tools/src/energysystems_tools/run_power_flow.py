@@ -39,27 +39,28 @@ def run_power_flow(
 
     if method == "ac":
         result = n.pf()
+        # pf() returns a dict with convergence info
+        if hasattr(result, "__getitem__") and "converged" in result:
+            converged = bool(result["converged"].all())
+        else:
+            converged = True
     else:
-        result = n.lpf()
-
-    # Check convergence — pf()/lpf() return a dict with convergent info
-    if hasattr(result, "__getitem__") and "converged" in result:
-        converged = bool(result["converged"].all())
-    else:
-        converged = True
+        # lpf() returns None in modern PyPSA; check buses_t for results
+        n.lpf()
+        converged = len(n.buses_t.p.columns) > 0
 
     # Extract bus results
     bus_results = []
     for bus_name in n.buses.index:
         entry = {"bus": bus_name}
         if method == "ac":
-            if "v_mag_pu" in n.buses_t:
+            if bus_name in n.buses_t.v_mag_pu.columns:
                 entry["v_mag_pu"] = round(float(n.buses_t.v_mag_pu[bus_name].mean()), 4)
-            if "v_ang" in n.buses_t:
+            if bus_name in n.buses_t.v_ang.columns:
                 entry["v_ang"] = round(float(n.buses_t.v_ang[bus_name].mean()), 4)
-        if "p" in n.buses_t:
+        if bus_name in n.buses_t.p.columns:
             entry["p"] = round(float(n.buses_t.p[bus_name].mean()), 4)
-        if "q" in n.buses_t:
+        if bus_name in n.buses_t.q.columns:
             entry["q"] = round(float(n.buses_t.q[bus_name].mean()), 4)
         bus_results.append(entry)
 
@@ -67,7 +68,7 @@ def run_power_flow(
     line_loading = []
     for line_name in n.lines.index:
         entry = {"line": line_name}
-        if "p0" in n.lines_t:
+        if line_name in n.lines_t.p0.columns:
             p0_mean = float(n.lines_t.p0[line_name].mean())
             entry["p0_mean_mw"] = round(p0_mean, 4)
             s_nom = float(n.lines.loc[line_name, "s_nom"]) if "s_nom" in n.lines.columns else 0
