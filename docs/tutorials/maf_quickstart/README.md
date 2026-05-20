@@ -154,7 +154,7 @@ factory is a thin wrapper around the framework-agnostic
 > kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to
-[`auth.providers.get_token_provider()`](../../../src/auth/providers.py),
+[`auth.providers.get_token_provider()`](../../../src/utilities/auth/providers.py),
 which returns a callable backed by the same
 `AzureCliCredential → ManagedIdentityCredential` chain used everywhere
 else in the repo. No new credentials are needed.
