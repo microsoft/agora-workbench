@@ -167,7 +167,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_tool_info_carries_state_fields(self):
         """ToolInfo should accept and store state_requires and state_produces."""
-        from utilities.tool_search import ToolInfo
+        from code_execution.tools.tool_search import ToolInfo
 
         ti = ToolInfo(
             name="test_tool",
@@ -183,7 +183,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_tool_info_defaults_empty(self):
         """ToolInfo state fields should default to empty tuples."""
-        from utilities.tool_search import ToolInfo
+        from code_execution.tools.tool_search import ToolInfo
 
         ti = ToolInfo(name="test", description="desc", server_name="s")
         assert ti.state_requires == ()
@@ -192,7 +192,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_carries_state_fields(self):
         """ToolSearchResult should include state_requires and state_produces."""
-        from utilities.tool_search import ToolSearchResult
+        from code_execution.tools.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -208,7 +208,7 @@ class TestPipelinePropagation:
     @pytest.mark.unit
     def test_search_result_defaults_empty(self):
         """ToolSearchResult state fields should default to empty lists."""
-        from utilities.tool_search import ToolSearchResult
+        from code_execution.tools.tool_search import ToolSearchResult
 
         r = ToolSearchResult(
             name="test",
@@ -223,7 +223,7 @@ class TestPipelinePropagation:
     @pytest.mark.asyncio
     async def test_bm25_backend_propagates_state_fields(self):
         """BM25 search results should include state transition data from ToolInfo."""
-        from utilities.tool_search import ToolInfo
+        from code_execution.tools.tool_search import ToolInfo
         from code_execution.tools.search.bm25_tool_search import BM25ToolSearchBackend
 
         tools = [
@@ -251,7 +251,7 @@ class TestStateGraphQueryTool:
     """Test the StateGraph class and plan_{name}_workflow tool."""
 
     def _make_graph(self):  # noqa: F821
-        from utilities.tool_search import ToolInfo
+        from code_execution.tools.tool_search import ToolInfo
         from code_execution.tools.search.state_graph import StateGraph
 
         tools = [

@@ -5,8 +5,9 @@ import pytest
 from code_execution.tools.search.bm25_tool_search import (
     BM25ToolSearchBackend,
     _tool_info_text,
+    _skill_info_text,
 )
-from utilities.tool_search import ToolInfo
+from code_execution.tools.tool_search import ToolInfo
 
 
 class TestToolInfoText:
@@ -103,10 +104,155 @@ class TestBM25ToolSearchBackend:
     @pytest.mark.unit
     @pytest.mark.asyncio
     async def test_result_fields(self, sample_tools):
-        backend = BM25ToolSearchBackend(tools=sample_tools)
+        backend = BM25ToolSearchBackend(tools=sample_tools, server_name="powergrid")
         results = await backend.search("run_opf", top=1)
         r = results[0]
         assert r.name == "run_opf"
         assert r.server_name == "powergrid"
         assert r.execution_type == "mcp"
+        assert r.type == "tool"
+        assert r.to_access == "Call via execute_powergrid_code"
         assert isinstance(r.score, float)
+
+
+class TestSkillInfoText:
+    """Test the text-extraction helper for skill metadata dicts."""
+
+    @pytest.mark.unit
+    def test_includes_name_and_description(self):
+        skill = {"name": "drug-screening", "description": "Drug-likeness evaluation"}
+        text = _skill_info_text(skill)
+        assert "drug-screening" in text
+        assert "Drug-likeness evaluation" in text
+
+    @pytest.mark.unit
+    def test_includes_states(self):
+        skill = {
+            "name": "test-skill",
+            "description": "desc",
+            "states": ["chem.parsed", "chem.filtered"],
+        }
+        text = _skill_info_text(skill)
+        assert "chem.parsed" in text
+        assert "chem.filtered" in text
+
+    @pytest.mark.unit
+    def test_empty_skill(self):
+        text = _skill_info_text({})
+        assert isinstance(text, str)
+
+
+class TestBM25SkillSearch:
+    """Test skill indexing and category filtering in BM25ToolSearchBackend."""
+
+    @pytest.fixture
+    def sample_tools(self):
+        return [
+            ToolInfo(
+                name="compute_descriptors",
+                description="Compute molecular descriptors",
+                server_name="chemistry",
+            ),
+            ToolInfo(
+                name="filter_drug_candidates",
+                description="Filter molecules for drug-likeness",
+                server_name="chemistry",
+            ),
+        ]
+
+    @pytest.fixture
+    def sample_skills(self):
+        return [
+            {
+                "name": "drug-screening",
+                "description": "Drug-likeness evaluation using Lipinski rules",
+                "domain": "chemistry",
+                "states": ["chemistry.descriptors_computed", "chemistry.candidates_filtered"],
+            },
+            {
+                "name": "molecular-analysis",
+                "description": "Structural characterization of molecules",
+                "domain": "chemistry",
+                "states": ["chemistry.molecule_parsed", "chemistry.groups_identified"],
+            },
+        ]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_skills_searchable_by_name(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug-screening", top=5)
+        skill_results = [r for r in results if r.type == "skill"]
+        assert len(skill_results) >= 1
+        assert skill_results[0].name == "drug-screening"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_skills_searchable_by_description(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("Lipinski", top=5)
+        skill_results = [r for r in results if r.type == "skill"]
+        assert len(skill_results) >= 1
+        assert skill_results[0].name == "drug-screening"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_category_tools_excludes_skills(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug", top=5, category="tools")
+        assert all(r.type == "tool" for r in results)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_category_skills_excludes_tools(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug", top=5, category="skills")
+        assert all(r.type == "skill" for r in results)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_category_all_returns_both(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug", top=5, category="all")
+        types = {r.type for r in results}
+        assert "tool" in types
+        assert "skill" in types
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_skill_result_has_to_access(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug-screening", top=5, category="skills")
+        assert len(results) >= 1
+        r = results[0]
+        assert r.type == "skill"
+        assert "load_chemistry_skill" in r.to_access
+        assert "drug-screening" in r.to_access
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_skill_result_fields(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug-screening", top=1, category="skills")
+        r = results[0]
+        assert r.name == "drug-screening"
+        assert r.server_name == "chemistry"
+        assert r.execution_type == "skill"
+        assert r.type == "skill"
+        assert r.state_requires == []
+        assert r.state_produces == []
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_no_skills_returns_empty_for_skill_category(self, sample_tools):
+        backend = BM25ToolSearchBackend(tools=sample_tools, server_name="chemistry")
+        results = await backend.search("drug", top=5, category="skills")
+        assert results == []
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_results_sorted_by_score(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("drug", top=10, category="all")
+        scores = [r.score for r in results]
+        assert scores == sorted(scores, reverse=True)

@@ -1,0 +1,45 @@
+# Data Catalog Configuration
+# Declare your data sources and search settings here.
+# The MCP server indexes these sources on startup and exposes
+# search_data, get_artifact, and list_domains tools to the agent.
+
+sources:
+  # Local filesystem directory
+  - path: /data/weather/
+    domain: earthscience
+    description: "NOAA daily weather observations for Pacific Northwest"
+    files:
+      daily_obs.csv:
+        description: "Daily temperature and precipitation readings from Pacific NW stations"
+      hourly_wind.parquet:
+        description: "Hourly wind speed measurements from coastal stations"
+
+  # Another local directory (no per-file overrides needed)
+  - path: /data/grid/
+    domain: powergrid
+
+  # Azure Blob Storage source (for cloud deployments)
+  # Supports both az:// shorthand and full HTTPS URLs:
+  # - path: az://mystorageaccount/container/prefix/
+  #   domain: powergrid
+  #   description: "Geospatial transmission line dataset"
+  # - path: https://mystorageaccount.blob.core.windows.net/container/prefix/
+  #   domain: powergrid
+  #   files:
+  #     lines.geojson:
+  #       description: "US high-voltage transmission lines with voltage and owner metadata"
+
+search:
+  # Embedding model for vector search
+  # Options:
+  #   - Any sentence-transformers model ID (runs locally on CPU)
+  #   - "azure-openai" (requires endpoint/deployment below)
+  embedding_model: nomic-ai/nomic-embed-text-v1.5
+
+  # Required only when embedding_model is "azure-openai":
+  # azure_openai_endpoint: https://your-resource.cognitiveservices.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15
+  # azure_openai_deployment: text-embedding-3-large
+
+  # Weight for keyword (FTS5) score in hybrid ranking.
+  # 0.0 = pure vector search, 1.0 = pure keyword search
+  hybrid_alpha: 0.5

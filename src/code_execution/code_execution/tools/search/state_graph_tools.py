@@ -21,7 +21,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from utilities.tool_search import ToolInfo
+from ..tool_search import ToolInfo
 from .state_graph import StateGraph, _discover_skills
 from ..tool_descriptor import ToolDescriptor
 
@@ -70,8 +70,8 @@ class LoadSkillInput(BaseModel):
     skill_name: str = Field(
         description=(
             "Name of the skill to load (e.g. 'flowsheet-setup', "
-            "'grid-converter').  Use plan_{name}_workflow to "
-            "discover available skill names."
+            "'grid-converter').  Use search_{name}_tools(category='skills') "
+            "or plan_{name}_workflow to discover available skill names."
         ),
     )
 
@@ -97,7 +97,7 @@ def create_plan_workflow_descriptor(
     tools : list[ToolInfo] | None
         Tool metadata to index in the state graph.  Defaults to an empty
         list (no state-annotated tools).  When used server-side, pass the
-        server's own tool catalog converted to :class:`~utilities.tool_search.ToolInfo`.
+        server's own tool catalog converted to :class:`~code_execution.tools.tool_search.ToolInfo`.
     domains_dir : Path | None
         Root of the ``domains/`` directory tree.  When None, skill and
         state discovery is skipped (only tool state annotations are used).
@@ -233,8 +233,9 @@ def create_load_skill_descriptor(
         description=(
             f"Load the full content of a {server_name} skill by name.  Skills "
             f"contain step-by-step instructions, best practices, and sub-skill "
-            f"references for domain workflows.  Use plan_{server_name}_workflow "
-            f"to discover available skill names, then call load_{server_name}_skill "
+            f"references for domain workflows.  Discover available skill names "
+            f"via search_{server_name}_tools (category='skills') or "
+            f"plan_{server_name}_workflow, then call load_{server_name}_skill "
             f"to get the detailed instructions before starting a workflow."
         ),
         input_model=LoadSkillInput,
