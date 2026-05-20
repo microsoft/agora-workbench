@@ -30,6 +30,8 @@ except ImportError:  # pragma: no cover
     _CredentialProviderTokenCredential = None  # type: ignore[assignment,misc]
 
 if TYPE_CHECKING:
+    from azure.core.credentials_async import AsyncTokenCredential
+
     from ...auth import CredentialProvider
 
 
@@ -178,7 +180,7 @@ class CatalogIndexer:
         from azure.storage.blob.aio import BlobServiceClient
 
         # Use the shared auth CredentialProvider if available, else fall back
-        credential: object
+        credential: AsyncTokenCredential
         owns_credential = False
         if self._credential_provider is not None and _CredentialProviderTokenCredential is not None:
             credential = _CredentialProviderTokenCredential(self._credential_provider)
@@ -217,7 +219,7 @@ class CatalogIndexer:
     async def _enumerate_blob_source(
         self,
         source: SourceConfig,
-        credential: object,
+        credential: AsyncTokenCredential,
         clients: dict,
     ) -> list[dict]:
         """

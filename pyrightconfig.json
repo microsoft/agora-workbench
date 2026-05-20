@@ -60,6 +60,7 @@
     "reportSelfClsParameterName": "none",
     "reportImplicitStringConcatenation": "none",
     "reportAttributeAccessIssue": "none",
+    "reportCallIssue": "none",
     "reportUndefinedVariable": "error",
     "reportUnboundVariable": "error"
 }

@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from ....code_execution.data_access.catalog.config import CatalogConfig, SourceConfig, SearchConfig
+from ....code_execution.data_access.catalog.config import CatalogConfig, FileOverride, SourceConfig, SearchConfig
 from ....code_execution.data_access.catalog.db import CatalogDB
 from ....code_execution.data_access.catalog.indexer import CatalogIndexer, _build_indexable_text, _parse_blob_path
 
@@ -175,7 +175,7 @@ class TestCatalogIndexerLocal:
                     domain="earthscience",
                     description="Default description",
                     files={
-                        "daily_obs.csv": {"description": "Override description", "domain": "custom"},
+                        "daily_obs.csv": FileOverride(description="Override description", domain="custom"),
                     },
                 )
             ],

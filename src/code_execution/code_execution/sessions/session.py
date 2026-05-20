@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, TypeVar, Generic
 
-from ..data_access import DataLakeDataManager
 from .objects import ObjectStore
 
 T = TypeVar("T")
@@ -76,8 +75,14 @@ class Session(Generic[T]):
         self.session_type = session_type
         self._status_history = [("created", datetime.now())]
 
-        # Initialize data manager for DataLake asset access
-        self.data_manager = DataLakeDataManager()
+        # Initialize data manager for DataLake asset access (lazy — may not be available)
+        self.data_manager = None
+        try:
+            from ..data_access.manager import DataLakeDataManager
+
+            self.data_manager = DataLakeDataManager()
+        except ImportError:
+            pass
 
         # Initialize object store for asset objects
         self.object_store = ObjectStore()

@@ -69,7 +69,7 @@ class CatalogConfig(BaseModel):
     """Top-level catalog.yaml configuration."""
 
     sources: list[SourceConfig] = Field(default_factory=list)
-    search: SearchConfig = Field(default_factory=SearchConfig)
+    search: SearchConfig = Field(default_factory=lambda: SearchConfig())
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "CatalogConfig":
