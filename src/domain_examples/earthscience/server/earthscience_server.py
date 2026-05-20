@@ -1,15 +1,15 @@
 """
-Earth Science MCP Server — Planetary Computer geospatial analysis.
+Earth Science MCP Server — Planetary Computer geospatial analysis environment.
 
-Provides an `execute_earthscience_code` MCP tool backed by a conda environment
-with pystac-client, planetary-computer, rasterio, xarray, and geospatial
-packages for satellite imagery discovery and analysis.
+Ships a single ``execute_earthscience_code`` MCP tool backed by a conda
+environment with pystac-client, planetary-computer, rasterio, xarray, and
+the rest of the geospatial Python stack. There are no domain-specific
+wrapper tools — the agent writes geospatial code directly against the
+auto-imported libraries, guided by the SKILL.md recipes under ``skills/``.
 
-Domain-specific tool implementations live in the ``earthscience_tools`` pip
-package (under ``earthscience_tools/``), which is installed into the conda
-environment via ``additional_commands``. The server holds only the
-``ToolDefinition`` metadata (schemas, state transitions, affordances);
-the kernel imports implementations from the installed package.
+This server exists as the canonical example of a "minimal BYOA" domain:
+the deliverable is the *environment* (conda spec + prelude + skill
+markdown), not a catalogue of pre-canned wrappers.
 
 The Microsoft Planetary Computer STAC API is free and publicly accessible —
 no API keys or accounts are required.
@@ -23,15 +23,9 @@ See the README for full instructions.
 
 import asyncio
 import os
-from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
+from code_execution import CodeExecutionServer, EnvironmentConfig
 from code_execution.auth import create_noop_auth_config
-from domain_examples.earthscience.tools import EARTHSCIENCE_TOOLS
-
-# Path to the earthscience_tools package (relative to this file so it works
-# both inside Docker and when running locally from the repo root).
-_EARTHSCIENCE_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "earthscience_tools")
 
 ENVIRONMENT_YML = """\
 name: earthscience
@@ -78,12 +72,6 @@ config = EnvironmentConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
-    additional_commands=[
-        # Install the earthscience_tools package into the conda environment
-        # so that tool proxy imports (e.g. ``from earthscience_tools.search_stac_items
-        # import search_stac_items``) resolve correctly inside the kernel.
-        f"python -m pip install --no-deps {_EARTHSCIENCE_TOOLS_PKG}",
-    ],
 )
 
 
@@ -95,14 +83,8 @@ class EarthScienceServer(CodeExecutionServer):
         return EARTHSCIENCE_PRELUDE + code
 
 
-# Build the tool registry from domain tool definitions
-tool_registry = ToolRegistry()
-for tool_def in EARTHSCIENCE_TOOLS:
-    tool_registry.register_tool(tool_def)
-
 server = EarthScienceServer(
     environment_config=config,
-    tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )
 
