@@ -3,16 +3,21 @@ MAF + agora-workbench quickstart tutorial.
 
 Wires a Microsoft Agent Framework (MAF) agent to three agora-workbench tools:
 
-  * ``search_data_lake_catalog`` — discovers datasets in the Azure AI Search-
-    backed data lake catalog (via ``data_lake.tools.adapters.maf``)
+  * ``search_data_lake_catalog`` — discovers datasets in the agora-workbench
+    data lake catalog (via ``data_lake.tools.adapters.maf``). The backend
+    is selected automatically from the environment: ``DATA_LAKE_SEARCH_ENDPOINT``
+    enables the Azure AI Search-backed catalog, while ``DATA_LAKE_LOCAL_CATALOG``
+    points at a YAML file on disk for fully-local development (BM25 ranking,
+    no Azure credentials required).
   * ``chemistry`` MCP toolset — the chemistry MCP server from
     ``src/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
-    ``list_chemistry_domain_tools`` discovery tool that catalogs the
+    server-side ``search_chemistry_tools`` BM25 search tool over the
     domain's typed helpers (``parse_molecule``, ``compute_descriptors``,
     ``filter_drug_candidates``, ``compute_fingerprints``,
     ``find_similar_molecules``, ``cluster_molecules``,
-    ``enumerate_functional_groups``).
+    ``enumerate_functional_groups``). Pass ``query=""`` with ``top=999``
+    to enumerate the full catalog.
 
     The typed helpers are *not* separate MCP tools — they are auto-injected
     as Python proxy functions in the kernel namespace, so the agent calls
@@ -21,10 +26,16 @@ Wires a Microsoft Agent Framework (MAF) agent to three agora-workbench tools:
     available in the kernel.
   * ``energysystems`` MCP toolset — the energy systems MCP server from
     ``src/domain_examples/energysystems/``. Exposes an
-    ``execute_energysystems_code`` tool with PyPSA pre-imported, plus typed
+    ``execute_energysystems_code`` tool with PyPSA pre-imported, a
+    server-side ``search_energysystems_tools`` BM25 search tool, plus typed
     helpers (``define_network``, ``add_components``, ``add_time_series``,
     ``run_power_flow``, ``run_optimal_power_flow``, ``run_capacity_expansion``,
     ``analyze_costs``, ``analyze_topology``).
+
+Tool search and indexing now live entirely server-side: each MCP server
+builds a BM25 index over its own ``ToolRegistry`` at startup and exposes
+it as an MCP tool. No client-side search infrastructure or middleware is
+required.
 
 Both domain servers ship with a SKILL.md that documents their state-graph
 workflows. The tutorial reads those files at startup and injects them into
@@ -97,12 +108,16 @@ def step_a_chat_client():
 async def step_b_data_lake_tool():
     """Build the agora-workbench data lake search tool.
 
-    Uses the default Azure AI Search-backed backend, which reads
-    ``DATA_LAKE_SEARCH_ENDPOINT`` and ``DATA_LAKE_CATALOG_INDEX_NAME`` from
-    the environment and authenticates via the shared Entra credential chain.
+    The backend is chosen automatically from the environment:
 
-    Returns ``None`` if the data lake isn't configured — letting the tutorial
-    still demonstrate the agent loop with just the chemistry tool.
+      * ``DATA_LAKE_SEARCH_ENDPOINT`` (+ optional ``DATA_LAKE_CATALOG_INDEX_NAME``)
+        — use the Azure AI Search-backed catalog. Authenticates via the shared
+        Entra credential chain.
+      * ``DATA_LAKE_LOCAL_CATALOG`` — path to a local YAML catalog. BM25
+        keyword ranking runs in-process; no Azure credentials required.
+
+    Returns ``None`` if neither is configured — letting the tutorial still
+    demonstrate the agent loop with just the MCP tools.
     """
     from data_lake.tools.adapters.maf import (
         create_data_lake_search_tool,
@@ -111,8 +126,8 @@ async def step_b_data_lake_tool():
 
     if not is_data_lake_configured():
         LOGGER.warning(
-            "Step B: DATA_LAKE_SEARCH_ENDPOINT not set — skipping data lake tool. "
-            "Set it in .env to enable catalog search."
+            "Step B: neither DATA_LAKE_SEARCH_ENDPOINT nor DATA_LAKE_LOCAL_CATALOG "
+            "is set — skipping data lake tool. Set one in .env to enable catalog search."
         )
         return None
 
@@ -150,8 +165,9 @@ async def step_c_chemistry_tool():
         )
         return None
 
-    # The local chemistry server uses noop auth, but its middleware still
-    # expects an Authorization header. Any non-empty bearer string is accepted.
+    # The local chemistry server uses noop auth, but its HTTP auth layer
+    # still expects an Authorization header. Any non-empty bearer string is
+    # accepted.
     http_client = httpx.AsyncClient(headers={"Authorization": "Bearer dev-token"})
     tool = MCPStreamableHTTPTool(
         name="chemistry",
@@ -251,12 +267,15 @@ def step_d_build_agent(chat_client, tools):
         "  * execute_chemistry_code — run Python in a kernel with RDKit\n"
         "      pre-imported (`Chem`, `Descriptors`, `AllChem`,\n"
         "      `rdMolDescriptors`, `np`, `pd`).\n"
-        "  * list_chemistry_domain_tools — catalog of typed helper functions\n"
-        "      auto-injected into the chemistry kernel namespace.\n"
+        "  * search_chemistry_tools — server-side BM25 search over the\n"
+        "      chemistry domain's typed helper catalog. Call with a\n"
+        "      `query` string and optional `top` (default 5). Pass\n"
+        "      `query=\"\"` with `top=999` to list every helper.\n"
         "  * execute_energysystems_code — run Python in a kernel with PyPSA\n"
         "      pre-imported (`pypsa`, `np`, `pd`, `nx`, `plt`).\n"
-        "  * list_energysystems_domain_tools — catalog of typed helper functions\n"
-        "      auto-injected into the energy systems kernel namespace.\n"
+        "  * search_energysystems_tools — server-side BM25 search over the\n"
+        "      energy systems domain's typed helper catalog. Same `query`\n"
+        "      / `top` signature as `search_chemistry_tools`.\n"
         "\n"
         "Inside execute_chemistry_code the following typed helpers are\n"
         "available as plain Python functions — no imports needed:\n"
@@ -321,7 +340,9 @@ def step_d_build_agent(chat_client, tools):
 # ---------------------------------------------------------------------------
 async def step_e_run(agent):
     prompt = (
-        "Do TWO tasks:\n"
+        "Do TWO tasks, STRICTLY ONE AT A TIME. Do NOT issue parallel or\n"
+        "simultaneous tool calls — finish all chemistry work and observe its\n"
+        "output before issuing ANY energy systems tool call.\n"
         "\n"
         "TASK 1 — Chemistry: Screen this small library of molecules for "
         "drug-likeness. Inside execute_chemistry_code call "
@@ -334,6 +355,9 @@ async def step_e_run(agent):
         "  - atorvastatin: CC(C)c1c(C(=O)Nc2ccccc2)c(-c2ccccc2)c(-c2ccc(F)cc2)"
         "n1CC[C@@H](O)C[C@@H](O)CC(=O)O\n"
         "\n"
+        "Only AFTER TASK 1 is complete and its tool output has been received,\n"
+        "begin TASK 2.\n"
+        "\n"
         "TASK 2 — Energy Systems: Build a simple 2-bus power grid and run "
         "optimal power flow. Inside execute_energysystems_code:\n"
         "  1. `net = define_network(name='demo_grid', snapshots=24)`\n"
@@ -344,7 +368,8 @@ async def step_e_run(agent):
         "  4. `costs = analyze_costs(network_name='demo_grid')`\n"
         "  5. `print(opf)` and `print(costs)`\n"
         "\n"
-        "Report results for BOTH tasks."
+        "Once BOTH tasks are complete, report results for both in natural\n"
+        "language with the key numbers inline."
     )
     print("\n" + "=" * 70)
     print(f"USER: {prompt}")
