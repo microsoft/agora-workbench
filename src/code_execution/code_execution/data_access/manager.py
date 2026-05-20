@@ -55,6 +55,7 @@ class DataLakeDataManager:
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
+        self._url_cache: dict[str, str] = {}  # Maps artifact_id -> resolved blob URL
 
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         self._credential_init_error: str | None = None
@@ -93,6 +94,9 @@ class DataLakeDataManager:
         """
         Retrieve blob storage URL from artifact_id by querying the blob-details index.
 
+        Results are cached so repeated resolutions of the same artifact skip
+        the search round-trip.
+
         Args:
             artifact_id: Base64-encoded artifact identifier from blob-details index
 
@@ -102,6 +106,11 @@ class DataLakeDataManager:
         Raises:
             ValueError: If the artifact is not found in the index or URL is invalid
         """
+        # Return cached URL if available
+        if artifact_id in self._url_cache:
+            LOGGER.debug(f"URL cache hit for artifact {artifact_id[:40]}...")
+            return self._url_cache[artifact_id]
+
         if not self._search_client:
             if self._credential_init_error:
                 init_error_type = self._credential_init_error.split(":", 1)[0]
@@ -133,6 +142,7 @@ class DataLakeDataManager:
                 raise ValueError(f"Retrieved storage path is not a valid URL: {blob_url!r}")
 
             LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}... -> {blob_url}")
+            self._url_cache[artifact_id] = blob_url
             return blob_url
 
         except Exception as e:
@@ -321,6 +331,15 @@ class DataLakeDataManager:
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
         self._cache_index.clear()
+        self._url_cache.clear()
+
+        # Close fetchers (releases pooled connections)
+        for fetcher in self._fetchers:
+            if hasattr(fetcher, "close"):
+                try:
+                    await fetcher.close()
+                except Exception as e:
+                    LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
 
         if hasattr(self, "_search_client") and self._search_client:
             try:
