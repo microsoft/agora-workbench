@@ -19,9 +19,12 @@ sources:
     domain: powergrid
 
   # Azure Blob Storage source (for cloud deployments)
+  # Supports both az:// shorthand and full HTTPS URLs:
   # - path: az://mystorageaccount/container/prefix/
   #   domain: powergrid
   #   description: "Geospatial transmission line dataset"
+  # - path: https://mystorageaccount.blob.core.windows.net/container/prefix/
+  #   domain: powergrid
   #   files:
   #     lines.geojson:
   #       description: "US high-voltage transmission lines with voltage and owner metadata"

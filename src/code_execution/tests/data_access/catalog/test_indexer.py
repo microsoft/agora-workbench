@@ -5,7 +5,41 @@ from unittest.mock import AsyncMock, MagicMock
 
 from ....code_execution.data_access.catalog.config import CatalogConfig, SourceConfig, SearchConfig
 from ....code_execution.data_access.catalog.db import CatalogDB
-from ....code_execution.data_access.catalog.indexer import CatalogIndexer, _build_indexable_text
+from ....code_execution.data_access.catalog.indexer import CatalogIndexer, _build_indexable_text, _parse_blob_path
+
+
+class TestParseBlobPath:
+    """Tests for blob path parsing."""
+
+    def test_az_scheme(self):
+        account, container, prefix = _parse_blob_path("az://myaccount/mycontainer/some/prefix")
+        assert account == "myaccount"
+        assert container == "mycontainer"
+        assert prefix == "some/prefix"
+
+    def test_az_scheme_no_prefix(self):
+        account, container, prefix = _parse_blob_path("az://myaccount/mycontainer")
+        assert account == "myaccount"
+        assert container == "mycontainer"
+        assert prefix == ""
+
+    def test_https_blob_url(self):
+        account, container, prefix = _parse_blob_path(
+            "https://orfb0eastus.blob.core.windows.net/fingerprints/.amltconfig"
+        )
+        assert account == "orfb0eastus"
+        assert container == "fingerprints"
+        assert prefix == ".amltconfig"
+
+    def test_https_blob_url_with_prefix(self):
+        account, container, prefix = _parse_blob_path("https://mystorage.blob.core.windows.net/data/weather/2024/")
+        assert account == "mystorage"
+        assert container == "data"
+        assert prefix == "weather/2024/"
+
+    def test_invalid_path_raises(self):
+        with pytest.raises(ValueError, match="Not a blob source"):
+            _parse_blob_path("/local/path/data")
 
 
 class TestBuildIndexableText:

@@ -21,6 +21,10 @@ class TestSourceConfig:
         source = SourceConfig(path="az://account/container/prefix/")
         assert source.source_type == "blob"
 
+    def test_blob_https_source_type(self):
+        source = SourceConfig(path="https://orfb0eastus.blob.core.windows.net/fingerprints/.amltconfig")
+        assert source.source_type == "blob"
+
     def test_relative_path_is_local(self):
         source = SourceConfig(path="./data/weather/")
         assert source.source_type == "local"

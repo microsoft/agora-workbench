@@ -19,7 +19,10 @@ class FileOverride(BaseModel):
 class SourceConfig(BaseModel):
     """A single data source (directory or blob prefix)."""
 
-    path: str = Field(..., description="Local path or az://account/container/prefix URI")
+    path: str = Field(
+        ...,
+        description="Local path, az://account/container/prefix, or https://<account>.blob.core.windows.net/container/prefix",
+    )
     domain: Optional[str] = Field(None, description="Domain label for all files in this source")
     description: Optional[str] = Field(None, description="Default description for files without an explicit one")
     files: Optional[dict[str, FileOverride]] = Field(
@@ -29,7 +32,7 @@ class SourceConfig(BaseModel):
     @property
     def source_type(self) -> str:
         """Infer storage type from path prefix."""
-        if self.path.startswith("az://"):
+        if self.path.startswith("az://") or ".blob.core.windows.net" in self.path:
             return "blob"
         return "local"
 

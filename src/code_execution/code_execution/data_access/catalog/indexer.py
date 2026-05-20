@@ -35,6 +35,35 @@ def _infer_content_type(filename: str) -> Optional[str]:
     return content_type
 
 
+def _parse_blob_path(path: str) -> tuple[str, str, str]:
+    """Parse a blob storage path into (account, container, prefix).
+
+    Supports:
+      - az://account/container/prefix
+      - https://<account>.blob.core.windows.net/container/prefix
+    """
+    if path.startswith("az://"):
+        parts = path[len("az://") :].split("/", 2)
+        account = parts[0]
+        container = parts[1] if len(parts) > 1 else ""
+        prefix = parts[2] if len(parts) > 2 else ""
+        return account, container, prefix
+
+    if ".blob.core.windows.net" in path:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(path)
+        # hostname: <account>.blob.core.windows.net
+        account = parsed.hostname.split(".")[0] if parsed.hostname else ""
+        # path: /container/prefix/...
+        path_parts = parsed.path.lstrip("/").split("/", 1)
+        container = path_parts[0] if path_parts else ""
+        prefix = path_parts[1] if len(path_parts) > 1 else ""
+        return account, container, prefix
+
+    raise ValueError(f"Not a blob source: {path}")
+
+
 class CatalogIndexer:
     """Scans configured sources and populates the catalog database."""
 
@@ -171,16 +200,12 @@ class CatalogIndexer:
         """
         Enumerate blobs in an Azure Blob Storage prefix.
 
+        Supports both az://account/container/prefix and
+        https://<account>.blob.core.windows.net/container/prefix formats.
+
         Requires azure-storage-blob with async support.
         """
-        if not source.path.startswith("az://"):
-            raise ValueError(f"Not a blob source: {source.path}")
-
-        # Parse az://account/container/prefix
-        parts = source.path[len("az://") :].split("/", 2)
-        account = parts[0]
-        container = parts[1] if len(parts) > 1 else ""
-        prefix = parts[2] if len(parts) > 2 else ""
+        account, container, prefix = _parse_blob_path(source.path)
 
         from azure.identity.aio import DefaultAzureCredential
         from azure.storage.blob.aio import BlobServiceClient
