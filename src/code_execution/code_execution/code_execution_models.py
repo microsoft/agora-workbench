@@ -22,8 +22,18 @@ class AssetSpec(BaseModel):
 
     Supported source URI schemes:
     - ``https://`` — streaming HTTP download with retry
-    - ``az://<container>/<blob>`` — Azure Blob Storage (uses DefaultAzureCredential)
+    - ``abfss://`` or ``https://*.blob.core.windows.net/`` — Azure Blob Storage
     - ``file:///path`` or bare path — local copy (useful with Docker bind mounts)
+
+    Accessing assets from tool implementations:
+        The ``MCP_ASSET_CACHE_DIR`` environment variable is set on every kernel
+        process, pointing to the cache directory.  Tool code can locate assets via::
+
+            import os
+            from pathlib import Path
+
+            cache = Path(os.environ["MCP_ASSET_CACHE_DIR"])
+            weights = cache / "models/weights.safetensors"
     """
 
     name: str = Field(description="Logical name for the asset (e.g., 'diffusion-weights')")

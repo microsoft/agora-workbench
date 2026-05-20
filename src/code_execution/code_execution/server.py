@@ -2034,6 +2034,12 @@ else:
         # Build environment if needed
         await self._ensure_environment()
 
+        # Expose asset cache directory via env var so kernel-side tool
+        # implementations can locate pre-provisioned assets without hardcoding
+        # paths.  Set on the server process so all spawned kernels inherit it.
+        cache_dir = self.environment_config.get_cache_dir()
+        os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
+
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")
 
