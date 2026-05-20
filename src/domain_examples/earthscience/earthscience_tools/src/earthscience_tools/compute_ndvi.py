@@ -96,8 +96,10 @@ def compute_ndvi(
 
         denom = nir + red
         with np.errstate(divide="ignore", invalid="ignore"):
-            ndvi = np.where(denom == 0, np.nan, (nir - red) / denom)
-        ndvi = np.clip(ndvi, -1.0, 1.0)
+            ndvi = np.ma.divide(nir - red, denom)
+        ndvi = np.ma.masked_where(np.isclose(denom, 0.0), ndvi)
+        ndvi = np.ma.masked_invalid(ndvi)
+        ndvi = np.ma.clip(ndvi, -1.0, 1.0)
 
         # Build transform for the (possibly resampled) output grid.
         window_transform = red_src.window_transform(window)
@@ -105,7 +107,7 @@ def compute_ndvi(
             w / out_w, h / out_h
         )
 
-        ndvi_arr = np.asarray(ndvi, dtype="float32")
+        ndvi_arr = ndvi.filled(np.nan).astype("float32")
         finite_mask = np.isfinite(ndvi_arr)
         valid_pixels = int(finite_mask.sum())
         total_pixels = int(ndvi_arr.size)
