@@ -1063,7 +1063,8 @@ class CodeExecutionServer:
             try:
                 session_id = ctx.session_id
             except (RuntimeError, AttributeError):
-                pass
+                # Session context may be unavailable in some invocation paths; publish without session_id.
+                session_id = None
             self.activity_publisher.publish_nowait(
                 {
                     "type": "tools_listed",
