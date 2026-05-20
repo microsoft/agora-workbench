@@ -72,6 +72,17 @@ param extraEnvVars object = {}
 @description('Container startup command. When empty (default), the image CMD is used.')
 param command array = []
 
+// ── Optional: Azure Files volume for environment/asset cache ────────────────
+// When provided, mounts an Azure File Share into the container so that built
+// environments and large assets (model weights) persist across restarts and
+// scale events.  Leave empty to use ephemeral storage only.
+
+@description('Name of the ACA environment storage link for Azure Files. Must be pre-created via `az containerapp env storage set`.')
+param storageLink string = ''
+
+@description('Mount path inside the container for the environment cache volume.')
+param cacheMountPath string = '/home/appuser/.cache/mcp-envs'
+
 // ── Environment variables ───────────────────────────────────────────────────
 
 var baseEnv = [
@@ -91,6 +102,22 @@ var extraEnvArray = [for key in objectKeys(extraEnvVars): {
 var allEnv = concat(baseEnv, extraEnvArray)
 
 var appName = '${serverName}-server'
+
+// Volume configuration (conditional on storageLink being provided)
+var volumeMounts = storageLink != '' ? [
+  {
+    volumeName: 'env-cache'
+    mountPath: cacheMountPath
+  }
+] : []
+
+var volumes = storageLink != '' ? [
+  {
+    name: 'env-cache'
+    storageName: storageLink
+    storageType: 'AzureFile'
+  }
+] : []
 
 // ── Container App ───────────────────────────────────────────────────────────
 
@@ -132,6 +159,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             memory: memory
           }
           env: allEnv
+          volumeMounts: volumeMounts
           probes: [
             {
               type: 'Startup'
@@ -171,6 +199,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           ]
         }
       ]
+      volumes: volumes
       scale: {
         minReplicas: minReplicas
         maxReplicas: maxReplicas

@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from . import environment_builders
+from . import asset_provisioner
 from . import code_execution as execution_defaults
 from .code_execution_models import (
     CodeExecutionResult,
@@ -274,10 +275,8 @@ class CodeExecutionServer:
             self._python_executable = expected_python
             self._environment_ready = True
             LOGGER.info(f"Found existing environment: {self._python_executable}")
-            return
-
-        # Build environment if auto_build is enabled
-        if config.auto_build:
+        elif config.auto_build:
+            # Build environment if auto_build is enabled
             LOGGER.info(f"Building {config.type} environment: {config.name}")
             await self._build_environment(config)
             self._python_executable = config.get_python_path()
@@ -288,6 +287,10 @@ class CodeExecutionServer:
                 f"Python environment not found at {expected_python} and auto_build is disabled. "
                 f"Either build the environment manually or set auto_build=True in EnvironmentConfig."
             )
+
+        # Provision large assets (model weights, data files) after env is ready
+        if config.assets and config.auto_provision:
+            await asset_provisioner.provision_assets(config)
 
     async def _build_environment(self, config: EnvironmentConfig):
         """Build the Python environment based on config."""
@@ -2060,6 +2063,12 @@ else:
 
         # Build environment if needed
         await self._ensure_environment()
+
+        # Expose asset cache directory via env var so kernel-side tool
+        # implementations can locate pre-provisioned assets without hardcoding
+        # paths.  Set on the server process so all spawned kernels inherit it.
+        cache_dir = self.environment_config.get_cache_dir()
+        os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
 
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")

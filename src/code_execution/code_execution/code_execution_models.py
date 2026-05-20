@@ -13,6 +13,52 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class AssetSpec(BaseModel):
+    """Specification for a large artifact (model weights, data files) to provision.
+
+    Assets are fetched into the environment cache directory at server startup
+    (when ``auto_provision=True`` on the parent ``EnvironmentConfig``) and
+    skipped if already present with a matching checksum.
+
+    Supported source URI schemes:
+    - ``https://`` — streaming HTTP download with retry
+    - ``abfss://`` or ``https://*.blob.core.windows.net/`` — Azure Blob Storage
+    - ``file:///path`` or bare path — local copy (useful with Docker bind mounts)
+
+    Accessing assets from tool implementations:
+        The ``MCP_ASSET_CACHE_DIR`` environment variable is set on every kernel
+        process, pointing to the cache directory.  Tool code can locate assets via::
+
+            import os
+            from pathlib import Path
+
+            cache = Path(os.environ["MCP_ASSET_CACHE_DIR"])
+            weights = cache / "models/weights.safetensors"
+    """
+
+    name: str = Field(description="Logical name for the asset (e.g., 'diffusion-weights')")
+    source: str = Field(
+        description=(
+            "URI to fetch from. Supported schemes: https://, az://<container>/<blob>, "
+            "file:///local/path, or a bare filesystem path."
+        )
+    )
+    destination: str = Field(
+        description=(
+            "Relative path under the environment cache directory where the asset "
+            "should be placed (e.g., 'models/weights.safetensors')"
+        )
+    )
+    size_hint_mb: Optional[int] = Field(
+        default=None,
+        description="Expected size in MB. Used for timeout calculation and progress reporting.",
+    )
+    checksum: Optional[str] = Field(
+        default=None,
+        description="SHA-256 hex digest. When provided, skip download if destination matches.",
+    )
+
+
 class ToolCallRecord(BaseModel):
     """Structured record of a tool call made during code execution.
 
@@ -97,12 +143,37 @@ class EnvironmentConfig(BaseModel):
             "Supported values: 'bm25' (default) and 'azure_ai_search'."
         ),
     )
+    assets: list[AssetSpec] = Field(
+        default_factory=list,
+        description=(
+            "Large artifacts (model weights, data files) to provision into the cache "
+            "directory before first tool execution. Fetched at server startup when "
+            "auto_provision is True."
+        ),
+    )
+    auto_provision: bool = Field(
+        default=True,
+        description=(
+            "Automatically fetch assets at server startup if they are not already cached. "
+            "Set to False when assets are pre-provisioned (e.g., baked into Docker image "
+            "or available on a mounted volume)."
+        ),
+    )
 
     def get_build_dir(self) -> Path:
         """Get the directory where environment will be built."""
         if self.build_dir:
             return self.build_dir
         return Path.home() / ".cache" / "mcp-envs" / self.name / self.type
+
+    def get_cache_dir(self) -> Path:
+        """Get the root cache directory for this environment (parent of build_dir).
+
+        Asset destinations are resolved relative to this directory.
+        """
+        if self.build_dir:
+            return self.build_dir.parent
+        return Path.home() / ".cache" / "mcp-envs" / self.name
 
     def get_python_path(self) -> Path:
         """Get the path to the Python executable."""
