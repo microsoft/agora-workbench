@@ -1,4 +1,4 @@
-"""Tests for utilities.mcp_clients.connect_mcp_servers."""
+"""Tests for utilities.mcp_clients."""
 
 from __future__ import annotations
 
@@ -10,28 +10,45 @@ import httpx
 import pytest
 
 from utilities.mcp_clients import (
+    McpServerConfig,
     _build_http_client,
     _is_local,
-    _load_registry,
-    _select,
     connect_mcp_servers,
+    load_server_registry,
 )
 
 
 # ---------------------------------------------------------------------------
-# _load_registry
+# McpServerConfig
 # ---------------------------------------------------------------------------
 
 
-def _write_registry(tmp_path: Path, content: str) -> Path:
-    p = tmp_path / "server_registry.yaml"
+class TestMcpServerConfig:
+    def test_minimum_fields(self):
+        cfg = McpServerConfig(name="x", url="http://localhost:1/mcp")
+        assert cfg.name == "x"
+        assert cfg.url == "http://localhost:1/mcp"
+        assert cfg.scope is None
+
+    def test_with_scope(self):
+        cfg = McpServerConfig(name="x", url="https://x.com/mcp", scope="api://x/.default")
+        assert cfg.scope == "api://x/.default"
+
+
+# ---------------------------------------------------------------------------
+# load_server_registry
+# ---------------------------------------------------------------------------
+
+
+def _write_yaml(tmp_path: Path, content: str) -> Path:
+    p = tmp_path / "servers.yaml"
     p.write_text(content, encoding="utf-8")
     return p
 
 
-class TestLoadRegistry:
+class TestLoadServerRegistry:
     def test_well_formed(self, tmp_path):
-        path = _write_registry(
+        path = _write_yaml(
             tmp_path,
             """
 scope: api://foo/.default
@@ -42,69 +59,65 @@ servers:
     url: http://localhost:8002/mcp
 """,
         )
-        data = _load_registry(path)
-        assert data["scope"] == "api://foo/.default"
-        assert len(data["servers"]) == 2
+        configs = load_server_registry(path)
+        assert [c.name for c in configs] == ["a", "b"]
+        # Both inherit the top-level default scope.
+        assert configs[0].scope == "api://foo/.default"
 
-    def test_missing_optional_fields(self, tmp_path):
-        path = _write_registry(tmp_path, "servers: []\n")
-        data = _load_registry(path)
-        assert data["servers"] == []
-        assert "scope" not in data
+    def test_per_entry_scope_overrides_default(self, tmp_path):
+        path = _write_yaml(
+            tmp_path,
+            """
+scope: api://default/.default
+servers:
+  - name: a
+    url: https://a.example.com/mcp
+    scope: api://custom/.default
+""",
+        )
+        configs = load_server_registry(path)
+        assert configs[0].scope == "api://custom/.default"
+
+    def test_no_default_scope(self, tmp_path):
+        path = _write_yaml(
+            tmp_path,
+            """
+servers:
+  - name: a
+    url: http://localhost:8001/mcp
+""",
+        )
+        configs = load_server_registry(path)
+        assert configs[0].scope is None
+
+    def test_empty_servers_list(self, tmp_path):
+        path = _write_yaml(tmp_path, "servers: []\n")
+        assert load_server_registry(path) == []
 
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            _load_registry(tmp_path / "nope.yaml")
+            load_server_registry(tmp_path / "nope.yaml")
 
     def test_non_mapping_root_raises(self, tmp_path):
-        path = _write_registry(tmp_path, "- a\n- b\n")
+        path = _write_yaml(tmp_path, "- a\n- b\n")
         with pytest.raises(ValueError, match="root must be a mapping"):
-            _load_registry(path)
+            load_server_registry(path)
 
     def test_servers_not_a_list_raises(self, tmp_path):
-        path = _write_registry(tmp_path, "servers: not-a-list\n")
+        path = _write_yaml(tmp_path, "servers: not-a-list\n")
         with pytest.raises(ValueError, match="must be a list"):
-            _load_registry(path)
+            load_server_registry(path)
 
-
-# ---------------------------------------------------------------------------
-# _select (filtering by name)
-# ---------------------------------------------------------------------------
-
-
-_AVAILABLE = [
-    {"name": "alpha", "url": "http://localhost:1/mcp"},
-    {"name": "beta", "url": "http://localhost:2/mcp"},
-    {"name": "gamma", "url": "http://localhost:3/mcp"},
-]
-
-
-class TestSelect:
-    def test_none_returns_all(self, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
-        assert _select(None, _AVAILABLE) == _AVAILABLE
-
-    def test_filter_by_argument(self, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
-        selected = _select(["alpha", "gamma"], _AVAILABLE)
-        assert [s["name"] for s in selected] == ["alpha", "gamma"]
-
-    def test_env_var_overrides_argument(self, monkeypatch):
-        monkeypatch.setenv("WORKBENCH_SERVERS", "beta")
-        selected = _select(["alpha", "gamma"], _AVAILABLE)
-        assert [s["name"] for s in selected] == ["beta"]
-
-    def test_env_var_strips_and_splits(self, monkeypatch):
-        monkeypatch.setenv("WORKBENCH_SERVERS", " alpha , beta ")
-        selected = _select(None, _AVAILABLE)
-        assert [s["name"] for s in selected] == ["alpha", "beta"]
-
-    def test_unknown_name_warns_and_skips(self, monkeypatch, caplog):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
-        with caplog.at_level(logging.WARNING):
-            selected = _select(["alpha", "missing"], _AVAILABLE)
-        assert [s["name"] for s in selected] == ["alpha"]
-        assert "missing" in caplog.text
+    def test_entry_missing_name_or_url_raises(self, tmp_path):
+        path = _write_yaml(
+            tmp_path,
+            """
+servers:
+  - name: a
+""",
+        )
+        with pytest.raises(ValueError, match="missing 'name' or 'url'"):
+            load_server_registry(path)
 
 
 # ---------------------------------------------------------------------------
@@ -156,30 +169,14 @@ class TestBuildHttpClient:
             client = _build_http_client("https://example.com/mcp", scope="api://x/.default")
             try:
                 mock_get.assert_called_once_with("api://x/.default")
-                # Auth class is set; we don't exercise the flow here.
                 assert client.auth is not None
             finally:
                 await client.aclose()
 
 
 # ---------------------------------------------------------------------------
-# connect_mcp_servers (integration with mocked httpx)
+# connect_mcp_servers
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def registry_yaml(tmp_path):
-    return _write_registry(
-        tmp_path,
-        """
-scope: api://workbench/.default
-servers:
-  - name: alpha
-    url: http://localhost:8001/mcp
-  - name: beta
-    url: http://localhost:8002/mcp
-""",
-    )
 
 
 def _make_async_client_factory(health_response_per_url):
@@ -209,10 +206,19 @@ def _make_async_client_factory(health_response_per_url):
     return FakeAsyncClient
 
 
+_TWO_LOCAL = [
+    McpServerConfig(name="alpha", url="http://localhost:8001/mcp"),
+    McpServerConfig(name="beta", url="http://localhost:8002/mcp"),
+]
+
+
 class TestConnectMcpServers:
     @pytest.mark.asyncio
-    async def test_all_healthy_returns_all(self, registry_yaml, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
+    async def test_empty_list_returns_empty(self):
+        assert await connect_mcp_servers([]) == []
+
+    @pytest.mark.asyncio
+    async def test_all_healthy_returns_all(self):
         Fake = _make_async_client_factory(
             {
                 "http://localhost:8001/health": "ok",
@@ -220,14 +226,13 @@ class TestConnectMcpServers:
             }
         )
         with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            servers = await connect_mcp_servers(registry_path=registry_yaml)
+            servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha", "beta"]
         for s in servers:
             await s.http_client.aclose()
 
     @pytest.mark.asyncio
-    async def test_unhealthy_is_skipped(self, registry_yaml, monkeypatch, caplog):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
+    async def test_unhealthy_is_skipped(self, caplog):
         Fake = _make_async_client_factory(
             {
                 "http://localhost:8001/health": "ok",
@@ -236,15 +241,14 @@ class TestConnectMcpServers:
         )
         with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
             with caplog.at_level(logging.WARNING):
-                servers = await connect_mcp_servers(registry_path=registry_yaml)
+                servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha"]
         assert "unreachable" in caplog.text
         for s in servers:
             await s.http_client.aclose()
 
     @pytest.mark.asyncio
-    async def test_5xx_is_skipped(self, registry_yaml, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
+    async def test_5xx_is_skipped(self):
         Fake = _make_async_client_factory(
             {
                 "http://localhost:8001/health": "ok",
@@ -252,14 +256,13 @@ class TestConnectMcpServers:
             }
         )
         with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            servers = await connect_mcp_servers(registry_path=registry_yaml)
+            servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha"]
         for s in servers:
             await s.http_client.aclose()
 
     @pytest.mark.asyncio
-    async def test_all_unreachable_returns_empty(self, registry_yaml, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
+    async def test_all_unreachable_returns_empty(self):
         Fake = _make_async_client_factory(
             {
                 "http://localhost:8001/health": "raise",
@@ -267,63 +270,24 @@ class TestConnectMcpServers:
             }
         )
         with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            servers = await connect_mcp_servers(registry_path=registry_yaml)
+            servers = await connect_mcp_servers(_TWO_LOCAL)
         assert servers == []
 
     @pytest.mark.asyncio
-    async def test_servers_filter_applied(self, registry_yaml, monkeypatch):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
-        Fake = _make_async_client_factory(
-            {
-                "http://localhost:8001/health": "ok",
-                "http://localhost:8002/health": "ok",
-            }
-        )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            servers = await connect_mcp_servers(
-                servers=["beta"], registry_path=registry_yaml
-            )
-        assert [s.name for s in servers] == ["beta"]
-        for s in servers:
-            await s.http_client.aclose()
-
-    @pytest.mark.asyncio
-    async def test_env_var_filter_applied(self, registry_yaml, monkeypatch):
-        monkeypatch.setenv("WORKBENCH_SERVERS", "alpha")
-        Fake = _make_async_client_factory(
-            {
-                "http://localhost:8001/health": "ok",
-                "http://localhost:8002/health": "ok",
-            }
-        )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            servers = await connect_mcp_servers(
-                servers=["beta"], registry_path=registry_yaml
-            )
-        # Env var wins over the servers= argument.
-        assert [s.name for s in servers] == ["alpha"]
-        for s in servers:
-            await s.http_client.aclose()
-
-    @pytest.mark.asyncio
-    async def test_entry_missing_url_skipped(self, tmp_path, monkeypatch, caplog):
-        monkeypatch.delenv("WORKBENCH_SERVERS", raising=False)
-        path = _write_registry(
+    async def test_load_then_connect_flow(self, tmp_path):
+        """End-to-end shape: yaml loader feeds connect_mcp_servers."""
+        path = _write_yaml(
             tmp_path,
             """
 servers:
   - name: alpha
-  - name: beta
-    url: http://localhost:8002/mcp
+    url: http://localhost:8001/mcp
 """,
         )
-        Fake = _make_async_client_factory(
-            {"http://localhost:8002/health": "ok"}
-        )
+        Fake = _make_async_client_factory({"http://localhost:8001/health": "ok"})
         with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
-            with caplog.at_level(logging.WARNING):
-                servers = await connect_mcp_servers(registry_path=path)
-        assert [s.name for s in servers] == ["beta"]
-        assert "missing 'name' or 'url'" in caplog.text
+            configs = load_server_registry(path)
+            servers = await connect_mcp_servers(configs)
+        assert [s.name for s in servers] == ["alpha"]
         for s in servers:
             await s.http_client.aclose()
