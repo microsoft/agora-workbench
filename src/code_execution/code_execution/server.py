@@ -247,7 +247,10 @@ class CodeExecutionServer:
 
         self.activity_publisher = ActivityPublisher(server_name=environment_config.name)
 
-        self.mcp = FastMCP(f"{environment_config.name}-executor")
+        self.mcp = FastMCP(
+            f"{environment_config.name}-executor",
+            instructions=environment_config.server_description or environment_config.description,
+        )
 
         # AssetResolutionMiddleware resolves tagged asset references before Pydantic validation.
         self.mcp.add_middleware(AssetResolutionMiddleware(self))

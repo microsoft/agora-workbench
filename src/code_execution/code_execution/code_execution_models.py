@@ -62,6 +62,14 @@ class EnvironmentConfig(BaseModel):
     description: str = Field(
         description="Description of the environment's capabilities and packages (appears in MCP tool description)"
     )
+    server_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Server-level description (used as FastMCP ``instructions``). Falls back to "
+            "``description`` when unset. Override when the server-as-a-whole pitch should "
+            "differ from the per-tool ``execute_{name}_code`` description."
+        ),
+    )
     type: Literal["uv", "conda", "pip"] = Field(description="Type of environment/dependency manager")
     dependency_file: str = Field(
         description="Serialized content of dependency file (environment.yml or requirements.txt)"
