@@ -8,7 +8,7 @@ import mimetypes
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from .config import CatalogConfig, SourceConfig
 from .db import CatalogDB, artifact_id_from_uri
@@ -21,6 +21,16 @@ _EMBEDDING_BATCH_SIZE = 64
 
 # Max concurrent blob source enumerations
 _MAX_BLOB_CONCURRENCY = 8
+
+
+# Avoid hard import cycle — auth module is optional at import time
+try:
+    from ...auth import CredentialProviderTokenCredential as _CredentialProviderTokenCredential
+except ImportError:  # pragma: no cover
+    _CredentialProviderTokenCredential = None  # type: ignore[assignment,misc]
+
+if TYPE_CHECKING:
+    from ...auth import CredentialProvider
 
 
 def _build_indexable_text(name: str, description: Optional[str], domain: Optional[str]) -> str:
@@ -71,9 +81,18 @@ def _parse_blob_path(path: str) -> tuple[str, str, str]:
 class CatalogIndexer:
     """Scans configured sources and populates the catalog database."""
 
-    def __init__(self, config: CatalogConfig, db: CatalogDB):
+    def __init__(self, config: CatalogConfig, db: CatalogDB, credential_provider: Optional[CredentialProvider] = None):
+        """
+        Args:
+            config: Catalog configuration.
+            db: The catalog database instance.
+            credential_provider: Optional CredentialProvider from the auth module.
+                Used for authenticating to blob storage. If None, blob sources
+                will fall back to DefaultAzureCredential.
+        """
         self._config = config
         self._db = db
+        self._credential_provider = credential_provider
         self._embedding_provider: Optional[EmbeddingProvider] = None
 
     @property
@@ -153,10 +172,19 @@ class CatalogIndexer:
 
     async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> list[dict]:
         """Enumerate multiple blob sources concurrently with shared credential."""
-        from azure.identity.aio import DefaultAzureCredential
         from azure.storage.blob.aio import BlobServiceClient
 
-        credential = DefaultAzureCredential()
+        # Use the shared auth CredentialProvider if available, else fall back
+        credential: object
+        owns_credential = False
+        if self._credential_provider is not None and _CredentialProviderTokenCredential is not None:
+            credential = _CredentialProviderTokenCredential(self._credential_provider)
+        else:
+            from azure.identity.aio import DefaultAzureCredential
+
+            credential = DefaultAzureCredential()
+            owns_credential = True
+
         # Reuse clients per storage account to avoid redundant connections
         clients: dict[str, BlobServiceClient] = {}
         semaphore = asyncio.Semaphore(_MAX_BLOB_CONCURRENCY)
@@ -179,7 +207,9 @@ class CatalogIndexer:
         finally:
             for client in clients.values():
                 await client.close()
-            await credential.close()
+            # Only close credential if we created it (not shared from auth module)
+            if owns_credential and hasattr(credential, "close"):
+                await credential.close()
 
     async def _enumerate_blob_source(
         self,
