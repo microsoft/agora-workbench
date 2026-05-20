@@ -183,8 +183,13 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
             len(self._tools),
         )
 
-    async def search(self, query: str, top: int = 5) -> list[ToolSearchResult]:
-        """Search the ephemeral Azure AI Search tool index."""
+    async def search(self, query: str, top: int = 5, category: str = "all") -> list[ToolSearchResult]:
+        """Search the ephemeral Azure AI Search tool index.
+
+        Note: The ``category`` parameter is accepted for protocol compatibility
+        but skill indexing in Azure AI Search is not yet implemented.  Only
+        tool results are returned regardless of category.
+        """
         if top <= 0:
             return []
         if not self._initialized:

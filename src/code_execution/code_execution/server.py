@@ -1061,57 +1061,76 @@ class CodeExecutionServer:
         """Register ``search_{name}_tools`` as an MCP tool on this server.
 
         Builds a search index at startup over the server's own tool catalog
-        (from :attr:`tool_registry`).  The index is shared across all sessions
-        and rebuilt on each server restart.
+        (from :attr:`tool_registry`) and any discoverable skills.  The index
+        is shared across all sessions and rebuilt on each server restart.
 
         The registered tool is named ``search_{server_name}_tools`` so that
         agents can distinguish catalogs when connected to multiple servers.
-        Pass ``query=""`` and ``top=999`` to retrieve the full catalog.
         """
         from utilities.tool_search import ToolSearchResult
         from code_execution.tools import create_tool_search_backend
+        from code_execution.tools.search.state_graph import _discover_skills
 
         server_name = self.environment_config.name
         tool_name = f"search_{server_name}_tools"
 
         tool_infos = self._build_tool_infos()
+
+        # Discover skills from the domains directory
+        domains_dir = self.environment_config.domains_dir
+        skills = _discover_skills(domains_dir) if domains_dir else []
+
         backend = create_tool_search_backend(
             backend_type=self.environment_config.tool_search_backend,
             tools=tool_infos,
             server_name=server_name,
+            skills=skills,
         )
         self._tool_search_backends.append(backend)
 
         LOGGER.info(
-            "Server-side tool search index built for '%s' with %d tools",
+            "Server-side tool search index built for '%s' with %d tools and %d skills",
             server_name,
             len(tool_infos),
+            len(skills),
         )
 
-        async def search_server_tools(query: str, top: int = 5) -> str:
-            """Search this server's tool catalog by name or description.
+        async def search_server_tools(query: str, top: int = 5, category: str = "all") -> str:
+            """Search this server's tool and skill catalog by name or description.
+
+            Use this tool to discover domain tools and skills. Results are
+            grouped by type. Skills must be loaded via ``load_{name}_skill``
+            before use; tools can be called directly.
 
             Args:
-                query: Natural-language description or tool name to search for.
+                query: Natural-language description or tool/skill name to search for.
                     Pass an empty string with ``top=999`` to retrieve the full
                     catalog.
-                top: Maximum number of results to return (default 5).
+                top: Maximum number of results to return per category (default 5).
+                category: Filter results — ``"all"`` (default), ``"tools"``, or
+                    ``"skills"``.
 
             Returns:
-                JSON object with a ``results`` array of matching tools, each
-                containing ``name``, ``server_name``, ``description``,
-                ``execution_type``, ``score``, ``state_requires``, and
-                ``state_produces``.
+                JSON object with ``tools`` and ``skills`` arrays. Each result
+                contains ``name``, ``server_name``, ``description``, ``type``,
+                ``to_access``, ``score``, ``state_requires``, and ``state_produces``.
             """
             LOGGER.info(
-                "search_%s_tools called with query=%r top=%d",
+                "search_%s_tools called with query=%r top=%d category=%r",
                 server_name,
                 query,
                 top,
+                category,
             )
+            # Validate category
+            if category not in ("all", "tools", "skills"):
+                return json.dumps({"error": f"Invalid category '{category}'. Must be 'all', 'tools', or 'skills'."})
             try:
-                results: list[ToolSearchResult] = await backend.search(query, top)
-                return json.dumps({"results": [r.model_dump() for r in results]})
+                results: list[ToolSearchResult] = await backend.search(query, top, category=category)
+                # Group results by type
+                tools_list = [r.model_dump() for r in results if r.type == "tool"]
+                skills_list = [r.model_dump() for r in results if r.type == "skill"]
+                return json.dumps({"tools": tools_list, "skills": skills_list})
             except Exception as exc:
                 LOGGER.error(
                     "search_%s_tools failed for query %r: %s",
@@ -1120,92 +1139,100 @@ class CodeExecutionServer:
                     exc,
                     exc_info=True,
                 )
-                return json.dumps({"results": [], "error": f"{type(exc).__name__}: {exc}"})
+                return json.dumps({"tools": [], "skills": [], "error": f"{type(exc).__name__}: {exc}"})
 
         self.mcp.tool(
             name=tool_name,
             description=(
-                f"Search {server_name} domain tools by name or description. "
-                f"Returns matching tools with relevance scores. "
-                f"Pass an empty query with top=999 to list all {server_name} tools."
+                f"Search {server_name} domain tools and skills by name or description. "
+                f"Returns matching results grouped into 'tools' and 'skills' arrays. "
+                f"Skills contain step-by-step workflow instructions — load them with "
+                f"load_{server_name}_skill. Use category='skills' to find only skills, "
+                f"or category='tools' for only tools."
             ),
         )(search_server_tools)
 
     def _setup_workflow_planning_tools(self) -> None:
         """Register ``plan_{name}_workflow`` and ``load_{name}_skill`` as MCP tools.
 
-        Builds the domain state graph from the server's own tool catalog
-        so that agents can plan workflow sequences without any client-side
-        infrastructure.  Only registered when the server has state-annotated
-        tools (i.e. tools with ``state_requires`` or ``state_produces``).
+        ``plan_{name}_workflow`` is only registered when state-annotated tools
+        exist (tools with ``state_requires`` or ``state_produces``).
+
+        ``load_{name}_skill`` is registered whenever discoverable skills exist,
+        regardless of whether the state graph is available.  This ensures
+        skills found via ``search_{name}_tools`` can always be loaded.
         """
         from code_execution.tools import (
             create_plan_workflow_descriptor,
             create_load_skill_descriptor,
         )
+        from code_execution.tools.search.state_graph import _discover_skills
 
         server_name = self.environment_config.name
         tool_infos = self._build_tool_infos()
+        domains_dir = self.environment_config.domains_dir
+
         has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
 
-        if not has_state_tools:
+        # Register plan_{name}_workflow only when state-annotated tools exist.
+        if has_state_tools:
+            pw_kwargs: dict = {"server_name": server_name, "tools": tool_infos}
+            if domains_dir is not None:
+                pw_kwargs["domains_dir"] = domains_dir
+            pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
+            _pw_func = pw_descriptor.func
+
+            async def _plan_workflow(
+                domain: str = "",
+                mode: str = "overview",
+                current_state: str = "",
+                target_state: str = "",
+                tool_name: str = "",
+            ) -> str:
+                """Plan and navigate domain workflow states."""
+                return await _pw_func(
+                    domain=domain,
+                    mode=mode,
+                    current_state=current_state,
+                    target_state=target_state,
+                    tool_name=tool_name,
+                )
+
+            self.mcp.tool(
+                name=pw_descriptor.name,
+                description=pw_descriptor.description,
+            )(_plan_workflow)
+
+            LOGGER.info(
+                "Registered plan_%s_workflow (%d state-annotated tools)",
+                server_name,
+                len([t for t in tool_infos if t.state_requires or t.state_produces]),
+            )
+
+        # Register load_{name}_skill whenever discoverable skills exist.
+        skills = _discover_skills(domains_dir) if domains_dir else []
+        if skills:
+            ls_kwargs: dict = {"server_name": server_name}
+            if domains_dir is not None:
+                ls_kwargs["domains_dir"] = domains_dir
+            ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
+            _ls_func = ls_descriptor.func
+
+            async def _load_skill(skill_name: str) -> str:
+                """Load a skill by name."""
+                return await _ls_func(skill_name=skill_name)
+
+            self.mcp.tool(
+                name=ls_descriptor.name,
+                description=ls_descriptor.description,
+            )(_load_skill)
+
+            LOGGER.info("Registered load_%s_skill (%d skills available)", server_name, len(skills))
+        elif not has_state_tools:
             LOGGER.debug(
-                "No state-annotated tools found for '%s'; skipping workflow planning registration.",
+                "No state-annotated tools or skills found for '%s'; skipping workflow planning registration.",
                 server_name,
             )
-            return
-
-        # Register plan_{name}_workflow — explicit parameters so FastMCP can build the schema.
-        domains_dir = self.environment_config.domains_dir
-        pw_kwargs: dict = {"server_name": server_name, "tools": tool_infos}
-        if domains_dir is not None:
-            pw_kwargs["domains_dir"] = domains_dir
-        pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
-        _pw_func = pw_descriptor.func
-
-        async def _plan_workflow(
-            domain: str = "",
-            mode: str = "overview",
-            current_state: str = "",
-            target_state: str = "",
-            tool_name: str = "",
-        ) -> str:
-            """Plan and navigate domain workflow states."""
-            return await _pw_func(
-                domain=domain,
-                mode=mode,
-                current_state=current_state,
-                target_state=target_state,
-                tool_name=tool_name,
-            )
-
-        self.mcp.tool(
-            name=pw_descriptor.name,
-            description=pw_descriptor.description,
-        )(_plan_workflow)
-
-        # Register load_{name}_skill — explicit parameters so FastMCP can build the schema.
-        ls_kwargs: dict = {"server_name": server_name}
-        if domains_dir is not None:
-            ls_kwargs["domains_dir"] = domains_dir
-        ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
-        _ls_func = ls_descriptor.func
-
-        async def _load_skill(skill_name: str) -> str:
-            """Load a skill by name."""
-            return await _ls_func(skill_name=skill_name)
-
-        self.mcp.tool(
-            name=ls_descriptor.name,
-            description=ls_descriptor.description,
-        )(_load_skill)
-
-        LOGGER.info(
-            "Registered plan_%s_workflow and load_%s_skill (%d state-annotated tools)",
-            server_name,
-            server_name,
-            len([t for t in tool_infos if t.state_requires or t.state_produces]),
-        )
 
     def _setup_transfer_tool(self) -> None:
         """Register MCP tools for cross-server object transfer.

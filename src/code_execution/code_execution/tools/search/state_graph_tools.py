@@ -70,8 +70,8 @@ class LoadSkillInput(BaseModel):
     skill_name: str = Field(
         description=(
             "Name of the skill to load (e.g. 'flowsheet-setup', "
-            "'grid-converter').  Use plan_{name}_workflow to "
-            "discover available skill names."
+            "'grid-converter').  Use search_{name}_tools(category='skills') "
+            "or plan_{name}_workflow to discover available skill names."
         ),
     )
 
@@ -233,8 +233,9 @@ def create_load_skill_descriptor(
         description=(
             f"Load the full content of a {server_name} skill by name.  Skills "
             f"contain step-by-step instructions, best practices, and sub-skill "
-            f"references for domain workflows.  Use plan_{server_name}_workflow "
-            f"to discover available skill names, then call load_{server_name}_skill "
+            f"references for domain workflows.  Discover available skill names "
+            f"via search_{server_name}_tools (category='skills') or "
+            f"plan_{server_name}_workflow, then call load_{server_name}_skill "
             f"to get the detailed instructions before starting a workflow."
         ),
         input_model=LoadSkillInput,
