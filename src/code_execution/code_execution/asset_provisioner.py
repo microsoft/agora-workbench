@@ -4,15 +4,16 @@ Asset provisioner for large artifacts (model weights, data files).
 Downloads or copies assets defined in ``EnvironmentConfig.assets`` into the
 environment cache directory.  Supports multiple source URI schemes and
 checksum-based skip-if-present logic to avoid redundant transfers.
+
+Reuses the existing ``BlobFetcher`` and ``LocalFileFetcher`` from the
+data_access layer for Azure Blob Storage and local file sources.
 """
 
 import asyncio
 import hashlib
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from .code_execution_models import AssetSpec, EnvironmentConfig
@@ -47,31 +48,29 @@ def _timeout_for_asset(asset: "AssetSpec") -> float:
     return DEFAULT_TIMEOUT_SECONDS
 
 
-def _parse_source_scheme(source: str) -> str:
-    """Determine the fetch scheme from a source URI string."""
-    if source.startswith("az://"):
-        return "az"
-    parsed = urlparse(source)
-    if parsed.scheme in ("http", "https"):
-        return "https"
-    if parsed.scheme == "file":
-        return "file"
-    # Bare path (no scheme) — treat as local file
-    if not parsed.scheme or parsed.scheme == "":
-        return "file"
-    return parsed.scheme
+def _is_blob_source(source: str) -> bool:
+    """Check if a source URI is an Azure Blob Storage reference."""
+    from .data_access.fetchers import BlobFetcher
+
+    fetcher = BlobFetcher.__new__(BlobFetcher)
+    return fetcher.can_handle(source)
 
 
-def _resolve_local_path(source: str) -> Path:
-    """Resolve a file:// URI or bare path to a local Path."""
-    if source.startswith("file://"):
-        parsed = urlparse(source)
-        return Path(parsed.path)
-    return Path(source)
+def _is_local_source(source: str) -> bool:
+    """Check if a source URI is a local file reference."""
+    from .data_access.fetchers import LocalFileFetcher
+
+    fetcher = LocalFileFetcher.__new__(LocalFileFetcher)
+    return fetcher.can_handle(source)
+
+
+def _is_https_source(source: str) -> bool:
+    """Check if a source is an HTTPS URL (non-blob)."""
+    return source.startswith("https://") or source.startswith("http://")
 
 
 async def _fetch_https(source: str, dest: Path, timeout: float) -> None:
-    """Download a file via HTTP(S) with streaming."""
+    """Download a file via HTTP(S) with streaming (for non-Azure-Blob HTTPS URLs)."""
     import httpx
 
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -87,107 +86,86 @@ async def _fetch_https(source: str, dest: Path, timeout: float) -> None:
     tmp.rename(dest)
 
 
-async def _fetch_azure_blob(source: str, dest: Path, timeout: float) -> None:
-    """Download a blob from Azure Blob Storage.
+async def _fetch_blob(source: str, dest: Path, credential=None) -> None:
+    """Download from Azure Blob Storage using the existing BlobFetcher."""
+    from .data_access.fetchers import BlobFetcher
 
-    Source format: az://<container_name>/<blob_path>
-    Uses DefaultAzureCredential for authentication (supports managed identity).
-    """
-    import os
-
-    from azure.identity.aio import DefaultAzureCredential
-    from azure.storage.blob.aio import BlobServiceClient
-
-    # Parse az://<container>/<blob_path>
-    # Requires AZURE_STORAGE_ACCOUNT_URL env var (e.g., https://<account>.blob.core.windows.net)
-    stripped = source[len("az://") :]
-    parts = stripped.split("/", 1)
-    if len(parts) != 2:
-        raise ValueError(f"Invalid az:// URI — expected az://<container>/<blob_path>, got: {source}")
-
-    container_name, blob_path = parts
-
-    account_url = os.environ.get("AZURE_STORAGE_ACCOUNT_URL")
-    if not account_url:
-        raise RuntimeError(
-            "AZURE_STORAGE_ACCOUNT_URL environment variable is required for az:// asset sources "
-            "(e.g., https://<account>.blob.core.windows.net)"
-        )
-
+    fetcher = BlobFetcher(credential=credential)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".tmp")
-
-    credential = DefaultAzureCredential()
-    try:
-        async with BlobServiceClient(account_url=account_url, credential=credential) as blob_service:
-            blob_client = blob_service.get_blob_client(container=container_name, blob=blob_path)
-            with open(tmp, "wb") as f:
-                stream = await blob_client.download_blob()
-                async for chunk in stream.chunks():
-                    f.write(chunk)
-    finally:
-        await credential.close()
-
+    await fetcher.fetch_to_file(source, tmp)
     tmp.rename(dest)
 
 
 async def _fetch_local(source: str, dest: Path) -> None:
-    """Copy a local file to the destination."""
-    src_path = _resolve_local_path(source)
-    if not src_path.exists():
-        raise FileNotFoundError(f"Local asset source not found: {src_path}")
+    """Copy a local file using the existing LocalFileFetcher."""
+    from .data_access.fetchers import LocalFileFetcher
 
+    fetcher = LocalFileFetcher(allowed_roots=None)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    await fetcher.fetch_to_file(source, tmp)
+    tmp.rename(dest)
 
-    # Run copy in thread pool to avoid blocking the event loop on large files
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, shutil.copy2, str(src_path), str(dest))
+
+async def _get_default_credential():
+    """Get a DefaultAzureCredential for blob access."""
+    from azure.identity.aio import DefaultAzureCredential
+
+    return DefaultAzureCredential()
 
 
 async def _fetch_single_asset(asset: "AssetSpec", cache_dir: Path) -> None:
     """Fetch a single asset with retry logic."""
     dest = cache_dir / asset.destination
     timeout = _timeout_for_asset(asset)
-    scheme = _parse_source_scheme(asset.source)
 
+    credential = None
     last_error: Exception | None = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            if scheme == "file":
-                await _fetch_local(asset.source, dest)
-            elif scheme == "https":
-                await _fetch_https(asset.source, dest, timeout)
-            elif scheme == "az":
-                await _fetch_azure_blob(asset.source, dest, timeout)
-            else:
-                raise ValueError(f"Unsupported asset source scheme '{scheme}' in: {asset.source}")
 
-            # Verify checksum if provided
-            if asset.checksum:
-                actual = _compute_sha256(dest)
-                if actual != asset.checksum:
-                    dest.unlink(missing_ok=True)
-                    raise ValueError(
-                        f"Checksum mismatch for asset '{asset.name}': expected {asset.checksum}, got {actual}"
+    try:
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                if _is_blob_source(asset.source):
+                    if credential is None:
+                        credential = await _get_default_credential()
+                    await _fetch_blob(asset.source, dest, credential)
+                elif _is_local_source(asset.source):
+                    await _fetch_local(asset.source, dest)
+                elif _is_https_source(asset.source):
+                    await _fetch_https(asset.source, dest, timeout)
+                else:
+                    raise ValueError(f"Unsupported asset source: {asset.source}")
+
+                # Verify checksum if provided
+                if asset.checksum:
+                    actual = _compute_sha256(dest)
+                    if actual != asset.checksum:
+                        dest.unlink(missing_ok=True)
+                        raise ValueError(
+                            f"Checksum mismatch for asset '{asset.name}': expected {asset.checksum}, got {actual}"
+                        )
+
+                LOGGER.info(f"Asset '{asset.name}' provisioned at {dest}")
+                return
+
+            except Exception as e:
+                last_error = e
+                # Clean up partial download
+                tmp = dest.with_suffix(dest.suffix + ".tmp")
+                tmp.unlink(missing_ok=True)
+                dest.unlink(missing_ok=True)
+
+                if attempt < MAX_RETRIES:
+                    backoff = BACKOFF_BASE_SECONDS * (BACKOFF_MULTIPLIER ** (attempt - 1))
+                    LOGGER.warning(
+                        f"Asset '{asset.name}' fetch attempt {attempt}/{MAX_RETRIES} failed: {e}. "
+                        f"Retrying in {backoff:.0f}s..."
                     )
-
-            LOGGER.info(f"Asset '{asset.name}' provisioned at {dest}")
-            return
-
-        except Exception as e:
-            last_error = e
-            # Clean up partial download
-            tmp = dest.with_suffix(dest.suffix + ".tmp")
-            tmp.unlink(missing_ok=True)
-            dest.unlink(missing_ok=True)
-
-            if attempt < MAX_RETRIES:
-                backoff = BACKOFF_BASE_SECONDS * (BACKOFF_MULTIPLIER ** (attempt - 1))
-                LOGGER.warning(
-                    f"Asset '{asset.name}' fetch attempt {attempt}/{MAX_RETRIES} failed: {e}. "
-                    f"Retrying in {backoff:.0f}s..."
-                )
-                await asyncio.sleep(backoff)
+                    await asyncio.sleep(backoff)
+    finally:
+        if credential is not None:
+            await credential.close()
 
     raise RuntimeError(f"Failed to provision asset '{asset.name}' after {MAX_RETRIES} attempts") from last_error
 

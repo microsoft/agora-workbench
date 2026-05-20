@@ -7,8 +7,9 @@ import pytest
 
 from code_execution.code_execution.asset_provisioner import (
     _compute_sha256,
-    _parse_source_scheme,
-    _resolve_local_path,
+    _is_blob_source,
+    _is_https_source,
+    _is_local_source,
     provision_assets,
 )
 from code_execution.code_execution.code_execution_models import AssetSpec, EnvironmentConfig
@@ -17,26 +18,31 @@ from code_execution.code_execution.code_execution_models import AssetSpec, Envir
 class TestHelpers:
     """Unit tests for helper functions."""
 
-    def test_parse_source_scheme_https(self):
-        assert _parse_source_scheme("https://example.com/model.bin") == "https"
+    def test_is_blob_source_abfss(self):
+        assert _is_blob_source("abfss://container@account.dfs.core.windows.net/path/file.bin")
 
-    def test_parse_source_scheme_http(self):
-        assert _parse_source_scheme("http://example.com/model.bin") == "https"
+    def test_is_blob_source_https_blob(self):
+        assert _is_blob_source("https://myaccount.blob.core.windows.net/container/file.bin")
 
-    def test_parse_source_scheme_az(self):
-        assert _parse_source_scheme("az://container/blob/path.bin") == "az"
+    def test_is_blob_source_not_blob(self):
+        assert not _is_blob_source("https://example.com/model.bin")
 
-    def test_parse_source_scheme_file_uri(self):
-        assert _parse_source_scheme("file:///tmp/model.bin") == "file"
+    def test_is_local_source_bare_path(self):
+        assert _is_local_source("/tmp/model.bin")
 
-    def test_parse_source_scheme_bare_path(self):
-        assert _parse_source_scheme("/tmp/model.bin") == "file"
+    def test_is_local_source_file_uri(self):
+        assert _is_local_source("file:///tmp/model.bin")
 
-    def test_resolve_local_path_file_uri(self):
-        assert _resolve_local_path("file:///tmp/model.bin") == Path("/tmp/model.bin")
+    def test_is_local_source_relative(self):
+        assert _is_local_source("./models/weights.bin")
 
-    def test_resolve_local_path_bare(self):
-        assert _resolve_local_path("/opt/data/weights.bin") == Path("/opt/data/weights.bin")
+    def test_is_local_source_not_local(self):
+        assert not _is_local_source("https://example.com/model.bin")
+
+    def test_is_https_source(self):
+        assert _is_https_source("https://example.com/model.bin")
+        assert _is_https_source("http://example.com/model.bin")
+        assert not _is_https_source("/tmp/model.bin")
 
     def test_compute_sha256(self, tmp_path):
         f = tmp_path / "test.bin"
@@ -157,3 +163,30 @@ class TestProvisionAssets:
         )
         with pytest.raises(RuntimeError, match="Failed to provision asset"):
             await provision_assets(config)
+
+    @pytest.mark.asyncio
+    async def test_provision_file_uri(self, tmp_path):
+        """Test that file:// URIs work correctly."""
+        src = tmp_path / "data" / "tokenizer.json"
+        src.parent.mkdir(parents=True)
+        src.write_bytes(b'{"vocab": []}')
+
+        config = EnvironmentConfig(
+            name="fileuri",
+            description="File URI test",
+            type="uv",
+            dependency_file="numpy",
+            build_dir=tmp_path / "cache" / "fileuri" / "uv",
+            assets=[
+                AssetSpec(
+                    name="tokenizer",
+                    source=f"file://{src}",
+                    destination="tokenizer.json",
+                ),
+            ],
+        )
+        await provision_assets(config)
+
+        dest = config.get_cache_dir() / "tokenizer.json"
+        assert dest.exists()
+        assert dest.read_bytes() == b'{"vocab": []}'
