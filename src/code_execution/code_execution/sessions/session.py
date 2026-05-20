@@ -75,14 +75,10 @@ class Session(Generic[T]):
         self.session_type = session_type
         self._status_history = [("created", datetime.now())]
 
-        # Initialize data manager for DataLake asset access (lazy — may not be available)
-        self.data_manager = None
-        try:
-            from ..data_access.manager import DataLakeDataManager
+        # Initialize data manager for DataLake asset access
+        from ..data_access.manager import DataLakeDataManager
 
-            self.data_manager = DataLakeDataManager()
-        except ImportError:
-            pass
+        self.data_manager = DataLakeDataManager()
 
         # Initialize object store for asset objects
         self.object_store = ObjectStore()
