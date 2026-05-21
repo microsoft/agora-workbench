@@ -266,17 +266,17 @@ def step_d_build_agent(chat_client, tools):
         "  1. Discover and load the matching domain skill before starting:\n"
         "     call `*_search_*_tools` with `category='skills'`, then\n"
         "     `*_load_*_skill`.\n"
-        "  1. If the user asks about datasets, call search_data.\n"
-        "  2. For chemistry work, call chem_execute_chemistry_code. Inside the\n"
+        "  2. If the user asks about datasets, call search_data.\n"
+        "  3. For chemistry work, call chem_execute_chemistry_code. Inside the\n"
         "     code, call the typed helpers above (e.g.\n"
         "     `result = filter_drug_candidates([...], rules='lipinski')`)\n"
         "     and `print(result)` so the values come back in the tool output.\n"
-        "  3. For power systems work, call execute_energysystems_code. Inside\n"
+        "  4. For power systems work, call execute_energysystems_code. Inside\n"
         "     the code, call the typed helpers (e.g.\n"
         "     `result = define_network('my_grid')`) and `print(result)`.\n"
-        "  4. Follow the state graphs in the injected skills: parse_molecule\n"
+        "  5. Follow the state graphs in the loaded skills: parse_molecule\n"
         "     first for chemistry, define_network first for energy systems.\n"
-        "  5. Report results in natural language with the key numbers inline.\n"
+        "  6. Report results in natural language with the key numbers inline.\n"
     )
     agent = chat_client.as_agent(
         name="quickstart_agent",
