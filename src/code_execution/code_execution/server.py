@@ -60,6 +60,7 @@ from .tool_proxy import (
 if TYPE_CHECKING:
     from .sessions import Session
     from .tool_registry import ToolRegistry
+    from .tools.tool_search import ToolSearchBackend
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -147,6 +148,7 @@ class CodeExecutionServer:
         default_timeout: int = 300,
         working_dir: Optional[Path] = None,
         output_truncation_threshold: int = 50_000,
+        tool_search_backend: Optional["ToolSearchBackend"] = None,
     ):
         """
         Initialize the code execution server.
@@ -165,11 +167,16 @@ class CodeExecutionServer:
                 inspect large objects server-side rather than pulling them through the MCP interface.
                 Set to 0 to disable truncation. Can also be set via CODE_OUTPUT_TRUNCATION_THRESHOLD
                 environment variable (env var takes precedence).
+            tool_search_backend: Optional pre-configured ToolSearchBackend instance.
+                If provided, this backend is used instead of creating one from config.
+                Enables custom search backends (e.g. vector DB, Elasticsearch) without
+                modifying the built-in factory.
         """
         self.environment_config = environment_config
         self.tool_registry = tool_registry
         self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
+        self._custom_tool_search_backend = tool_search_backend
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -1086,12 +1093,15 @@ class CodeExecutionServer:
         domains_dir = self.environment_config.domains_dir
         skills = _discover_skills(domains_dir) if domains_dir else []
 
-        backend = create_tool_search_backend(
-            backend_type=self.environment_config.tool_search_backend,
-            tools=tool_infos,
-            server_name=server_name,
-            skills=skills,
-        )
+        if self._custom_tool_search_backend is not None:
+            backend = self._custom_tool_search_backend
+        else:
+            backend = create_tool_search_backend(
+                backend_type=self.environment_config.tool_search_backend,
+                tools=tool_infos,
+                server_name=server_name,
+                skills=skills,
+            )
         self._tool_search_backends.append(backend)
 
         LOGGER.info(
