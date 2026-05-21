@@ -40,7 +40,11 @@ class DataLakeDataManager:
     - Local filesystem (absolute paths, relative paths, file:// URIs)
     """
 
-    def __init__(self, allowed_local_roots: list[str] | None = None):
+    def __init__(
+        self,
+        allowed_local_roots: list[str] | None = None,
+        extra_fetchers: list[AssetFetcher] | None = None,
+    ):
         """
         Initialize the data manager.
 
@@ -52,6 +56,11 @@ class DataLakeDataManager:
             allowed_local_roots: Optional list of directory paths the local
                 file fetcher is allowed to read from. If ``None`` or empty,
                 all paths are permitted (suitable for sandboxed containers).
+            extra_fetchers: Optional list of additional ``AssetFetcher``
+                instances to register. These are checked *before* the
+                built-in fetchers (local file, blob), allowing custom
+                fetchers to override default handling for specific URL
+                schemes or patterns.
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
@@ -60,10 +69,9 @@ class DataLakeDataManager:
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         self._credential_init_error: str | None = None
 
-        # Initialize fetchers
-        self._fetchers: list[AssetFetcher] = [
-            LocalFileFetcher(allowed_roots=allowed_local_roots),
-        ]
+        # Initialize fetchers — custom fetchers take priority over built-ins
+        self._fetchers: list[AssetFetcher] = list(extra_fetchers or [])
+        self._fetchers.append(LocalFileFetcher(allowed_roots=allowed_local_roots))
 
         if search_endpoint:
             # Azure mode: add blob fetcher and search client
