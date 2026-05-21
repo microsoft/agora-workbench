@@ -200,10 +200,20 @@ def _is_local(url: str) -> bool:
     return host in _LOCAL_HOSTS
 
 
+# Long read timeout for SSE: the MCP streamable-http transport keeps long-lived
+# GET/POST streams that may sit idle between events. httpx's default 5s read
+# timeout kills these streams mid-tool-call, and MCPStreamableHTTPTool uses any
+# http_client we pass in verbatim without applying its own streaming defaults.
+_SSE_TIMEOUT = httpx.Timeout(30.0, read=1200.0)
+
+
 def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
     """Pick auth: dev bearer for localhost, token provider otherwise."""
     if _is_local(url):
-        return httpx.AsyncClient(headers={"Authorization": f"Bearer {_DEV_BEARER}"})
+        return httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {_DEV_BEARER}"},
+            timeout=_SSE_TIMEOUT,
+        )
 
     if not scope:
         raise ValueError(
@@ -214,7 +224,7 @@ def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
     from utilities.auth import BearerTokenAuth, get_token_provider
 
     token_provider = get_token_provider(scope)
-    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider))
+    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider), timeout=_SSE_TIMEOUT)
 
 
 async def _is_healthy(url: str, http_client: httpx.AsyncClient, timeout: float) -> bool:
