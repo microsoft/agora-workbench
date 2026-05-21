@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from ..code_execution import CodeExecutionServer, EnvironmentConfig
 from ..code_execution.auth import create_noop_auth_config
 
