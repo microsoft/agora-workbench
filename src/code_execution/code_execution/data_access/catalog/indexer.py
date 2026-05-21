@@ -86,7 +86,13 @@ def _parse_blob_path(path: str) -> tuple[str, str, str]:
 class CatalogIndexer:
     """Scans configured sources and populates the catalog database."""
 
-    def __init__(self, config: CatalogConfig, db: CatalogDB, credential_provider: Optional[CredentialProvider] = None):
+    def __init__(
+        self,
+        config: CatalogConfig,
+        db: CatalogDB,
+        credential_provider: Optional[CredentialProvider] = None,
+        embedding_provider: Optional[EmbeddingProvider] = None,
+    ):
         """
         Args:
             config: Catalog configuration.
@@ -94,11 +100,15 @@ class CatalogIndexer:
             credential_provider: Optional CredentialProvider from the auth module.
                 Used for authenticating to blob storage. If None, blob sources
                 will fall back to DefaultAzureCredential.
+            embedding_provider: Optional pre-configured EmbeddingProvider instance.
+                If provided, bypasses the factory and uses this provider directly.
+                Useful for custom embedding backends not covered by the built-in
+                factory (e.g. Cohere, Ollama, HuggingFace Inference API).
         """
         self._config = config
         self._db = db
         self._credential_provider = credential_provider
-        self._embedding_provider: Optional[EmbeddingProvider] = None
+        self._embedding_provider: Optional[EmbeddingProvider] = embedding_provider
 
     @property
     def embedding_provider(self) -> EmbeddingProvider:
@@ -109,6 +119,7 @@ class CatalogIndexer:
                 model_name=search_cfg.embedding_model,
                 azure_openai_endpoint=search_cfg.azure_openai_endpoint,
                 azure_openai_deployment=search_cfg.azure_openai_deployment,
+                credential_provider=self._credential_provider,
             )
         return self._embedding_provider
 
