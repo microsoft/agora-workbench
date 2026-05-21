@@ -193,7 +193,7 @@ async def test_code_with_special_characters(test_server):
     """Test that code with various special characters is handled safely."""
     # Create a session through the server's session manager
     session_id = test_server.session_manager.create_session(
-        data={"namespace": {"x": 10}}, user_identity="test_user", user_token="test-token", token_claims={}
+        data={}, user_identity="test_user", user_token="test-token", token_claims={}
     )
     session = test_server.session_manager.get_session(session_id)
     set_current_session(session)
@@ -232,7 +232,7 @@ async def test_namespace_persistence_with_special_chars(test_server):
 
     # Create a session
     session_id = test_server.session_manager.create_session(
-        data={"namespace": {}}, user_identity="test_user", user_token="test-token", token_claims={}
+        data={}, user_identity="test_user", user_token="test-token", token_claims={}
     )
 
     # First execution: set a variable with special characters
@@ -252,7 +252,7 @@ async def test_namespace_persistence_with_special_chars(test_server):
 async def test_background_execution_preserves_session_state(test_server):
     """Background execution should complete in-session and preserve resulting variables."""
     session_id = test_server.session_manager.create_session(
-        data={"namespace": {}}, user_identity="test_user", user_token="test-token", token_claims={}
+        data={}, user_identity="test_user", user_token="test-token", token_claims={}
     )
     session = test_server.session_manager.get_session(session_id)
     set_current_session(session)

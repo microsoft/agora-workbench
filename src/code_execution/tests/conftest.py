@@ -301,7 +301,7 @@ async def test_server(
             # Execute code
             result = await server._execute_code(code=code, timeout=timeout)
 
-            # Save session (namespace is already updated in execute_code)
+            # Save session
             server.session_manager.update_session(session_id, session)
 
             return result

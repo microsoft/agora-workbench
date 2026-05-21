@@ -123,9 +123,6 @@ class AssetResolutionMiddleware(Middleware):
         try:
             LOGGER.info(f"Middleware: resolving {len(assets_to_resolve)} asset(s) for tool '{tool_name}'")
 
-            if "_asset_counter" not in session.data:
-                session.data["_asset_counter"] = 0
-
             async def _fetch(param_name: VarName, qualified_name: AssetId):
                 try:
                     cache_path = await session.data_manager.get_cache_path(qualified_name)
@@ -145,8 +142,8 @@ class AssetResolutionMiddleware(Middleware):
             # Replace argument values in-place and build injection metadata
             resolved = []
             for param_name, qualified_name, cache_path, _ in results:
-                session.data["_asset_counter"] += 1
-                asset_key = f"_asset_{param_name}_{session.data['_asset_counter']}"
+                session._asset_counter += 1
+                asset_key = f"_asset_{param_name}_{session._asset_counter}"
 
                 # Store metadata in session object store
                 session.object_store.store(
