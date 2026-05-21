@@ -43,6 +43,22 @@ Wrapping for MAF::
         )
         for s in servers
     ]
+
+Why the read timeout matters
+----------------------------
+
+MCP's streamable-HTTP transport keeps long-lived SSE streams open and
+sits idle between events. httpx's default 5-second read timeout will
+kill those streams mid-tool-call. ``MCPStreamableHTTPTool`` only applies
+its own SSE-friendly defaults when it constructs the client itself —
+when callers pass in an ``http_client`` (as our wrapper does), it is
+used verbatim. So the runtime timeout has to be set here.
+
+The default is ``httpx.Timeout(30.0, read=1200.0)`` — 30s connect, 20min
+read — which is comfortable for typical notebook-style tools. Override
+via the ``client_timeout`` argument to :func:`connect_mcp_servers` when
+you need longer reads (slow data fetches, model warmup) or tighter
+bounds (production deployments where a hung tool should fail fast).
 """
 
 from __future__ import annotations
@@ -207,12 +223,17 @@ def _is_local(url: str) -> bool:
 _SSE_TIMEOUT = httpx.Timeout(30.0, read=1200.0)
 
 
-def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
+def _build_http_client(
+    url: str,
+    scope: Optional[str],
+    client_timeout: Optional[httpx.Timeout] = None,
+) -> httpx.AsyncClient:
     """Pick auth: dev bearer for localhost, token provider otherwise."""
+    timeout = client_timeout if client_timeout is not None else _SSE_TIMEOUT
     if _is_local(url):
         return httpx.AsyncClient(
             headers={"Authorization": f"Bearer {_DEV_BEARER}"},
-            timeout=_SSE_TIMEOUT,
+            timeout=timeout,
         )
 
     if not scope:
@@ -224,7 +245,7 @@ def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
     from utilities.auth import BearerTokenAuth, get_token_provider
 
     token_provider = get_token_provider(scope)
-    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider), timeout=_SSE_TIMEOUT)
+    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider), timeout=timeout)
 
 
 async def _is_healthy(url: str, http_client: httpx.AsyncClient, timeout: float) -> bool:
@@ -242,6 +263,7 @@ async def _is_healthy(url: str, http_client: httpx.AsyncClient, timeout: float) 
 async def connect_mcp_servers(
     configs: list[McpServerConfig],
     timeout: float = 2.0,
+    client_timeout: Optional[httpx.Timeout] = None,
 ) -> list[McpServer]:
     """Probe a list of MCP servers and return live connections.
 
@@ -256,7 +278,20 @@ async def connect_mcp_servers(
     configs : list[McpServerConfig]
         Servers to probe.
     timeout : float
-        Per-server health-probe timeout in seconds.
+        Per-server health-probe timeout in seconds. Only used for the
+        ``/health`` GET that happens during connection setup.
+    client_timeout : httpx.Timeout | None
+        Timeout configuration applied to the returned ``httpx.AsyncClient``
+        used by the MCP streamable-HTTP transport. The ``read`` value caps
+        how long the SSE response stream may stay idle between events;
+        anything shorter than the longest plausible tool call will hang
+        the agent when a tool runs longer than that window (see "Why the
+        read timeout matters" in the module docstring).
+
+        Defaults to ``httpx.Timeout(30.0, read=1200.0)`` — 30s connect,
+        20min read — which suits typical long-running notebook-style
+        tool calls. Override when your tools may run longer, or when you
+        want tighter bounds for production deployments.
 
     Returns
     -------
@@ -275,6 +310,15 @@ async def connect_mcp_servers(
         ])
         for s in servers:
             print(f"connected: {s.name} @ {s.url}")
+
+    Custom timeout::
+
+        import httpx
+
+        servers = await connect_mcp_servers(
+            [McpServerConfig(name="earthscience", url="http://localhost:8021/mcp")],
+            client_timeout=httpx.Timeout(30.0, read=3600.0),  # 1h read for slow tools
+        )
     """
     if not configs:
         LOGGER.info("connect_mcp_servers called with empty config list.")
@@ -282,7 +326,7 @@ async def connect_mcp_servers(
 
     live: list[McpServer] = []
     for cfg in configs:
-        http_client = _build_http_client(cfg.url, cfg.scope)
+        http_client = _build_http_client(cfg.url, cfg.scope, client_timeout=client_timeout)
         if not await _is_healthy(cfg.url, http_client, timeout):
             await http_client.aclose()
             continue
