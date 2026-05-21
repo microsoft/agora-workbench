@@ -44,21 +44,13 @@ Wrapping for MAF::
         for s in servers
     ]
 
-Why the read timeout matters
-----------------------------
+SSE read timeout
+----------------
 
-MCP's streamable-HTTP transport keeps long-lived SSE streams open and
-sits idle between events. httpx's default 5-second read timeout will
-kill those streams mid-tool-call. ``MCPStreamableHTTPTool`` only applies
-its own SSE-friendly defaults when it constructs the client itself —
-when callers pass in an ``http_client`` (as our wrapper does), it is
-used verbatim. So the runtime timeout has to be set here.
-
-The default is ``httpx.Timeout(30.0, read=1200.0)`` — 30s connect, 20min
-read — which is comfortable for typical notebook-style tools. Override
-via the ``client_timeout`` argument to :func:`connect_mcp_servers` when
-you need longer reads (slow data fetches, model warmup) or tighter
-bounds (production deployments where a hung tool should fail fast).
+Tool calls travel over long-lived SSE streams. The httpx client we
+build uses ``httpx.Timeout(30.0, read=1200.0)`` by default (30s
+connect, 20min read). Override via :func:`connect_mcp_servers`'s
+``client_timeout`` argument.
 """
 
 from __future__ import annotations
