@@ -43,6 +43,14 @@ Wrapping for MAF::
         )
         for s in servers
     ]
+
+SSE read timeout
+----------------
+
+Tool calls travel over long-lived SSE streams. The httpx client we
+build uses ``httpx.Timeout(30.0, read=1200.0)`` by default (30s
+connect, 20min read). Override via :func:`connect_mcp_servers`'s
+``client_timeout`` argument.
 """
 
 from __future__ import annotations
@@ -200,10 +208,25 @@ def _is_local(url: str) -> bool:
     return host in _LOCAL_HOSTS
 
 
-def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
+# Long read timeout for SSE: the MCP streamable-http transport keeps long-lived
+# GET/POST streams that may sit idle between events. httpx's default 5s read
+# timeout kills these streams mid-tool-call, and MCPStreamableHTTPTool uses any
+# http_client we pass in verbatim without applying its own streaming defaults.
+_SSE_TIMEOUT = httpx.Timeout(30.0, read=1200.0)
+
+
+def _build_http_client(
+    url: str,
+    scope: Optional[str],
+    client_timeout: Optional[httpx.Timeout] = None,
+) -> httpx.AsyncClient:
     """Pick auth: dev bearer for localhost, token provider otherwise."""
+    timeout = client_timeout if client_timeout is not None else _SSE_TIMEOUT
     if _is_local(url):
-        return httpx.AsyncClient(headers={"Authorization": f"Bearer {_DEV_BEARER}"})
+        return httpx.AsyncClient(
+            headers={"Authorization": f"Bearer {_DEV_BEARER}"},
+            timeout=timeout,
+        )
 
     if not scope:
         raise ValueError(
@@ -214,7 +237,7 @@ def _build_http_client(url: str, scope: Optional[str]) -> httpx.AsyncClient:
     from utilities.auth import BearerTokenAuth, get_token_provider
 
     token_provider = get_token_provider(scope)
-    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider))
+    return httpx.AsyncClient(auth=BearerTokenAuth(token_provider), timeout=timeout)
 
 
 async def _is_healthy(url: str, http_client: httpx.AsyncClient, timeout: float) -> bool:
@@ -232,6 +255,7 @@ async def _is_healthy(url: str, http_client: httpx.AsyncClient, timeout: float) 
 async def connect_mcp_servers(
     configs: list[McpServerConfig],
     timeout: float = 2.0,
+    client_timeout: Optional[httpx.Timeout] = None,
 ) -> list[McpServer]:
     """Probe a list of MCP servers and return live connections.
 
@@ -246,7 +270,20 @@ async def connect_mcp_servers(
     configs : list[McpServerConfig]
         Servers to probe.
     timeout : float
-        Per-server health-probe timeout in seconds.
+        Per-server health-probe timeout in seconds. Only used for the
+        ``/health`` GET that happens during connection setup.
+    client_timeout : httpx.Timeout | None
+        Timeout configuration applied to the returned ``httpx.AsyncClient``
+        used by the MCP streamable-HTTP transport. The ``read`` value caps
+        how long the SSE response stream may stay idle between events;
+        anything shorter than the longest plausible tool call will hang
+        the agent when a tool runs longer than that window (see "Why the
+        read timeout matters" in the module docstring).
+
+        Defaults to ``httpx.Timeout(30.0, read=1200.0)`` — 30s connect,
+        20min read — which suits typical long-running notebook-style
+        tool calls. Override when your tools may run longer, or when you
+        want tighter bounds for production deployments.
 
     Returns
     -------
@@ -265,6 +302,15 @@ async def connect_mcp_servers(
         ])
         for s in servers:
             print(f"connected: {s.name} @ {s.url}")
+
+    Custom timeout::
+
+        import httpx
+
+        servers = await connect_mcp_servers(
+            [McpServerConfig(name="earthscience", url="http://localhost:8021/mcp")],
+            client_timeout=httpx.Timeout(30.0, read=3600.0),  # 1h read for slow tools
+        )
     """
     if not configs:
         LOGGER.info("connect_mcp_servers called with empty config list.")
@@ -272,7 +318,7 @@ async def connect_mcp_servers(
 
     live: list[McpServer] = []
     for cfg in configs:
-        http_client = _build_http_client(cfg.url, cfg.scope)
+        http_client = _build_http_client(cfg.url, cfg.scope, client_timeout=client_timeout)
         if not await _is_healthy(cfg.url, http_client, timeout):
             await http_client.aclose()
             continue
