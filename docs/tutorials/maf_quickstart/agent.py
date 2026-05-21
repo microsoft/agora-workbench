@@ -64,6 +64,7 @@ import asyncio
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -91,118 +92,82 @@ def step_a_chat_client():
 
 
 # ---------------------------------------------------------------------------
-# Step B — data lake search tool
+# Step B — connect domain MCP tools
 # ---------------------------------------------------------------------------
-async def step_b_data_lake_tool():
-    """The data catalog is now served by the MCP server itself.
-
-    If an MCP server startup path wires catalog indexing plus
-    ``register_catalog_tools(...)`` (see
-    ``src/code_execution/code_execution/catalog_tools.py``), the agent can
-    discover ``search_data``, ``query_catalog``, ``get_artifact``, and
-    ``list_domains`` when it connects via ``MCPStreamableHTTPTool``.
-
-    Returns ``None`` — kept as a numbered step purely for tutorial clarity.
-    """
-    LOGGER.info(
-        "Step B: data catalog tools (search_data, query_catalog, get_artifact, "
-        "list_domains) are discovered from MCP servers that wire catalog "
-        "indexing plus register_catalog_tools(...) at startup."
-    )
-    return None
+@dataclass(frozen=True)
+class _McpServerConfig:
+    name: str
+    url: str
+    description: str
+    tool_name_prefix: str
+    start_hint: str
 
 
-# ---------------------------------------------------------------------------
-# Step C — chemistry MCP tool
-# ---------------------------------------------------------------------------
-async def step_c_chemistry_tool():
-    """Build an MCPStreamableHTTPTool pointing at the local chemistry server.
-
-    Returns ``None`` if the server isn't reachable so the tutorial degrades
-    gracefully when Docker isn't running yet.
-    """
+async def _connect_mcp_tool(config: _McpServerConfig):
+    """Connect one MCP server using the shared explicit-config pattern from #124."""
     from agent_framework import MCPStreamableHTTPTool
 
-    url = os.getenv("CHEMISTRY_MCP_URL", "http://localhost:8020/mcp")
-    health_url = url.rsplit("/mcp", 1)[0] + "/health"
-
-    # Probe health before constructing the tool — produces a clear skip message
-    # rather than a confusing failure deeper in the agent loop.
+    health_url = config.url.rsplit("/mcp", 1)[0] + "/health"
     try:
         async with httpx.AsyncClient(timeout=2.0) as probe:
             resp = await probe.get(health_url)
             resp.raise_for_status()
     except Exception as exc:
         LOGGER.warning(
-            "Step C: chemistry MCP server unreachable at %s (%s) — skipping. "
-            "Start it with: cd src/domain_examples/chemistry && docker compose up -d",
+            "MCP server %r unreachable at %s (%s) — skipping. Start it with: %s",
+            config.name,
             health_url,
             exc,
-        )
-        return None
-
-    # The local chemistry server uses noop auth, but its HTTP auth layer
-    # still expects an Authorization header. Any non-empty bearer string is
-    # accepted.
-    http_client = httpx.AsyncClient(headers={"Authorization": "Bearer dev-token"})
-    tool = MCPStreamableHTTPTool(
-        name="chemistry",
-        url=url,
-        description=(
-            "Execute Python code with RDKit and cheminformatics packages. "
-            "Use for molecular analysis, SMILES parsing, descriptor calculation, "
-            "fingerprints, substructure search."
-        ),
-        approval_mode="never_require",
-        http_client=http_client,
-        tool_name_prefix="chem_",
-    )
-    LOGGER.info("Step C: built chemistry MCP tool @ %s", url)
-    return tool
-
-
-# ---------------------------------------------------------------------------
-# Step C2 — energy systems MCP tool
-# ---------------------------------------------------------------------------
-async def step_c2_energysystems_tool():
-    """Build an MCPStreamableHTTPTool pointing at the local energy systems server.
-
-    Returns ``None`` if the server isn't reachable so the tutorial degrades
-    gracefully when Docker isn't running yet.
-    """
-    from agent_framework import MCPStreamableHTTPTool
-
-    url = os.getenv("ENERGYSYSTEMS_MCP_URL", "http://localhost:8022/mcp")
-    health_url = url.rsplit("/mcp", 1)[0] + "/health"
-
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as probe:
-            resp = await probe.get(health_url)
-            resp.raise_for_status()
-    except Exception as exc:
-        LOGGER.warning(
-            "Step C2: energy systems MCP server unreachable at %s (%s) — skipping. "
-            "Start it with: cd src/domain_examples/energysystems && docker compose up -d",
-            health_url,
-            exc,
+            config.start_hint,
         )
         return None
 
     http_client = httpx.AsyncClient(headers={"Authorization": "Bearer dev-token"})
-    tool = MCPStreamableHTTPTool(
-        name="energysystems",
-        url=url,
-        description=(
-            "Execute Python code with PyPSA and power system analysis packages. "
-            "Use for network modeling, power flow, optimal dispatch, capacity "
-            "expansion, and topology analysis."
-        ),
+    return MCPStreamableHTTPTool(
+        name=config.name,
+        url=config.url,
+        description=config.description,
         approval_mode="never_require",
         http_client=http_client,
-        tool_name_prefix="energy_",
+        tool_name_prefix=config.tool_name_prefix,
     )
-    LOGGER.info("Step C2: built energy systems MCP tool @ %s", url)
-    return tool
+
+
+async def step_b_domain_tools():
+    """Build MCP tools from explicit server configs."""
+    configs = [
+        _McpServerConfig(
+            name="chemistry",
+            url=os.getenv("CHEMISTRY_MCP_URL", "http://localhost:8020/mcp"),
+            description=(
+                "Execute Python code with RDKit and cheminformatics packages. "
+                "Use for molecular analysis, SMILES parsing, descriptor calculation, "
+                "fingerprints, substructure search."
+            ),
+            tool_name_prefix="chem_",
+            start_hint="cd src/domain_examples/chemistry && docker compose up -d",
+        ),
+        _McpServerConfig(
+            name="energysystems",
+            url=os.getenv("ENERGYSYSTEMS_MCP_URL", "http://localhost:8022/mcp"),
+            description=(
+                "Execute Python code with PyPSA and power system analysis packages. "
+                "Use for network modeling, power flow, optimal dispatch, capacity "
+                "expansion, and topology analysis."
+            ),
+            tool_name_prefix="energy_",
+            start_hint="cd src/domain_examples/energysystems && docker compose up -d",
+        ),
+    ]
+
+    tools = []
+    for config in configs:
+        tool = await _connect_mcp_tool(config)
+        if tool is None:
+            continue
+        LOGGER.info("Step B: built %s MCP tool @ %s", config.name, config.url)
+        tools.append(tool)
+    return tools
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +214,7 @@ def step_d_build_agent(chat_client, tools):
         "  cluster_molecules(smiles_list, cutoff=0.4, ...)\n"
         "Each returns a dict; prefer them over hand-rolled RDKit code.\n"
         "\n"
-        "Inside execute_energysystems_code the following typed helpers are\n"
+        "Inside energy_execute_energysystems_code the following typed helpers are\n"
         "available as plain Python functions — no imports needed:\n"
         "  define_network(name, snapshots=24, start='2025-01-01', freq='h')\n"
         "  add_components(network_name, buses=None, generators=None,\n"
@@ -271,7 +236,7 @@ def step_d_build_agent(chat_client, tools):
         "     code, call the typed helpers above (e.g.\n"
         "     `result = filter_drug_candidates([...], rules='lipinski')`)\n"
         "     and `print(result)` so the values come back in the tool output.\n"
-        "  4. For power systems work, call execute_energysystems_code. Inside\n"
+        "  4. For power systems work, call energy_execute_energysystems_code. Inside\n"
         "     the code, call the typed helpers (e.g.\n"
         "     `result = define_network('my_grid')`) and `print(result)`.\n"
         "  5. Follow the state graphs in the loaded skills: parse_molecule\n"
@@ -311,7 +276,7 @@ async def step_e_run(agent):
         "begin TASK 2.\n"
         "\n"
         "TASK 2 — Energy Systems: Build a simple 2-bus power grid and run "
-        "optimal power flow. Inside execute_energysystems_code:\n"
+        "optimal power flow. Inside energy_execute_energysystems_code:\n"
         "  1. `net = define_network(name='demo_grid', snapshots=24)`\n"
         "  2. Add 2 buses (110 kV), a 200 MW coal generator (marginal_cost=30) "
         "on Bus0, a 150 MW wind generator (marginal_cost=0, p_nom=150) on Bus1, "
@@ -344,22 +309,18 @@ async def main() -> int:
     )
 
     chat_client = step_a_chat_client()
-    data_lake_tool = await step_b_data_lake_tool()
-    chemistry_tool = await step_c_chemistry_tool()
-    energysystems_tool = await step_c2_energysystems_tool()
-
-    tools = [t for t in (data_lake_tool, chemistry_tool, energysystems_tool) if t is not None]
+    tools = await step_b_domain_tools()
     if not tools:
-        LOGGER.error(
-            "No tools available. Configure the data lake and/or start an "
-            "MCP server, then re-run."
-        )
+        LOGGER.error("No tools available. Start at least one MCP server, then re-run.")
         return 1
 
     agent = step_d_build_agent(chat_client, tools)
 
+    chemistry_tool = next((t for t in tools if getattr(t, "name", None) == "chemistry"), None)
+    energysystems_tool = next((t for t in tools if getattr(t, "name", None) == "energysystems"), None)
+
     # Open MCP tool connections (MAF supports `async with` on tools with
-    # persistent connections; data lake tool is stateless).
+    # persistent connections).
     chem_ctx = chemistry_tool if chemistry_tool is not None else _nullcontext()
     energy_ctx = energysystems_tool if energysystems_tool is not None else _nullcontext()
     async with chem_ctx:
