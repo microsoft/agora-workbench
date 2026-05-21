@@ -1,9 +1,15 @@
 """
-Earth Science MCP Server — Planetary Computer geospatial analysis.
+Earth Science MCP Server — Planetary Computer geospatial analysis environment.
 
-Provides an `execute_earthscience_code` MCP tool backed by a conda environment
-with pystac-client, planetary-computer, rasterio, xarray, and geospatial
-packages for satellite imagery discovery and analysis.
+Ships a single ``execute_earthscience_code`` MCP tool backed by a conda
+environment with pystac-client, planetary-computer, rasterio, xarray, and
+the rest of the geospatial Python stack. There are no domain-specific
+wrapper tools — the agent writes geospatial code directly against the
+auto-imported libraries, guided by the SKILL.md recipes under ``skills/``.
+
+This server exists as the canonical example of a "minimal BYOA" domain:
+the deliverable is the *environment* (conda spec + prelude + skill
+markdown), not a catalogue of pre-canned wrappers.
 
 The Microsoft Planetary Computer STAC API is free and publicly accessible —
 no API keys or accounts are required.
@@ -27,6 +33,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.11
+  - pip
   - pystac-client
   - planetary-computer
   - rasterio

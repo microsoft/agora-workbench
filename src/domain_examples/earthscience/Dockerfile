@@ -7,10 +7,11 @@
 # Then build the earth science server:
 #   docker build -t earthscience-server:local .
 
-FROM mcp-server-base:local
+ARG BASE_IMAGE=mcp-server-base:local
+FROM ${BASE_IMAGE}
 
-# Copy earth science server code
-COPY --chown=appuser:appuser domain_examples/earthscience/server /app/domain_examples/earthscience/server
-COPY --chown=appuser:appuser domain_examples/earthscience/__init__.py /app/domain_examples/earthscience/__init__.py
+# Copy the earthscience package tree so Python module execution can resolve
+# the full package path consistently at runtime.
+COPY --chown=appuser:appuser domain_examples/earthscience /app/domain_examples/earthscience
 
 CMD ["python", "-m", "domain_examples.earthscience.server.earthscience_server"]

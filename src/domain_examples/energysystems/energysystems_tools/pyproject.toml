@@ -1,0 +1,16 @@
+[project]
+name = "energysystems-tools"
+version = "0.1.0"
+description = "PyPSA-based power system tool implementations for the Energy Systems MCP server."
+requires-python = ">=3.11"
+# No dependencies — PyPSA and scientific packages are provided by the
+# conda execution environment.  This package contains only pure-Python
+# wrapper functions that call into those libraries at runtime.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

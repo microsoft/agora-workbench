@@ -9,10 +9,10 @@ framework adapter only needs to translate a fully-resolved ``ModelSpec`` into
 its own client type.
 
 Currently supported factories:
-    - MAF: :func:`agora_agent.llm.factories.maf.make_maf_client`
+    - MAF: :func:`llm.factories.maf.make_maf_client`
 
 LangGraph, OpenAI Agents, and other factories will be added when those
-framework integrations begin. See ``docs/LLM_ABSTRACTION_PLAN.md``.
+framework integrations begin.
 """
 
 from __future__ import annotations

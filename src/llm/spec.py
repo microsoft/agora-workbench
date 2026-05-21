@@ -49,7 +49,7 @@ class ModelSpec:
         Ignored by non-Azure providers.
     credential_factory :
         Zero-arg callable returning a credential. Mutually exclusive with
-        ``api_key``. See :func:`agora_agent.llm.credentials.default_credential_factory`.
+        ``api_key``. See :func:`llm.credentials.default_credential_factory`.
     api_key :
         Static API key. Mutually exclusive with ``credential_factory``.
     scope :
@@ -75,8 +75,29 @@ class ModelSpec:
     extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.model:
+        if not self.model or not self.model.strip():
             raise ValueError("ModelSpec.model must be a non-empty string")
+
+        if self.endpoint is not None and not self.endpoint.strip():
+            raise ValueError(
+                "ModelSpec.endpoint must be a non-empty string when provided"
+            )
+
+        if self.api_version is not None and not self.api_version.strip():
+            raise ValueError(
+                "ModelSpec.api_version must be a non-empty string when provided"
+            )
+
+        if self.provider in {"azure_openai", "ollama", "litellm"} and not self.endpoint:
+            raise ValueError(
+                f"ModelSpec.endpoint is required for provider {self.provider!r}"
+            )
+
+        if self.provider == "azure_openai" and not self.api_version:
+            raise ValueError(
+                "ModelSpec.api_version is required for provider 'azure_openai'"
+            )
+
         has_key = bool(self.api_key)
         has_factory = self.credential_factory is not None
         if has_key and has_factory:

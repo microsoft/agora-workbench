@@ -1,0 +1,26 @@
+# Example MCP server list for local development.
+#
+# This file is *not* loaded automatically by anything — it's a sample of the
+# yaml format that utilities.mcp_clients.load_server_registry understands.
+# Copy it (or write your own), then load it explicitly:
+#
+#     from utilities.mcp_clients import load_server_registry, connect_mcp_servers
+#
+#     configs = load_server_registry("docs/tutorials/maf_quickstart/local_servers.yaml")
+#     servers = await connect_mcp_servers(configs)
+#
+# Servers below are the three domain examples shipped under
+# src/domain_examples/. Start them with `docker compose up` from each
+# domain's directory.
+
+# Optional default scope, used for any non-localhost entry that omits its own.
+# All entries here are localhost, so this is illustrative.
+scope: api://12c90937-013c-468e-93cf-eb8083d69ca7/.default
+
+servers:
+  - name: chemistry
+    url: http://localhost:8020/mcp
+  - name: earthscience
+    url: http://localhost:8021/mcp
+  - name: energysystems
+    url: http://localhost:8022/mcp

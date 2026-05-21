@@ -24,15 +24,13 @@ Key capabilities:
 - **MCP Code Execution** — domain-specific Python environments served over MCP, each running in Docker with its own dependencies
 - **Tool Discovery** — `search_tools` for natural-language catalog search; MCP server tools (`execute_code`, session management) are auto-discovered from `server_registry.yaml` at agent startup and available from the first turn
 - **Context Management** — MAF-native compaction via `CompactionProvider` with token-budget-aware strategies (tool-result compaction, LLM summarization, sliding window)
-- **Data Lake Integration** — semantic search over blob storage artifacts with RBAC-aware retrieval via Azure AI Search and Microsoft Purview
+- **Data Lake Integration** — server-side file catalog with hybrid keyword + vector search over local and blob storage artifacts
 
 ## Structure
 
 ```
 src/
 ├── auth/               # Agent-side credentials (ChainedTokenCredential)
-├── middleware/         # Pluggable conversation middleware
-│   └── */adapters/     # MAF-specific wrappers (requires [maf] extra)
 ├── tools/              # Tool search, MCP server registry, tool catalog
 │   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
 │   ├── search/                 # search_tools backends (BM25, Azure AI Search)
@@ -40,13 +38,9 @@ src/
 │   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
 │   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
 │   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
-├── planning/           # SQLite-backed plan store
-│   ├── tools.py                # create_plan_descriptors (no framework dep)
-│   └── adapters/               # MAF FunctionTool wrappers (requires [maf] extra)
 ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
+│   ├── data_access/catalog/  # Server-side file catalog (SQLite + FTS5 + sqlite-vec)
 │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
-├── data_lake/          # Artifact registry, sync pipeline, Purview integration
-│   └── utilities/      # Standalone helpers: update_purview_entity, list_artifact_registry
 ├── gui/                # GIS map GUI (FastAPI backend + React/Vite frontend)
 ├── server_registry.yaml    # MCP server configurations
 └── pyproject.toml
@@ -78,7 +72,6 @@ uv sync --group dev  # include dev tools (pytest, pre-commit, jupyter)
 The base package ships the full framework-agnostic layer:
 - `tools.tool_descriptor.ToolDescriptor` — callable + JSON Schema, usable with any agent framework
 - `tools.search.core` / `tools.search.state_graph_tools` — descriptor factories for search and state-graph tools
-- `planning.tools` — descriptor factories for all plan-management tools
 
 If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
 
@@ -188,107 +181,48 @@ For full details and payload shapes, see [`src/code_execution/README.md`](src/co
 
 - GUI includes `capture_map_view` for visual map screenshots; frontend capture relies on `html2canvas`.
 
-## Data Lake
+## Data Catalog
 
-### Utility Functions (`data_lake/utilities/utilities.py`)
+The data catalog is a server-side component that runs inside each MCP code execution server. It provides hybrid keyword + vector search over data files declared in a `catalog.yaml` configuration file.
 
-Standalone helpers for common Purview and Azure AI Search operations.
+### Configuration
 
-#### `update_purview_entity()`
-
-Edits the display name and/or user description of a Purview entity identified by its blob URL (qualified name).
-
-```python
-from data_lake.utilities.utilities import update_purview_entity
-
-# Rename a blob entity
-update_purview_entity(
-    purview_account="agora-purview",
-    qualified_name="https://myaccount.blob.core.windows.net/container/path/file.csv",
-    new_name="My Dataset",
-    new_description="Monthly energy consumption figures.",
-)
-
-# Preview without making changes (dry run)
-update_purview_entity(
-    purview_account="agora-purview",
-    qualified_name="https://myaccount.blob.core.windows.net/container/path/",
-    new_description="Processed grid topology files.",
-    dry_run=True,
-)
-```
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|---|---|---|
-| `purview_account` | `str` | Purview account name (e.g. `"agora-purview"`) |
-| `qualified_name` | `str` | Full blob URL of the entity |
-| `new_name` | `str \| None` | New display name; `None` leaves it unchanged |
-| `new_description` | `str \| None` | New user description; `None` leaves it unchanged |
-| `dry_run` | `bool` | If `True`, log what would change without writing to Purview |
-
-Directory paths (ending with `/`) are tried as `azure_blob_container` first, then `azure_blob_path`. At least one of `new_name` or `new_description` must be provided.
-
-#### `list_artifact_registry()`
-
-Queries the `artifact-registry` Azure AI Search index and returns all matching documents. Supports optional OData filter expressions.
-
-```python
-from data_lake.utilities.utilities import list_artifact_registry
-
-# List all artifacts
-artifacts = list_artifact_registry(search_service="agora-search")
-
-# Filter by domain and type
-artifacts = list_artifact_registry(
-    search_service="agora-search",
-    filter_expression="domain eq 'energy' and artifact_type eq 'blob'",
-    top=100,
-    select_fields=["id", "name", "description"],
-)
-```
-
-**Parameters:**
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `search_service` | `str` | — | Azure AI Search service name |
-| `index_name` | `str` | `"artifact-registry"` | Target index name |
-| `filter_expression` | `str \| None` | `None` | OData `$filter` expression |
-| `top` | `int \| None` | `None` | Maximum results; `None` fetches all |
-| `select_fields` | `list[str] \| None` | `None` | Fields to return; `None` returns all |
-
-### Purview Sync Cleanup (`data_lake/sync/`)
-
-The **Purview Sync Cleanup** GitHub Actions workflow (`.github/workflows/purview-sync-cleanup.yaml`) runs weekly (every Sunday at 02:00 UTC) and on demand. It removes stale artifact-registry entries whose Purview entity or blob no longer exists.
-
-**What the workflow produces:**
-
-| Output | Description |
-|---|---|
-| `cleanup-report.log` | Concise report surfaced in the GitHub Actions job summary. Includes run parameters, sync summary (processed/enriched/cleaned/failed counts), list of stale entries found, and any errors. |
-| `cleanup-output.log` | Full verbose sync output uploaded as a workflow artifact. |
-| Workflow artifacts | Both logs are uploaded with **180-day retention** under `cleanup-logs-<run_id>`. |
-
-**OpenAI endpoint validation:** The workflow fails fast if `DATA_LAKE_VECTORIZER_ENDPOINT` (mapped from `vars.DATA_LAKE_VECTORIZER_ENDPOINT`) is not set, preventing a silent run with missing embeddings configuration.
-
-**Trigger and configuration:**
+Create a `catalog.yaml` in your project:
 
 ```yaml
-# Manual trigger with overrides
-workflow_dispatch:
-  inputs:
-    dry_run:            # "true" to preview without deleting
-    max_cleanup:        # max stale entries to delete (default: 50)
-    cleanup_threshold:  # circuit-breaker ratio (default: 0.2)
-    search_service:     # optional Azure AI Search service override
-    purview_account:    # optional Microsoft Purview account override
+sources:
+  - path: /data/weather/
+    domain: earthscience
+    description: "NOAA daily weather observations for Pacific Northwest"
+    files:
+      daily_obs.csv:
+        description: "Daily temperature and precipitation readings"
+
+  - path: az://myaccount/container/grid/
+    domain: powergrid
+    description: "Geospatial transmission line dataset"
+
+search:
+  embedding_model: nomic-ai/nomic-embed-text-v1.5  # or: azure-openai
 ```
 
-Repository variables (`DATA_LAKE_*`) provide defaults for `search_service` (`DATA_LAKE_SEARCH_NAME`), `blob_details_index` (`DATA_LAKE_BLOB_DETAILS_INDEX`), and `artifact_registry_index` (`DATA_LAKE_CATALOG_INDEX_NAME`).
+### MCP Tools
 
-For cleanup safeguards (max cap, circuit breaker, transient error handling) see [`src/data_lake/sync/README.md`](src/data_lake/sync/README.md).
+The catalog exposes three tools to the agent:
+
+| Tool | Description |
+|------|-------------|
+| `search_data` | Hybrid keyword + vector search with optional domain/source_type filters |
+| `get_artifact` | Get full metadata for a specific artifact by ID |
+| `list_domains` | List all available data domains |
+
+### Deployment
+
+| Concern | Local | Azure Container Apps |
+|---------|-------|---------------------|
+| File storage | Filesystem / mounted volume | Azure Blob Storage (managed identity) |
+| Catalog DB | SQLite file in working dir | SQLite file in container |
+| Embeddings | Local model (default) | Local model OR Azure OpenAI (config) |
 
 ## Agentic Workflows
 

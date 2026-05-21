@@ -19,10 +19,42 @@ class TestPostInitValidation:
         with pytest.raises(ValueError, match="model must be a non-empty string"):
             ModelSpec(provider="openai", model="", api_key="k")
 
+    def test_whitespace_only_model_raises(self):
+        with pytest.raises(ValueError, match="model must be a non-empty string"):
+            ModelSpec(provider="openai", model="   ", api_key="k")
+
+    def test_whitespace_only_endpoint_raises(self):
+        with pytest.raises(ValueError, match="endpoint must be a non-empty string"):
+            ModelSpec(provider="openai", model="m", api_key="k", endpoint="   ")
+
+    def test_whitespace_only_api_version_raises(self):
+        with pytest.raises(ValueError, match="api_version must be a non-empty string"):
+            ModelSpec(
+                provider="openai", model="m", api_key="k", api_version="   "
+            )
+
+    @pytest.mark.parametrize("provider", ["azure_openai", "ollama", "litellm"])
+    def test_missing_endpoint_for_provider_raises(self, provider):
+        with pytest.raises(ValueError, match="endpoint is required for provider"):
+            ModelSpec(
+                provider=provider,  # type: ignore[arg-type]  # parametrize uses non-literal strings
+                model="m",
+                api_key="k",
+            )
+
+    def test_missing_api_version_for_azure_openai_raises(self):
+        with pytest.raises(ValueError, match="api_version is required"):
+            ModelSpec(
+                provider="azure_openai",
+                model="m",
+                api_key="k",
+                endpoint="https://x.openai.azure.com",
+            )
+
     def test_both_auth_modes_raises(self):
         with pytest.raises(ValueError, match="api_key OR credential_factory"):
             ModelSpec(
-                provider="azure_openai",
+                provider="openai",
                 model="m",
                 api_key="k",
                 credential_factory=lambda: "x",
@@ -41,6 +73,8 @@ class TestPostInitValidation:
         spec = ModelSpec(
             provider="azure_openai",
             model="m",
+            endpoint="https://x.openai.azure.com",
+            api_version="preview",
             credential_factory=lambda: "tok",
         )
         assert spec.api_key is None

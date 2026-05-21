@@ -351,18 +351,20 @@ class TestBlobFetcherDataRetrieval:
         assert len(result) == 10 * 1024 * 1024
 
     @pytest.mark.asyncio
-    async def test_blob_service_client_context_managed(self, mock_azure_blob_client, mock_credential):
-        """Test that BlobServiceClient is used as async context manager."""
+    async def test_blob_service_client_reused(self, mock_azure_blob_client, mock_credential):
+        """Test that BlobServiceClient is created once and reused across fetches."""
         mock_azure_blob_client.configure(expected_data=b"data")
 
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://container@storage.dfs.core.windows.net/file.csv"
 
         await fetcher.fetch(url)
+        await fetcher.fetch(url)
 
-        # Verify BlobServiceClient was used as context manager
-        mock_azure_blob_client.mock_client.__aenter__.assert_called_once()
-        mock_azure_blob_client.mock_client.__aexit__.assert_called_once()
+        # Verify BlobServiceClient was constructed only once (connection reuse)
+        mock_azure_blob_client.mock_client_class.assert_called_once()
+        # Verify get_blob_client was called for each fetch
+        assert mock_azure_blob_client.mock_client.get_blob_client.call_count == 2
 
     @pytest.mark.asyncio
     async def test_blob_not_found_error(self, mock_azure_blob_client, mock_credential):

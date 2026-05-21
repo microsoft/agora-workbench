@@ -1,10 +1,25 @@
 # Earth Science MCP Server (Planetary Computer)
 
-A domain-specific MCP code execution server for earth science and remote sensing, powered by [Microsoft Planetary Computer](https://planetarycomputer.microsoft.com/) (free, public API — no account required).
+A minimal domain example for the agora-workbench BYOA pattern: a
+code-execution MCP server that ships an **environment** — conda spec,
+auto-imported prelude, and skill markdown — and nothing else.
 
-Exposes an `execute_earthscience_code` MCP tool that runs Python code in an isolated environment with satellite imagery discovery and geospatial analysis packages pre-installed.
+There are no domain-specific wrapper tools. The agent does geospatial
+work by writing Python inside the single `execute_earthscience_code`
+tool, using the skills under `skills/` as guidance.
 
-## Pre-installed Packages
+This is the canonical "what does the smallest useful BYOA domain look
+like?" example.
+
+## What ships
+
+| Piece | Purpose |
+|---|---|
+| `server/earthscience_server.py` | Subclasses `CodeExecutionServer`, defines the conda env and the import prelude |
+| `skills/SKILL.md` | The one skill: how to find and load data from Planetary Computer (signing, collection IDs, STAC query syntax, signed-URL expiry, memory discipline). Stops at the array boundary — raster math is general Python the agent writes directly. |
+| `Dockerfile`, `docker-compose.yml` | Local deployment |
+
+## Pre-installed Packages (conda-forge)
 
 | Package | Purpose |
 |---------|---------|
@@ -19,6 +34,11 @@ Exposes an `execute_earthscience_code` MCP tool that runs Python code in an isol
 | **pandas** | Data manipulation |
 | **scipy** | Scientific computing |
 | **matplotlib** | Visualization |
+
+The auto-imported prelude (see `server/earthscience_server.py`) brings
+the most-used names into scope inside every `execute_earthscience_code`
+call — `planetary_computer`, `pystac_client`, `rasterio`, `xr`,
+`rioxarray`, `gpd`, `np`, `pd`, `box`, `Point`, `Polygon`.
 
 ## Quick Start
 
@@ -36,7 +56,9 @@ cd src/domain_examples/earthscience
 docker compose up --build
 ```
 
-The server will be available at `http://localhost:8021`. The first startup takes a few minutes while the conda environment is built (subsequent starts are cached).
+The server will be available at `http://localhost:8021`. The first
+startup takes several minutes while the conda environment is built;
+subsequent starts are cached.
 
 ### 3. Verify
 
@@ -44,106 +66,32 @@ The server will be available at `http://localhost:8021`. The first startup takes
 curl http://localhost:8021/health
 ```
 
-## Usage Examples
+## How an Agent Uses This Server
 
-The `execute_earthscience_code` tool accepts Python code. Common geospatial modules are auto-imported (`planetary_computer`, `pystac_client`, `rasterio`, `xarray`, `rioxarray`, `geopandas`, `numpy`, `pandas`, `shapely.geometry`).
+1. Read `skills/SKILL.md` to learn the Planetary Computer conventions
+   (sign the catalog, bbox is lon/lat, signed URLs expire after ~1 h,
+   how to search and load an array).
+2. Use the recipe to fetch the array(s) the user's request needs.
+3. Write the analysis (index computation, masking, statistics, plots)
+   directly in `execute_earthscience_code` — the skill does not cover
+   raster math because the LLM handles general scientific Python fine.
 
-### Search for Sentinel-2 imagery
-
-```python
-catalog = pystac_client.Client.open(
-    "https://planetarycomputer.microsoft.com/api/stac/v1",
-    modifier=planetary_computer.sign_inplace,
-)
-
-# Search for imagery over San Francisco
-search = catalog.search(
-    collections=["sentinel-2-l2a"],
-    bbox=[-122.5, 37.7, -122.3, 37.9],
-    datetime="2024-06-01/2024-06-30",
-    query={"eo:cloud_cover": {"lt": 20}},
-)
-
-items = search.item_collection()
-print(f"Found {len(items)} scenes")
-for item in items[:3]:
-    print(f"  {item.id} — {item.datetime} — cloud: {item.properties['eo:cloud_cover']}%")
-```
-
-### Compute NDVI from a Sentinel-2 scene
-
-```python
-catalog = pystac_client.Client.open(
-    "https://planetarycomputer.microsoft.com/api/stac/v1",
-    modifier=planetary_computer.sign_inplace,
-)
-
-search = catalog.search(
-    collections=["sentinel-2-l2a"],
-    bbox=[-122.5, 37.7, -122.3, 37.9],
-    datetime="2024-06-15",
-    query={"eo:cloud_cover": {"lt": 10}},
-    max_items=1,
-)
-item = next(search.items())
-
-# Read red (B04) and NIR (B08) bands
-red_href = item.assets["B04"].href
-nir_href = item.assets["B08"].href
-
-with rasterio.open(red_href) as src:
-    red = src.read(1, window=rasterio.windows.Window(0, 0, 512, 512)).astype(float)
-with rasterio.open(nir_href) as src:
-    nir = src.read(1, window=rasterio.windows.Window(0, 0, 512, 512)).astype(float)
-
-# Compute NDVI
-ndvi = (nir - red) / (nir + red + 1e-10)
-print(f"NDVI range: [{ndvi.min():.3f}, {ndvi.max():.3f}]")
-print(f"Mean NDVI: {ndvi.mean():.3f}")
-```
-
-### Load raster data with xarray
-
-```python
-catalog = pystac_client.Client.open(
-    "https://planetarycomputer.microsoft.com/api/stac/v1",
-    modifier=planetary_computer.sign_inplace,
-)
-
-search = catalog.search(
-    collections=["landsat-c2-l2"],
-    bbox=[-105.3, 39.9, -105.1, 40.1],
-    datetime="2024-07-01/2024-07-31",
-    max_items=1,
-)
-item = next(search.items())
-
-# Open surface reflectance band as xarray
-ds = xr.open_dataarray(item.assets["green"].href, engine="rasterio")
-print(ds)
-print(f"Shape: {ds.shape}, CRS: {ds.rio.crs}")
-```
-
-### List available datasets
-
-```python
-catalog = pystac_client.Client.open(
-    "https://planetarycomputer.microsoft.com/api/stac/v1",
-)
-
-collections = catalog.get_collections()
-for c in list(collections)[:10]:
-    print(f"{c.id}: {c.title}")
-```
+There is no state graph, no `query_state_graph`, no `load_skill` tool
+involvement on the server side. The skills are markdown the agent reads
+through its host; the server only runs the code.
 
 ## Data Access
 
-The Planetary Computer STAC API is **free and publicly accessible**. No API key or account is needed for:
-- Searching the catalog (STAC queries)
-- Downloading data (throttled for anonymous access)
-
-For higher throughput, the `planetary_computer.sign_inplace` modifier automatically handles SAS token signing — also free.
+The Planetary Computer STAC API is **free and publicly accessible**. No
+API key or account is needed for searching the catalog or downloading
+data (throttled for anonymous access). The
+`planetary_computer.sign_inplace` modifier signs asset URLs — also free,
+no account required.
 
 ## Authentication
 
-This example uses `create_noop_auth_config()` (no authentication required for the MCP server). For production deployments with Entra ID, see the [deployment README](../../deployment/mcp_server/README.md).
+This example uses `create_noop_auth_config()` (no authentication on the
+MCP server itself). The compose file binds to `127.0.0.1` only — the
+server must not be reachable off-host while running in no-op auth mode.
+For production deployments with Entra ID, see the
+[deployment README](../../deployment/mcp_server/README.md).

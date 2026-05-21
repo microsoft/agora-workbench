@@ -1,0 +1,4 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.34
+sse-starlette>=3.3.0
+pydantic>=2.10.4

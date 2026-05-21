@@ -5,8 +5,7 @@ Currently shipped:
     * :func:`maf.make_maf_client` — Microsoft Agent Framework
 
 Future factories (LangGraph, OpenAI Agents SDK, Pydantic AI, …) will land in
-sibling modules as those framework integrations begin. See
-``docs/LLM_ABSTRACTION_PLAN.md``.
+sibling modules as those framework integrations begin.
 """
 
 from __future__ import annotations
