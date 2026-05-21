@@ -548,7 +548,7 @@ class CodeExecutionServer:
 
         check_job_tool = execution_defaults.build_check_job_tool(self)
         self.mcp.tool(
-            name="check_job",
+            name=f"{self.environment_config.name}_check_job",
             description=(
                 "Check status/output for a background code execution job started with "
                 f"{self.get_tool_name()}(background=True)."
