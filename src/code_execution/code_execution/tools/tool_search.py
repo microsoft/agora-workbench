@@ -64,8 +64,28 @@ class ToolSearchBackend(ABC):
 
     Subclasses must implement :meth:`search`.  Implementations can be
     injected into :func:`~code_execution.server.CodeExecutionServer` via
-    ``register_search_tool()`` to expose server-side search as an MCP tool.
+    the ``tool_search_backend`` constructor parameter.
+
+    Lifecycle:
+        1. The backend is constructed (lightweight, no data required).
+        2. The server calls :meth:`index` with the tool catalog and skills.
+        3. If the backend exposes an ``initialize()`` method, the server calls it.
+        4. :meth:`search` is called for each user query.
+        5. If the backend exposes a ``close()`` method, the server calls it at shutdown.
     """
+
+    def index(self, tools: list[ToolInfo], skills: list[dict] | None = None, server_name: str = "") -> None:
+        """Receive the tool catalog and skill metadata to index.
+
+        Called by the server after construction but before any searches.
+        The default implementation is a no-op; subclasses should override
+        to ingest the provided data.
+
+        Args:
+            tools: Tool metadata from the server's tool registry.
+            skills: Optional skill metadata dicts discovered from domains.
+            server_name: Name of the hosting MCP server.
+        """
 
     @abstractmethod
     async def search(self, query: str, top: int = 5, category: SearchCategory = "all") -> list[ToolSearchResult]:

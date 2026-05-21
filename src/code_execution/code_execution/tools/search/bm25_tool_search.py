@@ -39,26 +39,22 @@ def _skill_info_text(skill: dict[str, Any]) -> str:
 class BM25ToolSearchBackend(ToolSearchBackend):
     """BM25-based implementation of :class:`~code_execution.tools.tool_search.ToolSearchBackend`.
 
-    Builds lightweight in-process BM25 indexes over tools and skills at
-    construction time.  Separate indexes ensure that ``category`` filtering
-    does not interfere with ``top`` ranking.
-
-    Args:
-        tools: Pre-computed list of tool metadata to index.
-        skills: Optional list of skill metadata dicts (from ``_discover_skills``).
-        server_name: Server name used to generate ``to_access`` instructions.
+    Builds lightweight in-process BM25 indexes over tools and skills.
+    Separate indexes ensure that ``category`` filtering does not interfere
+    with ``top`` ranking.
     """
 
-    def __init__(
-        self,
-        tools: list[ToolInfo],
-        skills: list[dict[str, Any]] | None = None,
-        server_name: str = "",
-    ):
+    def __init__(self) -> None:
         super().__init__()
-        self._server_name = server_name
+        self._server_name: str = ""
         self._tool_index: BM25Index[ToolInfo] = BM25Index()
         self._skill_index: BM25Index[dict[str, Any]] = BM25Index()
+
+    def index(self, tools: list[ToolInfo], skills: list[dict[str, Any]] | None = None, server_name: str = "") -> None:
+        """Build BM25 indexes over the provided tools and skills."""
+        self._server_name = server_name
+        self._tool_index = BM25Index()
+        self._skill_index = BM25Index()
 
         for tool in tools:
             self._tool_index.add(tool, _tool_info_text(tool))

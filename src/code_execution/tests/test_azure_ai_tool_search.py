@@ -132,7 +132,8 @@ class TestAzureAIToolSearchBackend:
     @pytest.mark.unit
     def test_constructs_with_tools(self, sample_tools, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(azure_tool_search, "get_search_credential_async", object)
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="Power Grid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="Power Grid")
         assert backend.server_name == "Power Grid"
         assert backend.index_name.startswith("tool-search-power-grid-")
         assert len(backend.index_name.rsplit("-", 1)[1]) == 8
@@ -158,7 +159,8 @@ class TestAzureAIToolSearchBackend:
             azure_tool_search.atexit, "register", lambda callback: registered_callbacks.append(callback)
         )
 
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="powergrid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="powergrid")
         await backend.initialize()
 
         assert backend.index_name.startswith("tool-search-powergrid-")
@@ -175,7 +177,8 @@ class TestAzureAIToolSearchBackend:
     @pytest.mark.asyncio
     async def test_search_returns_tool_search_results(self, sample_tools, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(azure_tool_search, "get_search_credential_async", object)
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="powergrid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="powergrid")
         backend._initialized = True
         backend._search_client = FakeSearchClient(
             responses=[
@@ -207,7 +210,8 @@ class TestAzureAIToolSearchBackend:
     @pytest.mark.asyncio
     async def test_search_falls_back_to_keyword_only(self, sample_tools, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.setattr(azure_tool_search, "get_search_credential_async", object)
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="powergrid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="powergrid")
         fake_search_client = FakeSearchClient(
             responses=[
                 RuntimeError("semantic unavailable"),
@@ -246,7 +250,8 @@ class TestAzureAIToolSearchBackend:
             azure_tool_search.atexit, "unregister", lambda callback: unregistered_callbacks.append(callback)
         )
 
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="powergrid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="powergrid")
         fake_index_client = FakeIndexClient()
         backend._search_client = FakeClosable()
         backend._index_client = fake_index_client
@@ -292,7 +297,8 @@ class TestAzureAIToolSearchBackend:
             lambda *, endpoint, index_name: deleted_indexes.append((endpoint, index_name)),
         )
 
-        backend = AzureAIToolSearchBackend(sample_tools, server_name="powergrid")
+        backend = AzureAIToolSearchBackend()
+        backend.index(sample_tools, server_name="powergrid")
         await backend.initialize()
 
         assert len(registered_callbacks) == 1

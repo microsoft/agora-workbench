@@ -1098,10 +1098,8 @@ class CodeExecutionServer:
         else:
             backend = create_tool_search_backend(
                 backend_type=self.environment_config.tool_search_backend,
-                tools=tool_infos,
-                server_name=server_name,
-                skills=skills,
             )
+        backend.index(tools=tool_infos, skills=skills, server_name=server_name)
         self._tool_search_backends.append(backend)
 
         LOGGER.info(

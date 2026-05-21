@@ -147,18 +147,14 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
 
     def __init__(
         self,
-        tools: list[ToolInfo],
-        server_name: str = "",
-        skills: list[dict[str, Any]] | None = None,
         index_name: str | None = None,
         endpoint: str | None = None,
     ):
         super().__init__()
-        derived_server_name = server_name or (tools[0].server_name if tools else "default")
-        self._tools = tools
-        self._skills = skills or []
-        self.server_name = derived_server_name
-        self.index_name = index_name or _build_ephemeral_index_name(derived_server_name)
+        self._tools: list[ToolInfo] = []
+        self._skills: list[dict[str, Any]] = []
+        self.server_name: str = ""
+        self.index_name = index_name or ""
         self.endpoint = endpoint or os.getenv(TOOL_SEARCH_ENDPOINT_ENV)
         self._credential = get_search_credential_async()
         self._index_client: SearchIndexClient | None = None
@@ -168,6 +164,14 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
         self._atexit_cleanup: Any | None = None
         self._index_created = False
         self._initialized = False
+
+    def index(self, tools: list[ToolInfo], skills: list[dict[str, Any]] | None = None, server_name: str = "") -> None:
+        """Store tool and skill metadata for later indexing during initialize()."""
+        self._tools = tools
+        self._skills = skills or []
+        self.server_name = server_name or (tools[0].server_name if tools else "default")
+        if not self.index_name:
+            self.index_name = _build_ephemeral_index_name(self.server_name)
 
     async def initialize(self) -> None:
         """Create a fresh index and upload tool documents. Call once at startup."""
