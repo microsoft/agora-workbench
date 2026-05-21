@@ -11,6 +11,7 @@ Authentication:
 """
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,14 @@ from azure.core.credentials_async import AsyncTokenCredential
 from azure.storage.blob.aio import BlobServiceClient
 
 LOGGER = logging.getLogger(__name__)
+
+# Tunable via environment variables for deployment-specific optimization.
+# Parallel streams for large blob downloads (default: 4).
+_BLOB_MAX_CONCURRENCY = int(os.getenv("MCP_BLOB_MAX_CONCURRENCY", "4"))
+# Chunk size per range request in bytes (default: 64 MB).
+_BLOB_CHUNK_SIZE = int(os.getenv("MCP_BLOB_CHUNK_SIZE", str(64 * 1024 * 1024)))
+# Files smaller than this are fetched in a single GET (default: 64 MB).
+_BLOB_MAX_SINGLE_GET = int(os.getenv("MCP_BLOB_MAX_SINGLE_GET", str(64 * 1024 * 1024)))
 
 
 class AssetFetcher(ABC):
@@ -83,10 +92,35 @@ class AssetFetcher(ABC):
 class BlobFetcher(AssetFetcher):
     """
     Fetcher for Azure Blob Storage / ADLS Gen2 assets.
+
+    Maintains a per-account client cache to amortize TCP/TLS handshake and
+    token acquisition costs across multiple fetches.
     """
 
     # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
+
+    def __init__(self, credential: AsyncTokenCredential | None = None):
+        super().__init__(credential=credential)
+        # Cache of account_url -> BlobServiceClient for connection reuse
+        self._clients: dict[str, BlobServiceClient] = {}
+
+    def _get_client(self, account_url: str) -> BlobServiceClient:
+        """Get or create a long-lived BlobServiceClient for the given account."""
+        if account_url not in self._clients:
+            self._clients[account_url] = BlobServiceClient(
+                account_url=account_url,
+                credential=self.credential,
+                max_single_get_size=_BLOB_MAX_SINGLE_GET,
+                max_chunk_get_size=_BLOB_CHUNK_SIZE,
+            )
+        return self._clients[account_url]
+
+    async def close(self) -> None:
+        """Close all cached blob service clients."""
+        for client in self._clients.values():
+            await client.close()
+        self._clients.clear()
 
     def can_handle(self, qualified_name: str) -> bool:
         """Check if this is a blob storage URL."""
@@ -126,24 +160,24 @@ class BlobFetcher(AssetFetcher):
         sanitized_url = f"{storage_account}/{container}/{blob_path}"
         LOGGER.info(f"Fetching blob asset: {sanitized_url}")
 
-        # Create authenticated client with managed identity credential
+        # Get or create authenticated client (connection reuse)
         account_url = f"https://{storage_account}.blob.core.windows.net"
+        client = self._get_client(account_url)
+        blob_client = client.get_blob_client(container=container, blob=blob_path)
 
-        async with BlobServiceClient(account_url=account_url, credential=self.credential) as client:
-            blob_client = client.get_blob_client(container=container, blob=blob_path)
+        # Download blob data with parallel range requests
+        stream = await blob_client.download_blob(max_concurrency=_BLOB_MAX_CONCURRENCY)
+        data = await stream.readall()
 
-            # Download blob data
-            stream = await blob_client.download_blob()
-            data = await stream.readall()
-
-            LOGGER.info(f"Successfully fetched {len(data)} bytes from {sanitized_url}")
-            return data
+        LOGGER.info(f"Successfully fetched {len(data)} bytes from {sanitized_url}")
+        return data
 
     async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
         """
         Fetch blob data and stream directly to a file.
 
         Streams data in chunks to avoid loading large files into memory.
+        Uses parallel range requests for improved throughput on large blobs.
 
         Args:
             qualified_name: Blob URL
@@ -164,26 +198,25 @@ class BlobFetcher(AssetFetcher):
         sanitized_url = f"{storage_account}/{container}/{blob_path}"
         LOGGER.info(f"Streaming blob asset to file: {sanitized_url}")
 
-        # Create authenticated client with managed identity credential
+        # Get or create authenticated client (connection reuse)
         account_url = f"https://{storage_account}.blob.core.windows.net"
+        client = self._get_client(account_url)
+        blob_client = client.get_blob_client(container=container, blob=blob_path)
 
-        async with BlobServiceClient(account_url=account_url, credential=self.credential) as client:
-            blob_client = client.get_blob_client(container=container, blob=blob_path)
+        # Ensure parent directory exists
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Ensure parent directory exists
-            dest_path.parent.mkdir(parents=True, exist_ok=True)
+        # Download with parallel range requests and stream to file
+        bytes_written = 0
+        stream = await blob_client.download_blob(max_concurrency=_BLOB_MAX_CONCURRENCY)
 
-            # Download blob data and stream to file in chunks
-            bytes_written = 0
-            stream = await blob_client.download_blob()
+        with open(dest_path, "wb") as f:
+            async for chunk in stream.chunks():
+                f.write(chunk)
+                bytes_written += len(chunk)
 
-            with open(dest_path, "wb") as f:
-                async for chunk in stream.chunks():
-                    f.write(chunk)
-                    bytes_written += len(chunk)
-
-            LOGGER.info(f"Successfully streamed {bytes_written} bytes to {dest_path}")
-            return bytes_written
+        LOGGER.info(f"Successfully streamed {bytes_written} bytes to {dest_path}")
+        return bytes_written
 
     def _parse_blob_url(self, url: str) -> tuple[str, str, str]:
         """
