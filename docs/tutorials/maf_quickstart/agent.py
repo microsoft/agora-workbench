@@ -36,9 +36,9 @@ builds a BM25 index over its own ``ToolRegistry`` at startup and exposes
 it as an MCP tool. No client-side search infrastructure or middleware is
 required.
 
-Both domain servers ship with a SKILL.md that documents their state-graph
-workflows. The tutorial reads those files at startup and injects them into
-the agent's system prompt so the agent uses tools in the recommended order.
+Both domain servers ship with SKILL.md workflows that are consumed through MCP
+skill tools: discover them with ``search_*_tools(category="skills")`` and
+load them on demand with ``load_*_skill``.
 
 Run from the repo root:
 
@@ -77,17 +77,6 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 load_dotenv(REPO_ROOT / ".env")
 
 LOGGER = logging.getLogger("maf_quickstart")
-
-# Path to the chemistry domain's SKILL.md — a portable workflow guide
-# (state graph, tool ordering, common pitfalls) that we inject into the
-# agent's instructions so it knows how to chain the typed tools.
-CHEMISTRY_SKILL_PATH = (
-    REPO_ROOT / "src" / "domain_examples" / "chemistry" / "skills" / "SKILL.md"
-)
-ENERGYSYSTEMS_SKILL_PATH = (
-    REPO_ROOT / "src" / "domain_examples" / "energysystems" / "skills" / "SKILL.md"
-)
-
 
 # ---------------------------------------------------------------------------
 # Step A — build the chat client (BYO LLM)
@@ -219,31 +208,8 @@ async def step_c2_energysystems_tool():
 # ---------------------------------------------------------------------------
 # Step D — assemble the agent
 # ---------------------------------------------------------------------------
-def _load_skill(path: Path, label: str) -> str:
-    """Read a domain SKILL.md, stripping the YAML frontmatter.
-
-    Skills are portable workflow guides that travel with the domain. Injecting
-    one into the system prompt is the simplest way to teach the agent how to
-    chain the typed tools (state graph, common pitfalls, default parameters).
-    """
-    if not path.is_file():
-        LOGGER.warning("%s SKILL.md not found at %s", label, path)
-        return ""
-    text = path.read_text(encoding="utf-8")
-    # Strip the leading YAML frontmatter (--- ... ---) — it's metadata for the
-    # skill loader, not useful in a system prompt.
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            text = text[end + 4 :].lstrip()
-    return text
-
-
 def step_d_build_agent(chat_client, tools):
     """Compose the chat client + tools into a MAF agent."""
-    chem_skill = _load_skill(CHEMISTRY_SKILL_PATH, "Chemistry")
-    energy_skill = _load_skill(ENERGYSYSTEMS_SKILL_PATH, "Energy Systems")
-
     instructions = (
         "You are a scientific research assistant with expertise in chemistry\n"
         "and power systems engineering.\n"
@@ -260,11 +226,17 @@ def step_d_build_agent(chat_client, tools):
         "      chemistry domain's typed helper catalog. Call with a\n"
         "      `query` string and optional `top` (default 5). Pass\n"
         "      `query=\"\"` with `top=999` to list every helper.\n"
+        "  * chem_load_chemistry_skill — load a chemistry skill by name\n"
+        "      (discover names via `chem_search_chemistry_tools` with\n"
+        "      `category='skills'`).\n"
         "  * energy_execute_energysystems_code — run Python in a kernel\n"
         "      with PyPSA pre-imported (`pypsa`, `np`, `pd`, `nx`, `plt`).\n"
         "  * energy_search_energysystems_tools — server-side BM25 search\n"
         "      over the energy systems domain's typed helper catalog. Same\n"
         "      `query` / `top` signature as `chem_search_chemistry_tools`.\n"
+        "  * energy_load_energysystems_skill — load an energy systems skill\n"
+        "      by name (discover names via `energy_search_energysystems_tools`\n"
+        "      with `category='skills'`).\n"
         "\n"
         "Inside chem_execute_chemistry_code the following typed helpers are\n"
         "available as plain Python functions — no imports needed:\n"
@@ -291,6 +263,9 @@ def step_d_build_agent(chat_client, tools):
         "Each returns a dict; prefer them over hand-rolled PyPSA code.\n"
         "\n"
         "General workflow:\n"
+        "  1. Discover and load the matching domain skill before starting:\n"
+        "     call `*_search_*_tools` with `category='skills'`, then\n"
+        "     `*_load_*_skill`.\n"
         "  1. If the user asks about datasets, call search_data.\n"
         "  2. For chemistry work, call chem_execute_chemistry_code. Inside the\n"
         "     code, call the typed helpers above (e.g.\n"
@@ -303,24 +278,12 @@ def step_d_build_agent(chat_client, tools):
         "     first for chemistry, define_network first for energy systems.\n"
         "  5. Report results in natural language with the key numbers inline.\n"
     )
-    if chem_skill:
-        instructions += "\n---\n# Chemistry skill (injected from SKILL.md)\n\n"
-        instructions += chem_skill
-    if energy_skill:
-        instructions += "\n---\n# Energy Systems skill (injected from SKILL.md)\n\n"
-        instructions += energy_skill
-
     agent = chat_client.as_agent(
         name="quickstart_agent",
         instructions=instructions,
         tools=tools,
     )
-    LOGGER.info(
-        "Step D: built agent with %d tool(s); skills injected: chemistry=%s, energy=%s",
-        len(tools),
-        bool(chem_skill),
-        bool(energy_skill),
-    )
+    LOGGER.info("Step D: built agent with %d tool(s)", len(tools))
     return agent
 
 
