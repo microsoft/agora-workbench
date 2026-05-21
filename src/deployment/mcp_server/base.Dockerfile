@@ -54,6 +54,11 @@ RUN mkdir -p /opt/wheelhouse && \
 # Copy shared code (used by all servers)
 COPY code_execution/code_execution /app/code_execution
 COPY code_execution/requirements.txt /app/requirements.txt
+# utilities/ is imported transitively by code_execution (e.g.
+# code_execution/tools/search/azure_ai_tool_search.py does
+# ``from utilities.auth import ...``), so it must live alongside
+# code_execution at /app to be importable.
+COPY utilities /app/utilities
 
 # Install Python dependencies
 RUN pip install --no-input -r /app/requirements.txt
