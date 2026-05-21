@@ -73,6 +73,7 @@ class Session(Generic[T]):
         self.token_claims = token_claims
         self.status = "created"
         self.session_type = session_type
+        self._asset_counter: int = 0
         self._status_history = [("created", datetime.now())]
 
         # Initialize data manager for DataLake asset access

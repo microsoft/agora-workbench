@@ -526,11 +526,6 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             # Inject tool proxies on first use of this session
             await server._inject_tool_proxies(session.session_id)
 
-            # Initialize namespace if new session
-            if "namespace" not in session.data:
-                session.data["namespace"] = {}
-                LOGGER.info(f"Initialized new namespace for session {session.session_id}")
-
             # --- Auto-extract assets from code ---
             # Single-pass extraction: refs is the deduplicated list,
             # all_occurrences maps each value to every matching AST node,
@@ -542,11 +537,8 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             asset_counter = 0
             has_assets = False
 
-            # Build the set of names to avoid: names in user code + session namespace
+            # Build the set of names to avoid from user code
             occupied_names = code_names
-            namespace = session.data.get("namespace")
-            if isinstance(namespace, dict):
-                occupied_names.update(namespace.keys())
 
             for _, kind, value in refs:
                 var_name, asset_counter = generate_safe_varname(
@@ -609,7 +601,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             result = await server._execute_code_with_tracing(code, timeout)
             result.description = description
 
-            # Save the session to persist the updated namespace
+            # Save the session to persist updated state
             server.session_manager.update_session(session.session_id, session)
 
             # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
