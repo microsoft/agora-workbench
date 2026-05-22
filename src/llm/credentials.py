@@ -15,7 +15,7 @@ def default_credential_factory(scope: str) -> Callable[[], Any]:
 
     The returned callable is what :class:`~llm.spec.ModelSpec`
     stores in its ``credential_factory`` field. Each call constructs a fresh
-    bearer-token provider via :func:`utilities.auth.providers.get_token_provider`,
+    bearer-token provider via :func:`code_execution.auth.get_token_provider`,
     which itself uses the standard ``AzureCli → ManagedIdentity`` chain.
 
     Parameters

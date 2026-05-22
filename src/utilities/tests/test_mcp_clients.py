@@ -163,7 +163,7 @@ class TestBuildHttpClient:
 
     @pytest.mark.asyncio
     async def test_non_local_uses_token_provider(self):
-        with patch("utilities.auth.get_token_provider") as mock_get:
+        with patch("code_execution.auth.get_token_provider") as mock_get:
             mock_provider = MagicMock(return_value="real-token")
             mock_get.return_value = mock_provider
             client = _build_http_client("https://example.com/mcp", scope="api://x/.default")

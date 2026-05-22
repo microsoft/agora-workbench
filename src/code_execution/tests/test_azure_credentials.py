@@ -1,4 +1,4 @@
-"""Tests for service-specific credential factories in auth.providers."""
+"""Tests for service-specific credential factories in code_execution.auth.azure_credentials."""
 
 import pytest
 from unittest.mock import patch, MagicMock

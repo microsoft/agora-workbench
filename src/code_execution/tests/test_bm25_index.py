@@ -1,4 +1,4 @@
-"""Tests for the generic BM25 index in :mod:`utilities.bm25`."""
+"""Tests for the generic BM25 index in :mod:`code_execution.tools.search._bm25`."""
 
 import pytest
 
