@@ -1304,6 +1304,7 @@ class CodeExecutionServer:
                     try:
                         session_id = ctx.session_id
                     except (RuntimeError, AttributeError):
+                        # Session context may be unavailable in some call paths; continue without session_id.
                         pass
                 result = await _ls_func(skill_name=skill_name)
                 self.activity_publisher.publish_nowait(
