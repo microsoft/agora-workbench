@@ -1,6 +1,7 @@
 """Default code-execution behavior for ``CodeExecutionServer``."""
 
 import ast
+import asyncio
 import json
 import logging
 from typing import Callable, Optional, TYPE_CHECKING
@@ -467,6 +468,35 @@ def _build_disallowed_actions_description(server: "CodeExecutionServer") -> str:
     )
 
 
+async def _publish_job_finished_when_done(
+    server: "CodeExecutionServer", session_id: str, job_id: str
+) -> None:
+    """Emit a ``job_finished`` activity event once a background job terminates."""
+    try:
+        final = await server.session_manager.await_background_job(job_id)
+    except Exception:
+        return
+    if final is None:
+        return
+    server.activity_publisher.publish_nowait(
+        {
+            "type": "job_finished",
+            "description": f"job {job_id} {final.get('status', 'unknown')}",
+            "session_id": session_id,
+            "job_id": job_id,
+            "success": bool(final.get("success")),
+            "stdout": final.get("stdout"),
+            "stderr": final.get("stderr"),
+            "error": final.get("error"),
+            "duration_ms": (
+                float(final.get("elapsed_seconds", 0.0)) * 1000.0
+                if final.get("elapsed_seconds") is not None
+                else None
+            ),
+        }
+    )
+
+
 def build_tool(server: "CodeExecutionServer") -> Callable:
     """Setup the general code execution tool."""
 
@@ -586,15 +616,22 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
                 if description:
                     job_result["description"] = description
                 server.session_manager.update_session(session.session_id, session)
+                bg_session_id = session.session_id
+                bg_job_id = job_result.get("job_id")
                 server.activity_publisher.publish_nowait(
                     {
                         "type": "job_started",
                         "description": description,
                         "code": code,
-                        "session_id": session.session_id,
-                        "job_id": job_result.get("job_id"),
+                        "session_id": bg_session_id,
+                        "job_id": bg_job_id,
                     }
                 )
+                if bg_job_id:
+                    asyncio.create_task(
+                        _publish_job_finished_when_done(server, bg_session_id, bg_job_id),
+                        name=f"activity-job-finished-{bg_job_id}",
+                    )
                 return json.dumps(job_result, indent=2)
 
             # Execute code with persistent namespace from session

@@ -91,9 +91,23 @@
         white-space: nowrap;
       }
       .badge.code_executed, .badge.code_failed { background: #1f6feb33; color: #79c0ff; }
-      .badge.job_started { background: #ffa65733; color: #ffa657; }
-      .badge.tools_listed { background: #d2a8ff22; color: #d2a8ff; }
+      .badge.job_started, .badge.job_finished { background: #ffa65733; color: #ffa657; }
       .badge.push_object_sent, .badge.push_object_received { background: #56d36433; color: #56d364; }
+      .badge.tool_search, .badge.skill_loaded, .badge.workflow_planned { background: #d2a8ff22; color: #d2a8ff; }
+      .badge.batch_cancelled { background: #f8514922; color: #f85149; }
+      .orch-chip {
+        display: inline-block;
+        font-size: 11px;
+        padding: 1px 6px;
+        margin: 2px 4px 0 0;
+        border-radius: 3px;
+        background: #21262d;
+        color: #d2a8ff;
+      }
+      .orch-chip.skill { color: #ffa657; }
+      .kv { color: #6e7681; font-size: 11px; margin-top: 2px; }
+      .kv span { margin-right: 10px; }
+      .kv b { color: #c9d1d9; font-weight: normal; }
       .tool-name {
         display: inline-block;
         font-size: 11px;
@@ -196,8 +210,8 @@
     <script>
       const TYPE_GROUPS = {
         exec:  ["code_executed", "code_failed"],
-        job:   ["job_started"],
-        tools: ["tools_listed"],
+        job:   ["job_started", "job_finished", "batch_cancelled"],
+        orch:  ["tool_search", "skill_loaded", "workflow_planned"],
         push:  ["push_object_sent", "push_object_received"],
       };
       const TYPE_TO_GROUP = {};
@@ -341,17 +355,40 @@
           wrap.appendChild(d);
         }
 
-        // tools_listed: show the catalog the agent received inline.
-        if (e.type === "tools_listed" && Array.isArray(e.tool_names) && e.tool_names.length) {
-          const list = document.createElement("div");
-          list.style.marginTop = "4px";
-          for (const name of e.tool_names) {
-            const chip = document.createElement("span");
-            chip.className = "tool-name";
-            chip.textContent = name;
-            list.appendChild(chip);
+        // tool_search: show the query and matched tool/skill names inline.
+        if (e.type === "tool_search") {
+          const matched = [
+            ...(Array.isArray(e.matched_tools) ? e.matched_tools : []),
+            ...(Array.isArray(e.matched_skills) ? e.matched_skills : []),
+          ];
+          if (matched.length) {
+            const list = document.createElement("div");
+            list.style.marginTop = "4px";
+            for (const name of matched) {
+              const chip = document.createElement("span");
+              chip.className = "orch-chip" + ((e.matched_skills || []).includes(name) ? " skill" : "");
+              chip.textContent = name;
+              list.appendChild(chip);
+            }
+            wrap.appendChild(list);
           }
-          wrap.appendChild(list);
+        }
+
+        // workflow_planned: show domain/mode/transition inline.
+        if (e.type === "workflow_planned") {
+          const kv = document.createElement("div");
+          kv.className = "kv";
+          const parts = [];
+          if (e.mode) parts.push(`mode <b>${e.mode}</b>`);
+          if (e.domain) parts.push(`domain <b>${e.domain}</b>`);
+          if (e.current_state || e.target_state) {
+            parts.push(`<b>${e.current_state || "?"}</b> → <b>${e.target_state || "?"}</b>`);
+          }
+          if (e.tool_name) parts.push(`tool <b>${e.tool_name}</b>`);
+          if (parts.length) {
+            kv.innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
+            wrap.appendChild(kv);
+          }
         }
 
         // tool_calls: promoted to a first-class lane (this is the headline content for "what did the agent do").

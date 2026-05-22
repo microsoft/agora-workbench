@@ -100,11 +100,13 @@ class TestBM25ToolSearchBackend:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_search_empty_query(self, sample_tools):
+    async def test_search_empty_query_dumps_catalog(self, sample_tools):
+        """Empty query is the documented catalog-dump path (see ``search()`` docstring)."""
         backend = BM25ToolSearchBackend()
         backend.index(tools=sample_tools)
-        results = await backend.search("")
-        assert results == []
+        results = await backend.search("", top=10)
+        assert {r.name for r in results} == {t.name for t in sample_tools}
+        assert all(r.score == 0.0 for r in results)
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -271,3 +273,33 @@ class TestBM25SkillSearch:
         results = await backend.search("drug", top=10, category="all")
         scores = [r.score for r in results]
         assert scores == sorted(scores, reverse=True)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_empty_query_returns_full_catalog(self, sample_tools, sample_skills):
+        """Empty query is the documented catalog-dump path; must return every indexed item."""
+        backend = BM25ToolSearchBackend()
+        backend.index(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("", top=999, category="all")
+        names = {r.name for r in results}
+        assert names == {t.name for t in sample_tools} | {s["name"] for s in sample_skills}
+        # Catalog dump entries have score 0 — agents shouldn't read it as a ranking signal.
+        assert all(r.score == 0.0 for r in results)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_empty_query_respects_top(self, sample_tools, sample_skills):
+        backend = BM25ToolSearchBackend()
+        backend.index(tools=sample_tools, skills=sample_skills, server_name="chemistry")
+        results = await backend.search("", top=1, category="all")
+        # ``top`` caps each category independently, so we expect 1 tool + 1 skill.
+        types = sorted(r.type for r in results)
+        assert types == ["skill", "tool"]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_whitespace_query_returns_full_catalog(self, sample_tools):
+        backend = BM25ToolSearchBackend()
+        backend.index(tools=sample_tools, server_name="chemistry")
+        results = await backend.search("   ", top=10, category="tools")
+        assert {r.name for r in results} == {t.name for t in sample_tools}

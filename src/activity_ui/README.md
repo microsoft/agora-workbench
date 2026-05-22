@@ -109,16 +109,19 @@ If `ACTIVITY_UI_URL` is left unset, the publisher is a silent no-op.
 
 ## Event schema
 
-All events are flat `ActivityEvent` dicts ([`models.py`](models.py)). Six event
-types currently fire:
+All events are flat `ActivityEvent` dicts ([`models.py`](models.py)). The currently-fired event types:
 
 | Type | Fired by | Carries |
 |---|---|---|
 | `code_executed` | Successful sync `execute_code`; successful parallel child | `code`, `stdout`, `stderr`, `success`, `duration_ms`, `tool_calls`, `session_id`, `batch_id` (parallel) |
 | `code_failed` | Failed sync `execute_code`; failed/cancelled parallel child | Same fields with `success=false`, `error` |
 | `job_started` | `execute_code(background=True)` | `code`, `job_id`, `session_id` |
-| `tools_listed` | `list_domain_tools` is called | `tool_names`, `session_id` |
-| `push_object_sent` | `push_object_to_*` (sender side) | `transfer_id`, `variable_name`, `target_server`, `session_id` |
+| `job_finished` | Background job reaches a terminal state | `job_id`, `session_id`, `success`, `stdout`, `stderr`, `error`, `duration_ms` |
+| `tool_search` | `search_{name}_tools` returns | `query`, `category`, `matched_tools`, `matched_skills`, `session_id`, `success` |
+| `skill_loaded` | `load_{name}_skill` returns | `skill_name`, `session_id`, `success` |
+| `workflow_planned` | `plan_{name}_workflow` returns | `domain`, `mode`, `current_state`, `target_state`, `tool_name`, `session_id` |
+| `batch_cancelled` | `{name}_cancel_batch` succeeds or fails | `batch_id`, `session_id`, `success`, `error` |
+| `push_object_sent` | `{name}_push_object` (sender side) | `transfer_id`, `variable_name`, `target_server`, `session_id` |
 | `push_object_received` | The receiving server's `/receive_transfer` endpoint | `transfer_id`, `variable_name`, `source_server`, `session_id` |
 
 Every event also carries `server` (the MCP server's name) and `timestamp`
@@ -163,7 +166,7 @@ You can POST synthetic events:
 ```bash
 curl -X POST http://127.0.0.1:8030/events \
   -H 'Content-Type: application/json' \
-  -d '{"type":"tools_listed","server":"chemistry","tool_names":["parse_molecule","compute_descriptors"],"session_id":"test-sess"}'
+  -d '{"type":"tool_search","server":"chemistry","query":"molecule","matched_tools":["parse_molecule","compute_descriptors"],"matched_skills":[],"session_id":"test-sess"}'
 ```
 
 Then refresh the page in the browser. The event should appear in a
@@ -182,9 +185,13 @@ These are intentional, not bugs:
 - **No real-time intra-call streaming.** Events fire at MCP-tool-call
   boundaries, not while code is running. A long `execute_code` shows
   nothing until it completes, then the whole event lands.
-- **No `job_finished` for `background=True`.** `job_started` carries the
-  code (the actual product); the terminal status is not emitted.
-- **No event for `cancel_batch`.** Agent's cancel decision is not visible.
+- **No events for poll-shaped tools.** `check_job` and `check_batch`
+  intentionally do not publish — they are just status reads. The
+  underlying job/batch is summarised at lifecycle transitions
+  (`job_started`/`job_finished`, `batch_cancelled`) instead.
+- **No events for session-management tools.** `list_sessions`,
+  `get_session_info`, `close_session`, `inspect_session` are
+  housekeeping calls and do not surface in the feed.
 
 ## Files
 
