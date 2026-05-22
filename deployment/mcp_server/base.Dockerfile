@@ -3,7 +3,7 @@
 # Contains system dependencies, uv, miniforge, and the code_execution package.
 # User server images should extend the locally built or published base image.
 #
-# Build from the repo's src/ directory:
+# Build from the repository root:
 #   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 #
 # Then create your own Dockerfile:
@@ -52,8 +52,8 @@ RUN mkdir -p /opt/wheelhouse && \
     && ls -1 /opt/wheelhouse | head -n 5
 
 # Copy shared code (used by all servers)
-COPY code_execution/code_execution /app/code_execution
-COPY code_execution/requirements.txt /app/requirements.txt
+COPY src/code_execution/code_execution /app/code_execution
+COPY src/code_execution/requirements.txt /app/requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-input -r /app/requirements.txt
