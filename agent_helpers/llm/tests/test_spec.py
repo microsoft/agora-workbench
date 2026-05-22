@@ -6,7 +6,7 @@ import dataclasses
 
 import pytest
 
-from llm import ModelSpec
+from agent_helpers.llm import ModelSpec
 
 
 # ---------------------------------------------------------------------------
@@ -29,9 +29,7 @@ class TestPostInitValidation:
 
     def test_whitespace_only_api_version_raises(self):
         with pytest.raises(ValueError, match="api_version must be a non-empty string"):
-            ModelSpec(
-                provider="openai", model="m", api_key="k", api_version="   "
-            )
+            ModelSpec(provider="openai", model="m", api_key="k", api_version="   ")
 
     @pytest.mark.parametrize("provider", ["azure_openai", "ollama", "litellm"])
     def test_missing_endpoint_for_provider_raises(self, provider):
@@ -313,9 +311,7 @@ class TestFromEnvLiteLLM:
         assert spec.api_key == "sk-litellm"
         assert spec.model == "claude-3-5-sonnet"
 
-    @pytest.mark.parametrize(
-        "missing", ["LITELLM_BASE_URL", "LITELLM_API_KEY", "LITELLM_MODEL"]
-    )
+    @pytest.mark.parametrize("missing", ["LITELLM_BASE_URL", "LITELLM_API_KEY", "LITELLM_MODEL"])
     def test_missing_required_raises(self, clean_env, missing):
         envs = {
             "LITELLM_BASE_URL": "http://localhost:4000",

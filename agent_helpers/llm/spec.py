@@ -79,35 +79,23 @@ class ModelSpec:
             raise ValueError("ModelSpec.model must be a non-empty string")
 
         if self.endpoint is not None and not self.endpoint.strip():
-            raise ValueError(
-                "ModelSpec.endpoint must be a non-empty string when provided"
-            )
+            raise ValueError("ModelSpec.endpoint must be a non-empty string when provided")
 
         if self.api_version is not None and not self.api_version.strip():
-            raise ValueError(
-                "ModelSpec.api_version must be a non-empty string when provided"
-            )
+            raise ValueError("ModelSpec.api_version must be a non-empty string when provided")
 
         if self.provider in {"azure_openai", "ollama", "litellm"} and not self.endpoint:
-            raise ValueError(
-                f"ModelSpec.endpoint is required for provider {self.provider!r}"
-            )
+            raise ValueError(f"ModelSpec.endpoint is required for provider {self.provider!r}")
 
         if self.provider == "azure_openai" and not self.api_version:
-            raise ValueError(
-                "ModelSpec.api_version is required for provider 'azure_openai'"
-            )
+            raise ValueError("ModelSpec.api_version is required for provider 'azure_openai'")
 
         has_key = bool(self.api_key)
         has_factory = self.credential_factory is not None
         if has_key and has_factory:
-            raise ValueError(
-                "ModelSpec accepts api_key OR credential_factory, not both"
-            )
+            raise ValueError("ModelSpec accepts api_key OR credential_factory, not both")
         if not has_key and not has_factory:
-            raise ValueError(
-                "ModelSpec requires either api_key or credential_factory"
-            )
+            raise ValueError("ModelSpec requires either api_key or credential_factory")
 
     # ------------------------------------------------------------------
     # Constructors
@@ -183,9 +171,7 @@ class ModelSpec:
     def _from_env_azure_openai(cls, prefix: str, auth_mode: AuthMode) -> "ModelSpec":
         endpoint = _require_env(f"{prefix}_ENDPOINT")
         api_version = _require_env("API_VERSION")
-        model = os.getenv(f"{prefix}_DEPLOYMENT_NAME") or _require_env(
-            "MODEL_DEPLOYMENT_NAME"
-        )
+        model = os.getenv(f"{prefix}_DEPLOYMENT_NAME") or _require_env("MODEL_DEPLOYMENT_NAME")
         scope = os.getenv("AOAI_SCOPE", _DEFAULT_AOAI_SCOPE)
 
         # Resolve auth based on the explicit mode.
@@ -258,9 +244,7 @@ class ModelSpec:
 def _require_env(name: str) -> str:
     value = os.getenv(name)
     if not value:
-        raise ValueError(
-            f"Environment variable {name!r} is required to build a ModelSpec"
-        )
+        raise ValueError(f"Environment variable {name!r} is required to build a ModelSpec")
     return value
 
 

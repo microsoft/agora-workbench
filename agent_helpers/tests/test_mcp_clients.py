@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from utilities.mcp_clients import (
+from agent_helpers.mcp_clients import (
     McpServerConfig,
     _build_http_client,
     _is_local,
@@ -225,7 +225,7 @@ class TestConnectMcpServers:
                 "http://localhost:8002/health": "ok",
             }
         )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
+        with patch("agent_helpers.mcp_clients.httpx.AsyncClient", Fake):
             servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha", "beta"]
         for s in servers:
@@ -239,7 +239,7 @@ class TestConnectMcpServers:
                 "http://localhost:8002/health": "raise",
             }
         )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
+        with patch("agent_helpers.mcp_clients.httpx.AsyncClient", Fake):
             with caplog.at_level(logging.WARNING):
                 servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha"]
@@ -255,7 +255,7 @@ class TestConnectMcpServers:
                 "http://localhost:8002/health": "5xx",
             }
         )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
+        with patch("agent_helpers.mcp_clients.httpx.AsyncClient", Fake):
             servers = await connect_mcp_servers(_TWO_LOCAL)
         assert [s.name for s in servers] == ["alpha"]
         for s in servers:
@@ -269,7 +269,7 @@ class TestConnectMcpServers:
                 "http://localhost:8002/health": "raise",
             }
         )
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
+        with patch("agent_helpers.mcp_clients.httpx.AsyncClient", Fake):
             servers = await connect_mcp_servers(_TWO_LOCAL)
         assert servers == []
 
@@ -285,7 +285,7 @@ servers:
 """,
         )
         Fake = _make_async_client_factory({"http://localhost:8001/health": "ok"})
-        with patch("utilities.mcp_clients.httpx.AsyncClient", Fake):
+        with patch("agent_helpers.mcp_clients.httpx.AsyncClient", Fake):
             configs = load_server_registry(path)
             servers = await connect_mcp_servers(configs)
         assert [s.name for s in servers] == ["alpha"]

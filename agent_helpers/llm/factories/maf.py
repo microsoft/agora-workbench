@@ -62,9 +62,7 @@ def make_maf_client(spec: ModelSpec) -> "OpenAIChatClient":
         if spec.endpoint:
             kwargs["base_url"] = spec.endpoint
     else:  # pragma: no cover — Provider Literal makes this unreachable
-        raise NotImplementedError(
-            f"make_maf_client does not support provider={spec.provider!r}"
-        )
+        raise NotImplementedError(f"make_maf_client does not support provider={spec.provider!r}")
 
     # Auth: ModelSpec.__post_init__ guarantees exactly one of these is set.
     # Note: ``credential`` (Entra) only makes sense for Azure OpenAI; the

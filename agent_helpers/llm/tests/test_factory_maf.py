@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("agent_framework")
 
-from llm import ModelSpec  # noqa: E402
-from llm.factories import make_maf_client  # noqa: E402
+from agent_helpers.llm import ModelSpec  # noqa: E402
+from agent_helpers.llm.factories import make_maf_client  # noqa: E402
 
 
 @pytest.fixture
