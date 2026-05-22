@@ -1,6 +1,8 @@
 {
     "include": [
-        "src"
+        "src",
+        "agent_helpers",
+        "examples"
     ],
     "exclude": [
         "**/__pycache__",
@@ -13,7 +15,8 @@
         "src/domains/vitrimer_vae/server/tools/src/vitrimer_vae_tools/vae"
     ],
     "extraPaths": [
-        "src"
+        "src",
+        "."
     ],
     "pythonVersion": "3.11",
     "pythonPlatform": "Linux",

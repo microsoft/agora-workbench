@@ -41,12 +41,12 @@ maf = ["agent-framework>=1.2.0"]
 homepage = "https://github.com/msr-central/agora-agent"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+package-dir = {"" = "src", "agent_helpers" = "agent_helpers"}
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["code_execution*", "utilities*", "planning*", "activity_ui*", "llm*"]
-exclude = ["tests*", "scripts*"]
+where = ["src", "."]
+include = ["code_execution*", "agent_helpers*"]
+exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]
@@ -66,7 +66,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/code_execution/tests", "src/domain_examples/tests", "src/llm/tests", "src/utilities/tests"]
+testpaths = ["src/code_execution/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
