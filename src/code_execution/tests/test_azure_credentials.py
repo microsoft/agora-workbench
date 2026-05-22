@@ -1,11 +1,11 @@
-"""Tests for service-specific credential factories in auth.providers."""
+"""Tests for service-specific credential factories in code_execution.auth.azure_credentials."""
 
 import pytest
 from unittest.mock import patch, MagicMock
 
 from azure.core.credentials import AzureKeyCredential
 
-from utilities.auth.providers import (
+from code_execution.auth.azure_credentials import (
     get_purview_credential,
     get_search_credential,
     get_search_credential_async,
@@ -29,9 +29,9 @@ class TestGetSearchCredential:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_returns_chained_credential_when_no_api_key(self, mock_chained, mock_managed, mock_cli):
         """When no API key is set, returns ChainedTokenCredential (Entra)."""
         mock_credential = MagicMock()
@@ -44,9 +44,9 @@ class TestGetSearchCredential:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_credential_chain_order(self, mock_chained, mock_managed, mock_cli):
         """Credential chain should be CLI first, then Managed Identity."""
         mock_cli_instance = MagicMock()
@@ -66,9 +66,9 @@ class TestGetSearchCredential:
         {"DEFAULT_IDENTITY_CLIENT_ID": "my-client-id"},
         clear=True,
     )
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_passes_managed_identity_client_id(self, mock_chained, mock_managed, mock_cli):
         """DEFAULT_IDENTITY_CLIENT_ID is passed to ManagedIdentityCredential."""
         get_search_credential()
@@ -88,9 +88,9 @@ class TestGetSearchCredentialAsync:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("utilities.auth.providers.AsyncAzureCliCredential")
-    @patch("utilities.auth.providers.AsyncManagedIdentityCredential")
-    @patch("utilities.auth.providers.AsyncChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AsyncAzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.AsyncManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.AsyncChainedTokenCredential")
     def test_returns_async_chained_credential_when_no_api_key(self, mock_chained, mock_managed, mock_cli):
         """When no API key is set, returns async ChainedTokenCredential."""
         mock_credential = MagicMock()
@@ -157,9 +157,9 @@ class TestGetPurviewCredential:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_returns_chained_credential(self, mock_chained, mock_managed, mock_cli):
         """Returns ChainedTokenCredential (Entra ID chain)."""
         mock_credential = MagicMock()
@@ -172,9 +172,9 @@ class TestGetPurviewCredential:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_credential_chain_order(self, mock_chained, mock_managed, mock_cli):
         """Credential chain should be CLI first, then Managed Identity."""
         mock_cli_instance = MagicMock()
@@ -194,9 +194,9 @@ class TestGetPurviewCredential:
         {"DEFAULT_IDENTITY_CLIENT_ID": "purview-client-id"},
         clear=True,
     )
-    @patch("utilities.auth.providers.AzureCliCredential")
-    @patch("utilities.auth.providers.ManagedIdentityCredential")
-    @patch("utilities.auth.providers.ChainedTokenCredential")
+    @patch("code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_passes_managed_identity_client_id(self, mock_chained, mock_managed, mock_cli):
         """DEFAULT_IDENTITY_CLIENT_ID is passed to ManagedIdentityCredential."""
         get_purview_credential()

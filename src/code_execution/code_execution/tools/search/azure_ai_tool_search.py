@@ -34,7 +34,7 @@ from azure.search.documents.indexes.models import (
 )
 from azure.search.documents.models import VectorizedQuery
 
-from utilities.auth import (
+from ...auth import (
     BearerTokenAuth,
     get_search_credential,
     get_search_credential_async,

@@ -45,7 +45,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["utilities*", "planning*", "activity_ui*", "llm*"]
+include = ["code_execution*", "utilities*", "planning*", "activity_ui*", "llm*"]
 exclude = ["tests*", "scripts*"]
 
 [build-system]
@@ -66,7 +66,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/utilities/auth/tests", "src/tools/tests", "src/code_execution/tests", "src/domain_examples/tests", "src/llm/tests"]
+testpaths = ["src/code_execution/tests", "src/domain_examples/tests", "src/llm/tests", "src/utilities/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

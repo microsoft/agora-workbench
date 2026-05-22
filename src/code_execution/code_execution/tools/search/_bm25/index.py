@@ -104,9 +104,7 @@ class BM25Index(Generic[D]):
                 if self._avgdl == 0:
                     tf_norm = (tf * (self.k1 + 1)) / (tf + self.k1)
                 else:
-                    tf_norm = (tf * (self.k1 + 1)) / (
-                        tf + self.k1 * (1 - self.b + self.b * dl / self._avgdl)
-                    )
+                    tf_norm = (tf * (self.k1 + 1)) / (tf + self.k1 * (1 - self.b + self.b * dl / self._avgdl))
 
                 score += idf * tf_norm
 

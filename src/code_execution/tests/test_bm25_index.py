@@ -1,8 +1,8 @@
-"""Tests for the generic BM25 index in :mod:`utilities.bm25`."""
+"""Tests for the generic BM25 index in :mod:`code_execution.tools.search._bm25`."""
 
 import pytest
 
-from utilities.bm25 import BM25Index, tokenize
+from code_execution.tools.search._bm25 import BM25Index, tokenize
 
 
 class TestTokenize:

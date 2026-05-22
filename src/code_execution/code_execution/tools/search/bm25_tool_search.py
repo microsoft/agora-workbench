@@ -17,7 +17,7 @@ from ..tool_search import (
     ToolSearchBackend,
     ToolSearchResult,
 )
-from utilities.bm25 import BM25Index
+from ._bm25 import BM25Index
 
 LOGGER = logging.getLogger(__name__)
 

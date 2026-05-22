@@ -10,7 +10,7 @@ Usage:
     credential = get_search_credential_async() # async
 
     # For raw HTTP calls that need auth headers:
-    headers = get_search_auth_headers()        # returns appropriate headers
+    headers = await get_search_auth_headers_async()
 
     # For bearer token provider (Entra-only, e.g. MCP servers):
     token_provider = get_token_provider(scope)
@@ -81,17 +81,11 @@ def get_search_credential() -> SearchCredential:
     Get a credential for Azure AI Search clients.
 
     Checks for an API key first (via AZURE_SEARCH_API_KEY env var), then
-    falls back to Entra ID authentication (CLI → Managed Identity chain).
+    falls back to Entra ID authentication (CLI -> Managed Identity chain).
 
     Returns:
         AzureKeyCredential if AZURE_SEARCH_API_KEY is set, otherwise a
-        ChainedTokenCredential (AzureCLI → ManagedIdentity).
-
-    Example:
-        >>> from utilities.auth.providers import get_search_credential
-        >>> from azure.search.documents import SearchClient
-        >>> credential = get_search_credential()
-        >>> client = SearchClient(endpoint=endpoint, index_name=index, credential=credential)
+        ChainedTokenCredential (AzureCLI -> ManagedIdentity).
     """
     api_key = os.getenv(AZURE_SEARCH_API_KEY_ENV)
     if api_key:
@@ -107,17 +101,11 @@ def get_search_credential_async() -> AsyncSearchCredential:
     Get an async credential for Azure AI Search clients.
 
     Checks for an API key first (via AZURE_SEARCH_API_KEY env var), then
-    falls back to Entra ID authentication (CLI → Managed Identity chain).
+    falls back to Entra ID authentication (CLI -> Managed Identity chain).
 
     Returns:
         AzureKeyCredential if AZURE_SEARCH_API_KEY is set, otherwise an
-        async ChainedTokenCredential (AzureCLI → ManagedIdentity).
-
-    Example:
-        >>> from utilities.auth.providers import get_search_credential_async
-        >>> from azure.search.documents.aio import SearchClient
-        >>> credential = get_search_credential_async()
-        >>> client = SearchClient(endpoint=endpoint, index_name=index, credential=credential)
+        async ChainedTokenCredential (AzureCLI -> ManagedIdentity).
     """
     api_key = os.getenv(AZURE_SEARCH_API_KEY_ENV)
     if api_key:
@@ -164,13 +152,7 @@ def get_purview_credential() -> ChainedTokenCredential:
     environments (Managed Identity).
 
     Returns:
-        ChainedTokenCredential (AzureCLI → ManagedIdentity).
-
-    Example:
-        >>> from utilities.auth.providers import get_purview_credential
-        >>> from azure.purview.catalog import PurviewCatalogClient
-        >>> credential = get_purview_credential()
-        >>> client = PurviewCatalogClient(endpoint=endpoint, credential=credential)
+        ChainedTokenCredential (AzureCLI -> ManagedIdentity).
     """
     LOGGER.debug("Using Entra ID credential chain for Microsoft Purview")
     return _create_sync_credential_chain()
@@ -198,11 +180,6 @@ def get_token_provider(scope: str) -> Callable[[], str]:
 
     Returns:
         Token provider function that can be called to get bearer tokens.
-
-    Example:
-        >>> from utilities.auth import get_token_provider
-        >>> token_provider = get_token_provider("https://cognitiveservices.azure.com/.default")
-        >>> token = token_provider()
     """
     credential = _create_sync_credential_chain()
     token_provider = get_bearer_token_provider(credential, scope)
@@ -222,16 +199,6 @@ def get_storage_connection_string() -> str | None:
     Returns:
         The connection string if AZURE_STORAGE_CONNECTION_STRING is set,
         otherwise None (caller should fall back to Entra credential).
-
-    Example:
-        >>> from utilities.auth.providers import get_storage_connection_string
-        >>> conn_str = get_storage_connection_string()
-        >>> if conn_str:
-        ...     client = BlobServiceClient.from_connection_string(conn_str)
-        ... else:
-        ...     from azure.identity import DefaultAzureCredential
-        ...
-        ...     client = BlobServiceClient(account_url, credential=DefaultAzureCredential())
     """
     return os.getenv(AZURE_STORAGE_CONNECTION_STRING_ENV) or None
 
@@ -260,7 +227,7 @@ def is_key_based_auth() -> bool:
 
 
 def _create_sync_credential_chain() -> ChainedTokenCredential:
-    """Create the standard sync credential chain (CLI → Managed Identity)."""
+    """Create the standard sync credential chain (CLI -> Managed Identity)."""
     managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
     credentials = [
         AzureCliCredential(),
@@ -270,7 +237,7 @@ def _create_sync_credential_chain() -> ChainedTokenCredential:
 
 
 def _create_async_credential_chain() -> AsyncChainedTokenCredential:
-    """Create the standard async credential chain (CLI → Managed Identity)."""
+    """Create the standard async credential chain (CLI -> Managed Identity)."""
     managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
     credentials = [
         AsyncAzureCliCredential(),
