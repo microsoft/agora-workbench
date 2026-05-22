@@ -2,7 +2,7 @@
 
 import pytest
 
-from utilities.bm25 import BM25Index, tokenize
+from code_execution.tools.search._bm25 import BM25Index, tokenize
 
 
 class TestTokenize:
