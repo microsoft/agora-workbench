@@ -77,8 +77,9 @@ markers = [
     "live: Live tests (require real API calls, credentials, network)",
     "asyncio: Async tests",
 ]
-asyncio_mode = "strict"
-asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+timeout = 300
 
 [tool.uv]
 required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
