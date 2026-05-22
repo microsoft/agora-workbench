@@ -34,7 +34,7 @@ def default_credential_factory(scope: str) -> Callable[[], Any]:
     def _factory() -> Any:
         # Import locally so importing this module never forces the auth
         # package to load (keeps import-time cheap for unit tests).
-        from utilities.auth.providers import get_token_provider
+        from code_execution.auth import get_token_provider
 
         return get_token_provider(scope)
 

@@ -21,9 +21,11 @@ Hardcoded inline (simplest case)::
 
     from utilities.mcp_clients import McpServerConfig, connect_mcp_servers
 
-    servers = await connect_mcp_servers([
-        McpServerConfig(name="earthscience", url="http://localhost:8021/mcp"),
-    ])
+    servers = await connect_mcp_servers(
+        [
+            McpServerConfig(name="earthscience", url="http://localhost:8021/mcp"),
+        ]
+    )
 
 From a yaml file you wrote::
 
@@ -38,7 +40,9 @@ Wrapping for MAF::
 
     tools = [
         MCPStreamableHTTPTool(
-            name=s.name, url=s.url, http_client=s.http_client,
+            name=s.name,
+            url=s.url,
+            http_client=s.http_client,
             approval_mode="never_require",
         )
         for s in servers
@@ -234,7 +238,7 @@ def _build_http_client(
             "McpServerConfig (or in the registry yaml's top-level fallback)."
         )
 
-    from utilities.auth import BearerTokenAuth, get_token_provider
+    from code_execution.auth import BearerTokenAuth, get_token_provider
 
     token_provider = get_token_provider(scope)
     return httpx.AsyncClient(auth=BearerTokenAuth(token_provider), timeout=timeout)
@@ -296,10 +300,12 @@ async def connect_mcp_servers(
 
         from utilities.mcp_clients import McpServerConfig, connect_mcp_servers
 
-        servers = await connect_mcp_servers([
-            McpServerConfig(name="earthscience", url="http://localhost:8021/mcp"),
-            McpServerConfig(name="chemistry", url="http://localhost:8020/mcp"),
-        ])
+        servers = await connect_mcp_servers(
+            [
+                McpServerConfig(name="earthscience", url="http://localhost:8021/mcp"),
+                McpServerConfig(name="chemistry", url="http://localhost:8020/mcp"),
+            ]
+        )
         for s in servers:
             print(f"connected: {s.name} @ {s.url}")
 
