@@ -50,6 +50,11 @@ class BM25Index(Generic[D]):
     def __len__(self) -> int:
         return len(self._docs)
 
+    @property
+    def documents(self) -> list[D]:
+        """Return the indexed document objects in insertion order."""
+        return [doc for doc, _ in self._docs]
+
     def add(self, doc: D, text: str) -> None:
         """Add a document plus the text used to index it."""
         tokens = tokenize(text)

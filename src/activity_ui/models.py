@@ -11,9 +11,13 @@ EventType = Literal[
     "code_executed",
     "code_failed",
     "job_started",
-    "tools_listed",
+    "job_finished",
     "push_object_sent",
     "push_object_received",
+    "tool_search",
+    "skill_loaded",
+    "workflow_planned",
+    "batch_cancelled",
 ]
 
 
@@ -49,11 +53,24 @@ class ActivityEvent(BaseModel):
     # parallel_execute correlation (set on per-child code_executed/code_failed)
     batch_id: Optional[str] = None
 
-    # tools_listed
-    tool_names: Optional[list[str]] = None
-
     # push_object correlation
     transfer_id: Optional[str] = None
     variable_name: Optional[str] = None
     target_server: Optional[str] = None  # set on push_object_sent
     source_server: Optional[str] = None  # set on push_object_received
+
+    # tool_search
+    query: Optional[str] = None
+    category: Optional[str] = None
+    matched_tools: Optional[list[str]] = None
+    matched_skills: Optional[list[str]] = None
+
+    # skill_loaded
+    skill_name: Optional[str] = None
+
+    # workflow_planned
+    domain: Optional[str] = None
+    mode: Optional[str] = None
+    current_state: Optional[str] = None
+    target_state: Optional[str] = None
+    tool_name: Optional[str] = None  # also reused if a workflow step targets a specific tool

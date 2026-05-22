@@ -1109,7 +1109,9 @@ class CodeExecutionServer:
             len(skills),
         )
 
-        async def search_server_tools(query: str, top: int = 5, category: str = "all") -> str:
+        async def search_server_tools(
+            query: str, top: int = 5, category: str = "all", ctx: Optional[Context] = None
+        ) -> str:
             """Search this server's tool and skill catalog by name or description.
 
             Use this tool to discover domain tools and skills. Results are
@@ -1136,6 +1138,14 @@ class CodeExecutionServer:
                 top,
                 category,
             )
+            session_id = None
+            if ctx:
+                try:
+                    session_id = ctx.session_id
+                except (RuntimeError, AttributeError):
+                    # Session context may be unavailable in some execution paths;
+                    # keep session_id as None and continue with the search request.
+                    LOGGER.debug("Unable to resolve session_id from context", exc_info=True)
             # Validate category
             if category not in ("all", "tools", "skills"):
                 return json.dumps({"error": f"Invalid category '{category}'. Must be 'all', 'tools', or 'skills'."})
@@ -1144,6 +1154,21 @@ class CodeExecutionServer:
                 # Group results by type
                 tools_list = [r.model_dump() for r in results if r.type == "tool"]
                 skills_list = [r.model_dump() for r in results if r.type == "skill"]
+                query_label = repr(query) if query else "'' (catalog)"
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "tool_search",
+                        "description": (
+                            f"search {query_label} → {len(tools_list)} tool(s), {len(skills_list)} skill(s)"
+                        ),
+                        "query": query,
+                        "category": category,
+                        "matched_tools": [t.get("name", "") for t in tools_list],
+                        "matched_skills": [s.get("name", "") for s in skills_list],
+                        "session_id": session_id,
+                        "success": True,
+                    }
+                )
                 return json.dumps({"tools": tools_list, "skills": skills_list})
             except Exception as exc:
                 LOGGER.error(
@@ -1152,6 +1177,17 @@ class CodeExecutionServer:
                     query,
                     exc,
                     exc_info=True,
+                )
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "tool_search",
+                        "description": f"search '{query}' failed: {type(exc).__name__}",
+                        "query": query,
+                        "category": category,
+                        "session_id": session_id,
+                        "success": False,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
                 )
                 return json.dumps({"tools": [], "skills": [], "error": f"{type(exc).__name__}: {exc}"})
 
@@ -1202,15 +1238,44 @@ class CodeExecutionServer:
                 current_state: str = "",
                 target_state: str = "",
                 tool_name: str = "",
+                ctx: Optional[Context] = None,
             ) -> str:
                 """Plan and navigate domain workflow states."""
-                return await _pw_func(
+                session_id = None
+                if ctx:
+                    try:
+                        session_id = ctx.session_id
+                    except (RuntimeError, AttributeError):
+                        # Some contexts may not expose session_id; leave session_id as None.
+                        session_id = None
+                result = await _pw_func(
                     domain=domain,
                     mode=mode,
                     current_state=current_state,
                     target_state=target_state,
                     tool_name=tool_name,
                 )
+                desc_bits = [f"mode={mode}"]
+                if domain:
+                    desc_bits.append(f"domain={domain}")
+                if current_state or target_state:
+                    desc_bits.append(f"{current_state or '?'}→{target_state or '?'}")
+                if tool_name:
+                    desc_bits.append(f"tool={tool_name}")
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "workflow_planned",
+                        "description": "plan_workflow " + " ".join(desc_bits),
+                        "domain": domain or None,
+                        "mode": mode,
+                        "current_state": current_state or None,
+                        "target_state": target_state or None,
+                        "tool_name": tool_name or None,
+                        "session_id": session_id,
+                        "success": True,
+                    }
+                )
+                return result
 
             self.mcp.tool(
                 name=pw_descriptor.name,
@@ -1232,9 +1297,26 @@ class CodeExecutionServer:
             ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
             _ls_func = ls_descriptor.func
 
-            async def _load_skill(skill_name: str) -> str:
+            async def _load_skill(skill_name: str, ctx: Optional[Context] = None) -> str:
                 """Load a skill by name."""
-                return await _ls_func(skill_name=skill_name)
+                session_id = None
+                if ctx:
+                    try:
+                        session_id = ctx.session_id
+                    except (RuntimeError, AttributeError):
+                        # Session context may be unavailable in some call paths; continue without session_id.
+                        pass
+                result = await _ls_func(skill_name=skill_name)
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "skill_loaded",
+                        "description": f"load_skill {skill_name}",
+                        "skill_name": skill_name,
+                        "session_id": session_id,
+                        "success": True,
+                    }
+                )
+                return result
 
             self.mcp.tool(
                 name=ls_descriptor.name,
@@ -1985,12 +2067,38 @@ else:
                 self._clear_auth_context()
 
         async def cancel_batch(ctx: Context, batch_id: str) -> str:
+            transport_session_id = None
+            if ctx:
+                try:
+                    transport_session_id = ctx.session_id
+                except (RuntimeError, AttributeError):
+                    # ctx/session metadata may be unavailable for some transports; fall back to None.
+                    pass
             try:
                 await _restore_auth_and_verify_batch_access(ctx, batch_id)
                 payload = await self._cancel_batch_payload(batch_id)
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "batch_cancelled",
+                        "description": f"cancel_batch {batch_id} ({payload.get('status')})",
+                        "batch_id": batch_id,
+                        "session_id": payload.get("parent_session_id") or transport_session_id,
+                        "success": True,
+                    }
+                )
                 return json.dumps(payload, indent=2)
             except Exception as e:
                 LOGGER.error(f"cancel_batch failed for {batch_id}: {e}", exc_info=True)
+                self.activity_publisher.publish_nowait(
+                    {
+                        "type": "batch_cancelled",
+                        "description": f"cancel_batch {batch_id} failed: {type(e).__name__}",
+                        "batch_id": batch_id,
+                        "session_id": transport_session_id,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
                 return json.dumps({"success": False, "error": str(e)}, indent=2)
             finally:
                 self._clear_auth_context()

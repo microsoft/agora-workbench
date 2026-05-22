@@ -561,6 +561,26 @@ class SessionManager:
             result["error"] = job.error
         return result
 
+    async def await_background_job(self, job_id: str) -> Optional[dict[str, Any]]:
+        """Wait for a background job's task to reach a terminal state, then return its status.
+
+        Returns ``None`` if the job was never registered or has already been purged.
+        Used by the activity publisher to emit ``job_finished`` events; callers must
+        treat exceptions on the underlying task as terminal (a failed task still
+        leaves ``_BackgroundJob.status`` set by ``_collect_background_job``).
+        """
+        job = self._background_jobs.get(job_id)
+        if job is None or job.task is None:
+            return None
+        try:
+            await job.task
+        except Exception:
+            LOGGER.debug("Background job task raised for job_id=%s", job_id, exc_info=True)
+        try:
+            return self.check_background_job(job_id)
+        except ValueError:
+            return None
+
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> Tuple[str, str, bool]:

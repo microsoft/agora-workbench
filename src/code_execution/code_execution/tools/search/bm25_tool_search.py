@@ -74,52 +74,68 @@ class BM25ToolSearchBackend(ToolSearchBackend):
         Returns only results with a positive BM25 score; zero-score matches
         are excluded.  When ``category="all"``, returns up to *top* results
         from each category (tools and skills), merged and sorted by score.
+
+        Whitespace-only or empty queries are treated as a catalog dump: the
+        first ``top`` indexed tools and skills (in insertion order) are
+        returned with a score of ``0`` so agents can discover what is
+        available without composing a query.
         """
         results: list[ToolSearchResult] = []
+
+        if not query.strip():
+            if category in ("all", "tools"):
+                for tool_info in self._tool_index.documents[:top]:
+                    results.append(self._tool_result(tool_info, score=0.0))
+            if category in ("all", "skills"):
+                for skill_info in self._skill_index.documents[:top]:
+                    results.append(self._skill_result(skill_info, score=0.0))
+            return results
 
         if category in ("all", "tools"):
             tool_hits = self._tool_index.search(query, top_k=top)
             for tool_info, score in tool_hits:
                 if score <= 0:
                     continue
-                to_access = f"Call via execute_{self._server_name}_code" if self._server_name else ""
-                results.append(
-                    ToolSearchResult(
-                        name=tool_info.name,
-                        server_name=tool_info.server_name,
-                        description=tool_info.description,
-                        execution_type="mcp",
-                        type="tool",
-                        to_access=to_access,
-                        score=score,
-                        state_requires=list(tool_info.state_requires),
-                        state_produces=list(tool_info.state_produces),
-                    )
-                )
+                results.append(self._tool_result(tool_info, score=score))
 
         if category in ("all", "skills"):
             skill_hits = self._skill_index.search(query, top_k=top)
             for skill_info, score in skill_hits:
                 if score <= 0:
                     continue
-                skill_name = skill_info.get("name", "")
-                to_access = (
-                    f'Load with load_{self._server_name}_skill(skill_name="{skill_name}")' if self._server_name else ""
-                )
-                results.append(
-                    ToolSearchResult(
-                        name=skill_name,
-                        server_name=self._server_name,
-                        description=skill_info.get("description", ""),
-                        execution_type="skill",
-                        type="skill",
-                        to_access=to_access,
-                        score=score,
-                        state_requires=[],
-                        state_produces=[],
-                    )
-                )
+                results.append(self._skill_result(skill_info, score=score))
 
         # Sort merged results by score descending
         results.sort(key=lambda r: r.score or 0, reverse=True)
         return results
+
+    def _tool_result(self, tool_info: ToolInfo, score: float) -> ToolSearchResult:
+        to_access = f"Call via execute_{self._server_name}_code" if self._server_name else ""
+        return ToolSearchResult(
+            name=tool_info.name,
+            server_name=tool_info.server_name,
+            description=tool_info.description,
+            execution_type="mcp",
+            type="tool",
+            to_access=to_access,
+            score=score,
+            state_requires=list(tool_info.state_requires),
+            state_produces=list(tool_info.state_produces),
+        )
+
+    def _skill_result(self, skill_info: dict[str, Any], score: float) -> ToolSearchResult:
+        skill_name = skill_info.get("name", "")
+        to_access = (
+            f'Load with load_{self._server_name}_skill(skill_name="{skill_name}")' if self._server_name else ""
+        )
+        return ToolSearchResult(
+            name=skill_name,
+            server_name=self._server_name,
+            description=skill_info.get("description", ""),
+            execution_type="skill",
+            type="skill",
+            to_access=to_access,
+            score=score,
+            state_requires=[],
+            state_produces=[],
+        )
