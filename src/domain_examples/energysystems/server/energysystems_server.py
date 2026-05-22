@@ -71,6 +71,9 @@ config = EnvironmentConfig(
         # so that tool proxy imports resolve correctly inside the kernel.
         f"python -m pip install --no-deps {_ENERGYSYSTEMS_TOOLS_PKG}",
     ],
+    # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
+    # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.
+    domains_dir=Path(__file__).resolve().parents[2],
 )
 
 

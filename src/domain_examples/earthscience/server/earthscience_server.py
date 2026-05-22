@@ -23,6 +23,7 @@ See the README for full instructions.
 
 import asyncio
 import os
+from pathlib import Path
 
 from code_execution import CodeExecutionServer, EnvironmentConfig
 from code_execution.auth import create_noop_auth_config
@@ -72,6 +73,9 @@ config = EnvironmentConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
+    # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
+    # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.
+    domains_dir=Path(__file__).resolve().parents[2],
 )
 
 
