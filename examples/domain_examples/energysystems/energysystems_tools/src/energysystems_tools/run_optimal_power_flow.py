@@ -31,11 +31,20 @@ def run_optimal_power_flow(network_name: str) -> dict:
 
     status, _ = n.optimize(solver_name="highs")
 
+    if status != "ok":
+        return {
+            "status": status,
+            "objective_value": None,
+            "generator_dispatch": [],
+            "line_flows": [],
+            "marginal_prices": [],
+        }
+
     # Generator dispatch
     generator_dispatch = []
     for gen_name in n.generators.index:
         entry = {"generator": gen_name}
-        if gen_name in n.generators_t.p.columns:
+        if hasattr(n.generators_t, "p") and gen_name in n.generators_t.p.columns:
             entry["p_mean_mw"] = round(float(n.generators_t.p[gen_name].mean()), 4)
             entry["p_max_mw"] = round(float(n.generators_t.p[gen_name].max()), 4)
         entry["carrier"] = str(n.generators.loc[gen_name].get("carrier", ""))
@@ -45,7 +54,7 @@ def run_optimal_power_flow(network_name: str) -> dict:
     line_flows = []
     for line_name in n.lines.index:
         entry = {"line": line_name}
-        if line_name in n.lines_t.p0.columns:
+        if hasattr(n.lines_t, "p0") and line_name in n.lines_t.p0.columns:
             entry["p0_mean_mw"] = round(float(n.lines_t.p0[line_name].mean()), 4)
             s_nom = float(n.lines.loc[line_name, "s_nom"]) if "s_nom" in n.lines.columns else 0
             if s_nom > 0:
@@ -55,7 +64,7 @@ def run_optimal_power_flow(network_name: str) -> dict:
     # Marginal prices
     marginal_prices = []
     for bus_name in n.buses.index:
-        if bus_name in n.buses_t.marginal_price.columns:
+        if hasattr(n.buses_t, "marginal_price") and bus_name in n.buses_t.marginal_price.columns:
             mp_series = n.buses_t.marginal_price[bus_name]
             marginal_prices.append(
                 {
