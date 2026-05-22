@@ -575,7 +575,7 @@ class SessionManager:
         try:
             await job.task
         except Exception:
-            pass
+            LOGGER.debug("Background job task raised for job_id=%s", job_id, exc_info=True)
         try:
             return self.check_background_job(job_id)
         except ValueError:
