@@ -1246,7 +1246,8 @@ class CodeExecutionServer:
                     try:
                         session_id = ctx.session_id
                     except (RuntimeError, AttributeError):
-                        pass
+                        # Some contexts may not expose session_id; leave session_id as None.
+                        session_id = None
                 result = await _pw_func(
                     domain=domain,
                     mode=mode,
