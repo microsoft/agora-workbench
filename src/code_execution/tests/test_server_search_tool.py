@@ -256,6 +256,9 @@ class _AsyncSearchBackend:
         self.initialized = False
         self.closed = False
 
+    def index(self, tools, skills=None, server_name=""):
+        pass
+
     async def initialize(self):
         self.initialized = True
 

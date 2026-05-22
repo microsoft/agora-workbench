@@ -235,7 +235,8 @@ class TestPipelinePropagation:
                 state_produces=("sim.flowsheet_solved", "sim.results_available"),
             ),
         ]
-        backend = BM25ToolSearchBackend(tools)
+        backend = BM25ToolSearchBackend()
+        backend.index(tools)
         results = await backend.search("solve flowsheet", top=1)
         assert len(results) == 1
         assert results[0].state_requires == ["sim.flowsheet_exists"]
