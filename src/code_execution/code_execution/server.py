@@ -2068,6 +2068,7 @@ else:
                 try:
                     transport_session_id = ctx.session_id
                 except (RuntimeError, AttributeError):
+                    # ctx/session metadata may be unavailable for some transports; fall back to None.
                     pass
             try:
                 await _restore_auth_and_verify_batch_access(ctx, batch_id)
