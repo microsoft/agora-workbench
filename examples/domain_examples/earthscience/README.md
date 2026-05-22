@@ -45,14 +45,14 @@ call — `planetary_computer`, `pystac_client`, `rasterio`, `xr`,
 ### 1. Build the base image (one-time)
 
 ```bash
-cd src
+# From the repository root:
 docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the earth science server
 
 ```bash
-cd src/domain_examples/earthscience
+cd examples/domain_examples/earthscience
 docker compose up --build
 ```
 

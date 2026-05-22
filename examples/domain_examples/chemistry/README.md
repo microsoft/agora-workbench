@@ -20,14 +20,14 @@ Exposes an `execute_chemistry_code` MCP tool that runs Python code in an isolate
 ### 1. Build the base image (one-time)
 
 ```bash
-cd src
+# From the repository root:
 docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the chemistry server
 
 ```bash
-cd src/domain_examples/chemistry
+cd examples/domain_examples/chemistry
 docker compose up --build
 ```
 

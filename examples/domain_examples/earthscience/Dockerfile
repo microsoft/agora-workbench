@@ -1,7 +1,7 @@
 # Earth Science MCP Server
 #
 # Prerequisites — build the base image first:
-#   cd src
+#   # From the repository root:
 #   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 #
 # Then build the earth science server:
@@ -12,6 +12,6 @@ FROM ${BASE_IMAGE}
 
 # Copy the earthscience package tree so Python module execution can resolve
 # the full package path consistently at runtime.
-COPY --chown=appuser:appuser domain_examples/earthscience /app/domain_examples/earthscience
+COPY --chown=appuser:appuser examples/domain_examples/earthscience /app/domain_examples/earthscience
 
 CMD ["python", "-m", "domain_examples.earthscience.server.earthscience_server"]

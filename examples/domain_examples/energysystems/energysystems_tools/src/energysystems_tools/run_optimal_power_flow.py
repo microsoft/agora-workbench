@@ -9,10 +9,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -52,9 +49,7 @@ def run_optimal_power_flow(network_name: str) -> dict:
             entry["p0_mean_mw"] = round(float(n.lines_t.p0[line_name].mean()), 4)
             s_nom = float(n.lines.loc[line_name, "s_nom"]) if "s_nom" in n.lines.columns else 0
             if s_nom > 0:
-                entry["loading_pct"] = round(
-                    abs(float(n.lines_t.p0[line_name].mean())) / s_nom * 100, 2
-                )
+                entry["loading_pct"] = round(abs(float(n.lines_t.p0[line_name].mean())) / s_nom * 100, 2)
         line_flows.append(entry)
 
     # Marginal prices
@@ -62,12 +57,14 @@ def run_optimal_power_flow(network_name: str) -> dict:
     if "marginal_price" in n.buses_t:
         for bus_name in n.buses.index:
             mp_series = n.buses_t.marginal_price[bus_name]
-            marginal_prices.append({
-                "bus": bus_name,
-                "mean": round(float(mp_series.mean()), 4),
-                "min": round(float(mp_series.min()), 4),
-                "max": round(float(mp_series.max()), 4),
-            })
+            marginal_prices.append(
+                {
+                    "bus": bus_name,
+                    "mean": round(float(mp_series.mean()), 4),
+                    "min": round(float(mp_series.min()), 4),
+                    "max": round(float(mp_series.max()), 4),
+                }
+            )
 
     return {
         "status": status,

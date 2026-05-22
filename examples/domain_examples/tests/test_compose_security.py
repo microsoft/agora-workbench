@@ -51,9 +51,7 @@ def test_domain_compose_publishes_to_loopback_only(compose_path: Path) -> None:
             if isinstance(entry, dict):
                 host_ip = entry.get("host_ip")
                 if host_ip != "127.0.0.1":
-                    offenders.append(
-                        f"{service_name}: long-syntax port host_ip={host_ip!r} (must be '127.0.0.1')"
-                    )
+                    offenders.append(f"{service_name}: long-syntax port host_ip={host_ip!r} (must be '127.0.0.1')")
                 continue
 
             port_str = str(entry)

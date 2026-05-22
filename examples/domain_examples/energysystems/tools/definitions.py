@@ -202,7 +202,9 @@ run_power_flow = ToolDefinition(
     return_spec=[
         ReturnSpec(name="converged", type=bool, description="Whether the power flow converged"),
         ReturnSpec(name="method", type=str, description="Power flow method used (ac/dc)"),
-        ReturnSpec(name="bus_results", type=list, description="Per-bus voltage magnitude, angle, active/reactive power"),
+        ReturnSpec(
+            name="bus_results", type=list, description="Per-bus voltage magnitude, angle, active/reactive power"
+        ),
         ReturnSpec(name="line_loading", type=list, description="Per-line loading percentage and power flow"),
     ],
     module="energysystems_tools.run_power_flow",
@@ -304,7 +306,9 @@ analyze_costs = ToolDefinition(
     return_spec=[
         ReturnSpec(name="total_cost", type=float, description="Total system cost"),
         ReturnSpec(name="cost_by_carrier", type=dict, description="Cost breakdown by carrier/technology"),
-        ReturnSpec(name="marginal_price_stats", type=dict, description="Marginal price statistics (mean, min, max per bus)"),
+        ReturnSpec(
+            name="marginal_price_stats", type=dict, description="Marginal price statistics (mean, min, max per bus)"
+        ),
         ReturnSpec(name="most_expensive_bus", type=str, description="Bus with highest average marginal price"),
     ],
     module="energysystems_tools.analyze_costs",

@@ -1,24 +1,26 @@
-# Energy Systems MCP Server — local development with docker compose.
+# Chemistry MCP Server — local development
 #
 # Prerequisites — build the base image first:
-#   cd src
+#   # From the repository root:
 #   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 #
 # To see activity events in the shared Activity UI (optional but recommended):
 #   1) docker network create agora-activity     # once per host
-#   2) cd src/activity_ui && docker compose up -d
+#   2) cd activity_ui  # (or agent_helpers/activity_ui after full reorg) && docker compose up -d
 # Then from this directory:
 #   docker compose up --build
 #
 # If the activity-ui is not running, the publisher silently no-ops.
 
 services:
-  energysystems-server:
+  chemistry-server:
     build:
-      context: ../..
-      dockerfile: domain_examples/energysystems/Dockerfile
+      context: ../../..
+      dockerfile: examples/domain_examples/chemistry/Dockerfile
     ports:
-      - "127.0.0.1:8022:8000"
+      # Bind to localhost by default because this service is unauthenticated.
+      # Do not expose it to untrusted networks unless authentication is enabled.
+      - "127.0.0.1:8020:8000"
     env_file:
       - ../../../.env
     environment:
@@ -30,17 +32,11 @@ services:
     networks:
       - agora-activity
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-        ]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 300s
+      start_period: 120s
 
 networks:
   agora-activity:

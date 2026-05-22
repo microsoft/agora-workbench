@@ -14,7 +14,7 @@
 # To see what your agent is doing in this server (executed code, tool calls,
 # pushes, etc.), uncomment the three lines marked "[activity-ui]" below and:
 #   1) docker network create agora-activity     # once per host
-#   2) cd src/activity_ui && docker compose up -d
+#   2) cd activity_ui  # (or agent_helpers/activity_ui after full reorg) && docker compose up -d
 # Then open http://127.0.0.1:8030 to see live activity.
 
 services:

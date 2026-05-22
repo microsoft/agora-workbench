@@ -6,10 +6,10 @@ Docker-based deployment for `CodeExecutionServer` instances. Provides a shared b
 
 ### 1. Build the base image
 
-From the repo's `src/` directory:
+From the repository root:
 
 ```bash
-cd src
+# From the repository root:
 docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ```
 

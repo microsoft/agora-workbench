@@ -9,10 +9,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -43,33 +40,35 @@ def run_capacity_expansion(network_name: str) -> dict:
     for gen_name in n.generators.index:
         gen = n.generators.loc[gen_name]
         if gen.get("p_nom_extendable", False):
-            optimal_capacities.append({
-                "component": gen_name,
-                "type": "generator",
-                "carrier": str(gen.get("carrier", "")),
-                "p_nom_opt_mw": round(float(gen.get("p_nom_opt", 0)), 4),
-                "capital_cost": round(float(gen.get("capital_cost", 0)), 4),
-            })
+            optimal_capacities.append(
+                {
+                    "component": gen_name,
+                    "type": "generator",
+                    "carrier": str(gen.get("carrier", "")),
+                    "p_nom_opt_mw": round(float(gen.get("p_nom_opt", 0)), 4),
+                    "capital_cost": round(float(gen.get("capital_cost", 0)), 4),
+                }
+            )
 
     for su_name in n.storage_units.index:
         su = n.storage_units.loc[su_name]
         if su.get("p_nom_extendable", False):
-            optimal_capacities.append({
-                "component": su_name,
-                "type": "storage_unit",
-                "carrier": str(su.get("carrier", "")),
-                "p_nom_opt_mw": round(float(su.get("p_nom_opt", 0)), 4),
-                "capital_cost": round(float(su.get("capital_cost", 0)), 4),
-            })
+            optimal_capacities.append(
+                {
+                    "component": su_name,
+                    "type": "storage_unit",
+                    "carrier": str(su.get("carrier", "")),
+                    "p_nom_opt_mw": round(float(su.get("p_nom_opt", 0)), 4),
+                    "capital_cost": round(float(su.get("capital_cost", 0)), 4),
+                }
+            )
 
     # Investment breakdown by carrier
     investment_by_type: dict[str, float] = {}
     for cap in optimal_capacities:
         carrier = cap["carrier"] or cap["component"]
         cost = cap["p_nom_opt_mw"] * cap["capital_cost"]
-        investment_by_type[carrier] = round(
-            investment_by_type.get(carrier, 0) + cost, 4
-        )
+        investment_by_type[carrier] = round(investment_by_type.get(carrier, 0) + cost, 4)
 
     return {
         "status": status,

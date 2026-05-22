@@ -1,12 +1,12 @@
 # Earth Science MCP Server — local development
 #
 # Prerequisites — build the base image first:
-#   cd src
+#   # From the repository root:
 #   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 #
 # To see activity events in the shared Activity UI (optional but recommended):
 #   1) docker network create agora-activity     # once per host
-#   2) cd src/activity_ui && docker compose up -d
+#   2) cd activity_ui  # (or agent_helpers/activity_ui after full reorg) && docker compose up -d
 # Then from this directory:
 #   docker compose up --build
 #
@@ -15,8 +15,8 @@
 services:
   earthscience-server:
     build:
-      context: ../..
-      dockerfile: domain_examples/earthscience/Dockerfile
+      context: ../../..
+      dockerfile: examples/domain_examples/earthscience/Dockerfile
     ports:
       # Bind to loopback only — the server uses create_noop_auth_config()
       # which accepts any bearer token, so it must not be reachable off-host.

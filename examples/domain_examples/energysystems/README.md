@@ -28,14 +28,14 @@ Exposes an `execute_energysystems_code` MCP tool that runs Python code in an iso
 ### 1. Build the base image (one-time)
 
 ```bash
-cd src
+# From the repository root:
 docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the energy systems server
 
 ```bash
-cd src/domain_examples/energysystems
+cd examples/domain_examples/energysystems
 docker compose up --build
 ```
 

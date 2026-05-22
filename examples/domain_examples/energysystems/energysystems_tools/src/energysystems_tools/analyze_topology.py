@@ -11,10 +11,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -63,12 +60,14 @@ def analyze_topology(network_name: str) -> dict:
         sorted_edges = sorted(edge_bc.items(), key=lambda x: x[1], reverse=True)
         for (u, v), centrality in sorted_edges[:5]:
             edge_data = G.edges[u, v]
-            bottleneck_lines.append({
-                "line": edge_data.get("name", f"{u}-{v}"),
-                "bus0": u,
-                "bus1": v,
-                "betweenness_centrality": round(centrality, 4),
-            })
+            bottleneck_lines.append(
+                {
+                    "line": edge_data.get("name", f"{u}-{v}"),
+                    "bus0": u,
+                    "bus1": v,
+                    "betweenness_centrality": round(centrality, 4),
+                }
+            )
 
     return {
         "num_buses": num_buses,

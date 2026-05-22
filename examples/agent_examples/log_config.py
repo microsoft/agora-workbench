@@ -50,14 +50,16 @@ def setup_logging(script_file: str) -> str:
 
     # "user" logger → console + file (high-level progress)
     user_logger = logging.getLogger("user")
-    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
-               for h in user_logger.handlers):
+    if not any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in user_logger.handlers
+    ):
         user_logger.addHandler(console_handler)
 
     # "status" logger → console + file (phase updates)
     status_logger = logging.getLogger("status")
-    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
-               for h in status_logger.handlers):
+    if not any(
+        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler) for h in status_logger.handlers
+    ):
         status_logger.addHandler(console_handler)
 
     # Quiet noisy HTTP modules

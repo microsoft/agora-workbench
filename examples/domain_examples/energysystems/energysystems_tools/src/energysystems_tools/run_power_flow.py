@@ -9,10 +9,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 

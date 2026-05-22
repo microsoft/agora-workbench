@@ -9,10 +9,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -35,10 +32,7 @@ def analyze_costs(network_name: str) -> dict:
     # objective == 0 — a zero objective is valid (e.g. all-wind dispatch).
     has_dispatch = "p" in n.generators_t and not n.generators_t.p.empty
     if not has_dispatch:
-        raise ValueError(
-            f"Network {network_name!r} has no solved OPF. "
-            "Run run_optimal_power_flow first."
-        )
+        raise ValueError(f"Network {network_name!r} has no solved OPF. Run run_optimal_power_flow first.")
 
     total_cost = round(float(n.objective), 4)
 
@@ -53,9 +47,7 @@ def analyze_costs(network_name: str) -> dict:
         else:
             total_gen = 0
         gen_cost = mc * total_gen
-        cost_by_carrier[carrier] = round(
-            cost_by_carrier.get(carrier, 0) + gen_cost, 4
-        )
+        cost_by_carrier[carrier] = round(cost_by_carrier.get(carrier, 0) + gen_cost, 4)
 
     # Marginal price stats per bus
     marginal_price_stats: dict[str, dict] = {}

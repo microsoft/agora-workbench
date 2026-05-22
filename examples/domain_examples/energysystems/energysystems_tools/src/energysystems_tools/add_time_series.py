@@ -11,10 +11,7 @@ def _get_network(name: str):
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -66,10 +63,7 @@ def add_time_series(
         }
         t_attr = type_map.get(comp_type)
         if t_attr is None:
-            raise ValueError(
-                f"Unknown component_type {comp_type!r}. "
-                f"Expected one of: {sorted(type_map)}"
-            )
+            raise ValueError(f"Unknown component_type {comp_type!r}. Expected one of: {sorted(type_map)}")
 
         t_df = getattr(n, t_attr)
         if attribute not in t_df:

@@ -12,10 +12,7 @@ def _get_network(name: str) -> pypsa.Network:
     """Retrieve a previously created network by name."""
     networks = getattr(builtins, "_pypsa_networks", {})
     if name not in networks:
-        raise ValueError(
-            f"Network {name!r} not found. Call define_network first. "
-            f"Available: {sorted(networks)}"
-        )
+        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
     return networks[name]
 
 
@@ -56,31 +53,31 @@ def add_components(
         "num_storage_units": 0,
     }
 
-    for bus in (buses or []):
+    for bus in buses or []:
         params = dict(bus)
         bus_name = params.pop("name")
         n.add("Bus", bus_name, **params)
         counts["num_buses"] += 1
 
-    for gen in (generators or []):
+    for gen in generators or []:
         params = dict(gen)
         gen_name = params.pop("name")
         n.add("Generator", gen_name, **params)
         counts["num_generators"] += 1
 
-    for load in (loads or []):
+    for load in loads or []:
         params = dict(load)
         load_name = params.pop("name")
         n.add("Load", load_name, **params)
         counts["num_loads"] += 1
 
-    for line in (lines or []):
+    for line in lines or []:
         params = dict(line)
         line_name = params.pop("name")
         n.add("Line", line_name, **params)
         counts["num_lines"] += 1
 
-    for su in (storage_units or []):
+    for su in storage_units or []:
         params = dict(su)
         su_name = params.pop("name")
         n.add("StorageUnit", su_name, **params)
