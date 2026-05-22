@@ -1143,7 +1143,9 @@ class CodeExecutionServer:
                 try:
                     session_id = ctx.session_id
                 except (RuntimeError, AttributeError):
-                    pass
+                    # Session context may be unavailable in some execution paths;
+                    # keep session_id as None and continue with the search request.
+                    LOGGER.debug("Unable to resolve session_id from context", exc_info=True)
             # Validate category
             if category not in ("all", "tools", "skills"):
                 return json.dumps({"error": f"Invalid category '{category}'. Must be 'all', 'tools', or 'skills'."})
