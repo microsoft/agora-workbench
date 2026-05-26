@@ -567,12 +567,12 @@ class CodeExecutionServer:
         # Setup general code execution tool
         self._setup_code_execution_tool()
 
-        if self.tool_registry:
-            # Register server-side BM25 tool search (search_{name}_tools)
-            self._setup_search_tool()
-
-            # Register workflow planning and skill tools if state-annotated tools exist
-            self._setup_workflow_planning_tools()
+        # Register server-side search (search_{name}_tools) and workflow/skill
+        # tools (plan_{name}_workflow, load_{name}_skill).  These remain useful
+        # for skill-only / wrapper-less BYOA servers (e.g. earthscience), so
+        # they are not gated on tool_registry.  Each helper guards internally.
+        self._setup_search_tool()
+        self._setup_workflow_planning_tools()
 
         # Setup session management meta tools (prefixed with server name for uniqueness)
         register_session_meta_tools(
@@ -1089,9 +1089,19 @@ class CodeExecutionServer:
 
         tool_infos = self._build_tool_infos()
 
-        # Discover skills from the domains directory
+        # Discover skills from the domains directory, restricted to this
+        # server's own domain so a shared-source dev layout doesn't leak
+        # skills across servers.
         domains_dir = self.environment_config.domains_dir
-        skills = _discover_skills(domains_dir) if domains_dir else []
+        skills = _discover_skills(domains_dir, domain_name=server_name) if domains_dir else []
+
+        if not tool_infos and not skills:
+            LOGGER.debug(
+                "No tools or skills to index for '%s'; skipping search_%s_tools registration.",
+                server_name,
+                server_name,
+            )
+            return
 
         if self._custom_tool_search_backend is not None:
             backend = self._custom_tool_search_backend
@@ -1226,7 +1236,11 @@ class CodeExecutionServer:
 
         # Register plan_{name}_workflow only when state-annotated tools exist.
         if has_state_tools:
-            pw_kwargs: dict = {"server_name": server_name, "tools": tool_infos}
+            pw_kwargs: dict = {
+                "server_name": server_name,
+                "tools": tool_infos,
+                "domain_name": server_name,
+            }
             if domains_dir is not None:
                 pw_kwargs["domains_dir"] = domains_dir
             pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
@@ -1289,9 +1303,9 @@ class CodeExecutionServer:
             )
 
         # Register load_{name}_skill whenever discoverable skills exist.
-        skills = _discover_skills(domains_dir) if domains_dir else []
+        skills = _discover_skills(domains_dir, domain_name=server_name) if domains_dir else []
         if skills:
-            ls_kwargs: dict = {"server_name": server_name}
+            ls_kwargs: dict = {"server_name": server_name, "domain_name": server_name}
             if domains_dir is not None:
                 ls_kwargs["domains_dir"] = domains_dir
             ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
