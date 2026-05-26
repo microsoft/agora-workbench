@@ -2,6 +2,7 @@
     "include": [
         "src",
         "agent_helpers",
+        "activity_ui",
         "examples"
     ],
     "exclude": [
