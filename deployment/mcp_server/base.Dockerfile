@@ -52,11 +52,11 @@ RUN mkdir -p /opt/wheelhouse && \
     && ls -1 /opt/wheelhouse | head -n 5
 
 # Copy shared code (used by all servers)
-COPY src/code_execution/code_execution /app/code_execution
-COPY src/code_execution/requirements.txt /app/requirements.txt
+# .dockerignore excludes tests/ and dev files from this COPY
+COPY src/code_execution /app/code_execution
 
 # Install Python dependencies
-RUN pip install --no-input -r /app/requirements.txt
+RUN pip install --no-input -r /app/code_execution/requirements.txt
 
 # Create cache directory for MCP environments and add a non-root user for runtime
 RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
