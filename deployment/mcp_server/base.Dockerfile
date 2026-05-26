@@ -51,12 +51,15 @@ RUN mkdir -p /opt/wheelhouse && \
     "ipykernel>=6.29.0" \
     && ls -1 /opt/wheelhouse | head -n 5
 
+# Copy package metadata for dependency resolution, then install runtime deps
+COPY pyproject.toml /app/pyproject.toml
+RUN python -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'))['project']['dependencies']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
+    pip install --no-input -r /tmp/reqs.txt && \
+    rm /tmp/reqs.txt
+
 # Copy shared code (used by all servers)
 # .dockerignore excludes tests/ and dev files from this COPY
 COPY src/code_execution /app/code_execution
-
-# Install Python dependencies
-RUN pip install --no-input -r /app/code_execution/requirements.txt
 
 # Create cache directory for MCP environments and add a non-root user for runtime
 RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
