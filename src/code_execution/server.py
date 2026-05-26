@@ -2458,6 +2458,15 @@ else:
 
                 if not success:
                     error_msg = stderr.strip() or "Failed to inject variable into kernel"
+                    LOGGER.error(
+                        "object_transfer_receive: kernel injection failed for "
+                        "session=%s variable=%s source=%s transfer_id=%s: %s",
+                        session.session_id,
+                        variable_name,
+                        transfer_metadata.get("source_server"),
+                        transfer_metadata.get("transfer_id"),
+                        error_msg,
+                    )
                     return JSONResponse(
                         {"success": False, "error": f"Kernel injection failed: {error_msg}"},
                         status_code=500,
