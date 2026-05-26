@@ -45,21 +45,18 @@ dependencies = [
 [project.optional-dependencies]
 # Agent-side helpers (LLM factories, MCP clients, activity UI)
 agent = [
+    "agent-framework>=1.2.0",
     "openai>=1.107.3",
     "python-dotenv>=1.1.1",
     "sse-starlette>=3.3.0",
     "tenacity>=9.1.2",
     "tiktoken>=0.11.0",
 ]
-# Microsoft Agent Framework integration
-maf = ["agent-framework>=1.2.0"]
 # Domain-specific (geospatial examples)
 geo = [
     "rasterio>=1.4.0",
     "titiler.core>=0.19.0",
 ]
-# IRM/DRM decryption support
-irm = ["olefile>=0.47"]
 
 [project.urls]
 homepage = "https://github.com/msr-central/agora-agent"

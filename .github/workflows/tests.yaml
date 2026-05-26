@@ -64,7 +64,7 @@ jobs:
         id: llm_tests
         continue-on-error: true
         run: |
-          uv sync --extra maf
+          uv sync --extra agent
           uv run pytest agent_helpers/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
       
       - name: Test Summary
