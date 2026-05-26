@@ -86,6 +86,7 @@ def create_plan_workflow_descriptor(
     tools: list[ToolInfo] | None = None,
     domains_dir: Path | None = None,
     extra_skill_dirs: list[Path] | None = None,
+    domain_name: str | None = None,
 ) -> ToolDescriptor:
     """Create a ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
@@ -111,7 +112,7 @@ def create_plan_workflow_descriptor(
     """
     if tools is None:
         tools = []
-    graph = StateGraph(tools, domains_dir, extra_skill_dirs)
+    graph = StateGraph(tools, domains_dir, extra_skill_dirs, domain_name=domain_name)
 
     async def plan_workflow(
         domain: str = "",
@@ -167,6 +168,7 @@ def create_load_skill_descriptor(
     server_name: str,
     domains_dir: Path | None = None,
     extra_skill_dirs: list[Path] | None = None,
+    domain_name: str | None = None,
 ) -> ToolDescriptor:
     """Create a ``load_{name}_skill`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
@@ -196,7 +198,7 @@ def create_load_skill_descriptor(
         """Build a name → absolute-path index of all discovered skills."""
         nonlocal _index
         if _index is None:
-            skills = _discover_skills(domains_dir, extra_skill_dirs)
+            skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
             _index = {s["name"]: s["abs_path"] for s in skills}
             LOGGER.info("load_%s_skill index built with %d skills", server_name, len(_index))
         return _index

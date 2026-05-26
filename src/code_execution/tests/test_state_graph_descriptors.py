@@ -23,7 +23,7 @@ _EMPTY_TOOLS: list = []
 _TEST_SERVER = "testdomain"
 
 
-def _fake_discover_skills(domains_dir, extra_skill_dirs):
+def _fake_discover_skills(*_args, **_kwargs):
     return [
         {"name": "flowsheet-setup", "abs_path": "/fake/skills/flowsheet-setup/SKILL.md"},
         {"name": "grid-converter", "abs_path": "/fake/skills/grid-converter/SKILL.md"},
@@ -194,7 +194,7 @@ class TestLoadSkillDescriptor:
         skill_file = skill_dir / "SKILL.md"
         skill_file.write_text("# Test Skill\nDo the thing.", encoding="utf-8")
 
-        def _discover(domains_dir, extra_skill_dirs):
+        def _discover(*_args, **_kwargs):
             return [{"name": "test-skill", "abs_path": str(skill_file)}]
 
         with patch(

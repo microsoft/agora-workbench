@@ -52,8 +52,12 @@ def _parse_skill_frontmatter(path: Path) -> dict[str, Any]:
 def _discover_skills(
     domains_dir: Path | None,
     extra_skill_dirs: list[Path] | None = None,
+    domain_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Discover all SKILL.md files under ``domains/*/skills/`` and parse frontmatter.
+    """Discover skill markdown files under ``domains/*/skills/`` and parse frontmatter.
+
+    Any ``*.md`` file with a ``name:`` field in its YAML frontmatter is treated
+    as a skill.  Files without frontmatter (READMEs, prose docs) are skipped.
 
     Parameters
     ----------
@@ -61,9 +65,13 @@ def _discover_skills(
         Root of the ``domains/`` directory tree.  When None, domain-based
         skill discovery is skipped.
     extra_skill_dirs : list[Path] | None
-        Additional top-level directories to search for SKILL.md files
-        (e.g. ``planning/skills``).  Each is searched recursively up to
-        3 levels deep, like domain skill directories.
+        Additional top-level directories to search for skill markdown
+        (e.g. ``planning/skills``).
+    domain_name : str | None
+        When set, restrict discovery to ``domains_dir / domain_name / skills/``
+        instead of iterating every subdirectory of ``domains_dir``.  Use this
+        from per-server callers so chemistry's server doesn't index
+        earthscience's skills in a shared-source dev layout.
 
     Returns a list of dicts with keys: name, description, domain, states, path.
     """
@@ -71,16 +79,19 @@ def _discover_skills(
     if domains_dir is None or not domains_dir.is_dir():
         return skills
 
-    for domain_dir in sorted(domains_dir.iterdir()):
-        if not domain_dir.is_dir():
-            continue
+    if domain_name is not None:
+        candidate = domains_dir / domain_name
+        domain_dirs = [candidate] if candidate.is_dir() else []
+    else:
+        domain_dirs = sorted(d for d in domains_dir.iterdir() if d.is_dir())
+
+    for domain_dir in domain_dirs:
         skills_root = domain_dir / "skills"
         if not skills_root.is_dir():
             continue
-        domain_name = domain_dir.name
+        d_name = domain_dir.name
 
-        # Search up to 3 levels deep for SKILL.md
-        for skill_md in sorted(skills_root.rglob("SKILL.md")):
+        for skill_md in sorted(skills_root.rglob("*.md")):
             fm = _parse_skill_frontmatter(skill_md)
             if not fm.get("name"):
                 continue
@@ -88,7 +99,7 @@ def _discover_skills(
                 {
                     "name": fm["name"],
                     "description": fm.get("description", ""),
-                    "domain": domain_name,
+                    "domain": d_name,
                     "states": fm.get("states", []),
                     "path": str(skill_md.relative_to(domains_dir)),
                     "abs_path": str(skill_md),
@@ -99,7 +110,7 @@ def _discover_skills(
         if not extra_dir.is_dir():
             continue
         pkg_name = extra_dir.parent.name  # e.g. "planning"
-        for skill_md in sorted(extra_dir.rglob("SKILL.md")):
+        for skill_md in sorted(extra_dir.rglob("*.md")):
             fm = _parse_skill_frontmatter(skill_md)
             if not fm.get("name"):
                 continue
@@ -139,9 +150,11 @@ class StateGraph:
         tools: list[ToolInfo],
         domains_dir: Path | None = None,
         extra_skill_dirs: list[Path] | None = None,
+        domain_name: str | None = None,
     ) -> None:
         self._domains_dir = domains_dir
         self._extra_skill_dirs = extra_skill_dirs
+        self._domain_name = domain_name
 
         # {domain_name: {enum_member.value: enum_member.name, ...}}
         self._domain_states: dict[str, dict[str, str]] = {}
@@ -158,7 +171,7 @@ class StateGraph:
         self._build_adjacency()
 
         # Skills with state annotations
-        self._skills = _discover_skills(domains_dir, extra_skill_dirs)
+        self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -168,8 +181,13 @@ class StateGraph:
         """Import ``states.py`` from each domain directory."""
         if self._domains_dir is None or not self._domains_dir.is_dir():
             return
-        for domain_dir in sorted(self._domains_dir.iterdir()):
-            if not domain_dir.is_dir() or not (domain_dir / "states.py").exists():
+        if self._domain_name is not None:
+            candidate = self._domains_dir / self._domain_name
+            domain_dirs = [candidate] if candidate.is_dir() else []
+        else:
+            domain_dirs = sorted(d for d in self._domains_dir.iterdir() if d.is_dir())
+        for domain_dir in domain_dirs:
+            if not (domain_dir / "states.py").exists():
                 continue
             domain_name = domain_dir.name
             try:
