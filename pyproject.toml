@@ -64,9 +64,6 @@ geo = [
 [project.urls]
 homepage = "https://github.com/msr-central/agora-agent"
 
-[tool.setuptools]
-package-dir = {"" = "src", "agent_helpers" = "agent_helpers"}
-
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = ["code_execution*", "agent_helpers*", "activity_ui*"]
