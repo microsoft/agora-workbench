@@ -7,7 +7,7 @@ before string operations that could raise IndexError.
 
 import pytest
 
-from ...code_execution.data_access.fetchers import BlobFetcher
+from ...data_access.fetchers import BlobFetcher
 
 
 @pytest.fixture

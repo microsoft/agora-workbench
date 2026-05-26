@@ -16,9 +16,9 @@ def mock_entra_env():
 
 def _create_server():
     """Helper to create a CodeExecutionServer for testing with Entra auth."""
-    from ...code_execution import CodeExecutionServer
-    from ...code_execution.code_execution_models import EnvironmentConfig
-    from ...code_execution.auth import create_entra_auth_config
+    from ... import CodeExecutionServer
+    from ...code_execution_models import EnvironmentConfig
+    from ...auth import create_entra_auth_config
 
     config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     auth_config = create_entra_auth_config(client_id="test-client-id", tenant_id="test-tenant-id")
@@ -185,7 +185,7 @@ class TestEntraTokenValidatorConfig:
 
     def test_missing_entra_config_raises_value_error(self):
         """create_entra_auth_config should raise ValueError when config is missing."""
-        from ...code_execution.auth import create_entra_auth_config
+        from ...auth import create_entra_auth_config
 
         with patch.dict("os.environ", {"ENTRA_CLIENT_ID": "", "ENTRA_TENANT_ID": ""}, clear=False):
             with pytest.raises(ValueError, match="Missing required Entra ID configuration"):

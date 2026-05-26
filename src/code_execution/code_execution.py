@@ -468,9 +468,7 @@ def _build_disallowed_actions_description(server: "CodeExecutionServer") -> str:
     )
 
 
-async def _publish_job_finished_when_done(
-    server: "CodeExecutionServer", session_id: str, job_id: str
-) -> None:
+async def _publish_job_finished_when_done(server: "CodeExecutionServer", session_id: str, job_id: str) -> None:
     """Emit a ``job_finished`` activity event once a background job terminates."""
     try:
         final = await server.session_manager.await_background_job(job_id)
@@ -489,9 +487,7 @@ async def _publish_job_finished_when_done(
             "stderr": final.get("stderr"),
             "error": final.get("error"),
             "duration_ms": (
-                float(final.get("elapsed_seconds", 0.0)) * 1000.0
-                if final.get("elapsed_seconds") is not None
-                else None
+                float(final.get("elapsed_seconds", 0.0)) * 1000.0 if final.get("elapsed_seconds") is not None else None
             ),
         }
     )

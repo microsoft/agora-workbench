@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ..code_execution.code_execution_models import EnvironmentConfig
-from ..code_execution.environment_builders import (
+from ..code_execution_models import EnvironmentConfig
+from ..environment_builders import (
     build_conda_environment,
     build_pip_environment,
     build_uv_environment,
@@ -215,8 +215,7 @@ async def test_additional_command_runs_inside_env(tmp_path: Path) -> None:
 
     written = marker.read_text().strip()
     assert str(config.build_dir) in written, (
-        f"additional_command ran outside the env: python={written!r} "
-        f"build_dir={config.build_dir}"
+        f"additional_command ran outside the env: python={written!r} build_dir={config.build_dir}"
     )
 
 
@@ -246,4 +245,3 @@ async def test_additional_command_failure_raises(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="Additional command 1/1 failed"):
         await build_uv_environment(config)
-

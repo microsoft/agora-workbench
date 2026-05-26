@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import asyncio
 
-from ..code_execution import CodeExecutionServer, EnvironmentConfig
-from ..code_execution.auth import create_noop_auth_config
+from .. import CodeExecutionServer, EnvironmentConfig
+from ..auth import create_noop_auth_config
 
 
 def _make_server(name: str) -> CodeExecutionServer:
@@ -38,12 +38,9 @@ def _list_tool_names(server: CodeExecutionServer) -> list[str]:
 class TestMetaToolPrefixing:
     def test_check_job_carries_server_prefix(self):
         names = _list_tool_names(_make_server("alpha"))
-        assert "alpha_check_job" in names, (
-            f"check_job must be prefixed with server name; got: {sorted(names)}"
-        )
+        assert "alpha_check_job" in names, f"check_job must be prefixed with server name; got: {sorted(names)}"
         assert "check_job" not in names, (
-            "bare 'check_job' (no prefix) leaks across servers and breaks "
-            "multi-server agent assembly"
+            "bare 'check_job' (no prefix) leaks across servers and breaks multi-server agent assembly"
         )
 
     def test_no_name_collisions_between_two_servers(self):
@@ -52,6 +49,5 @@ class TestMetaToolPrefixing:
         b = set(_list_tool_names(_make_server("beta")))
         overlap = a & b
         assert overlap == set(), (
-            f"Tool names overlap between servers — would cause duplicate-tool "
-            f"errors in multi-server agents: {overlap}"
+            f"Tool names overlap between servers — would cause duplicate-tool errors in multi-server agents: {overlap}"
         )

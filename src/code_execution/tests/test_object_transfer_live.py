@@ -23,8 +23,8 @@ import uvicorn
 from pathlib import Path
 from typing import AsyncGenerator
 
-from ..code_execution import CodeExecutionServer, EnvironmentConfig
-from ..code_execution.sessions import (
+from .. import CodeExecutionServer, EnvironmentConfig
+from ..sessions import (
     SessionManager,
     SessionConfig,
     set_current_session,
@@ -85,7 +85,7 @@ def _make_server(
         build_dir=build_dir,
     )
     session_manager = SessionManager(SessionConfig(max_sessions=10, timeout_minutes=5, cleanup_interval_seconds=60))
-    from ..code_execution.auth import create_noop_auth_config
+    from ..auth import create_noop_auth_config
 
     return CodeExecutionServer(
         environment_config=config,

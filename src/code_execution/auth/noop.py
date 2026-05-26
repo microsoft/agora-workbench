@@ -149,10 +149,7 @@ def create_noop_auth_config(
     Returns:
         An AuthConfig with no-op implementations.
     """
-    LOGGER.warning(
-        "Creating no-op auth configuration. "
-        "This MUST NOT be used in production — tokens are not validated."
-    )
+    LOGGER.warning("Creating no-op auth configuration. This MUST NOT be used in production — tokens are not validated.")
 
     token_validator = NoOpTokenValidator(default_user_id=default_user_id, default_tenant_id=default_tenant_id)
     identity_extractor = NoOpIdentityExtractor(default_identity=f"{default_user_id}@{default_tenant_id}")

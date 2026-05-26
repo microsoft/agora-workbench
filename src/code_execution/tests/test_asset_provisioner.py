@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from code_execution.code_execution.asset_provisioner import (
+from code_execution.asset_provisioner import (
     _compute_sha256,
     _is_blob_source,
     _is_https_source,
     _is_local_source,
     provision_assets,
 )
-from code_execution.code_execution.code_execution_models import AssetSpec, EnvironmentConfig
+from code_execution.code_execution_models import AssetSpec, EnvironmentConfig
 
 
 class TestHelpers:

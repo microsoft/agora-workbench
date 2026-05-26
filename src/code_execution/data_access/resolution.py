@@ -13,7 +13,7 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from ..types import AssetId, VarName
 
 if TYPE_CHECKING:
-    from ..code_execution import CodeExecutionServer
+    from ..server import CodeExecutionServer
 
 LOGGER = logging.getLogger(__name__)
 

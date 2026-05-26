@@ -65,9 +65,7 @@ def _validate_target_url(url: str) -> None:
 
     # Only allow HTTP(S); plain HTTP is restricted to loopback addresses only.
     if parsed.scheme not in ("https", "http"):
-        raise ValueError(
-            f"Object transfer target URL must use HTTP or HTTPS (got '{parsed.scheme}')."
-        )
+        raise ValueError(f"Object transfer target URL must use HTTP or HTTPS (got '{parsed.scheme}').")
     if parsed.scheme == "http" and not is_loopback:
         raise ValueError(
             "Plain HTTP is only permitted for loopback addresses "
@@ -205,6 +203,7 @@ class ObjectTransferClient:
         # Strip common MCP path suffixes so the agent can pass the MCP
         # endpoint URL directly (e.g. http://gis-server:8000/mcp).
         import re as _re
+
         base = _re.sub(r"/mcp/?$", "", target_url.rstrip("/"))
         receive_url = f"{base}/object-transfer/receive"
         payload: dict = {

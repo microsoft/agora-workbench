@@ -7,7 +7,7 @@ be resolved as assets.  Detection is purely value-based — any string
 matching ``<type>id</type>`` is resolved, regardless of parameter type.
 """
 
-from ...code_execution.data_access.resolution import (
+from ...data_access.resolution import (
     looks_like_qualified_name,
     should_resolve_as_asset,
 )

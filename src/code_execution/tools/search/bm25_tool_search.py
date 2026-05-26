@@ -125,9 +125,7 @@ class BM25ToolSearchBackend(ToolSearchBackend):
 
     def _skill_result(self, skill_info: dict[str, Any], score: float) -> ToolSearchResult:
         skill_name = skill_info.get("name", "")
-        to_access = (
-            f'Load with load_{self._server_name}_skill(skill_name="{skill_name}")' if self._server_name else ""
-        )
+        to_access = f'Load with load_{self._server_name}_skill(skill_name="{skill_name}")' if self._server_name else ""
         return ToolSearchResult(
             name=skill_name,
             server_name=self._server_name,

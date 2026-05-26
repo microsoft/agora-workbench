@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from ....code_execution.data_access.catalog.config import CatalogConfig, SearchConfig
-from ....code_execution.data_access.catalog.db import CatalogDB
-from ....code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
+from ....data_access.catalog.config import CatalogConfig, SearchConfig
+from ....data_access.catalog.db import CatalogDB
+from ....catalog_tools import CatalogToolsContext, register_catalog_tools
 
 
 @pytest.fixture
