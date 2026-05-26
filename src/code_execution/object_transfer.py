@@ -38,11 +38,17 @@ def _validate_target_url(url: str) -> None:
 
     Enforces the following rules to prevent SSRF and Bearer-token leakage:
 
-    * The URL must use the ``https`` scheme, *unless* the host is a loopback
-      address (``localhost``, ``127.0.0.1``, ``::1``), which is permitted over
-      plain ``http`` for local development and tests.  All other plain-HTTP
-      destinations are rejected to prevent bearer-token exposure over
-      unencrypted connections.
+    * The URL must use the ``https`` scheme, *unless* the host is one of:
+        - a loopback address (``localhost``, ``127.0.0.1``, ``::1``), which is
+          always permitted over plain ``http`` for local development / tests;
+        - a host matching a pattern in the ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``
+          environment variable, which lets operators explicitly opt-in trusted
+          internal service names (e.g. docker-compose service names on a
+          shared docker network).  Patterns follow the same syntax as
+          ``OBJECT_TRANSFER_ALLOWED_HOSTS`` (space- or comma-separated, optional
+          leading ``*.`` wildcard).
+      All other plain-HTTP destinations are rejected to prevent bearer-token
+      exposure over unencrypted connections.
     * When the environment variable ``OBJECT_TRANSFER_ALLOWED_HOSTS`` is set,
       the URL's hostname must match one of the space- or comma-separated
       patterns listed there.  Each pattern may use ``*`` as a leading wildcard
@@ -63,27 +69,41 @@ def _validate_target_url(url: str) -> None:
 
     is_loopback = host in _LOOPBACK_HOSTS
 
-    # Only allow HTTP(S); plain HTTP is restricted to loopback addresses only.
+    # Only allow HTTP(S); plain HTTP is restricted to loopback addresses and
+    # explicitly-opted-in trusted hosts.
     if parsed.scheme not in ("https", "http"):
         raise ValueError(f"Object transfer target URL must use HTTP or HTTPS (got '{parsed.scheme}').")
     if parsed.scheme == "http" and not is_loopback:
-        raise ValueError(
-            "Plain HTTP is only permitted for loopback addresses "
-            "(localhost, 127.0.0.1, ::1). "
-            "Use an HTTPS URL for all other inter-service object transfers."
+        trusted_patterns = _parse_host_patterns(os.environ.get("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", ""))
+        if not (trusted_patterns and _host_matches_any(host, trusted_patterns)):
+            raise ValueError(
+                "Plain HTTP is only permitted for loopback addresses "
+                "(localhost, 127.0.0.1, ::1) or hosts listed in "
+                "OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS. "
+                "Use an HTTPS URL for all other inter-service object transfers."
+            )
+        LOGGER.warning(
+            "Allowing plain-HTTP object transfer to trusted host '%s'. "
+            "Bearer tokens will traverse an unencrypted connection; ensure "
+            "this is acceptable for the deployment (e.g. a private docker network).",
+            host,
         )
 
     # Honor an optional hostname allow-list from the environment.
     # Loopback hosts bypass this check; trusted HTTP hosts do *not* so that the
     # allow-list remains an effective SSRF control for internal service names.
-    allowed_hosts_env = os.environ.get("OBJECT_TRANSFER_ALLOWED_HOSTS", "").strip()
-    if allowed_hosts_env and not is_loopback:
-        patterns = [p.strip() for p in allowed_hosts_env.replace(",", " ").split() if p.strip()]
-        if patterns and not _host_matches_any(host, patterns):
+    allowed_patterns = _parse_host_patterns(os.environ.get("OBJECT_TRANSFER_ALLOWED_HOSTS", ""))
+    if allowed_patterns and not is_loopback:
+        if not _host_matches_any(host, allowed_patterns):
             raise ValueError(
                 f"Object transfer target host '{host}' is not in the allowed-host list. "
                 f"Update OBJECT_TRANSFER_ALLOWED_HOSTS to permit this host."
             )
+
+
+def _parse_host_patterns(raw: str) -> list[str]:
+    """Split a comma- or space-separated env-var value into host patterns."""
+    return [p.strip() for p in raw.replace(",", " ").split() if p.strip()]
 
 
 def _host_matches_any(host: str, patterns: list[str]) -> bool:
