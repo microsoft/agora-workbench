@@ -473,6 +473,12 @@
       // Supported MIME types: image/png (base64), image/svg+xml (raw XML).
       // Anything else falls back to a small placeholder so unhandled payloads
       // are still visible.
+      //
+      // Security: both PNG and SVG are rendered via `<img>` data URLs.  For
+      // SVG, this puts the browser into "secure static mode" — scripts and
+      // event handlers inside the SVG are disabled, external fetches are
+      // blocked.  Do NOT switch SVG to innerHTML/DOMParser; kernel code is
+      // LLM-generated and prompt-injectable.
       function buildDisplayEl(d) {
         const fig = document.createElement("div");
         fig.className = "display-figure";
@@ -487,12 +493,13 @@
           img.src = `data:image/png;base64,${d.data}`;
           fig.appendChild(img);
         } else if (d.mime_type === "image/svg+xml" && typeof d.data === "string") {
-          // Render SVG inline.  Trust boundary: this content comes from our
-          // own kernel running the agent's code; we don't load it from
-          // untrusted third parties.
-          const container = document.createElement("div");
-          container.innerHTML = d.data;
-          fig.appendChild(container);
+          const img = document.createElement("img");
+          img.alt = "kernel output (image/svg+xml)";
+          // btoa() needs latin-1; encode UTF-8 first so non-ASCII text in
+          // the SVG (axis labels, titles) survives the round-trip.
+          img.src = "data:image/svg+xml;base64," +
+            btoa(unescape(encodeURIComponent(d.data)));
+          fig.appendChild(img);
         } else {
           const placeholder = document.createElement("div");
           placeholder.className = "mime-badge";

@@ -20,7 +20,13 @@ from .storage import InMemoryStorage, SessionStorageBackend
 
 # Display-data capture: priority of renderable MIME types to extract from
 # Jupyter `display_data` / `execute_result` messages.  Higher priority first.
-_DISPLAY_MIME_PRIORITY: Tuple[str, ...] = ("image/png", "image/svg+xml", "text/html")
+#
+# `text/html` is deliberately NOT captured.  Kernel code is LLM-generated and
+# therefore prompt-injectable from any document the agent reads; raw HTML
+# rendered in the UI is a direct XSS vector.  If interactive HTML payloads
+# (plotly, bokeh) are wanted later, render them via a sandboxed iframe — do
+# not relax the policy here.
+_DISPLAY_MIME_PRIORITY: Tuple[str, ...] = ("image/png", "image/svg+xml")
 
 # Hard cap on total display-data bytes captured per execute, to keep activity
 # events transportable.  matplotlib PNGs are typically <500 KB so 5 MB

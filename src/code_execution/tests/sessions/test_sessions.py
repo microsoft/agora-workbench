@@ -656,16 +656,21 @@ class TestDisplayDataCapture:
         assert _extract_display(None, None) is None  # type: ignore[arg-type]
 
     @pytest.mark.unit
-    def test_extract_display_html_third_priority(self):
-        """text/html ranks below image formats but above plain text."""
+    def test_extract_display_drops_html(self):
+        """text/html is intentionally NOT a capturable display type.
+
+        Rendering raw HTML in the activity UI is an XSS vector because
+        kernel code is LLM-generated and prompt-injectable.  HTML-only
+        payloads (e.g. a DataFrame ``_repr_html_``) fall through to None
+        so the UI shows nothing for them.
+        """
         from ...sessions.manager import _extract_display
 
-        out = _extract_display(
+        assert _extract_display(
             {"text/plain": "<DataFrame>", "text/html": "<table></table>"},
             {},
-        )
-        assert out is not None
-        assert out["mime_type"] == "text/html"
+        ) is None
+        assert _extract_display({"text/html": "<script>alert(1)</script>"}, {}) is None
 
 
 class TestKernelExecuteLock:
