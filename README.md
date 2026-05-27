@@ -80,6 +80,8 @@ Configure credentials for your use case:
 - **Running the tutorial agent locally** — copy `docs/tutorials/maf_quickstart/.env.agent.example` to `.env.agent` at the repo root.
 - **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server`.
 
+For a minimal, **agent-free** MCP flow (standalone `CodeExecutionServer` + direct MCP client / `curl` calls), see [`examples/agent_examples/agent_free_getting_started/README.md`](examples/agent_examples/agent_free_getting_started/README.md).
+
 ## Development
 
 ```bash
