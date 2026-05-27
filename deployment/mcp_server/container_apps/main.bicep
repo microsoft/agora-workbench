@@ -11,7 +11,7 @@
 //   az deployment group create \
 //     --resource-group <rg> \
 //     --template-file  main.bicep \
-//     --parameters     parameters/office.bicepparam
+//     --parameters     parameters/<server>.bicepparam
 // ---------------------------------------------------------------------------
 
 targetScope = 'resourceGroup'

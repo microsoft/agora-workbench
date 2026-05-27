@@ -1,16 +1,16 @@
-// Parameter file for the office-server deployment.
+// Parameter file for the earthscience-server deployment.
 //
 // Infrastructure values (environmentId, identityId, registryServer, etc.)
 // are passed by deploy.sh from .env — do NOT duplicate them here.
 //
 // Usage:
-//   ./deploy.sh --server office
+//   ./deploy.sh --server earthscience
 
 using '../main.bicep'
 
 // ── Server identity ─────────────────────────────────────────────────────────
 
-param serverName    = 'office'
+param serverName    = 'earthscience'
 param containerPort = 8000
 
 // ── Resource sizing (ACA consumption plan) ──────────────────────────────────
