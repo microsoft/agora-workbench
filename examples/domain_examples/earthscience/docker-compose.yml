@@ -22,7 +22,7 @@ services:
       # which accepts any bearer token, so it must not be reachable off-host.
       - "127.0.0.1:8021:8000"
     env_file:
-      - ../../../.env.server
+      - ../../../deployment/mcp_server/.env.server
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"

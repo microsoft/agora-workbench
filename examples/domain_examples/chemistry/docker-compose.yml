@@ -22,7 +22,7 @@ services:
       # Do not expose it to untrusted networks unless authentication is enabled.
       - "127.0.0.1:8020:8000"
     env_file:
-      - ../../../.env.server
+      - ../../../deployment/mcp_server/.env.server
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"

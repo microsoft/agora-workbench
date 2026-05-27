@@ -25,11 +25,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 # ── Load .env.server ──────────────────────────────────────────────────────────
 
-ENV_FILE="${REPO_ROOT}/.env.server"
+ENV_FILE="${SCRIPT_DIR}/../.env.server"
 if [[ -f "$ENV_FILE" ]]; then
     # Source only non-comment, non-empty lines; strip surrounding quotes
     set -a
