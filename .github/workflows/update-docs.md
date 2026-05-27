@@ -37,7 +37,7 @@ Your only job is to review whether documentation may need updating, and if so, o
    - A clear title summarizing the documentation gap (e.g. "Docs: update README for new X feature").
    - A body that lists the specific files or areas that need attention and why.
    - The label `documentation`.
-   - End the issue body with a note: `> **Note:** Follow the documentation guidelines in .github/agents/documentation-agent.md.`
+   - End the issue body with a note: `> **Note:** Follow the repository documentation guidelines.`
 3. **If no updates are needed**, call `noop` with a brief message such as "No documentation updates needed — all recent changes are already covered in the docs."
 
 > NOTE: Do NOT create pull requests or edit files directly. Your only output is a GitHub issue assigned to Copilot (assignment is handled automatically).
