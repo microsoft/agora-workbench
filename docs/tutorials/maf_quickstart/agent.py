@@ -48,7 +48,7 @@ Prerequisites:
   1. ``.env.agent`` populated (see docs/tutorials/maf_quickstart/.env.example)
   2. ``az login`` (LLM auth uses Entra ID by default)
   3. Chemistry MCP server running locally:
-       cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
+       cd src && docker build -f deployment/base.Dockerfile \\
                               -t mcp-server-base:local .
        cd src/domain_examples/chemistry && docker compose up -d --build
   4. Energy systems MCP server running locally:

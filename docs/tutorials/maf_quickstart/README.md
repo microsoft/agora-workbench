@@ -86,7 +86,7 @@ Both domain servers inherit from this image:
 
 ```bash
 cd src
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 3. Start the chemistry MCP server

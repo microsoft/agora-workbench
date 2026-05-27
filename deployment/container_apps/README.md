@@ -33,9 +33,9 @@ az account set --subscription <SUBSCRIPTION_ID>
   --location        eastus2 \
   --identity-id     /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
 
-# 3. Copy the ACA_* values printed by setup.sh into `deployment/mcp_server/.env.server`.
+# 3. Copy the ACA_* values printed by setup.sh into `deployment/.env.server`.
 #    deploy.sh reads infrastructure config (ACR, environment, identity) from
-#    `deployment/mcp_server/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
+#    `deployment/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
 #    See deploy.sh and .env.example for the full list of ACA_* variables.
 
 # 4. Deploy an example server (chemistry shown)

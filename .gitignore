@@ -23,7 +23,7 @@ wheels/
 # Virtual environments
 .env
 .env.agent
-deployment/mcp_server/.env.server
+deployment/.env.server
 .venv
 env/
 venv/

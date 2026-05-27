@@ -21,7 +21,7 @@ Exposes an `execute_chemistry_code` MCP tool that runs Python code in an isolate
 
 ```bash
 # From the repository root:
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the chemistry server
@@ -99,7 +99,7 @@ print(f"Benzene vs Hexane: {DataStructs.TanimotoSimilarity(fp1, fp3):.3f}")
 
 ## Authentication
 
-This example uses `create_noop_auth_config()` (no authentication required). For production deployments with Entra ID, see the [deployment README](../../deployment/mcp_server/README.md).
+This example uses `create_noop_auth_config()` (no authentication required). For production deployments with Entra ID, see the [deployment README](../../deployment/README.md).
 
 ## Domain Tools
 

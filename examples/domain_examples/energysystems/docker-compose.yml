@@ -2,7 +2,7 @@
 #
 # Prerequisites — build the base image first:
 #   # From the repository root:
-#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 #
 # To see activity events in the shared Activity UI (optional but recommended):
 #   1) docker network create agora-activity     # once per host
@@ -20,7 +20,7 @@ services:
     ports:
       - "127.0.0.1:8022:8000"
     env_file:
-      - ../../../deployment/mcp_server/.env.server
+      - ../../../deployment/.env.server
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"

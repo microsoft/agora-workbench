@@ -10,7 +10,7 @@ From the repository root:
 
 ```bash
 # From the repository root:
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 The base image includes system dependencies, `uv`, miniforge, and the `code_execution` package.
@@ -69,7 +69,7 @@ See `.env.example` at the repo root for the full list.
 ## Architecture
 
 ```
-src/deployment/mcp_server/
+deployment/
 ├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, code_execution)
 ├── README.md                # This file
 ├── example/

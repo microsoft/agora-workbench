@@ -101,7 +101,7 @@ networks:
     external: true
 ```
 
-That's it. The BYOA template at `src/deployment/mcp_server/example/docker-compose.yml`
+That's it. The BYOA template at `deployment/example/docker-compose.yml`
 ships with this wiring pre-written but commented out — uncomment the
 `[activity-ui]` blocks to opt in.
 
@@ -151,7 +151,7 @@ the base, then the domain server:
 
 ```bash
 cd src
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 cd domain_examples/chemistry
 docker compose up -d --build --force-recreate
 ```

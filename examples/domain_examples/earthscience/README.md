@@ -46,7 +46,7 @@ call — `planetary_computer`, `pystac_client`, `rasterio`, `xr`,
 
 ```bash
 # From the repository root:
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the earth science server
@@ -94,4 +94,4 @@ This example uses `create_noop_auth_config()` (no authentication on the
 MCP server itself). The compose file binds to `127.0.0.1` only — the
 server must not be reachable off-host while running in no-op auth mode.
 For production deployments with Entra ID, see the
-[deployment README](../../deployment/mcp_server/README.md).
+[deployment README](../../deployment/README.md).
