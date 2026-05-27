@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from ..code_execution.code_execution_models import CodeExecutionResult, EnvironmentConfig
+from ..code_execution_models import CodeExecutionResult, EnvironmentConfig
 
 
 def test_code_execution_result_defaults():

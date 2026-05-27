@@ -11,14 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ...code_execution.data_access.fetchers import BlobFetcher
-from ...code_execution.data_access.manager import DataLakeDataManager
+from ...data_access.fetchers import BlobFetcher
+from ...data_access.manager import DataLakeDataManager
 
 
 @pytest.fixture(autouse=True)
 def mock_entra_credential_provider():
     """Mock EntraCredentialProvider for all tests."""
-    with patch("code_execution.code_execution.data_access.manager.EntraCredentialProvider") as mock_provider_cls:
+    with patch("code_execution.data_access.manager.EntraCredentialProvider") as mock_provider_cls:
         mock_provider = MagicMock()
         mock_provider.get_token = AsyncMock(return_value=MagicMock(token="mock-token", expires_on=9999999999))
         mock_provider.close = AsyncMock()
@@ -86,7 +86,7 @@ class TestDataLakeDataManagerInit:
     async def test_init_credential_provider_failure_is_deferred(self):
         """Test credential provider init errors are deferred to fetch time."""
         with patch(
-            "code_execution.code_execution.data_access.manager.EntraCredentialProvider",
+            "code_execution.data_access.manager.EntraCredentialProvider",
             side_effect=RuntimeError("missing managed identity"),
         ):
             manager = DataLakeDataManager()
@@ -189,7 +189,7 @@ class TestGetCachePath:
     async def test_blob_lookup_surfaces_credential_init_error(self):
         """Test blob requests surface deferred Azure init errors to the caller."""
         with patch(
-            "code_execution.code_execution.data_access.manager.EntraCredentialProvider",
+            "code_execution.data_access.manager.EntraCredentialProvider",
             side_effect=RuntimeError("missing managed identity"),
         ):
             manager = DataLakeDataManager()

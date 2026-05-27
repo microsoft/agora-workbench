@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ...code_execution.sessions import Session, SessionConfig, SessionManager
+from ...sessions import Session, SessionConfig, SessionManager
 
 
 class TestUserIdentityInSessions:
@@ -140,7 +140,7 @@ class TestUserTokenKernelPropagation:
         km, kc = self._make_mock_kernel()
 
         with patch(
-            "code_execution.code_execution.sessions.manager.AsyncKernelManager",
+            "code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
             await manager._get_or_create_kernel(
@@ -160,7 +160,7 @@ class TestUserTokenKernelPropagation:
         km, kc = self._make_mock_kernel()
 
         with patch(
-            "code_execution.code_execution.sessions.manager.AsyncKernelManager",
+            "code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
             await manager._get_or_create_kernel(
@@ -180,7 +180,7 @@ class TestUserTokenKernelPropagation:
         km, kc = self._make_mock_kernel()
 
         with patch(
-            "code_execution.code_execution.sessions.manager.AsyncKernelManager",
+            "code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
             await manager._get_or_create_kernel("sess-3")
@@ -196,7 +196,7 @@ class TestUserTokenKernelPropagation:
         km, kc = self._make_mock_kernel()
 
         with patch(
-            "code_execution.code_execution.sessions.manager.AsyncKernelManager",
+            "code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
             await manager._get_or_create_kernel("sess-4", user_token="initial-token")

@@ -25,8 +25,8 @@ os.environ.setdefault("DATA_LAKE_SEARCH_ENDPOINT", "https://test-search.search.w
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 
-from ..code_execution import CodeExecutionServer, EnvironmentConfig
-from ..code_execution.sessions import SessionManager, SessionConfig, set_current_session
+from .. import CodeExecutionServer, EnvironmentConfig
+from ..sessions import SessionManager, SessionConfig, set_current_session
 from code_execution import ToolDefinition, ToolParameter, ToolRegistry
 
 
@@ -240,7 +240,7 @@ async def test_server(
         )
     )
 
-    from ..code_execution.auth import create_noop_auth_config
+    from ..auth import create_noop_auth_config
 
     server = CodeExecutionServer(
         environment_config=config,

@@ -10,11 +10,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
-from ...code_execution.data_access.resolution import (
+from ...data_access.resolution import (
     AssetResolutionMiddleware,
     _resolved_assets,
 )
-from ...code_execution.sessions import Session
+from ...sessions import Session
 
 
 def _patch_set_current_session():

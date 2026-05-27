@@ -8,9 +8,9 @@ import pytest
 
 import code_execution.tools as code_execution_tools
 
-from ..code_execution import CodeExecutionServer, EnvironmentConfig
-from ..code_execution.auth import create_noop_auth_config
-from ..code_execution.tool_registry import ToolDefinition, ToolRegistry, StateTransition
+from .. import CodeExecutionServer, EnvironmentConfig
+from ..auth import create_noop_auth_config
+from ..tool_registry import ToolDefinition, ToolRegistry, StateTransition
 
 
 # ---------------------------------------------------------------------------

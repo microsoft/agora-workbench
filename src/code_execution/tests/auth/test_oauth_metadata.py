@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-from ...code_execution import CodeExecutionServer
-from ...code_execution.auth import create_entra_auth_config, create_noop_auth_config
-from ...code_execution.code_execution_models import EnvironmentConfig
+from ... import CodeExecutionServer
+from ...auth import create_entra_auth_config, create_noop_auth_config
+from ...code_execution_models import EnvironmentConfig
 
 
 def _create_server(entra_client_id="test-client-id", entra_tenant_id="test-tenant-id"):

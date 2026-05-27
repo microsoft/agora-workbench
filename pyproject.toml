@@ -5,48 +5,69 @@ description = "A multi-domain AI agent system that combines LLM-driven workflows
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    # Azure SDKs
+    "azure-core>=1.38.0",
+    "azure-data-tables>=12.7.0",
     "azure-identity>=1.25.0",
+    "azure-search-documents>=11.4.0",
     "azure-storage-blob[aio]>=12.28.0",
-    "dill>=0.3.8",
+    # MCP / Web
     "fastapi>=0.115",
     "fastmcp>=2.14.2",
-    "ipykernel>=6.29.0",
-    "jinja2>=3.1.6",
     "mcp>=1.26.0",
-    "openai>=1.107.3",
+    "starlette>=0.41.0",
+    "uvicorn>=0.34",
+    "wsproto>=1.3.2",
+    # Auth
+    "cryptography>=43.0.0",
+    "msal>=1.28.0",
+    "pyjwt[crypto]>=2.8.0",
+    # Data
     "pandas>=2.3.3",
     "pyarrow>=22.0.0",
     "pydantic>=2.10.4",
-    "pyjwt[crypto]>=2.8.0",
-    "python-dotenv>=1.1.1",
     "pyyaml>=6.0",
-    "rasterio>=1.4.0",
+    # Execution & Sessions
+    "dill>=0.3.8",
+    "ipykernel>=6.29.0",
+    "jupyter-client>=8.6.0",
+    "pyzmq>=26.0.0",
+    # Search & Catalog
     "sentence-transformers>=3.0.0",
     "sqlite-vec>=0.1.9",
-    "sse-starlette>=3.3.0",
-    "azure-search-documents>=11.4.0",
-    "tenacity>=9.1.2",
-    "tiktoken>=0.11.0",
-    "titiler.core>=0.19.0",
+    # HTTP & Networking
+    "httpx>=0.27.0",
+    # Utilities
     "typeguard>=4.4.4",
-    "azure-data-tables>=12.7.0",
-    "uvicorn>=0.34",
-    "wsproto>=1.3.2",
+    "typing-extensions>=4.12.0",
 ]
 
 [project.optional-dependencies]
-maf = ["agent-framework>=1.2.0"]
+# Agent-side helpers (LLM factories, MCP clients)
+agent = [
+    "agent-framework>=1.2.0",
+    "openai>=1.107.3",
+    "python-dotenv>=1.1.1",
+    "tenacity>=9.1.2",
+    "tiktoken>=0.11.0",
+]
+# Activity UI monitoring service
+ui = [
+    "sse-starlette>=3.3.0",
+]
+# Domain-specific (geospatial examples)
+geo = [
+    "rasterio>=1.4.0",
+    "titiler.core>=0.19.0",
+]
 
 [project.urls]
 homepage = "https://github.com/msr-central/agora-agent"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["code_execution*", "utilities*", "planning*", "activity_ui*", "llm*"]
-exclude = ["tests*", "scripts*"]
+where = ["src", "."]
+include = ["code_execution*", "agent_helpers*", "activity_ui*"]
+exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]
@@ -66,7 +87,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/code_execution/tests", "src/domain_examples/tests", "src/llm/tests", "src/utilities/tests"]
+testpaths = ["src/code_execution/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
@@ -77,8 +98,9 @@ markers = [
     "live: Live tests (require real API calls, credentials, network)",
     "asyncio: Async tests",
 ]
-asyncio_mode = "strict"
-asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+timeout = 300
 
 [tool.uv]
 required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]

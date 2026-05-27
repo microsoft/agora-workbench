@@ -1,0 +1,15 @@
+# Exclude non-runtime files from Docker build context
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+**/.venv
+.git
+.github
+docs
+logo_ideas
+
+# Exclude test and dev files from code_execution package image
+src/code_execution/tests
+src/code_execution/README.md
+src/code_execution/catalog.example.yaml
