@@ -25,7 +25,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig
+from code_execution import CodeExecutionServer, ServerConfig
 from code_execution.auth import create_noop_auth_config
 
 ENVIRONMENT_YML = """\
@@ -60,7 +60,7 @@ import pandas as pd
 from shapely.geometry import box, Point, Polygon
 """
 
-config = EnvironmentConfig(
+config = ServerConfig(
     name="earthscience",
     description=(
         "Execute Python code for earth science and remote sensing analysis. "
@@ -88,7 +88,7 @@ class EarthScienceServer(CodeExecutionServer):
 
 
 server = EarthScienceServer(
-    environment_config=config,
+    server_config=config,
     auth_config=create_noop_auth_config(),
 )
 

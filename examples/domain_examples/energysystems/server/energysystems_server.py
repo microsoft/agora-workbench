@@ -16,7 +16,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
+from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
 from domain_examples.energysystems.tools import ENERGYSYSTEMS_TOOLS
 
@@ -54,7 +54,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 """
 
-config = EnvironmentConfig(
+config = ServerConfig(
     name="energysystems",
     description=(
         "Execute Python code with PyPSA and power system analysis packages. "
@@ -111,7 +111,7 @@ for tool_def in ENERGYSYSTEMS_TOOLS:
     tool_registry.register_tool(tool_def)
 
 server = EnergySystemsServer(
-    environment_config=config,
+    server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )

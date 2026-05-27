@@ -17,13 +17,13 @@ def mock_entra_env():
 def _create_server():
     """Helper to create a CodeExecutionServer for testing with Entra auth."""
     from ... import CodeExecutionServer
-    from ...code_execution_models import EnvironmentConfig
+    from ...code_execution_models import ServerConfig
     from ...auth import create_entra_auth_config
 
-    config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     auth_config = create_entra_auth_config(client_id="test-client-id", tenant_id="test-tenant-id")
     return CodeExecutionServer(
-        environment_config=config,
+        server_config=config,
         auth_config=auth_config,
     )
 

@@ -16,13 +16,13 @@ import sys
 from pathlib import Path
 
 from .asset_provisioner import provision_assets
-from .code_execution_models import EnvironmentConfig
+from .code_execution_models import ServerConfig
 
 LOGGER = logging.getLogger(__name__)
 
 
-def _load_config(config_path: Path) -> EnvironmentConfig:
-    """Load EnvironmentConfig from a JSON or YAML file."""
+def _load_config(config_path: Path) -> ServerConfig:
+    """Load ServerConfig from a JSON or YAML file."""
     content = config_path.read_text(encoding="utf-8")
 
     if config_path.suffix in (".yaml", ".yml"):
@@ -50,10 +50,10 @@ def _load_config(config_path: Path) -> EnvironmentConfig:
                 )
                 sys.exit(1)
 
-    return EnvironmentConfig(**data)
+    return ServerConfig(**data)
 
 
-async def _warm(config: EnvironmentConfig) -> None:
+async def _warm(config: ServerConfig) -> None:
     """Build environment and provision assets."""
     from . import environment_builders
 

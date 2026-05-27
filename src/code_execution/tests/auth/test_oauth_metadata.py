@@ -11,24 +11,24 @@ from starlette.testclient import TestClient
 
 from ... import CodeExecutionServer
 from ...auth import create_entra_auth_config, create_noop_auth_config
-from ...code_execution_models import EnvironmentConfig
+from ...code_execution_models import ServerConfig
 
 
 def _create_server(entra_client_id="test-client-id", entra_tenant_id="test-tenant-id"):
     """Helper to create a CodeExecutionServer for testing with Entra auth."""
-    config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     auth_config = create_entra_auth_config(client_id=entra_client_id, tenant_id=entra_tenant_id)
     return CodeExecutionServer(
-        environment_config=config,
+        server_config=config,
         auth_config=auth_config,
     )
 
 
 def _create_server_with_noop_auth():
     """Helper to create a CodeExecutionServer using no-op auth_config."""
-    config = EnvironmentConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
     return CodeExecutionServer(
-        environment_config=config,
+        server_config=config,
         auth_config=create_noop_auth_config(),
     )
 

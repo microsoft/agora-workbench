@@ -1,7 +1,7 @@
 """
 Asset provisioner for large artifacts (model weights, data files).
 
-Downloads or copies assets defined in ``EnvironmentConfig.assets`` into the
+Downloads or copies assets defined in ``ServerConfig.assets`` into the
 environment cache directory.  Supports multiple source URI schemes and
 checksum-based skip-if-present logic to avoid redundant transfers.
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .code_execution_models import AssetSpec, EnvironmentConfig
+    from .code_execution_models import AssetSpec, ServerConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ async def _fetch_single_asset(asset: "AssetSpec", cache_dir: Path) -> None:
     raise RuntimeError(f"Failed to provision asset '{asset.name}' after {MAX_RETRIES} attempts") from last_error
 
 
-async def provision_assets(config: "EnvironmentConfig") -> None:
+async def provision_assets(config: "ServerConfig") -> None:
     """Provision all assets defined in the environment config.
 
     Skips assets that already exist at the destination with a matching checksum.

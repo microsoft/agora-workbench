@@ -146,7 +146,7 @@ Set to `0` to **disable** truncation entirely (not recommended for production â€
 ```python
 # Custom threshold via constructor
 server = MyCodeExecutionServer(
-    environment_config=...,
+    server_config=...,
     output_truncation_threshold=100_000,  # 100 k chars
 )
 ```

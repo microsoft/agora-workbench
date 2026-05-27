@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .code_execution_models import EnvironmentConfig
+    from .code_execution_models import ServerConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -135,11 +135,11 @@ def _ensure_packages_in_environment_yml(dep_file: Path, packages: list[str]) -> 
     dep_file.write_text("".join(lines), encoding="utf-8")
 
 
-async def build_uv_environment(config: "EnvironmentConfig"):
+async def build_uv_environment(config: "ServerConfig"):
     """Build environment using uv.
 
     Args:
-        config: EnvironmentConfig with type="uv" and uv.lock dependency_file
+        config: ServerConfig with type="uv" and uv.lock dependency_file
     """
     build_dir = config.get_build_dir()
 
@@ -246,11 +246,11 @@ async def build_uv_environment(config: "EnvironmentConfig"):
     marker_file.write_text("ok")
 
 
-async def build_conda_environment(config: "EnvironmentConfig"):
+async def build_conda_environment(config: "ServerConfig"):
     """Build environment using conda.
 
     Args:
-        config: EnvironmentConfig with type="conda" and environment.yaml dependency_file
+        config: ServerConfig with type="conda" and environment.yaml dependency_file
     """
     build_dir = config.get_build_dir()
 
@@ -333,11 +333,11 @@ async def build_conda_environment(config: "EnvironmentConfig"):
             LOGGER.info(f"Additional command {i} completed successfully")
 
 
-async def build_pip_environment(config: "EnvironmentConfig"):
+async def build_pip_environment(config: "ServerConfig"):
     """Build environment using Python venv + pip.
 
     Args:
-        config: EnvironmentConfig with type="pip" and requirements.txt dependency_file
+        config: ServerConfig with type="pip" and requirements.txt dependency_file
     """
     build_dir = config.get_build_dir()
 

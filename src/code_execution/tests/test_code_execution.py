@@ -472,7 +472,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "12345"}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
                 output_truncation_threshold=99999,
             )
@@ -483,7 +483,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "50_000"}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 50000
@@ -493,7 +493,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "  1000  "}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 1000
@@ -503,7 +503,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "not_a_number"}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
                 output_truncation_threshold=42000,
             )
@@ -514,7 +514,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "-1"}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
                 output_truncation_threshold=42000,
             )
@@ -525,7 +525,7 @@ class TestEnvVarParsing:
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "0"}):
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 0
@@ -536,7 +536,7 @@ class TestEnvVarParsing:
             os.environ.pop("CODE_OUTPUT_TRUNCATION_THRESHOLD", None)
             test_server.__class__.__init__(
                 test_server,
-                environment_config=test_server.environment_config,
+                server_config=test_server.server_config,
                 auth_config=test_server.auth_config,
                 output_truncation_threshold=77777,
             )

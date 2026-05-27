@@ -4,7 +4,7 @@ Data models for code execution configuration and results.
 This module contains Pydantic models used by the code execution server:
 - ToolCallRecord: Structured record of a tool call
 - CodeExecutionResult: Output from code execution
-- EnvironmentConfig: Configuration for Python environments
+- ServerConfig: Configuration for a CodeExecutionServer instance
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ class AssetSpec(BaseModel):
     """Specification for a large artifact (model weights, data files) to provision.
 
     Assets are fetched into the environment cache directory at server startup
-    (when ``auto_provision=True`` on the parent ``EnvironmentConfig``) and
+    (when ``auto_provision=True`` on the parent ``ServerConfig``) and
     skipped if already present with a matching checksum.
 
     Supported source URI schemes:
@@ -94,17 +94,27 @@ class CodeExecutionResult(BaseModel):
     )
 
 
-class EnvironmentConfig(BaseModel):
-    """
-    Configuration for building/locating a Python execution environment.
+class ServerConfig(BaseModel):
+    """Configuration for a CodeExecutionServer instance.
 
-    Supports multiple dependency management systems:
-    - uv: Fast Python package installer (requirements.txt)
-    - conda: Anaconda/Miniconda (environment.yml)
-    - pip: Standard Python (requirements.txt)
+    Fields are organized into logical groups:
+
+    **Identity** — server and tool naming/description:
+        name, description, server_description
+
+    **Environment** — Python environment build settings:
+        type, dependency_file, auto_build, build_dir, additional_commands
+
+    **Assets** — large artifact provisioning:
+        assets, auto_provision
+
+    **Features** — optional server capabilities:
+        domains_dir, tool_search_backend
     """
 
-    name: str = Field(description="Environment name (e.g., 'powergrid', 'chemistry')")
+    # --- Identity ---
+
+    name: str = Field(description="Server/environment name (e.g., 'powergrid', 'chemistry')")
     description: str = Field(
         description="Description of the environment's capabilities and packages (appears in MCP tool description)"
     )
@@ -116,6 +126,9 @@ class EnvironmentConfig(BaseModel):
             "differ from the per-tool ``execute_{name}_code`` description."
         ),
     )
+
+    # --- Environment ---
+
     type: Literal["uv", "conda", "pip"] = Field(description="Type of environment/dependency manager")
     dependency_file: str = Field(
         description="Serialized content of dependency file (environment.yml or requirements.txt)"
@@ -128,21 +141,9 @@ class EnvironmentConfig(BaseModel):
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
     )
-    domains_dir: Optional[Path] = Field(
-        default=None,
-        description=(
-            "Path to the domains/ directory containing domain state definitions and skills. "
-            "Used by workflow planning and skill loading tools. "
-            "When None, these features are disabled unless tools carry state annotations directly."
-        ),
-    )
-    tool_search_backend: Literal["bm25", "azure_ai_search"] = Field(
-        default="bm25",
-        description=(
-            "Tool search backend for the server-side search_tools MCP tool. "
-            "Supported values: 'bm25' (default) and 'azure_ai_search'."
-        ),
-    )
+
+    # --- Assets ---
+
     assets: list[AssetSpec] = Field(
         default_factory=list,
         description=(
@@ -157,6 +158,24 @@ class EnvironmentConfig(BaseModel):
             "Automatically fetch assets at server startup if they are not already cached. "
             "Set to False when assets are pre-provisioned (e.g., baked into Docker image "
             "or available on a mounted volume)."
+        ),
+    )
+
+    # --- Features ---
+
+    domains_dir: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Path to the domains/ directory containing domain state definitions and skills. "
+            "Used by workflow planning and skill loading tools. "
+            "When None, these features are disabled unless tools carry state annotations directly."
+        ),
+    )
+    tool_search_backend: Literal["bm25", "azure_ai_search"] = Field(
+        default="bm25",
+        description=(
+            "Tool search backend for the server-side search_tools MCP tool. "
+            "Supported values: 'bm25' (default) and 'azure_ai_search'."
         ),
     )
 
