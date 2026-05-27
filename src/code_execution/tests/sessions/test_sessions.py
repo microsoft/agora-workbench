@@ -615,5 +615,56 @@ print(counter.increment())
         assert "7" in result2.stdout and "8" in result2.stdout and "9" in result2.stdout
 
 
+class TestDisplayDataCapture:
+    """The kernel polling loop must capture Jupyter display_data / execute_result
+    rich outputs (matplotlib figures, images, SVGs) so the activity UI can
+    render them.  Text-only payloads must NOT be returned as displays — they
+    are already in stdout.
+    """
+
+    @pytest.mark.unit
+    def test_extract_display_prefers_png(self):
+        from ...code_execution.sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/png": "BASE64HERE"},
+            {"width": 800},
+        )
+        assert out == {"mime_type": "image/png", "data": "BASE64HERE", "metadata": {"width": 800}}
+
+    @pytest.mark.unit
+    def test_extract_display_falls_back_to_svg(self):
+        from ...code_execution.sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/svg+xml": "<svg/>"},
+            {},
+        )
+        assert out is not None
+        assert out["mime_type"] == "image/svg+xml"
+        assert out["data"] == "<svg/>"
+
+    @pytest.mark.unit
+    def test_extract_display_text_only_returns_none(self):
+        """Pure text/plain payloads belong in stdout, not displays."""
+        from ...code_execution.sessions.manager import _extract_display
+
+        assert _extract_display({"text/plain": "just text"}, {}) is None
+        assert _extract_display({}, {}) is None
+        assert _extract_display(None, None) is None  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_extract_display_html_third_priority(self):
+        """text/html ranks below image formats but above plain text."""
+        from ...code_execution.sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<DataFrame>", "text/html": "<table></table>"},
+            {},
+        )
+        assert out is not None
+        assert out["mime_type"] == "text/html"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

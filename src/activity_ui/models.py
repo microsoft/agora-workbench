@@ -43,6 +43,10 @@ class ActivityEvent(BaseModel):
     duration_ms: Optional[float] = None
     tool_calls: Optional[list[dict[str, Any]]] = None
     error: Optional[str] = None
+    # Rich kernel outputs (matplotlib figures, images, SVGs, HTML).  Each
+    # entry: ``{"mime_type": str, "data": str, "metadata": dict}``.
+    # Rendered inline in the activity card; not sent to the agent.
+    displays: Optional[list[dict[str, Any]]] = None
 
     # set on most events so the UI can group by session
     session_id: Optional[str] = None

@@ -906,7 +906,7 @@ class CodeExecutionServer:
         try:
             start_time = time.monotonic()
             working_dir_str = str(self.working_dir) if self.working_dir else None
-            stdout, stderr, success = await self.session_manager.execute_code_for_session(
+            stdout, stderr, success, displays = await self.session_manager.execute_code_for_session(
                 session_id=session_id, code=code, timeout=timeout, working_dir=working_dir_str
             )
             execution_time = time.monotonic() - start_time
@@ -917,6 +917,7 @@ class CodeExecutionServer:
                 execution_time=execution_time,
                 success=success,
                 error=None if success else "Kernel execution failed",
+                displays=displays,
             )
 
             result = self.postprocess_result(result)
@@ -1475,7 +1476,7 @@ class CodeExecutionServer:
                     f"del __pkl__, __f__\n"
                 )
                 working_dir_str = str(server.working_dir) if server.working_dir else None
-                stdout, stderr, success = await server.session_manager.execute_code_for_session(
+                stdout, stderr, success, _displays = await server.session_manager.execute_code_for_session(
                     session_id=session.session_id, code=serialize_code, timeout=60, working_dir=working_dir_str
                 )
 
@@ -1615,7 +1616,7 @@ for __name__, __value__ in list(globals().items()):
 
 print(__agora_json__.dumps(__agora_ns__, sort_keys=True))
 """
-        stdout, _stderr, success = await self.session_manager.execute_code_for_session(
+        stdout, _stderr, success, _displays = await self.session_manager.execute_code_for_session(
             session_id=session_id,
             code=inspect_code,
             timeout=10,
@@ -1674,7 +1675,7 @@ if {result_variable!r} in globals():
 else:
     print("__AGORA_MISSING__")
 """
-        stdout, _stderr, success = await self.session_manager.execute_code_for_session(
+        stdout, _stderr, success, _displays = await self.session_manager.execute_code_for_session(
             session_id=session_id,
             code=capture_code,
             timeout=10,
@@ -1752,6 +1753,7 @@ else:
                         "session_id": session_id,
                         "job_id": job_id,
                         "batch_id": batch_id,
+                        "displays": result.displays,
                     }
                 )
             finally:
@@ -2452,7 +2454,7 @@ else:
                     f"del __pkl__, __f__\n"
                 )
                 working_dir_str = str(self.working_dir) if self.working_dir else None
-                stdout, stderr, success = await self.session_manager.execute_code_for_session(
+                stdout, stderr, success, _displays = await self.session_manager.execute_code_for_session(
                     session_id=session.session_id, code=deserialize_code, timeout=60, working_dir=working_dir_str
                 )
 

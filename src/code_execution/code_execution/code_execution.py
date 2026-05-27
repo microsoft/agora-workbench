@@ -654,11 +654,16 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
                     "tool_calls": [tc.model_dump() for tc in result.tool_calls],
                     "error": result.error,
                     "session_id": session.session_id,
+                    "displays": result.displays,
                 }
             )
 
-            # Return result with session_id
-            result_dict = result.model_dump()
+            # Return result with session_id.  ``displays`` is intentionally
+            # excluded from the JSON returned to the agent: matplotlib PNGs
+            # can be hundreds of KB and would blow the agent's context window
+            # for no gain — the text/plain reprs are already in ``stdout``,
+            # and the rich payload is streamed to the activity UI above.
+            result_dict = result.model_dump(exclude={"displays"})
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:
