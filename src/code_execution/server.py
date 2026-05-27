@@ -1463,6 +1463,14 @@ class CodeExecutionServer:
             fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
             os.close(fd)
 
+            # transfer_id correlates source/target events in the activity
+            # feed.  Generate it up front so the except-path publish below
+            # always has a stable id, even if an exception fires before the
+            # serialize step (e.g. session creation failure).
+            import uuid as _uuid
+
+            transfer_id = _uuid.uuid4().hex
+
             try:
                 server._restore_auth_context_for_mcp_session(session_id)
                 session = await server._get_or_create_session(tool_name, session_id=session_id)
@@ -1508,11 +1516,6 @@ class CodeExecutionServer:
                     user_token=current_token,
                 )
 
-                # transfer_id correlates source/target events in the activity feed.
-                import uuid as _uuid
-
-                transfer_id = _uuid.uuid4().hex
-
                 result = await client.push(
                     target_url=target_server_url,
                     variable_name=effective_target_name,
@@ -1554,9 +1557,33 @@ class CodeExecutionServer:
                 if self._is_max_sessions_http_error(e):
                     return _json.dumps(e.detail, indent=2)
                 LOGGER.error(f"Object transfer failed: {e}", exc_info=True)
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_sent",
+                        "description": f"Push '{variable_name}' → {target_server_url} failed: {e}",
+                        "transfer_id": transfer_id,
+                        "variable_name": variable_name,
+                        "target_server": target_server_url,
+                        "session_id": session_id,
+                        "success": False,
+                        "error": str(e),
+                    }
+                )
                 return _json.dumps({"success": False, "error": str(e)}, indent=2)
             except Exception as e:
                 LOGGER.error(f"Object transfer failed: {e}", exc_info=True)
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "push_object_sent",
+                        "description": f"Push '{variable_name}' → {target_server_url} failed: {type(e).__name__}: {e}",
+                        "transfer_id": transfer_id,
+                        "variable_name": variable_name,
+                        "target_server": target_server_url,
+                        "session_id": session_id,
+                        "success": False,
+                        "error": f"{type(e).__name__}: {e}",
+                    }
+                )
                 return _json.dumps({"success": False, "error": str(e)}, indent=2)
             finally:
                 server._clear_auth_context()
@@ -2458,10 +2485,48 @@ else:
 
                 if not success:
                     error_msg = stderr.strip() or "Failed to inject variable into kernel"
-                    return JSONResponse(
-                        {"success": False, "error": f"Kernel injection failed: {error_msg}"},
-                        status_code=500,
+                    LOGGER.error(
+                        "object_transfer_receive: kernel injection failed for "
+                        "session=%s variable=%s source=%s transfer_id=%s: %s",
+                        session.session_id,
+                        variable_name,
+                        transfer_metadata.get("source_server"),
+                        transfer_metadata.get("transfer_id"),
+                        error_msg,
                     )
+                    self.activity_publisher.publish_nowait(
+                        {
+                            "type": "push_object_received",
+                            "description": (
+                                f"Receive '{variable_name}' from "
+                                f"{transfer_metadata.get('source_server') or 'another server'} "
+                                f"failed: kernel injection error"
+                            ),
+                            "transfer_id": transfer_metadata.get("transfer_id"),
+                            "variable_name": variable_name,
+                            "source_server": transfer_metadata.get("source_server"),
+                            "session_id": session.session_id,
+                            "success": False,
+                            "error": error_msg,
+                        }
+                    )
+                    # If the receiver kernel is missing a module needed to
+                    # deserialize the object, surface that as an actionable
+                    # hint so the agent can self-correct (push a portable
+                    # representation: pandas DataFrame, dict, JSON, ...).
+                    response_body: dict[str, Any] = {
+                        "success": False,
+                        "error": f"Kernel injection failed: {error_msg}",
+                    }
+                    if "ModuleNotFoundError" in error_msg:
+                        response_body["hint"] = (
+                            "The target server's Python environment does not have a "
+                            "module needed to deserialize this object. Push a portable "
+                            "representation instead (e.g. pandas DataFrame, dict, JSON, "
+                            "or the framework's own export format) rather than the live "
+                            "in-memory class instance."
+                        )
+                    return JSONResponse(response_body, status_code=500)
 
                 self.activity_publisher.publish_nowait(
                     {

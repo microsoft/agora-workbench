@@ -420,3 +420,50 @@ class TestValidateTargetUrl:
 
         with pytest.raises(ValueError, match="HTTPS"):
             _validate_target_url("http://example.com")
+
+    @pytest.mark.unit
+    def test_trusted_http_host_accepted(self, monkeypatch):
+        """Plain HTTP is allowed when the host is listed in OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS."""
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.setenv(
+            "OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS",
+            "chemistry-server,earthscience-server,energysystems-server",
+        )
+        _validate_target_url("http://chemistry-server:8000")
+        _validate_target_url("http://earthscience-server:8000/mcp")
+        _validate_target_url("http://energysystems-server:8000")
+
+    @pytest.mark.unit
+    def test_trusted_http_host_wildcard(self, monkeypatch):
+        """Trusted-host patterns support the leading '*.' wildcard."""
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.setenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", "*.svc.cluster.local")
+        _validate_target_url("http://chem.svc.cluster.local")
+
+        # Unlisted host is still rejected.
+        with pytest.raises(ValueError, match="Plain HTTP"):
+            _validate_target_url("http://chem.example.com")
+
+    @pytest.mark.unit
+    def test_trusted_http_does_not_bypass_allow_list(self, monkeypatch):
+        """A trusted HTTP host must still satisfy OBJECT_TRANSFER_ALLOWED_HOSTS when set."""
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.setenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", "chemistry-server")
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "earthscience-server")
+
+        # HTTP scheme is unblocked (trusted-host hit) but the allow-list rejects
+        # this hostname, so validation still fails.
+        with pytest.raises(ValueError, match="allowed-host"):
+            _validate_target_url("http://chemistry-server:8000")
+
+    @pytest.mark.unit
+    def test_trusted_http_unset_rejects_non_loopback_http(self, monkeypatch):
+        """With the trusted-host env var unset, plain HTTP to non-loopback is rejected."""
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
+        with pytest.raises(ValueError, match="Plain HTTP"):
+            _validate_target_url("http://chemistry-server:8000")

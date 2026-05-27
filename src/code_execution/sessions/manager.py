@@ -92,6 +92,10 @@ class SessionManager:
         self._kernels: dict[str, Tuple[AsyncKernelManager, "AsyncKernelClient"]] = {}
         self._kernel_last_used: dict[str, float] = {}  # session_id -> timestamp
         self._kernel_tokens: dict[str, Optional[str]] = {}  # session_id -> last injected user token
+        # Per-session lock that serializes execute_code_for_session calls so the
+        # shared Jupyter kernel client (single iopub queue) cannot be raced by
+        # concurrent callers (e.g. four parallel push_object MCP calls).
+        self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
 
@@ -414,7 +418,7 @@ class SessionManager:
                     last_keepalive = now
 
                 if now - job.start_time > job.timeout:
-                    km.interrupt_kernel()
+                    await km.interrupt_kernel()
                     await asyncio.sleep(1.0)
                     job.success = False
                     job.error = f"Execution timeout after {job.timeout}s"
@@ -581,11 +585,30 @@ class SessionManager:
         except ValueError:
             return None
 
+    def _get_kernel_execute_lock(self, session_id: str) -> asyncio.Lock:
+        """Get-or-create the asyncio.Lock that serializes kernel access for *session_id*.
+
+        A Jupyter kernel client has a single iopub queue; running ``kc.execute``
+        and draining replies from two coroutines at once causes one coroutine to
+        consume the other's ``status: idle`` reply, which leaves the loser
+        spinning until its timeout fires.  Serializing here is correct because
+        the kernel only processes one execute at a time anyway.
+        """
+        lock = self._kernel_execute_locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._kernel_execute_locks[session_id] = lock
+        return lock
+
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> Tuple[str, str, bool]:
         """
         Execute code in the session's Jupyter kernel.
+
+        Concurrent calls for the same ``session_id`` are serialized by a
+        per-session asyncio.Lock so they cannot race on the shared
+        Jupyter ``KernelClient`` iopub stream.
 
         Args:
             session_id: Session identifier
@@ -616,6 +639,27 @@ class SessionManager:
         if running_job_id:
             return "", f"Session busy — job {running_job_id} is still running", False
 
+        async with self._get_kernel_execute_lock(session_id):
+            return await self._execute_code_locked(
+                session_id=session_id,
+                code=code,
+                timeout=timeout,
+                working_dir=working_dir,
+                user_token=user_token,
+                user_identity=user_identity,
+            )
+
+    async def _execute_code_locked(
+        self,
+        *,
+        session_id: str,
+        code: str,
+        timeout: float,
+        working_dir: Optional[str],
+        user_token: Optional[str],
+        user_identity: Optional[str],
+    ) -> Tuple[str, str, bool]:
+        """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
@@ -648,7 +692,7 @@ class SessionManager:
                 last_keepalive = now
 
             if time.monotonic() - start_time > timeout:
-                km.interrupt_kernel()
+                await km.interrupt_kernel()
                 await asyncio.sleep(1.0)
                 return "", f"Execution timeout after {timeout}s", False
 
@@ -758,6 +802,7 @@ class SessionManager:
             del self._kernels[session_id]
             del self._kernel_last_used[session_id]
             self._kernel_tokens.pop(session_id, None)
+            self._kernel_execute_locks.pop(session_id, None)
 
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
