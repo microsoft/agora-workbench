@@ -454,16 +454,16 @@
         }
 
         if (Array.isArray(e.displays) && e.displays.length) {
-          const lane = document.createElement("div");
-          lane.className = "displays";
-          const lbl = document.createElement("div");
-          lbl.className = "displays-label";
-          lbl.textContent = `figures (${e.displays.length})`;
-          lane.appendChild(lbl);
+          const det = document.createElement("details");
+          det.className = "displays";
+          const sum = document.createElement("summary");
+          sum.className = "displays-label";
+          sum.textContent = `figures (${e.displays.length})`;
+          det.appendChild(sum);
           for (const d of e.displays) {
-            lane.appendChild(buildDisplayEl(d));
+            det.appendChild(buildDisplayEl(d));
           }
-          wrap.appendChild(lane);
+          wrap.appendChild(det);
         }
 
         return wrap;
