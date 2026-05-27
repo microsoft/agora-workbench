@@ -2,7 +2,7 @@
 
 import pytest
 
-from ....code_execution.data_access.catalog.db import (
+from ....data_access.catalog.db import (
     CatalogDB,
     artifact_id_from_uri,
 )

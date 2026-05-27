@@ -7,13 +7,13 @@ from io import StringIO
 
 import pytest
 
-from ..code_execution.tool_proxy import (
+from ..tool_proxy import (
     FLUSH_SNIPPET,
     generate_list_tools_code,
     generate_tool_proxies,
     generate_tracing_infrastructure_code,
 )
-from ..code_execution.tool_registry import (
+from ..tool_registry import (
     ReturnSpec,
     ToolDefinition,
     ToolParameter,

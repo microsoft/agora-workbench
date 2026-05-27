@@ -272,7 +272,7 @@ class TestBM25SkillSearch:
         backend.index(tools=sample_tools, skills=sample_skills, server_name="chemistry")
         results = await backend.search("drug", top=10, category="all")
         scores = [r.score for r in results]
-        assert scores == sorted(scores, reverse=True)
+        assert scores == sorted(scores, key=lambda s: s if s is not None else 0.0, reverse=True)
 
     @pytest.mark.unit
     @pytest.mark.asyncio

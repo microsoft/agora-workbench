@@ -3,11 +3,11 @@
 import dill
 import pytest
 
-from ..code_execution.object_transfer import (
+from ..object_transfer import (
     ObjectSerializer,
     ObjectTransferClient,
 )
-from ..code_execution.sessions.objects import ObjectStore
+from ..sessions.objects import ObjectStore
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_https_url_accepted(self):
         """HTTPS URLs with arbitrary hostnames should be accepted."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         # Should not raise
         _validate_target_url("https://example.azurecontainerapps.io")
@@ -328,7 +328,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_http_loopback_accepted(self):
         """Plain HTTP is permitted for loopback addresses."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         _validate_target_url("http://localhost:8001")
         _validate_target_url("http://127.0.0.1:8001")
@@ -337,7 +337,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_http_non_loopback_rejected(self):
         """Plain HTTP to a non-loopback host must be rejected."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         with pytest.raises(ValueError, match="Plain HTTP"):
             _validate_target_url("http://example.com")
@@ -345,7 +345,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_allow_list_respected(self, monkeypatch):
         """Hostname allow-list blocks unlisted HTTPS hosts."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "*.azurecontainerapps.io")
 
@@ -363,7 +363,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_allow_list_loopback_bypass(self, monkeypatch):
         """Loopback addresses bypass the allow-list."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "*.azurecontainerapps.io")
 
@@ -373,7 +373,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_allow_list_comma_separated(self, monkeypatch):
         """Allow-list patterns may be comma-separated."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         monkeypatch.setenv(
             "OBJECT_TRANSFER_ALLOWED_HOSTS",
@@ -388,7 +388,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_allow_list_case_insensitive(self, monkeypatch):
         """Allow-list patterns with uppercase or trailing dots are normalized."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         # Pattern with mixed case and trailing dot should still match
         monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "*.AzureContainerApps.IO.")
@@ -397,7 +397,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_missing_hostname_rejected(self):
         """URLs without a hostname must be rejected."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         with pytest.raises(ValueError, match="hostname"):
             _validate_target_url("https:///path")
@@ -405,7 +405,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_non_http_scheme_rejected(self):
         """Non-HTTP/HTTPS schemes must be rejected even for loopback."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         with pytest.raises(ValueError, match="HTTP or HTTPS"):
             _validate_target_url("ftp://localhost:21")
@@ -416,8 +416,7 @@ class TestValidateTargetUrl:
     @pytest.mark.unit
     def test_http_error_message_is_clear(self):
         """Error message for plain-HTTP rejection should clearly direct to HTTPS."""
-        from ..code_execution.object_transfer import _validate_target_url
+        from ..object_transfer import _validate_target_url
 
         with pytest.raises(ValueError, match="HTTPS"):
             _validate_target_url("http://example.com")
-

@@ -5,7 +5,7 @@ import threading
 import pytest
 import time
 
-from ...code_execution.sessions import (
+from ...sessions import (
     MaxSessionsReachedError,
     Session,
     SessionManager,
@@ -276,7 +276,9 @@ class TestSessionManager:
 
         def _create():
             try:
-                session_id = manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+                session_id = manager.create_session(
+                    {}, user_identity="test_user", user_token="test-token", token_claims={}
+                )
                 results.append(session_id)
             except Exception as exc:
                 errors.append(exc)

@@ -10,8 +10,8 @@ import pytest
 from contextlib import contextmanager
 from fastapi import HTTPException
 
-from ..code_execution import CodeExecutionResult
-from ..code_execution.sessions import (
+from .. import CodeExecutionResult
+from ..sessions import (
     set_current_request_token,
     set_current_session,
     set_current_token_claims,

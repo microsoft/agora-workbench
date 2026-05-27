@@ -2,9 +2,9 @@
 
 import pytest
 
-from ..code_execution import CodeExecutionServer
-from ..code_execution.auth import create_noop_auth_config
-from ..code_execution.code_execution_models import EnvironmentConfig
+from .. import CodeExecutionServer
+from ..auth import create_noop_auth_config
+from ..code_execution_models import EnvironmentConfig
 
 
 @pytest.fixture

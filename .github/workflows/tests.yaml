@@ -13,6 +13,8 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'agent_helpers/**'
+      - 'examples/**'
       - '.github/workflows/tests.yaml'
     
 jobs:
@@ -56,14 +58,14 @@ jobs:
         id: domain_examples_tests
         continue-on-error: true
         run: |
-          uv run pytest src/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
+          uv run pytest examples/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
 
       - name: Run llm tests
         id: llm_tests
         continue-on-error: true
         run: |
-          uv sync --extra maf
-          uv run pytest src/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
+          uv sync --extra agent
+          uv run pytest agent_helpers/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
       
       - name: Test Summary
         if: always()

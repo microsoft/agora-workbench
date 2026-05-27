@@ -1,6 +1,6 @@
 """Tests for ObjectStore class - in-session object storage."""
 
-from ...code_execution.sessions.objects import ObjectStore
+from ...sessions.objects import ObjectStore
 
 
 class TestObjectStoreBasicOperations:
