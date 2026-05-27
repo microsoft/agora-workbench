@@ -20,8 +20,8 @@ from __future__ import annotations
 import logging
 import os
 
-from llm import ModelSpec
-from llm.factories import make_maf_client
+from agent_helpers.llm import ModelSpec
+from agent_helpers.llm.factories import make_maf_client
 
 LOGGER = logging.getLogger(__name__)
 

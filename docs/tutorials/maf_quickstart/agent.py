@@ -70,9 +70,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-# Make the repo's `src/` packages importable when running this script directly.
+# Make the repo's top-level packages importable when running this script directly.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT))
 
 # Load the repo-root .env (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
 load_dotenv(REPO_ROOT / ".env")
