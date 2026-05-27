@@ -25,7 +25,7 @@ os.environ.setdefault("DATA_LAKE_SEARCH_ENDPOINT", "https://test-search.search.w
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 
-from .. import CodeExecutionServer, EnvironmentConfig
+from .. import CodeExecutionServer, ServerConfig
 from ..sessions import SessionManager, SessionConfig, set_current_session
 from code_execution import ToolDefinition, ToolParameter, ToolRegistry
 
@@ -222,7 +222,7 @@ async def test_server(
 
     Uses uv with a requirements.txt file for fast package installation.
     """
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="test",
         description="Test environment for unit tests",
         type="uv",
@@ -243,7 +243,7 @@ async def test_server(
     from ..auth import create_noop_auth_config
 
     server = CodeExecutionServer(
-        environment_config=config,
+        server_config=config,
         session_manager=session_manager,
         auth_config=create_noop_auth_config(),
         working_dir=session_work_dir,

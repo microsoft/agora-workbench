@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from ..code_execution_models import CodeExecutionResult, EnvironmentConfig
+from ..code_execution_models import CodeExecutionResult, ServerConfig
 
 
 def test_code_execution_result_defaults():
@@ -56,15 +56,15 @@ def test_code_execution_result_serialization():
     assert data["success"] is True
 
 
-def test_environment_config_required_fields():
-    """Test that EnvironmentConfig requires essential fields."""
+def test_server_config_required_fields():
+    """Test that ServerConfig requires essential fields."""
     with pytest.raises(ValidationError):
-        EnvironmentConfig()  # type: ignore[call-arg]
+        ServerConfig()  # type: ignore[call-arg]
 
 
-def test_environment_config_serialization():
-    """Test that EnvironmentConfig can be serialized."""
-    config = EnvironmentConfig(
+def test_server_config_serialization():
+    """Test that ServerConfig can be serialized."""
+    config = ServerConfig(
         name="serialize_test",
         description="Serialization test",
         type="uv",

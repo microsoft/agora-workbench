@@ -21,7 +21,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, EnvironmentConfig, ToolRegistry
+from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
 from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 
@@ -52,7 +52,7 @@ import numpy as np
 import pandas as pd
 """
 
-config = EnvironmentConfig(
+config = ServerConfig(
     name="chemistry",
     description=(
         "Execute Python code with RDKit and cheminformatics packages. "
@@ -89,7 +89,7 @@ for tool_def in CHEMISTRY_TOOLS:
     tool_registry.register_tool(tool_def)
 
 server = ChemistryServer(
-    environment_config=config,
+    server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
 )
