@@ -182,4 +182,4 @@ For larger problems, you can also use:
 
 ## Authentication
 
-This example uses `create_noop_auth_config()` (no authentication required for the MCP server). For production deployments with Entra ID, see the [deployment README](../../deployment/README.md).
+This example uses `create_noop_auth_config()` (no authentication required for the MCP server). For production deployments with Entra ID, see the [deployment README](../../../deployment/README.md).

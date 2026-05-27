@@ -75,7 +75,10 @@ The base package ships the full framework-agnostic layer:
 
 If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
 
-Copy `.env.example` to `.env` and configure credentials. See the comments in that file for available settings.
+Configure credentials for your use case:
+
+- **Running the tutorial agent locally** — copy `docs/tutorials/maf_quickstart/.env.agent.example` to `.env.agent` at the repo root.
+- **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server`.
 
 ## Development
 

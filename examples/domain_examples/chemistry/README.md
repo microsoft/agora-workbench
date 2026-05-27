@@ -99,7 +99,7 @@ print(f"Benzene vs Hexane: {DataStructs.TanimotoSimilarity(fp1, fp3):.3f}")
 
 ## Authentication
 
-This example uses `create_noop_auth_config()` (no authentication required). For production deployments with Entra ID, see the [deployment README](../../deployment/README.md).
+This example uses `create_noop_auth_config()` (no authentication required). For production deployments with Entra ID, see the [deployment README](../../../deployment/README.md).
 
 ## Domain Tools
 

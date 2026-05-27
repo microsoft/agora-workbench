@@ -197,6 +197,7 @@ class ServerConfig(BaseModel):
     )
     output_truncation_threshold: Optional[int] = Field(
         default=None,
+        ge=0,
         description=(
             "Maximum characters allowed in stdout/stderr before truncation. "
             "Large outputs are trimmed and a guidance message is appended. "

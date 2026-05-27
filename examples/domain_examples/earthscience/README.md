@@ -94,4 +94,4 @@ This example uses `create_noop_auth_config()` (no authentication on the
 MCP server itself). The compose file binds to `127.0.0.1` only — the
 server must not be reachable off-host while running in no-op auth mode.
 For production deployments with Entra ID, see the
-[deployment README](../../deployment/README.md).
+[deployment README](../../../deployment/README.md).
