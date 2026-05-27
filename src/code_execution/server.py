@@ -144,29 +144,19 @@ class CodeExecutionServer:
         tool_registry: Optional["ToolRegistry"] = None,
         session_manager: Optional["SessionManager"] = None,
         auth_config: Optional["AuthConfig"] = None,
-        max_timeout: int = 600,
-        default_timeout: int = 300,
         working_dir: Optional[Path] = None,
-        output_truncation_threshold: int = 50_000,
         tool_search_backend: Optional["ToolSearchBackend"] = None,
     ):
         """
         Initialize the code execution server.
 
         Args:
-            server_config: Server configuration (environment, assets, features)
+            server_config: Server configuration (environment, assets, execution policy, features)
             tool_registry: Optional ToolRegistry containing domain-specific tools
             session_manager: Optional SessionManager for stateful tool support (auto-created with defaults if None)
             auth_config: Authentication configuration providing token validation,
                 identity extraction, and credential provisioning.
-            max_timeout: Maximum allowed execution timeout in seconds
-            default_timeout: Default timeout if not specified
             working_dir: Working directory for code execution (None = temp dir per execution)
-            output_truncation_threshold: Maximum characters allowed in stdout/stderr before truncation.
-                Large outputs are trimmed and a guidance message is appended instructing the LLM to
-                inspect large objects server-side rather than pulling them through the MCP interface.
-                Set to 0 to disable truncation. Can also be set via CODE_OUTPUT_TRUNCATION_THRESHOLD
-                environment variable (env var takes precedence).
             tool_search_backend: Optional pre-configured ToolSearchBackend instance.
                 If provided, this backend is used instead of creating one from config.
                 Enables custom search backends (e.g. vector DB, Elasticsearch) without
@@ -181,15 +171,20 @@ class CodeExecutionServer:
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
-        parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY", "0").strip()
-        try:
-            parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw)
-        except ValueError:
-            LOGGER.warning(
-                "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; falling back to 0.",
-                parallel_execute_max_concurrency_raw,
-            )
-            parallel_execute_max_concurrency = 0
+        # Env var overrides config value for parallel concurrency
+        parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY")
+        if parallel_execute_max_concurrency_raw is not None:
+            try:
+                parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw.strip())
+            except ValueError:
+                LOGGER.warning(
+                    "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; using config default %d.",
+                    parallel_execute_max_concurrency_raw,
+                    server_config.parallel_max_concurrency,
+                )
+                parallel_execute_max_concurrency = server_config.parallel_max_concurrency
+        else:
+            parallel_execute_max_concurrency = server_config.parallel_max_concurrency
         self.parallel_max_concurrency = max(0, parallel_execute_max_concurrency)
         self._parallel_semaphore: Optional[asyncio.Semaphore] = (
             asyncio.Semaphore(self.parallel_max_concurrency) if self.parallel_max_concurrency > 0 else None
@@ -225,12 +220,13 @@ class CodeExecutionServer:
         if not self.entra_tenant_id:
             self.entra_tenant_id = os.getenv("ENTRA_TENANT_ID")
 
-        self.max_timeout = max_timeout
-        self.default_timeout = default_timeout
+        self.max_timeout = server_config.max_timeout
+        self.default_timeout = server_config.default_timeout
 
+        # Env var overrides config value for output truncation
         env_threshold = os.getenv("CODE_OUTPUT_TRUNCATION_THRESHOLD")
         if env_threshold is None:
-            self.output_truncation_threshold = output_truncation_threshold
+            self.output_truncation_threshold = server_config.output_truncation_threshold
         else:
             normalized = env_threshold.strip().replace("_", "")
             try:
@@ -240,11 +236,11 @@ class CodeExecutionServer:
                 self.output_truncation_threshold = parsed
             except ValueError:
                 LOGGER.warning(
-                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using default %d",
+                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using config default %d",
                     env_threshold,
-                    output_truncation_threshold,
+                    server_config.output_truncation_threshold,
                 )
-                self.output_truncation_threshold = output_truncation_threshold
+                self.output_truncation_threshold = server_config.output_truncation_threshold
 
         self.working_dir = working_dir
         self._python_executable: Optional[Path] = None

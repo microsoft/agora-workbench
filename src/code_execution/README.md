@@ -9,7 +9,7 @@ Each domain (powergrid, process, foundry, etc.) defines a server under `domains/
 The main components are:
 
 - **`CodeExecutionServer`** (`code_execution/server.py`) — FastMCP-based server with subprocess code execution, Entra ID authentication, and customizable validation/preprocessing hooks
-- **`ServerConfig`** (`code_execution/code_execution_models.py`) — defines the server identity, Python environment type (`uv`, `conda`, `pip`), dependencies, build settings, asset provisioning, and feature flags
+- **`ServerConfig`** (`code_execution/code_execution_models.py`) — defines the server identity, Python environment type (`uv`, `conda`, `pip`), dependencies, build settings, asset provisioning, execution policy, and feature flags
 - **Environment Builders** (`code_execution/environment_builders.py`) — automated virtual environment creation
 - **Session Management** (`code_execution/sessions/`) — stateful workflows across MCP calls, with decorators (`@auto_session_tool`, `@create_session_tool`, `@requires_session`), context-based session injection, and automatic cleanup
 

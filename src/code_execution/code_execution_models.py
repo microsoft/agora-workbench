@@ -108,6 +108,9 @@ class ServerConfig(BaseModel):
     **Assets** — large artifact provisioning:
         assets, auto_provision
 
+    **Execution** — code execution policy:
+        max_timeout, default_timeout, output_truncation_threshold, parallel_max_concurrency
+
     **Features** — optional server capabilities:
         domains_dir, tool_search_backend
     """
@@ -158,6 +161,34 @@ class ServerConfig(BaseModel):
             "Automatically fetch assets at server startup if they are not already cached. "
             "Set to False when assets are pre-provisioned (e.g., baked into Docker image "
             "or available on a mounted volume)."
+        ),
+    )
+
+    # --- Execution ---
+
+    max_timeout: int = Field(
+        default=600,
+        description="Maximum allowed execution timeout in seconds for any single code run.",
+    )
+    default_timeout: int = Field(
+        default=300,
+        description="Default execution timeout in seconds when not specified by the caller.",
+    )
+    output_truncation_threshold: int = Field(
+        default=50_000,
+        description=(
+            "Maximum characters allowed in stdout/stderr before truncation. "
+            "Large outputs are trimmed and a guidance message is appended. "
+            "Set to 0 to disable truncation. Can be overridden via the "
+            "CODE_OUTPUT_TRUNCATION_THRESHOLD environment variable."
+        ),
+    )
+    parallel_max_concurrency: int = Field(
+        default=0,
+        description=(
+            "Maximum number of parallel code executions allowed. "
+            "0 means unlimited. Can be overridden via the "
+            "PARALLEL_EXECUTE_MAX_CONCURRENCY environment variable."
         ),
     )
 
