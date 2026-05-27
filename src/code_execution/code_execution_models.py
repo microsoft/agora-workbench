@@ -129,6 +129,22 @@ class ServerConfig(BaseModel):
             "differ from the per-tool ``execute_{name}_code`` description."
         ),
     )
+    entra_client_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Entra ID application (client) ID for this server's app registration. "
+            "When set, overrides the ENTRA_CLIENT_ID environment variable. Use this "
+            "when deploying multiple servers with distinct app registrations."
+        ),
+    )
+    entra_tenant_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Azure AD tenant ID for this server's app registration. "
+            "When set, overrides the ENTRA_TENANT_ID environment variable. Use this "
+            "when deploying multiple servers with distinct app registrations."
+        ),
+    )
 
     # --- Environment ---
 
