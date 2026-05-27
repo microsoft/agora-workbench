@@ -34,6 +34,14 @@ def run_capacity_expansion(network_name: str) -> dict:
 
     status, _ = n.optimize(solver_name="highs")
 
+    if status != "ok":
+        return {
+            "status": status,
+            "total_system_cost": 0,
+            "optimal_capacities": [],
+            "investment_by_type": {},
+        }
+
     # Optimal capacities for extendable components
     optimal_capacities = []
 
