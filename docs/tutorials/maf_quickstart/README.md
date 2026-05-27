@@ -68,8 +68,7 @@ recommended order.
   [chat_client.py](chat_client.py) also supports Azure OpenAI API keys,
   OpenAI, and Ollama — see Step A.
 - `.env.agent` populated at the repo root. Copy entries from
-  [.env.example](.env.example) and the repo-level
-  [.env.example](../../../.env.example) as needed.
+  [.env.agent.example](.env.agent.example) as needed.
 - **Docker** — both MCP servers run as local containers.
 
 ## Setup

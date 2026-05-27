@@ -45,7 +45,7 @@ Run from the repo root:
     uv run python docs/tutorials/maf_quickstart/agent.py
 
 Prerequisites:
-  1. ``.env.agent`` populated (see docs/tutorials/maf_quickstart/.env.example)
+  1. ``.env.agent`` populated (see docs/tutorials/maf_quickstart/.env.agent.example)
   2. ``az login`` (LLM auth uses Entra ID by default)
   3. Chemistry MCP server running locally:
        cd src && docker build -f deployment/base.Dockerfile \\
