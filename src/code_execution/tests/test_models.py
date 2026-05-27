@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from ..code_execution_models import CodeExecutionResult, EnvironmentConfig
+from ..code_execution_models import CodeExecutionResult, ServerConfig
 
 
 def test_code_execution_result_defaults():
@@ -58,8 +58,6 @@ def test_code_execution_result_serialization():
 
 def test_code_execution_result_displays_default_empty():
     """displays defaults to an empty list and round-trips through model_dump."""
-    from ..code_execution.code_execution_models import CodeExecutionResult
-
     result = CodeExecutionResult(stdout="ok")
     assert result.displays == []
     dumped = result.model_dump()
@@ -73,8 +71,6 @@ def test_code_execution_result_displays_excluded():
     ``model_dump(exclude={'displays'})`` because matplotlib PNG payloads
     are several hundred KB and would blow the agent's token budget.
     """
-    from ..code_execution.code_execution_models import CodeExecutionResult
-
     big_png = "x" * 50000
     result = CodeExecutionResult(
         stdout="<Figure>",
@@ -89,15 +85,15 @@ def test_code_execution_result_displays_excluded():
     assert agent_view["stdout"] == "<Figure>"
 
 
-def test_environment_config_required_fields():
-    """Test that EnvironmentConfig requires essential fields."""
+def test_server_config_required_fields():
+    """Test that ServerConfig requires essential fields."""
     with pytest.raises(ValidationError):
-        EnvironmentConfig()  # type: ignore[call-arg]
+        ServerConfig()  # type: ignore[call-arg]
 
 
-def test_environment_config_serialization():
-    """Test that EnvironmentConfig can be serialized."""
-    config = EnvironmentConfig(
+def test_server_config_serialization():
+    """Test that ServerConfig can be serialized."""
+    config = ServerConfig(
         name="serialize_test",
         description="Serialization test",
         type="uv",

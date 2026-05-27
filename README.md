@@ -138,17 +138,18 @@ Docker-based deployment for `CodeExecutionServer` instances. The shared base ima
 
 | Setting | Default | Description |
 |---|---|---|
-| Constructor parameter `output_truncation_threshold` | `50_000` | Maximum characters allowed per output stream before truncation is applied (that is, `stdout` and `stderr` are evaluated independently, not as a combined total). A guidance message is appended instructing the LLM to inspect large objects server-side. |
-| Environment variable `CODE_OUTPUT_TRUNCATION_THRESHOLD` | _(unset)_ | Overrides the constructor parameter when set. Takes precedence. |
+| `ServerConfig.output_truncation_threshold` | `50_000` | Maximum characters allowed per output stream before truncation is applied (that is, `stdout` and `stderr` are evaluated independently, not as a combined total). A guidance message is appended instructing the LLM to inspect large objects server-side. |
+| Environment variable `CODE_OUTPUT_TRUNCATION_THRESHOLD` | _(unset)_ | Overrides the config value when set. Takes precedence. |
 
 Set to `0` to **disable** truncation entirely (not recommended for production — very large outputs will be passed to the LLM unchanged).
 
 ```python
-# Custom threshold via constructor
-server = MyCodeExecutionServer(
-    environment_config=...,
+# Custom threshold via ServerConfig
+config = ServerConfig(
+    ...,
     output_truncation_threshold=100_000,  # 100 k chars
 )
+server = MyCodeExecutionServer(server_config=config)
 ```
 
 ```bash

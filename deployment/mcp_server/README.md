@@ -116,10 +116,10 @@ docker compose --profile setup run --rm warm-cache
 
 ### Asset configuration
 
-Add `assets` to your `EnvironmentConfig` to declare large files:
+Add `assets` to your `ServerConfig` to declare large files:
 
 ```python
-EnvironmentConfig(
+ServerConfig(
     name="my-model",
     description="Server with large ML model",
     type="uv",

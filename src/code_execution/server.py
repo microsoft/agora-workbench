@@ -30,7 +30,7 @@ from . import asset_provisioner
 from . import code_execution as execution_defaults
 from .code_execution_models import (
     CodeExecutionResult,
-    EnvironmentConfig,
+    ServerConfig,
     ToolCallRecord,
 )
 from .auth.base import AuthConfig, TokenValidationError
@@ -140,39 +140,29 @@ class CodeExecutionServer:
 
     def __init__(
         self,
-        environment_config: EnvironmentConfig,
+        server_config: ServerConfig,
         tool_registry: Optional["ToolRegistry"] = None,
         session_manager: Optional["SessionManager"] = None,
         auth_config: Optional["AuthConfig"] = None,
-        max_timeout: int = 600,
-        default_timeout: int = 300,
         working_dir: Optional[Path] = None,
-        output_truncation_threshold: int = 50_000,
         tool_search_backend: Optional["ToolSearchBackend"] = None,
     ):
         """
         Initialize the code execution server.
 
         Args:
-            environment_config: Configuration for the Python execution environment
+            server_config: Server configuration (environment, assets, execution policy, features)
             tool_registry: Optional ToolRegistry containing domain-specific tools
             session_manager: Optional SessionManager for stateful tool support (auto-created with defaults if None)
             auth_config: Authentication configuration providing token validation,
                 identity extraction, and credential provisioning.
-            max_timeout: Maximum allowed execution timeout in seconds
-            default_timeout: Default timeout if not specified
             working_dir: Working directory for code execution (None = temp dir per execution)
-            output_truncation_threshold: Maximum characters allowed in stdout/stderr before truncation.
-                Large outputs are trimmed and a guidance message is appended instructing the LLM to
-                inspect large objects server-side rather than pulling them through the MCP interface.
-                Set to 0 to disable truncation. Can also be set via CODE_OUTPUT_TRUNCATION_THRESHOLD
-                environment variable (env var takes precedence).
             tool_search_backend: Optional pre-configured ToolSearchBackend instance.
                 If provided, this backend is used instead of creating one from config.
                 Enables custom search backends (e.g. vector DB, Elasticsearch) without
                 modifying the built-in factory.
         """
-        self.environment_config = environment_config
+        self.server_config = server_config
         self.tool_registry = tool_registry
         self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
@@ -181,15 +171,20 @@ class CodeExecutionServer:
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
-        parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY", "0").strip()
-        try:
-            parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw)
-        except ValueError:
-            LOGGER.warning(
-                "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; falling back to 0.",
-                parallel_execute_max_concurrency_raw,
-            )
-            parallel_execute_max_concurrency = 0
+        # Env var overrides config value for parallel concurrency
+        parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY")
+        if parallel_execute_max_concurrency_raw is not None:
+            try:
+                parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw.strip())
+            except ValueError:
+                LOGGER.warning(
+                    "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; using config default %d.",
+                    parallel_execute_max_concurrency_raw,
+                    server_config.parallel_max_concurrency,
+                )
+                parallel_execute_max_concurrency = server_config.parallel_max_concurrency
+        else:
+            parallel_execute_max_concurrency = server_config.parallel_max_concurrency
         self.parallel_max_concurrency = max(0, parallel_execute_max_concurrency)
         self._parallel_semaphore: Optional[asyncio.Semaphore] = (
             asyncio.Semaphore(self.parallel_max_concurrency) if self.parallel_max_concurrency > 0 else None
@@ -225,12 +220,13 @@ class CodeExecutionServer:
         if not self.entra_tenant_id:
             self.entra_tenant_id = os.getenv("ENTRA_TENANT_ID")
 
-        self.max_timeout = max_timeout
-        self.default_timeout = default_timeout
+        self.max_timeout = server_config.max_timeout
+        self.default_timeout = server_config.default_timeout
 
+        # Env var overrides config value for output truncation
         env_threshold = os.getenv("CODE_OUTPUT_TRUNCATION_THRESHOLD")
         if env_threshold is None:
-            self.output_truncation_threshold = output_truncation_threshold
+            self.output_truncation_threshold = server_config.output_truncation_threshold
         else:
             normalized = env_threshold.strip().replace("_", "")
             try:
@@ -240,11 +236,11 @@ class CodeExecutionServer:
                 self.output_truncation_threshold = parsed
             except ValueError:
                 LOGGER.warning(
-                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using default %d",
+                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using config default %d",
                     env_threshold,
-                    output_truncation_threshold,
+                    server_config.output_truncation_threshold,
                 )
-                self.output_truncation_threshold = output_truncation_threshold
+                self.output_truncation_threshold = server_config.output_truncation_threshold
 
         self.working_dir = working_dir
         self._python_executable: Optional[Path] = None
@@ -253,11 +249,11 @@ class CodeExecutionServer:
         # Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).
         from .activity_publisher import ActivityPublisher
 
-        self.activity_publisher = ActivityPublisher(server_name=environment_config.name)
+        self.activity_publisher = ActivityPublisher(server_name=server_config.name)
 
         self.mcp = FastMCP(
-            f"{environment_config.name}-executor",
-            instructions=environment_config.server_description or environment_config.description,
+            f"{server_config.name}-executor",
+            instructions=server_config.server_description or server_config.description,
         )
 
         # AssetResolutionMiddleware resolves tagged asset references before Pydantic validation.
@@ -274,7 +270,7 @@ class CodeExecutionServer:
         if self._environment_ready:
             return
 
-        config = self.environment_config
+        config = self.server_config
 
         # Check if environment already exists
         expected_python = config.get_python_path()
@@ -292,14 +288,14 @@ class CodeExecutionServer:
         else:
             raise RuntimeError(
                 f"Python environment not found at {expected_python} and auto_build is disabled. "
-                f"Either build the environment manually or set auto_build=True in EnvironmentConfig."
+                f"Either build the environment manually or set auto_build=True in ServerConfig."
             )
 
         # Provision large assets (model weights, data files) after env is ready
         if config.assets and config.auto_provision:
             await asset_provisioner.provision_assets(config)
 
-    async def _build_environment(self, config: EnvironmentConfig):
+    async def _build_environment(self, config: ServerConfig):
         """Build the Python environment based on config."""
         build_dir = config.get_build_dir()
 
@@ -332,15 +328,15 @@ class CodeExecutionServer:
         else:
             raise ValueError(f"Unsupported environment type: {config.type}")
 
-    async def _build_uv_environment(self, config: EnvironmentConfig):
+    async def _build_uv_environment(self, config: ServerConfig):
         """Build environment using uv."""
         await environment_builders.build_uv_environment(config)
 
-    async def _build_conda_environment(self, config: EnvironmentConfig):
+    async def _build_conda_environment(self, config: ServerConfig):
         """Build environment using conda."""
         await environment_builders.build_conda_environment(config)
 
-    async def _build_pip_environment(self, config: EnvironmentConfig):
+    async def _build_pip_environment(self, config: ServerConfig):
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
 
@@ -350,7 +346,7 @@ class CodeExecutionServer:
 
     def get_tool_name(self) -> str:
         """Get the MCP tool name. Override to customize."""
-        return f"execute_{self.environment_config.name}_code"
+        return f"execute_{self.server_config.name}_code"
 
     def preprocess_code(self, code: str) -> str:
         """
@@ -543,7 +539,7 @@ class CodeExecutionServer:
         # resolving the {max_timeout} placeholder.
         tool_catalog = self._build_tool_catalog_summary()
         tool_description = (
-            self.environment_config.description
+            self.server_config.description
             + "\n\n"
             + inspect.cleandoc(execute_code_tool.__doc__ or "").format(max_timeout=self.max_timeout)
             + "\n\n"
@@ -555,7 +551,7 @@ class CodeExecutionServer:
 
         check_job_tool = execution_defaults.build_check_job_tool(self)
         self.mcp.tool(
-            name=f"{self.environment_config.name}_check_job",
+            name=f"{self.server_config.name}_check_job",
             description=(
                 "Check status/output for a background code execution job started with "
                 f"{self.get_tool_name()}(background=True)."
@@ -578,7 +574,7 @@ class CodeExecutionServer:
         register_session_meta_tools(
             self.mcp,
             self.session_manager,
-            name_prefix=self.environment_config.name,
+            name_prefix=self.server_config.name,
             inspector=self._inspect_session_payload,
         )
 
@@ -825,7 +821,7 @@ class CodeExecutionServer:
                 "--name",
                 kernel_name,
                 "--display-name",
-                f"Python ({self.environment_config.name})",
+                f"Python ({self.server_config.name})",
             ],
             capture_output=True,
             text=True,
@@ -1016,11 +1012,11 @@ class CodeExecutionServer:
         if not self.tool_registry:
             return []
 
-        server_name = self.environment_config.name
+        server_name = self.server_config.name
 
         # Load state→affordance phrases from the domain's states module (if present).
         state_aff_lookup: dict[str, list[str]] = {}
-        domains_dir = self.environment_config.domains_dir
+        domains_dir = self.server_config.domains_dir
         try:
             if domains_dir is not None:
                 # Load states.py from the configured domains directory
@@ -1085,7 +1081,7 @@ class CodeExecutionServer:
         from code_execution.tools import create_tool_search_backend
         from code_execution.tools.search.state_graph import _discover_skills
 
-        server_name = self.environment_config.name
+        server_name = self.server_config.name
         tool_name = f"search_{server_name}_tools"
 
         tool_infos = self._build_tool_infos()
@@ -1093,7 +1089,7 @@ class CodeExecutionServer:
         # Discover skills from the domains directory, restricted to this
         # server's own domain so a shared-source dev layout doesn't leak
         # skills across servers.
-        domains_dir = self.environment_config.domains_dir
+        domains_dir = self.server_config.domains_dir
         skills = _discover_skills(domains_dir, domain_name=server_name) if domains_dir else []
 
         if not tool_infos and not skills:
@@ -1108,7 +1104,7 @@ class CodeExecutionServer:
             backend = self._custom_tool_search_backend
         else:
             backend = create_tool_search_backend(
-                backend_type=self.environment_config.tool_search_backend,
+                backend_type=self.server_config.tool_search_backend,
             )
         backend.index(tools=tool_infos, skills=skills, server_name=server_name)
         self._tool_search_backends.append(backend)
@@ -1229,9 +1225,9 @@ class CodeExecutionServer:
         )
         from code_execution.tools.search.state_graph import _discover_skills
 
-        server_name = self.environment_config.name
+        server_name = self.server_config.name
         tool_infos = self._build_tool_infos()
-        domains_dir = self.environment_config.domains_dir
+        domains_dir = self.server_config.domains_dir
 
         has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
 
@@ -1354,7 +1350,7 @@ class CodeExecutionServer:
         server-to-server without routing through the agent context.
         """
         server = self
-        tool_name = f"{self.environment_config.name}_push_object"
+        tool_name = f"{self.server_config.name}_push_object"
 
         async def push_object(
             ctx: Context,
@@ -1522,7 +1518,7 @@ class CodeExecutionServer:
                     variable_name=effective_target_name,
                     serialized_data=serialized,
                     metadata={
-                        "source_server": server.environment_config.name,
+                        "source_server": server.server_config.name,
                         "source_variable": variable_name,
                         "transfer_id": transfer_id,
                     },
@@ -1544,7 +1540,7 @@ class CodeExecutionServer:
                 return _json.dumps(
                     {
                         "success": True,
-                        "source_server": server.environment_config.name,
+                        "source_server": server.server_config.name,
                         "source_variable": variable_name,
                         "target_variable": effective_target_name,
                         "target_server_url": target_server_url,
@@ -1597,7 +1593,7 @@ class CodeExecutionServer:
         self.mcp.tool(
             name=tool_name,
             description=(
-                f"Push a Python variable from the {self.environment_config.name} server's session "
+                f"Push a Python variable from the {self.server_config.name} server's session "
                 "to another MCP server. The variable is serialized and transferred directly "
                 "between servers without passing through the agent context, enabling transfer "
                 "of large or non-JSONable Python objects.\n\n"
@@ -2040,9 +2036,9 @@ else:
 
     def _setup_parallel_execution_tools(self) -> None:
         """Register map-style parallel execution tools."""
-        execute_name = f"{self.environment_config.name}_parallel_execute"
-        check_name = f"{self.environment_config.name}_check_batch"
-        cancel_name = f"{self.environment_config.name}_cancel_batch"
+        execute_name = f"{self.server_config.name}_parallel_execute"
+        check_name = f"{self.server_config.name}_check_batch"
+        cancel_name = f"{self.server_config.name}_cancel_batch"
 
         async def parallel_execute(
             ctx: Context,
@@ -2226,7 +2222,7 @@ else:
         # Expose asset cache directory via env var so kernel-side tool
         # implementations can locate pre-provisioned assets without hardcoding
         # paths.  Set on the server process so all spawned kernels inherit it.
-        cache_dir = self.environment_config.get_cache_dir()
+        cache_dir = self.server_config.get_cache_dir()
         os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
 
         # Register the environment as a Jupyter kernel
@@ -2296,7 +2292,7 @@ else:
             return JSONResponse(
                 {
                     "status": "healthy",
-                    "environment": self.environment_config.name,
+                    "environment": self.server_config.name,
                     "python": python_exe,
                     "environment_ready": self._environment_ready,
                 }

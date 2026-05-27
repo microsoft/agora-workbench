@@ -603,7 +603,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             timeout = min(timeout, server.max_timeout)
 
             LOGGER.info(
-                f"Executing code in {server.environment_config.name} environment "
+                f"Executing code in {server.server_config.name} environment "
                 f"(session={session.session_id[:8]}, timeout={timeout}s)"
             )
 

@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import asyncio
 
-from .. import CodeExecutionServer, EnvironmentConfig
+from .. import CodeExecutionServer, ServerConfig
 from ..auth import create_noop_auth_config
 
 
 def _make_server(name: str) -> CodeExecutionServer:
     return CodeExecutionServer(
-        environment_config=EnvironmentConfig(
+        server_config=ServerConfig(
             name=name,
             description="d",
             type="uv",
