@@ -467,8 +467,8 @@ class TestOutputTruncation:
 class TestEnvVarParsing:
     """Tests for CODE_OUTPUT_TRUNCATION_THRESHOLD env var parsing."""
 
-    def test_env_var_overrides_constructor_default(self, test_server):
-        """Env var takes precedence over the config value."""
+    def test_config_overrides_env_var(self, test_server):
+        """ServerConfig value takes precedence over the env var."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "12345"}):
             config = test_server.server_config.model_copy(update={"output_truncation_threshold": 99999})
             test_server.__class__.__init__(
@@ -476,62 +476,65 @@ class TestEnvVarParsing:
                 server_config=config,
                 auth_config=test_server.auth_config,
             )
-            assert test_server.output_truncation_threshold == 12345
+            assert test_server.output_truncation_threshold == 99999
 
     def test_env_var_with_underscores(self, test_server):
-        """Underscored numeric values (e.g. '50_000') are accepted."""
+        """Underscored numeric values (e.g. '50_000') are accepted when config is unset."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "50_000"}):
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
             test_server.__class__.__init__(
                 test_server,
-                server_config=test_server.server_config,
+                server_config=config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 50000
 
     def test_env_var_with_whitespace(self, test_server):
-        """Leading/trailing whitespace in the env var is stripped."""
+        """Leading/trailing whitespace in the env var is stripped when config is unset."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "  1000  "}):
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
             test_server.__class__.__init__(
                 test_server,
-                server_config=test_server.server_config,
+                server_config=config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 1000
 
-    def test_env_var_invalid_falls_back_to_default(self, test_server):
-        """An unparseable env var falls back to the config value."""
+    def test_env_var_invalid_falls_back_to_builtin_default(self, test_server):
+        """An unparseable env var falls back to the built-in default (50000)."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "not_a_number"}):
-            config = test_server.server_config.model_copy(update={"output_truncation_threshold": 42000})
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
             test_server.__class__.__init__(
                 test_server,
                 server_config=config,
                 auth_config=test_server.auth_config,
             )
-            assert test_server.output_truncation_threshold == 42000
+            assert test_server.output_truncation_threshold == 50000
 
-    def test_env_var_negative_falls_back_to_default(self, test_server):
-        """A negative env var value falls back to the config value."""
+    def test_env_var_negative_falls_back_to_builtin_default(self, test_server):
+        """A negative env var value falls back to the built-in default (50000)."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "-1"}):
-            config = test_server.server_config.model_copy(update={"output_truncation_threshold": 42000})
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
             test_server.__class__.__init__(
                 test_server,
                 server_config=config,
                 auth_config=test_server.auth_config,
             )
-            assert test_server.output_truncation_threshold == 42000
+            assert test_server.output_truncation_threshold == 50000
 
     def test_env_var_zero_disables_truncation(self, test_server):
-        """Setting the env var to '0' disables truncation."""
+        """Setting the env var to '0' disables truncation when config is unset."""
         with patch.dict(os.environ, {"CODE_OUTPUT_TRUNCATION_THRESHOLD": "0"}):
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
             test_server.__class__.__init__(
                 test_server,
-                server_config=test_server.server_config,
+                server_config=config,
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 0
 
-    def test_no_env_var_uses_constructor_default(self, test_server):
-        """Without the env var, the config value is used."""
+    def test_config_value_used_without_env_var(self, test_server):
+        """ServerConfig value is used when env var is not set."""
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("CODE_OUTPUT_TRUNCATION_THRESHOLD", None)
             config = test_server.server_config.model_copy(update={"output_truncation_threshold": 77777})
@@ -541,3 +544,15 @@ class TestEnvVarParsing:
                 auth_config=test_server.auth_config,
             )
             assert test_server.output_truncation_threshold == 77777
+
+    def test_no_config_no_env_var_uses_builtin_default(self, test_server):
+        """Without config or env var, the built-in default (50000) is used."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CODE_OUTPUT_TRUNCATION_THRESHOLD", None)
+            config = test_server.server_config.model_copy(update={"output_truncation_threshold": None})
+            test_server.__class__.__init__(
+                test_server,
+                server_config=config,
+                auth_config=test_server.auth_config,
+            )
+            assert test_server.output_truncation_threshold == 50000
