@@ -55,12 +55,12 @@ The server supports two auth modes:
 - **NoOp (local development)** — No env vars needed. Configure your server with
   `create_noop_auth_config()`. Any bearer token (or none) is accepted without validation.
 - **Entra ID (production)** — Pass `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` at runtime
-  via your `.env` file or docker-compose environment. Configure your server with
+  via your `.env.server` file or docker-compose environment. Configure your server with
   `create_entra_auth_config()`.
 
 ## Environment Variables
 
-Containers read configuration from a `.env` file. Key variables:
+Containers read configuration from a `.env.server` file. Key variables:
 
 - `ENTRA_CLIENT_ID` / `ENTRA_TENANT_ID` — Entra ID app registration (required only for Entra auth)
 

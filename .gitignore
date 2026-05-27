@@ -22,6 +22,8 @@ wheels/
 
 # Virtual environments
 .env
+.env.server
+.env.agent
 .venv
 env/
 venv/

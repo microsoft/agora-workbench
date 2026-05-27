@@ -102,7 +102,7 @@ The search backend is pluggable via the `ToolSearchBackend` abstract base class 
 | Backend | Class | When to use |
 |---------|-------|-------------|
 | **BM25** (default) | `BM25ToolSearchBackend` | Local, zero-dependency keyword search over the YAML-derived tool catalog. |
-| **Azure AI Search** | `AzureAIToolSearchBackend` | Cloud-hosted semantic/vector search. Set `TOOL_SEARCH_ENDPOINT` in `.env`. |
+| **Azure AI Search** | `AzureAIToolSearchBackend` | Cloud-hosted semantic/vector search. Set `TOOL_SEARCH_ENDPOINT` in `.env.server`. |
 
 ## Authentication
 
