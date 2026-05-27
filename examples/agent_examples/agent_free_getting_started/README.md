@@ -160,10 +160,10 @@ curl -sS http://127.0.0.1:8010/mcp \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
-Execute code:
+Execute code and capture the execution `session_id` from the response:
 
 ```bash
-curl -sS http://127.0.0.1:8010/mcp \
+EXEC_RESPONSE=$(curl -sS http://127.0.0.1:8010/mcp \
   -H 'Content-Type: application/json' \
   -H "Mcp-Session-Id: $SESSION_ID" \
   -H 'Authorization: Bearer dev-token' \
@@ -178,10 +178,14 @@ curl -sS http://127.0.0.1:8010/mcp \
         "code":"print(2+2)"
       }
     }
-  }'
+  }')
+
+echo "$EXEC_RESPONSE"
+EXEC_SESSION_ID=$(echo "$EXEC_RESPONSE" | python3 -c "import sys,json; r=json.load(sys.stdin); print(json.loads(r['result']['content'][0]['text'])['session_id'])")
+echo "Execution session: $EXEC_SESSION_ID"
 ```
 
-Close the session:
+Close the execution session (note: this is the execution session ID, not the MCP transport session):
 
 ```bash
 curl -sS http://127.0.0.1:8010/mcp \
@@ -194,7 +198,7 @@ curl -sS http://127.0.0.1:8010/mcp \
     \"method\":\"tools/call\",
     \"params\":{
       \"name\":\"starter_close_session\",
-      \"arguments\":{\"session_id\":\"$SESSION_ID\"}
+      \"arguments\":{\"session_id\":\"$EXEC_SESSION_ID\"}
     }
   }"
 ```
