@@ -1,7 +1,7 @@
 # Example Dockerfile for a CodeExecutionServer.
 #
 # Prerequisites — build the base image first (from the repo root):
-#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 #
 # Then build your server image:
 #   docker build -t my-server:local .

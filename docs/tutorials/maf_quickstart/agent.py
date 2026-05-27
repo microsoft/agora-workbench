@@ -9,7 +9,7 @@ Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
     ``src/code_execution/catalog.example.yaml`` and
     ``src/code_execution/code_execution/catalog_tools.py``).
   * ``chemistry`` MCP toolset — the chemistry MCP server from
-    ``src/domain_examples/chemistry/``. The server exposes a generic
+    ``examples/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
     server-side ``search_chemistry_tools`` BM25 search tool over the
     domain's typed helpers (``parse_molecule``, ``compute_descriptors``,
@@ -24,7 +24,7 @@ Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
     without any explicit import. A ``list_tools()`` function is also
     available in the kernel.
   * ``energysystems`` MCP toolset — the energy systems MCP server from
-    ``src/domain_examples/energysystems/``. Exposes an
+    ``examples/domain_examples/energysystems/``. Exposes an
     ``execute_energysystems_code`` tool with PyPSA pre-imported, a
     server-side ``search_energysystems_tools`` BM25 search tool, plus typed
     helpers (``define_network``, ``add_components``, ``add_time_series``,
@@ -45,14 +45,13 @@ Run from the repo root:
     uv run python docs/tutorials/maf_quickstart/agent.py
 
 Prerequisites:
-  1. ``.env`` populated (see docs/tutorials/maf_quickstart/.env.example)
+  1. ``.env.agent`` populated (see docs/tutorials/maf_quickstart/.env.agent.example)
   2. ``az login`` (LLM auth uses Entra ID by default)
   3. Chemistry MCP server running locally:
-       cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
-                              -t mcp-server-base:local .
-       cd src/domain_examples/chemistry && docker compose up -d --build
+       docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+       cd examples/domain_examples/chemistry && docker compose up -d --build
   4. Energy systems MCP server running locally:
-       cd src/domain_examples/energysystems && docker compose up -d --build
+       cd examples/domain_examples/energysystems && docker compose up -d --build
 
 If any MCP server is unreachable the script still runs with the remaining
 tools and prints a friendly skip message.
@@ -74,10 +73,11 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-# Load the repo-root .env (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
-load_dotenv(REPO_ROOT / ".env")
+# Load the repo-root .env.agent (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
+load_dotenv(REPO_ROOT / ".env.agent")
 
 LOGGER = logging.getLogger("maf_quickstart")
+
 
 # ---------------------------------------------------------------------------
 # Step A — build the chat client (BYO LLM)
@@ -145,7 +145,7 @@ async def step_b_domain_tools():
                 "fingerprints, substructure search."
             ),
             tool_name_prefix="chem_",
-            start_hint="cd src/domain_examples/chemistry && docker compose up -d",
+            start_hint="cd examples/domain_examples/chemistry && docker compose up -d",
         ),
         _McpServerConfig(
             name="energysystems",
@@ -156,7 +156,7 @@ async def step_b_domain_tools():
                 "expansion, and topology analysis."
             ),
             tool_name_prefix="energy_",
-            start_hint="cd src/domain_examples/energysystems && docker compose up -d",
+            start_hint="cd examples/domain_examples/energysystems && docker compose up -d",
         ),
     ]
 
@@ -190,7 +190,7 @@ def step_d_build_agent(chat_client, tools):
         "  * chem_search_chemistry_tools — server-side BM25 search over the\n"
         "      chemistry domain's typed helper catalog. Call with a\n"
         "      `query` string and optional `top` (default 5). Pass\n"
-        "      `query=\"\"` with `top=999` to list every helper.\n"
+        '      `query=""` with `top=999` to list every helper.\n'
         "  * chem_load_chemistry_skill — load a chemistry skill by name\n"
         "      (discover names via `chem_search_chemistry_tools` with\n"
         "      `category='skills'`).\n"

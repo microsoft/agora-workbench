@@ -171,20 +171,19 @@ class CodeExecutionServer:
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
-        # Env var overrides config value for parallel concurrency
-        parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY")
-        if parallel_execute_max_concurrency_raw is not None:
+        # Resolution: ServerConfig overrides env var; env var provides deployment default.
+        if server_config.parallel_max_concurrency is not None:
+            parallel_execute_max_concurrency = server_config.parallel_max_concurrency
+        else:
+            parallel_execute_max_concurrency_raw = os.getenv("PARALLEL_EXECUTE_MAX_CONCURRENCY", "0").strip()
             try:
-                parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw.strip())
+                parallel_execute_max_concurrency = int(parallel_execute_max_concurrency_raw)
             except ValueError:
                 LOGGER.warning(
-                    "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; using config default %d.",
+                    "Invalid PARALLEL_EXECUTE_MAX_CONCURRENCY value %r; using default 0.",
                     parallel_execute_max_concurrency_raw,
-                    server_config.parallel_max_concurrency,
                 )
-                parallel_execute_max_concurrency = server_config.parallel_max_concurrency
-        else:
-            parallel_execute_max_concurrency = server_config.parallel_max_concurrency
+                parallel_execute_max_concurrency = 0
         self.parallel_max_concurrency = max(0, parallel_execute_max_concurrency)
         self._parallel_semaphore: Optional[asyncio.Semaphore] = (
             asyncio.Semaphore(self.parallel_max_concurrency) if self.parallel_max_concurrency > 0 else None
@@ -208,26 +207,25 @@ class CodeExecutionServer:
         self.auth_config = auth_config
 
         # Entra client/tenant IDs for RFC 9728 OAuth protected-resource metadata.
-        # Prefer values from the auth_config's token validator (when Entra-based),
-        # falling back to environment variables for backwards compatibility.
+        # Resolution order: auth_config validator → ServerConfig → environment variable.
         self.entra_client_id: Optional[str] = None
         self.entra_tenant_id: Optional[str] = None
         if hasattr(auth_config.token_validator, "_client_id"):
             self.entra_client_id = auth_config.token_validator._client_id
             self.entra_tenant_id = auth_config.token_validator._tenant_id
         if not self.entra_client_id:
-            self.entra_client_id = os.getenv("ENTRA_CLIENT_ID")
+            self.entra_client_id = server_config.entra_client_id or os.getenv("ENTRA_CLIENT_ID")
         if not self.entra_tenant_id:
-            self.entra_tenant_id = os.getenv("ENTRA_TENANT_ID")
+            self.entra_tenant_id = server_config.entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
 
         self.max_timeout = server_config.max_timeout
         self.default_timeout = server_config.default_timeout
 
-        # Env var overrides config value for output truncation
-        env_threshold = os.getenv("CODE_OUTPUT_TRUNCATION_THRESHOLD")
-        if env_threshold is None:
+        # Resolution: ServerConfig overrides env var; env var provides deployment default.
+        if server_config.output_truncation_threshold is not None:
             self.output_truncation_threshold = server_config.output_truncation_threshold
         else:
+            env_threshold = os.getenv("CODE_OUTPUT_TRUNCATION_THRESHOLD", "50000")
             normalized = env_threshold.strip().replace("_", "")
             try:
                 parsed = int(normalized)
@@ -236,11 +234,10 @@ class CodeExecutionServer:
                 self.output_truncation_threshold = parsed
             except ValueError:
                 LOGGER.warning(
-                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using config default %d",
+                    "Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=%r; using default 50000",
                     env_threshold,
-                    server_config.output_truncation_threshold,
                 )
-                self.output_truncation_threshold = server_config.output_truncation_threshold
+                self.output_truncation_threshold = 50_000
 
         self.working_dir = working_dir
         self._python_executable: Optional[Path] = None

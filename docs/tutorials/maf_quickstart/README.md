@@ -33,9 +33,9 @@ library for Lipinski drug-likeness, then build and dispatch a tiny 2-bus
 power grid. It chains the typed helpers in each domain (auto-injected into
 the kernel namespace) and reports the results. Each domain server ships a
 workflow guide —
-[`chemistry/skills/SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md)
+[`chemistry/skills/SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md)
 and
-[`energysystems/skills/SKILL.md`](../../../src/domain_examples/energysystems/skills/SKILL.md)
+[`energysystems/skills/SKILL.md`](../../../examples/domain_examples/energysystems/skills/SKILL.md)
 — which is injected into the system prompt so the agent uses tools in the
 recommended order.
 
@@ -67,17 +67,16 @@ recommended order.
   (run `az login` first), but the BYO-LLM factory in
   [chat_client.py](chat_client.py) also supports Azure OpenAI API keys,
   OpenAI, and Ollama — see Step A.
-- `.env` populated at the repo root. Copy entries from
-  [.env.example](.env.example) and the repo-level
-  [.env.example](../../../.env.example) as needed.
+- `.env.agent` populated at the repo root. Copy entries from
+  [.env.agent.example](.env.agent.example) as needed.
 - **Docker** — both MCP servers run as local containers.
 
 ## Setup
 
 ### 1. Configure environment
 
-Copy the tutorial's [.env.example](.env.example) into your repo-root `.env`
-(or merge missing keys). The default and tested LLM path is **Azure OpenAI
+Copy [.env.agent.example](.env.agent.example) to `.env.agent` at the repo root
+and fill in values. The default and tested LLM path is **Azure OpenAI
 via Entra ID**.
 
 ### 2. Build the shared MCP base image (once)
@@ -85,8 +84,7 @@ via Entra ID**.
 Both domain servers inherit from this image:
 
 ```bash
-cd src
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 3. Start the chemistry MCP server
@@ -99,7 +97,7 @@ docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 > to a publicly reachable server.**
 
 ```bash
-cd src/domain_examples/chemistry
+cd examples/domain_examples/chemistry
 docker compose up -d --build
 curl http://localhost:8020/health
 # => {"status":"healthy", ...}
@@ -113,7 +111,7 @@ from scratch with RDKit; subsequent starts are fast.
 Same pattern, binds to `127.0.0.1:8022`:
 
 ```bash
-cd src/domain_examples/energysystems
+cd examples/domain_examples/energysystems
 docker compose up -d --build
 curl http://localhost:8022/health
 # => {"status":"healthy", ...}
@@ -200,7 +198,7 @@ configure a catalog on one of your servers.
 [`step_c_chemistry_tool`](agent.py) instantiates
 `MCPStreamableHTTPTool(name="chemistry", url=..., tool_name_prefix="chem_", approval_mode="never_require")`
 pointing at `http://localhost:8020/mcp`. The chemistry server (see
-[chemistry_server.py](../../../src/domain_examples/chemistry/server/chemistry_server.py))
+[chemistry_server.py](../../../examples/domain_examples/chemistry/server/chemistry_server.py))
 exposes:
 
 - `execute_chemistry_code` — run Python in a long-lived Jupyter kernel
@@ -221,7 +219,7 @@ domain servers without name collisions — every tool the chemistry server
 exposes appears to the LLM as `chem_<original_name>`.
 
 **Typed domain helpers** are *not* separate MCP tools. They live in the
-[`chemistry_tools`](../../../src/domain_examples/chemistry/chemistry_tools/)
+[`chemistry_tools`](../../../examples/domain_examples/chemistry/chemistry_tools/)
 pip package, which is installed into the kernel's conda env at server
 build time. The server then auto-injects an instrumented Python proxy
 for each helper into the kernel namespace via
@@ -282,7 +280,7 @@ backed by [PyPSA](https://pypsa.org/):
 ### Step D — Build the agent
 
 [`step_d_build_agent`](agent.py) reads each domain's
-[`SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md) — a
+[`SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md) — a
 portable workflow guide that documents the tool state-graph, default
 parameters, and common pitfalls — and appends both to the system prompt.
 This is the simplest version of the agora-workbench *skills* pattern:
@@ -349,14 +347,14 @@ PyPSA versions the server environments resolve.)
 
 | Symptom | Likely cause |
 | --- | --- |
-| `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
+| `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env.agent` not loaded or missing the key. Check the repo-root `.env.agent`. |
 | `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [chat_client.py](chat_client.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
 | `BadRequest: API version not supported` from `/responses` | The Responses API on your endpoint doesn't accept the configured `API_VERSION`. Try `API_VERSION="preview"` (some internal gateways only accept floating tags; public AOAI typically wants a dated preview like `2025-04-01-preview`). |
 | `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
 | `Bind for 127.0.0.1:8020 failed: port is already allocated` | A previous container (or unrelated process) is still holding the port. Find it with `docker ps \| grep 8020` and remove with `docker rm -f <name>`, then retry `docker compose up -d`. (Same for `:8022`.) |
 | Container exits immediately with `Could not resolve host: conda.anaconda.org` | Transient DNS / network blip while the conda env is being built on first start. Retry: `docker compose down && docker compose up -d`. |
-| `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `src/domain_examples/chemistry/`. |
-| `Step C2: energy systems MCP server unreachable at http://localhost:8022/health` | Same as above but in `src/domain_examples/energysystems/`. |
+| `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `examples/domain_examples/chemistry/`. |
+| `Step C2: energy systems MCP server unreachable at http://localhost:8022/health` | Same as above but in `examples/domain_examples/energysystems/`. |
 | AOAI 403 / "scope not allowed" | `AOAI_SCOPE` doesn't match the endpoint. Standard AOAI uses `https://cognitiveservices.azure.com/.default`; some internal/gateway endpoints require a different scope — check with your endpoint owner. |
 | Agent hangs after one tool call returns | Parallel tool-call streaming bug across two MCP servers (see note in Step E). Make sure the prompt forces strict sequential execution. |
 | Container exits during startup with `RuntimeError: Additional command 1/1 failed` | A pip-install step inside the conda env failed; the build now surfaces this instead of silently continuing. Read the surrounding container logs for the underlying pip error (network, missing build dep, etc.) and rebuild with `docker compose up --build`. |
@@ -364,8 +362,8 @@ PyPSA versions the server environments resolve.)
 ## Cleanup
 
 ```bash
-cd src/domain_examples/chemistry && docker compose down
-cd src/domain_examples/energysystems && docker compose down
+cd examples/domain_examples/chemistry && docker compose down
+cd examples/domain_examples/energysystems && docker compose down
 ```
 
 ## Next steps

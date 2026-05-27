@@ -1,7 +1,7 @@
 # Example docker-compose for running a CodeExecutionServer locally.
 #
 # Prerequisites — build the base image first (from the repo root):
-#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 #
 # Then from this directory:
 #   docker compose up --build
@@ -29,8 +29,8 @@ services:
       - "8000:8000"
     env_file:
       # Loads ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and other config.
-      # Copy .env.example from the repo root and fill in your values.
-      - .env
+      # Copy .env.server.example and fill in your values.
+      - ../.env.server
     environment:
       # PORT/HOST tell the CodeExecutionServer where to bind inside the container.
       PORT: "8000"
@@ -61,7 +61,7 @@ services:
       context: .
       dockerfile: Dockerfile
     env_file:
-      - .env
+      - ../.env.server
     volumes:
       - env-cache:/home/appuser/.cache/mcp-envs
     command: ["python", "-m", "code_execution.cli", "warm", "--config", "/app/my_server/config.yaml", "-v"]

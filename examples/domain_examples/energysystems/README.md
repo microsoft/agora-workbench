@@ -29,7 +29,7 @@ Exposes an `execute_energysystems_code` MCP tool that runs Python code in an iso
 
 ```bash
 # From the repository root:
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the energy systems server
@@ -182,4 +182,4 @@ For larger problems, you can also use:
 
 ## Authentication
 
-This example uses `create_noop_auth_config()` (no authentication required for the MCP server). For production deployments with Entra ID, see the [deployment README](../../deployment/mcp_server/README.md).
+This example uses `create_noop_auth_config()` (no authentication required for the MCP server). For production deployments with Entra ID, see the [deployment README](../../../deployment/README.md).
