@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import queue
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,6 +26,15 @@ _DISPLAY_MIME_PRIORITY: Tuple[str, ...] = ("image/png", "image/svg+xml", "text/h
 # events transportable.  matplotlib PNGs are typically <500 KB so 5 MB
 # accommodates a few plots without risking an unbounded SSE payload.
 _MAX_DISPLAY_BYTES_PER_EXECUTE: int = 5 * 1024 * 1024
+
+# IPython colorizes tracebacks with ANSI SGR escape sequences when emitting
+# `error` messages.  The activity UI is a browser <pre>, not a terminal, so
+# the codes show up as garbage like ``␛[0;31m``.  Strip them at the source.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_SGR_RE.sub("", text)
 
 
 def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
@@ -475,7 +485,7 @@ class SessionManager:
                         job.stderr_parts.append(text)
                 elif msg_type == "error":
                     traceback = "\n".join(content.get("traceback", []))
-                    job.stderr_parts.append(traceback)
+                    job.stderr_parts.append(_strip_ansi(traceback))
                     job.success = False
                 elif msg_type == "execute_result":
                     data = content.get("data", {})
@@ -777,7 +787,7 @@ class SessionManager:
             elif msg_type == "error":
                 # Execution error
                 traceback = "\n".join(content.get("traceback", []))
-                stderr_parts.append(traceback)
+                stderr_parts.append(_strip_ansi(traceback))
                 success = False
 
             elif msg_type == "execute_result":
