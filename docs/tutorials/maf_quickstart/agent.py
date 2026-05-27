@@ -7,9 +7,9 @@ Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
     data catalog tools exposed by MCP servers that explicitly wire catalog
     indexing plus ``register_catalog_tools(...)`` at startup (see
     ``src/code_execution/catalog.example.yaml`` and
-    ``src/code_execution/code_execution/catalog_tools.py``).
+    ``src/code_execution/catalog_tools.py``).
   * ``chemistry`` MCP toolset — the chemistry MCP server from
-    ``src/domain_examples/chemistry/``. The server exposes a generic
+    ``examples/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
     server-side ``search_chemistry_tools`` BM25 search tool over the
     domain's typed helpers (``parse_molecule``, ``compute_descriptors``,
@@ -24,7 +24,7 @@ Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
     without any explicit import. A ``list_tools()`` function is also
     available in the kernel.
   * ``energysystems`` MCP toolset — the energy systems MCP server from
-    ``src/domain_examples/energysystems/``. Exposes an
+    ``examples/domain_examples/energysystems/``. Exposes an
     ``execute_energysystems_code`` tool with PyPSA pre-imported, a
     server-side ``search_energysystems_tools`` BM25 search tool, plus typed
     helpers (``define_network``, ``add_components``, ``add_time_series``,
@@ -50,9 +50,9 @@ Prerequisites:
   3. Chemistry MCP server running locally:
        cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
                               -t mcp-server-base:local .
-       cd src/domain_examples/chemistry && docker compose up -d --build
+       cd examples/domain_examples/chemistry && docker compose up -d --build
   4. Energy systems MCP server running locally:
-       cd src/domain_examples/energysystems && docker compose up -d --build
+       cd examples/domain_examples/energysystems && docker compose up -d --build
 
 If any MCP server is unreachable the script still runs with the remaining
 tools and prints a friendly skip message.
@@ -145,7 +145,7 @@ async def step_b_domain_tools():
                 "fingerprints, substructure search."
             ),
             tool_name_prefix="chem_",
-            start_hint="cd src/domain_examples/chemistry && docker compose up -d",
+            start_hint="cd examples/domain_examples/chemistry && docker compose up -d",
         ),
         _McpServerConfig(
             name="energysystems",
@@ -156,7 +156,7 @@ async def step_b_domain_tools():
                 "expansion, and topology analysis."
             ),
             tool_name_prefix="energy_",
-            start_hint="cd src/domain_examples/energysystems && docker compose up -d",
+            start_hint="cd examples/domain_examples/energysystems && docker compose up -d",
         ),
     ]
 

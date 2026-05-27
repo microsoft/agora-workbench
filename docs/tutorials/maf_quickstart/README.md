@@ -33,9 +33,9 @@ library for Lipinski drug-likeness, then build and dispatch a tiny 2-bus
 power grid. It chains the typed helpers in each domain (auto-injected into
 the kernel namespace) and reports the results. Each domain server ships a
 workflow guide —
-[`chemistry/skills/SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md)
+[`chemistry/skills/SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md)
 and
-[`energysystems/skills/SKILL.md`](../../../src/domain_examples/energysystems/skills/SKILL.md)
+[`energysystems/skills/SKILL.md`](../../../examples/domain_examples/energysystems/skills/SKILL.md)
 — which is injected into the system prompt so the agent uses tools in the
 recommended order.
 
@@ -46,7 +46,7 @@ recommended order.
 
 > **Data catalog — currently a placeholder.** The repo includes a
 > server-side catalog package
-> ([`catalog_tools.py`](../../../src/code_execution/code_execution/catalog_tools.py))
+> ([`catalog_tools.py`](../../../src/code_execution/catalog_tools.py))
 > that can register `search_data`, `get_artifact`, `list_domains`, and
 > `query_catalog` MCP tools from a catalog configuration such as
 > [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)).
@@ -92,14 +92,14 @@ docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the chemistry MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](../../../src/code_execution/code_execution/auth/),
+> [`create_noop_auth_config()`](../../../src/code_execution/auth/),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8020` so it's
 > not reachable from outside the host. **Do not deploy this configuration
 > to a publicly reachable server.**
 
 ```bash
-cd src/domain_examples/chemistry
+cd examples/domain_examples/chemistry
 docker compose up -d --build
 curl http://localhost:8020/health
 # => {"status":"healthy", ...}
@@ -113,7 +113,7 @@ from scratch with RDKit; subsequent starts are fast.
 Same pattern, binds to `127.0.0.1:8022`:
 
 ```bash
-cd src/domain_examples/energysystems
+cd examples/domain_examples/energysystems
 docker compose up -d --build
 curl http://localhost:8022/health
 # => {"status":"healthy", ...}
@@ -143,9 +143,9 @@ own function so you can map README sections to code.
 [chat_client.py](chat_client.py). agora-workbench is **BYO LLM**: any
 object that satisfies MAF's `ChatClient` protocol works. The tutorial
 factory is a thin wrapper around the framework-agnostic
-[`ModelSpec`](../../../src/llm/spec.py) +
-[`make_maf_client`](../../../src/llm/factories/maf.py) abstraction in
-`src/llm/`, and dispatches on `$LLM_PROVIDER`:
+[`ModelSpec`](../../../agent_helpers/llm/spec.py) +
+[`make_maf_client`](../../../agent_helpers/llm/factories/maf.py) abstraction in
+`agent_helpers/llm/`, and dispatches on `$LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
 | --- | --- | --- | --- |
@@ -161,7 +161,7 @@ factory is a thin wrapper around the framework-agnostic
 > kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to
-[`auth.providers.get_token_provider()`](../../../src/utilities/auth/providers.py),
+[`get_token_provider()`](../../../src/code_execution/auth/azure_credentials.py),
 which returns a callable backed by the same
 `AzureCliCredential → ManagedIdentityCredential` chain used everywhere
 else in the repo. No new credentials are needed.
@@ -184,7 +184,7 @@ else in the repo. No new credentials are needed.
 catalog search has moved into the MCP server itself: when a server is
 launched with a `catalog.yaml` (see
 [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)),
-[`register_catalog_tools`](../../../src/code_execution/code_execution/catalog_tools.py)
+[`register_catalog_tools`](../../../src/code_execution/catalog_tools.py)
 indexes the declared sources on startup and exposes `search_data`,
 `get_artifact`, and `list_domains` as MCP tools. The agent discovers them
 automatically through the `MCPStreamableHTTPTool` connection — no
@@ -200,7 +200,7 @@ configure a catalog on one of your servers.
 [`step_c_chemistry_tool`](agent.py) instantiates
 `MCPStreamableHTTPTool(name="chemistry", url=..., tool_name_prefix="chem_", approval_mode="never_require")`
 pointing at `http://localhost:8020/mcp`. The chemistry server (see
-[chemistry_server.py](../../../src/domain_examples/chemistry/server/chemistry_server.py))
+[chemistry_server.py](../../../examples/domain_examples/chemistry/server/chemistry_server.py))
 exposes:
 
 - `execute_chemistry_code` — run Python in a long-lived Jupyter kernel
@@ -221,11 +221,11 @@ domain servers without name collisions — every tool the chemistry server
 exposes appears to the LLM as `chem_<original_name>`.
 
 **Typed domain helpers** are *not* separate MCP tools. They live in the
-[`chemistry_tools`](../../../src/domain_examples/chemistry/chemistry_tools/)
+[`chemistry_tools`](../../../examples/domain_examples/chemistry/chemistry_tools/)
 pip package, which is installed into the kernel's conda env at server
 build time. The server then auto-injects an instrumented Python proxy
 for each helper into the kernel namespace via
-[`tool_proxy.py`](../../../src/code_execution/code_execution/tool_proxy.py),
+[`tool_proxy.py`](../../../src/code_execution/tool_proxy.py),
 so inside `execute_chemistry_code` the agent can simply call them as
 plain Python functions — no imports required:
 
@@ -282,7 +282,7 @@ backed by [PyPSA](https://pypsa.org/):
 ### Step D — Build the agent
 
 [`step_d_build_agent`](agent.py) reads each domain's
-[`SKILL.md`](../../../src/domain_examples/chemistry/skills/SKILL.md) — a
+[`SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md) — a
 portable workflow guide that documents the tool state-graph, default
 parameters, and common pitfalls — and appends both to the system prompt.
 This is the simplest version of the agora-workbench *skills* pattern:
@@ -355,8 +355,8 @@ PyPSA versions the server environments resolve.)
 | `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
 | `Bind for 127.0.0.1:8020 failed: port is already allocated` | A previous container (or unrelated process) is still holding the port. Find it with `docker ps \| grep 8020` and remove with `docker rm -f <name>`, then retry `docker compose up -d`. (Same for `:8022`.) |
 | Container exits immediately with `Could not resolve host: conda.anaconda.org` | Transient DNS / network blip while the conda env is being built on first start. Retry: `docker compose down && docker compose up -d`. |
-| `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `src/domain_examples/chemistry/`. |
-| `Step C2: energy systems MCP server unreachable at http://localhost:8022/health` | Same as above but in `src/domain_examples/energysystems/`. |
+| `Step C: chemistry MCP server unreachable at http://localhost:8020/health` | Docker container not running. `docker compose up -d` in `examples/domain_examples/chemistry/`. |
+| `Step C2: energy systems MCP server unreachable at http://localhost:8022/health` | Same as above but in `examples/domain_examples/energysystems/`. |
 | AOAI 403 / "scope not allowed" | `AOAI_SCOPE` doesn't match the endpoint. Standard AOAI uses `https://cognitiveservices.azure.com/.default`; some internal/gateway endpoints require a different scope — check with your endpoint owner. |
 | Agent hangs after one tool call returns | Parallel tool-call streaming bug across two MCP servers (see note in Step E). Make sure the prompt forces strict sequential execution. |
 | Container exits during startup with `RuntimeError: Additional command 1/1 failed` | A pip-install step inside the conda env failed; the build now surfaces this instead of silently continuing. Read the surrounding container logs for the underlying pip error (network, missing build dep, etc.) and rebuild with `docker compose up --build`. |
@@ -364,8 +364,8 @@ PyPSA versions the server environments resolve.)
 ## Cleanup
 
 ```bash
-cd src/domain_examples/chemistry && docker compose down
-cd src/domain_examples/energysystems && docker compose down
+cd examples/domain_examples/chemistry && docker compose down
+cd examples/domain_examples/energysystems && docker compose down
 ```
 
 ## Next steps
@@ -377,7 +377,7 @@ working, layer in:
   servers (template:
   [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml))
   and wire it into the server entry point via
-  [`register_catalog_tools`](../../../src/code_execution/code_execution/catalog_tools.py).
+  [`register_catalog_tools`](../../../src/code_execution/catalog_tools.py).
   Once registered, the agent automatically picks up `search_data`,
   `get_artifact`, and `list_domains` — no changes to `agent.py` required.
 - **Workflow planning** — servers with state-annotated tools also expose
