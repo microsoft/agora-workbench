@@ -306,16 +306,30 @@
         return joined.length > 90 ? joined.slice(0, 90) + "…" : joined;
       }
 
+      // Build a span with class + text in one shot.  We use this everywhere
+      // a server-controlled string would otherwise be interpolated into
+      // innerHTML.  textContent is the safe sink — it never parses HTML.
+      function span(className, text) {
+        const el = document.createElement("span");
+        el.className = className;
+        el.textContent = text;
+        return el;
+      }
+
       function buildToolCallRow(tc) {
         const row = document.createElement("div");
         row.className = "tool-call";
         const ok = tc.success !== false;
-        const mark = `<span class="mark ${ok ? "ok" : "fail"}">${ok ? "✓" : "✗"}</span>`;
-        const name = `<span class="tname">${tc.tool_name || "?"}</span>`;
-        const args = `<span class="targs">(${fmtArgsInline(tc.args)})</span>`;
-        const dur = typeof tc.duration_ms === "number" ? `<span class="tdur">${tc.duration_ms.toFixed(2)}ms</span>` : "";
-        const err = tc.error ? `<span class="terror">${tc.error}</span>` : "";
-        row.innerHTML = `${mark} ${name}${args}${dur}${err}`;
+        row.appendChild(span("mark " + (ok ? "ok" : "fail"), ok ? "✓" : "✗"));
+        row.appendChild(document.createTextNode(" "));
+        row.appendChild(span("tname", tc.tool_name || "?"));
+        row.appendChild(span("targs", "(" + fmtArgsInline(tc.args) + ")"));
+        if (typeof tc.duration_ms === "number") {
+          row.appendChild(span("tdur", tc.duration_ms.toFixed(2) + "ms"));
+        }
+        if (tc.error) {
+          row.appendChild(span("terror", tc.error));
+        }
 
         const detail = document.createElement("div");
         detail.className = "tool-call-detail";
@@ -335,17 +349,15 @@
 
         const row = document.createElement("div");
         row.className = "row";
-        const successHtml = typeof e.success === "boolean"
-          ? `<span class="${e.success ? "ok" : "fail"}">${e.success ? "✓" : "✗"}</span>`
-          : "";
-        const batchTag = e.batch_id ? `<span class="batch-tag">batch ${e.batch_id}</span>` : "";
-        row.innerHTML = `
-          <span class="badge ${e.type}">${e.type}</span>
-          <span class="server">${e.server || "?"}</span>
-          ${successHtml}
-          ${batchTag}
-          <span class="ts">${fmtTs(e.timestamp)}</span>
-        `;
+        row.appendChild(span("badge " + (e.type || ""), e.type || ""));
+        row.appendChild(span("server", e.server || "?"));
+        if (typeof e.success === "boolean") {
+          row.appendChild(span(e.success ? "ok" : "fail", e.success ? "✓" : "✗"));
+        }
+        if (e.batch_id) {
+          row.appendChild(span("batch-tag", "batch " + e.batch_id));
+        }
+        row.appendChild(span("ts", fmtTs(e.timestamp)));
         wrap.appendChild(row);
 
         if (e.description) {
@@ -378,17 +390,33 @@
         if (e.type === "workflow_planned") {
           const kv = document.createElement("div");
           kv.className = "kv";
-          const parts = [];
-          if (e.mode) parts.push(`mode <b>${e.mode}</b>`);
-          if (e.domain) parts.push(`domain <b>${e.domain}</b>`);
+          // Each part = a <span> holding "label " + <b>value</b>.  Built
+          // with DOM nodes so values can't inject markup.
+          const addPart = (labelText, value) => {
+            const s = document.createElement("span");
+            if (labelText) s.appendChild(document.createTextNode(labelText + " "));
+            const b = document.createElement("b");
+            b.textContent = value;
+            s.appendChild(b);
+            kv.appendChild(s);
+          };
+          let any = false;
+          if (e.mode) { addPart("mode", e.mode); any = true; }
+          if (e.domain) { addPart("domain", e.domain); any = true; }
           if (e.current_state || e.target_state) {
-            parts.push(`<b>${e.current_state || "?"}</b> → <b>${e.target_state || "?"}</b>`);
+            const s = document.createElement("span");
+            const b1 = document.createElement("b");
+            b1.textContent = e.current_state || "?";
+            s.appendChild(b1);
+            s.appendChild(document.createTextNode(" → "));
+            const b2 = document.createElement("b");
+            b2.textContent = e.target_state || "?";
+            s.appendChild(b2);
+            kv.appendChild(s);
+            any = true;
           }
-          if (e.tool_name) parts.push(`tool <b>${e.tool_name}</b>`);
-          if (parts.length) {
-            kv.innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
-            wrap.appendChild(kv);
-          }
+          if (e.tool_name) { addPart("tool", e.tool_name); any = true; }
+          if (any) wrap.appendChild(kv);
         }
 
         // tool_calls: promoted to a first-class lane (this is the headline content for "what did the agent do").
@@ -461,12 +489,12 @@
           header.className = "session-header";
           const label = sid === ORPHAN ? "(no session)" : `session ${sid.slice(0, 8)}`;
           const serverList = [...g.servers].join(", ") || "?";
-          header.innerHTML = `
-            <span class="caret">▼</span>
-            <span class="session-id">${label}</span>
-            <span class="server">${serverList}</span>
-            <span class="session-meta">${g.events.length} events · last ${fmtTs(g.lastSeen)}</span>
-          `;
+          header.appendChild(span("caret", "▼"));
+          header.appendChild(span("session-id", label));
+          header.appendChild(span("server", serverList));
+          header.appendChild(
+            span("session-meta", g.events.length + " events · last " + fmtTs(g.lastSeen))
+          );
           header.onclick = () => {
             if (collapsedSessions.has(sid)) collapsedSessions.delete(sid);
             else collapsedSessions.add(sid);
