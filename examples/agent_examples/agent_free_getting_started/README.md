@@ -19,7 +19,7 @@ config = ServerConfig(
     type="uv",
     dependency_file="numpy>=2.0.0\npandas>=2.3.0\n",
     auto_build=True,
-    # Custom environment location (environment config)
+    # environment location for local installation
     build_dir=Path.home() / ".cache" / "mcp-envs" / "starter-demo" / "uv",
 )
 
@@ -50,6 +50,7 @@ Create `client_mcp_sdk.py`:
 ```python
 import asyncio
 import json
+from contextlib import AsyncExitStack
 
 import httpx
 from mcp import ClientSession
@@ -67,38 +68,50 @@ def first_text(result) -> str:
 
 
 async def main() -> None:
+    # — Setup: open HTTP client, transport, and MCP session —
+    stack = AsyncExitStack()
+
     timeout = httpx.Timeout(connect=10.0, read=None, write=10.0, pool=10.0)
-    async with httpx.AsyncClient(
+    http_client = httpx.AsyncClient(
         headers={"Authorization": "Bearer dev-token"},
         timeout=timeout,
-    ) as http_client:
-        async with streamable_http_client(MCP_URL, http_client=http_client) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
+    )
+    await stack.enter_async_context(http_client)
 
-                tools = await session.list_tools()
-                print("Available tools:", [tool.name for tool in tools.tools])
+    read, write, _ = await stack.enter_async_context(
+        streamable_http_client(MCP_URL, http_client=http_client)
+    )
 
-                run = await session.call_tool(
-                    "execute_starter_code",
-                    {
-                        "description": "Create a DataFrame and compute a sum.",
-                        "code": (
-                            "import pandas as pd\n"
-                            "df = pd.DataFrame({'x': [1, 2, 3]})\n"
-                            "print(int(df['x'].sum()))"
-                        ),
-                    },
-                )
-                payload = json.loads(first_text(run))
-                print("Execution stdout:", payload["stdout"].strip())
+    session = await stack.enter_async_context(ClientSession(read, write))
+    await session.initialize()
 
-                sessions = await session.call_tool("starter_list_sessions", {"summary_only": True})
-                print("Sessions:", first_text(sessions))
+    # — Use: call tools on the running server —
+    tools = await session.list_tools()
+    print("Available tools:", [tool.name for tool in tools.tools])
 
-                session_id = payload["session_id"]
-                closed = await session.call_tool("starter_close_session", {"session_id": session_id})
-                print("Close session result:", first_text(closed))
+    run = await session.call_tool(
+        "execute_starter_code",
+        {
+            "description": "Create a DataFrame and compute a sum.",
+            "code": (
+                "import pandas as pd\n"
+                "df = pd.DataFrame({'x': [1, 2, 3]})\n"
+                "print(int(df['x'].sum()))"
+            ),
+        },
+    )
+    payload = json.loads(first_text(run))
+    print("Execution stdout:", payload["stdout"].strip())
+
+    sessions = await session.call_tool("starter_list_sessions", {"summary_only": True})
+    print("Sessions:", first_text(sessions))
+
+    session_id = payload["session_id"]
+    closed = await session.call_tool("starter_close_session", {"session_id": session_id})
+    print("Close session result:", first_text(closed))
+
+    # — Teardown: close session, transport, and HTTP client —
+    await stack.aclose()
 
 
 if __name__ == "__main__":
