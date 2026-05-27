@@ -77,6 +77,8 @@ If you are **not** using MAF, you never need `agent-framework`.  Write a one-lin
 
 Copy `.env.example` to `.env` and configure credentials. See the comments in that file for available settings.
 
+For a minimal, **agent-free** MCP flow (standalone `CodeExecutionServer` + direct MCP client / `curl` calls), see [`examples/agent_examples/agent_free_getting_started/README.md`](examples/agent_examples/agent_free_getting_started/README.md).
+
 ## Development
 
 ```bash
