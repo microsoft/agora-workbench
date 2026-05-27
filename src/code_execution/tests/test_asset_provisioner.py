@@ -65,7 +65,7 @@ class TestProvisionAssets:
 
     @pytest.fixture
     def config_with_local_asset(self, tmp_path, source_file):
-        """Create an ServerConfig with a local file asset."""
+        """Create a ServerConfig with a local file asset."""
         cache_dir = tmp_path / "cache" / "myenv"
         return ServerConfig(
             name="myenv",

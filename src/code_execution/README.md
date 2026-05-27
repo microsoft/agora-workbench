@@ -19,6 +19,7 @@ Domain servers live in `domains/<name>/server/` and are registered in `server_re
 
 ```python
 from code_execution import CodeExecutionServer, ServerConfig
+from code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myenv",
@@ -28,7 +29,7 @@ config = ServerConfig(
     auto_build=True,
 )
 
-server = CodeExecutionServer(server_config=config)
+server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 await server.run_http(host="0.0.0.0", port=8000)
 ```
 
