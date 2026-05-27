@@ -18,8 +18,8 @@
 #   - .env configured with ACA_* variables (see .env.example)
 #
 # Usage:
-#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context
-#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context --tag v1.2.3
+#   ./deploy.sh --server chemistry --dockerfile path/to/Dockerfile --context path/to/context
+#   ./deploy.sh --server chemistry --dockerfile path/to/Dockerfile --context path/to/context --tag v1.2.3
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
