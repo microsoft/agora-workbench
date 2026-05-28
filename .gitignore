@@ -64,3 +64,6 @@ test_scenarios.jsonl
 test_facilities_map.html
 facilities_map_demo.png
 facilities_summary.png
+
+# MkDocs build output
+site/

@@ -85,6 +85,11 @@ dev = [
     "pytest-timeout>=2.4.0",
     "ruff>=0.15.12",
 ]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["src/code_execution/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests"]
