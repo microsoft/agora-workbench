@@ -347,6 +347,7 @@ class CodeExecutionServer:
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
+        await self._register_kernel(kernel_name="tools-py")
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
     # ========================================================================
@@ -834,6 +835,12 @@ class CodeExecutionServer:
         """
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
+
+        # Skip if kernel is already registered (e.g., pre-registered during warm build)
+        kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
+        if kernel_dir.exists():
+            LOGGER.info(f"Kernel '{kernel_name}' already registered at {kernel_dir}")
+            return
 
         LOGGER.info(f"Registering Jupyter kernel '{kernel_name}' with Python: {self._python_executable}")
 
