@@ -24,39 +24,6 @@ class EmbeddingProvider(Protocol):
         ...
 
 
-class LocalEmbeddingProvider(EmbeddingProvider):
-    """Embedding provider using sentence-transformers on CPU."""
-
-    def __init__(self, model_name: str = "nomic-ai/nomic-embed-text-v1.5"):
-        self._model_name = model_name
-        self._model = None
-
-    def _load_model(self):
-        if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            LOGGER.info("Loading embedding model: %s", self._model_name)
-            self._model = SentenceTransformer(self._model_name, trust_remote_code=True)
-            LOGGER.info("Embedding model loaded (dimensions=%d)", self._model.get_sentence_embedding_dimension())
-
-    @property
-    def dimensions(self) -> int:
-        self._load_model()
-        return self._model.get_sentence_embedding_dimension()  # type: ignore[union-attr]
-
-    async def embed(self, texts: list[str]) -> list[list[float]]:
-        self._load_model()
-        # sentence-transformers encode is synchronous; run in thread for async compat
-        import asyncio
-
-        loop = asyncio.get_event_loop()
-        embeddings = await loop.run_in_executor(
-            None,
-            lambda: self._model.encode(texts, normalize_embeddings=True).tolist(),  # type: ignore[union-attr]
-        )
-        return embeddings
-
-
 class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
     """Embedding provider using Azure OpenAI.
 
@@ -122,19 +89,26 @@ def create_embedding_provider(
     azure_openai_deployment: str | None = None,
     credential_provider: CredentialProvider | None = None,
 ) -> EmbeddingProvider:
-    """Factory to create the appropriate embedding provider from config."""
-    if model_name == "azure-openai":
-        if not azure_openai_endpoint or not azure_openai_deployment:
-            raise ValueError(
-                "azure_openai_endpoint and azure_openai_deployment are required when embedding_model is 'azure-openai'"
-            )
-        if credential_provider is None:
-            from ...auth import EntraCredentialProvider
+    """Factory to create the appropriate embedding provider from config.
 
-            credential_provider = EntraCredentialProvider()
-        return AzureOpenAIEmbeddingProvider(
-            endpoint=azure_openai_endpoint,
-            deployment=azure_openai_deployment,
-            credential_provider=credential_provider,
+    Only Azure OpenAI embeddings are supported. For local-only setups
+    without an embedding endpoint, use BM25 search instead.
+    """
+    if model_name != "azure-openai":
+        raise ValueError(
+            f"Unsupported embedding model '{model_name}'. "
+            "Only 'azure-openai' is supported. For local-only setups, use BM25 search."
         )
-    return LocalEmbeddingProvider(model_name=model_name)
+    if not azure_openai_endpoint or not azure_openai_deployment:
+        raise ValueError(
+            "azure_openai_endpoint and azure_openai_deployment are required when embedding_model is 'azure-openai'"
+        )
+    if credential_provider is None:
+        from ...auth import EntraCredentialProvider
+
+        credential_provider = EntraCredentialProvider()
+    return AzureOpenAIEmbeddingProvider(
+        endpoint=azure_openai_endpoint,
+        deployment=azure_openai_deployment,
+        credential_provider=credential_provider,
+    )
