@@ -7,7 +7,7 @@ Wires a Microsoft Agent Framework (MAF) agent to the agora-workbench tools:
     data catalog tools exposed by MCP servers that explicitly wire catalog
     indexing plus ``register_catalog_tools(...)`` at startup (see
     ``src/code_execution/catalog.example.yaml`` and
-    ``src/code_execution/code_execution/catalog_tools.py``).
+    ``src/code_execution/catalog_tools.py``).
   * ``chemistry`` MCP toolset — the chemistry MCP server from
     ``examples/domain_examples/chemistry/``. The server exposes a generic
     ``execute_chemistry_code`` tool with RDKit pre-imported, plus a
@@ -69,9 +69,9 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-# Make the repo's `src/` packages importable when running this script directly.
+# Make the repo's top-level packages importable when running this script directly.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(REPO_ROOT / "src"))
+sys.path.insert(0, str(REPO_ROOT))
 
 # Load the repo-root .env.agent (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
 load_dotenv(REPO_ROOT / ".env.agent")

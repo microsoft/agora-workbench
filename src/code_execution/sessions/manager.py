@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import os
 import queue
+import re
 import shutil
 import time
 import uuid
@@ -18,6 +19,49 @@ from jupyter_client.manager import AsyncKernelManager
 
 from .session import Session
 from .storage import InMemoryStorage, SessionStorageBackend
+
+# Display-data capture: priority of renderable MIME types to extract from
+# Jupyter `display_data` / `execute_result` messages.  Higher priority first.
+#
+# `text/html` is deliberately NOT captured.  Kernel code is LLM-generated and
+# therefore prompt-injectable from any document the agent reads; raw HTML
+# rendered in the UI is a direct XSS vector.  If interactive HTML payloads
+# (plotly, bokeh) are wanted later, render them via a sandboxed iframe — do
+# not relax the policy here.
+_DISPLAY_MIME_PRIORITY: Tuple[str, ...] = ("image/png", "image/svg+xml")
+
+# Hard cap on total display-data bytes captured per execute, to keep activity
+# events transportable.  matplotlib PNGs are typically <500 KB so 5 MB
+# accommodates a few plots without risking an unbounded SSE payload.
+_MAX_DISPLAY_BYTES_PER_EXECUTE: int = 5 * 1024 * 1024
+
+# IPython colorizes tracebacks with ANSI SGR escape sequences when emitting
+# `error` messages.  The activity UI is a browser <pre>, not a terminal, so
+# the codes show up as garbage like ``␛[0;31m``.  Strip them at the source.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_SGR_RE.sub("", text)
+
+
+def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
+    """Pick the richest renderable representation from a Jupyter display payload.
+
+    Returns a dict suitable for the Activity UI:
+
+        {"mime_type": "image/png", "data": "<base64>", "metadata": {...}}
+
+    or ``None`` if the payload has no renderable image / HTML / SVG.
+    Plain-text representations are intentionally NOT returned — they are
+    already captured into stdout by the caller.
+    """
+    if not data:
+        return None
+    for mime in _DISPLAY_MIME_PRIORITY:
+        if mime in data:
+            return {"mime_type": mime, "data": data[mime], "metadata": metadata or {}}
+    return None
 
 if TYPE_CHECKING:
     from jupyter_client.asynchronous.client import AsyncKernelClient
@@ -648,7 +692,7 @@ class SessionManager:
                         job.stderr_parts.append(text)
                 elif msg_type == "error":
                     traceback = "\n".join(content.get("traceback", []))
-                    job.stderr_parts.append(traceback)
+                    job.stderr_parts.append(_strip_ansi(traceback))
                     job.success = False
                 elif msg_type == "execute_result":
                     data = content.get("data", {})
@@ -803,7 +847,7 @@ class SessionManager:
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
-    ) -> Tuple[str, str, bool, list[dict]]:
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """
         Execute code in the session's Jupyter kernel.
 
@@ -818,12 +862,19 @@ class SessionManager:
             working_dir: Optional working directory for kernel
 
         Returns:
-            Tuple of ``(stdout, stderr, success, artifacts)`` where
-            ``artifacts`` is a list of metadata dicts (one per new/modified
-            file under the session's outputs dir) with shape
-            ``{name, size_bytes, mime_type, modified_at, download_token}``.
-            Each ``download_token`` is unguessable and valid for the
-            session's lifetime; the MCP server composes the full URL.
+            Tuple of ``(stdout, stderr, success, displays, artifacts)``:
+
+            * ``displays`` — rich-output payloads emitted by the kernel
+              (e.g. matplotlib figures via ``display_data`` or trailing
+              expressions via ``execute_result``).  Each entry has the
+              shape ``{"mime_type": str, "data": <base64 for image/png;
+              raw for svg/html>, "metadata": dict}``.  Empty when the
+              code produced only text output.
+            * ``artifacts`` — metadata dicts (one per new/modified file
+              under the session's outputs dir) with shape ``{name,
+              size_bytes, mime_type, modified_at, download_token}``.
+              Each ``download_token`` is unguessable and valid for the
+              session's lifetime; the MCP server composes the full URL.
         """
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).
@@ -840,11 +891,12 @@ class SessionManager:
                 ),
                 False,
                 [],
+                [],
             )
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
-            return "", f"Session busy — job {running_job_id} is still running", False, []
+            return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
         async with self._get_kernel_execute_lock(session_id):
             return await self._execute_code_locked(
@@ -865,7 +917,7 @@ class SessionManager:
         working_dir: Optional[str],
         user_token: Optional[str],
         user_identity: Optional[str],
-    ) -> Tuple[str, str, bool, list[dict]]:
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
@@ -883,7 +935,27 @@ class SessionManager:
 
         stdout_parts = []
         stderr_parts = []
+        displays: list[dict] = []
+        displays_bytes = 0
         success = True
+
+        def _maybe_capture_display(content_data: dict, content_meta: dict) -> None:
+            """Append a renderable display payload to ``displays`` if room remains."""
+            nonlocal displays_bytes
+            entry = _extract_display(content_data, content_meta)
+            if entry is None:
+                return
+            size = len(entry["data"]) if isinstance(entry["data"], (str, bytes)) else 0
+            if displays_bytes + size > _MAX_DISPLAY_BYTES_PER_EXECUTE:
+                LOGGER.warning(
+                    "Dropping kernel display payload (%s, %d bytes): per-execute cap %d bytes reached",
+                    entry["mime_type"],
+                    size,
+                    _MAX_DISPLAY_BYTES_PER_EXECUTE,
+                )
+                return
+            displays_bytes += size
+            displays.append(entry)
 
         start_time = time.monotonic()
         keepalive_interval_seconds = self.execution_session_keepalive_seconds
@@ -902,13 +974,14 @@ class SessionManager:
                         ),
                         False,
                         [],
+                        [],
                     )
                 last_keepalive = now
 
             if time.monotonic() - start_time > timeout:
                 await km.interrupt_kernel()
                 await asyncio.sleep(1.0)
-                return "", f"Execution timeout after {timeout}s", False, []
+                return "", f"Execution timeout after {timeout}s", False, [], []
 
             try:
                 msg = await kc.get_iopub_msg(timeout=1.0)
@@ -935,15 +1008,30 @@ class SessionManager:
             elif msg_type == "error":
                 # Execution error
                 traceback = "\n".join(content.get("traceback", []))
-                stderr_parts.append(traceback)
+                stderr_parts.append(_strip_ansi(traceback))
                 success = False
 
             elif msg_type == "execute_result":
-                # Result of expression
+                # Result of expression: capture the text/plain repr to stdout
+                # AND any renderable rich-output (image/png, svg, html) as a
+                # display payload.
                 data = content.get("data", {})
                 text_result = data.get("text/plain", "")
                 if text_result:
                     stdout_parts.append(text_result)
+                _maybe_capture_display(data, content.get("metadata", {}))
+
+            elif msg_type in ("display_data", "update_display_data"):
+                # Rich output from explicit display(...) calls or implicit
+                # matplotlib emit.  The text/plain rep (e.g. "<Figure size
+                # 800x600 with 1 Axes>") goes to stdout so the agent has
+                # context that a figure was produced; the image / svg / html
+                # rep goes to the displays list for the activity UI.
+                data = content.get("data", {})
+                text_result = data.get("text/plain", "")
+                if text_result:
+                    stdout_parts.append(text_result)
+                _maybe_capture_display(data, content.get("metadata", {}))
 
             elif msg_type == "status":
                 # Execution state changed
@@ -974,6 +1062,13 @@ class SessionManager:
                             t = data.get("text/plain", "")
                             if t:
                                 stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
+                        elif r_type in ("display_data", "update_display_data"):
+                            data = r_content.get("data", {})
+                            t = data.get("text/plain", "")
+                            if t:
+                                stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
                     break
 
         stdout = "".join(stdout_parts)
@@ -996,7 +1091,7 @@ class SessionManager:
             )
             artifacts = []
 
-        return stdout, stderr, success, artifacts
+        return stdout, stderr, success, displays, artifacts
 
     async def _shutdown_kernel(self, session_id: str):
         """Shutdown and remove a kernel."""

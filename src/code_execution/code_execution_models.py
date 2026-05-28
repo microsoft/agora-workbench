@@ -92,6 +92,16 @@ class CodeExecutionResult(BaseModel):
         default_factory=list,
         description="Structured tool-call records captured during execution",
     )
+    displays: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Rich kernel outputs (matplotlib figures, images, SVGs, HTML) captured "
+            "from Jupyter display_data and execute_result messages. Each entry has "
+            "the shape ``{'mime_type': str, 'data': str, 'metadata': dict}``. "
+            "Streamed to the activity UI for rendering; excluded from the JSON "
+            "returned to the agent to keep its context window small."
+        ),
+    )
     artifacts: list[dict] = Field(
         default_factory=list,
         description=(

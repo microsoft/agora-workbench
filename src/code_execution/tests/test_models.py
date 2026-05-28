@@ -56,6 +56,35 @@ def test_code_execution_result_serialization():
     assert data["success"] is True
 
 
+def test_code_execution_result_displays_default_empty():
+    """displays defaults to an empty list and round-trips through model_dump."""
+    result = CodeExecutionResult(stdout="ok")
+    assert result.displays == []
+    dumped = result.model_dump()
+    assert dumped["displays"] == []
+
+
+def test_code_execution_result_displays_excluded():
+    """Agent-facing JSON serialization can drop displays to keep context small.
+
+    The activity-publish path keeps displays; the agent return path uses
+    ``model_dump(exclude={'displays'})`` because matplotlib PNG payloads
+    are several hundred KB and would blow the agent's token budget.
+    """
+    big_png = "x" * 50000
+    result = CodeExecutionResult(
+        stdout="<Figure>",
+        displays=[{"mime_type": "image/png", "data": big_png, "metadata": {}}],
+    )
+    full = result.model_dump()
+    assert len(full["displays"]) == 1
+    assert full["displays"][0]["data"] == big_png
+
+    agent_view = result.model_dump(exclude={"displays"})
+    assert "displays" not in agent_view
+    assert agent_view["stdout"] == "<Figure>"
+
+
 def test_server_config_required_fields():
     """Test that ServerConfig requires essential fields."""
     with pytest.raises(ValidationError):

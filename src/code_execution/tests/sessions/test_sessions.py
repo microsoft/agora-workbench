@@ -617,6 +617,62 @@ print(counter.increment())
         assert "7" in result2.stdout and "8" in result2.stdout and "9" in result2.stdout
 
 
+class TestDisplayDataCapture:
+    """The kernel polling loop must capture Jupyter display_data / execute_result
+    rich outputs (matplotlib figures, images, SVGs) so the activity UI can
+    render them.  Text-only payloads must NOT be returned as displays — they
+    are already in stdout.
+    """
+
+    @pytest.mark.unit
+    def test_extract_display_prefers_png(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/png": "BASE64HERE"},
+            {"width": 800},
+        )
+        assert out == {"mime_type": "image/png", "data": "BASE64HERE", "metadata": {"width": 800}}
+
+    @pytest.mark.unit
+    def test_extract_display_falls_back_to_svg(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/svg+xml": "<svg/>"},
+            {},
+        )
+        assert out is not None
+        assert out["mime_type"] == "image/svg+xml"
+        assert out["data"] == "<svg/>"
+
+    @pytest.mark.unit
+    def test_extract_display_text_only_returns_none(self):
+        """Pure text/plain payloads belong in stdout, not displays."""
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display({"text/plain": "just text"}, {}) is None
+        assert _extract_display({}, {}) is None
+        assert _extract_display(None, None) is None  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_extract_display_drops_html(self):
+        """text/html is intentionally NOT a capturable display type.
+
+        Rendering raw HTML in the activity UI is an XSS vector because
+        kernel code is LLM-generated and prompt-injectable.  HTML-only
+        payloads (e.g. a DataFrame ``_repr_html_``) fall through to None
+        so the UI shows nothing for them.
+        """
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display(
+            {"text/plain": "<DataFrame>", "text/html": "<table></table>"},
+            {},
+        ) is None
+        assert _extract_display({"text/html": "<script>alert(1)</script>"}, {}) is None
+
+
 class TestKernelExecuteLock:
     """Per-session asyncio.Lock that serializes execute_code_for_session calls.
 

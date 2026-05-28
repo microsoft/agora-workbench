@@ -678,13 +678,19 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
                     "artifacts": artifacts_with_urls,
                     "error": result.error,
                     "session_id": session.session_id,
+                    "displays": result.displays,
                 }
             )
 
-            # Return result with session_id.  Drop artifacts from the agent's
-            # view: the agent doesn't need download URLs (the user is who
-            # downloads), and the metadata adds token pressure for nothing.
-            result_dict = result.model_dump(exclude={"artifacts"})
+            # Return result with session_id.  Both ``displays`` and
+            # ``artifacts`` are excluded from the JSON returned to the agent:
+            # matplotlib PNGs (displays) can be hundreds of KB and would blow
+            # the agent's context window for no gain — text/plain reprs are
+            # already in ``stdout``, and the rich payload is streamed to the
+            # activity UI.  Artifact metadata is similarly the user's concern
+            # (download URLs), not the agent's, and adds token pressure for
+            # nothing — both payloads ride the code_executed activity event.
+            result_dict = result.model_dump(exclude={"displays", "artifacts"})
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:
