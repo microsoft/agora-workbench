@@ -1,8 +1,9 @@
 """BYO-LLM factory for the MAF quickstart tutorial.
 
-A thin wrapper around the project-wide LLM abstraction in ``src/llm/``: maps
-the tutorial's ``LLM_PROVIDER`` env var onto a :class:`llm.ModelSpec` and
-hands it to :func:`llm.factories.make_maf_client`.
+A thin wrapper around the project-wide LLM abstraction in
+``agent_helpers/llm/``: maps the tutorial's ``LLM_PROVIDER`` env var onto a
+:class:`agent_helpers.llm.ModelSpec` and hands it to
+:func:`agent_helpers.llm.factories.make_maf_client`.
 
 Supported ``$LLM_PROVIDER`` values:
     azure_openai_entra  - Azure OpenAI via Entra ID token (default)
@@ -20,8 +21,8 @@ from __future__ import annotations
 import logging
 import os
 
-from llm import ModelSpec
-from llm.factories import make_maf_client
+from agent_helpers.llm import ModelSpec
+from agent_helpers.llm.factories import make_maf_client
 
 LOGGER = logging.getLogger(__name__)
 
