@@ -36,12 +36,13 @@ az account set --subscription <SUBSCRIPTION_ID>
 # 3. Copy the ACA_* values printed by setup.sh into `deployment/.env.server`.
 #    deploy.sh reads infrastructure config (ACR, environment, identity) from
 #    `deployment/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
-#    See deploy.sh and .env.example for the full list of ACA_* variables.
+#    See deploy.sh and .env.server.example for the full list of ACA_* variables.
 
 # 4. Deploy an example server (chemistry shown)
 ./deploy.sh \
-  --resource-group  agora-mcp-rg \
-  --server          chemistry
+  --server          chemistry \
+  --dockerfile      ../../deployment/base.Dockerfile \
+  --context         ../../
 
 # 5. Verify
 az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv

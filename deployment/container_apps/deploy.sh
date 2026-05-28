@@ -64,6 +64,7 @@ IMAGE_TAG=""                         # auto-set to git short SHA if empty
 PARAM_FILE=""                        # auto-resolved from server name
 DOCKERFILE=""                        # user-provided Dockerfile path
 BUILD_CONTEXT=""                     # Docker build context directory
+DRY_RUN=false
 
 usage() {
     cat <<EOF
@@ -82,6 +83,7 @@ Optional:
   --storage-link        NAME    ACA environment storage link name for Azure Files cache
   --cache-mount-path    PATH    Container mount path for cache (default: /home/appuser/.cache/mcp-envs)
   --param-file          PATH    Bicep parameter file override
+  --dry-run                     Show what would be deployed without building or deploying
   -h, --help                    Show this help message
 EOF
     exit 0
@@ -100,6 +102,7 @@ while [[ $# -gt 0 ]]; do
         --storage-link)       STORAGE_LINK="$2";    shift 2 ;;
         --cache-mount-path)   CACHE_MOUNT_PATH="$2"; shift 2 ;;
         --param-file)         PARAM_FILE="$2";      shift 2 ;;
+        --dry-run)            DRY_RUN=true;         shift ;;
         -h|--help)            usage ;;
         *)                    echo "Unknown option: $1"; usage ;;
     esac
@@ -109,19 +112,19 @@ if [[ -z "$SERVER_NAME" ]]; then
     echo "ERROR: --server is required." >&2; exit 1
 fi
 
-if [[ -z "$DOCKERFILE" ]]; then
+if [[ -z "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
     echo "ERROR: --dockerfile is required." >&2; exit 1
 fi
 
-if [[ ! -f "$DOCKERFILE" ]]; then
+if [[ -n "$DOCKERFILE" && ! -f "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
     echo "ERROR: Dockerfile not found: $DOCKERFILE" >&2; exit 1
 fi
 
-if [[ -z "$BUILD_CONTEXT" ]]; then
+if [[ -z "$BUILD_CONTEXT" && "$DRY_RUN" == false ]]; then
     echo "ERROR: --context is required." >&2; exit 1
 fi
 
-if [[ ! -d "$BUILD_CONTEXT" ]]; then
+if [[ -n "$BUILD_CONTEXT" && ! -d "$BUILD_CONTEXT" && "$DRY_RUN" == false ]]; then
     echo "ERROR: Build context directory not found: $BUILD_CONTEXT" >&2; exit 1
 fi
 
@@ -171,19 +174,24 @@ echo ""
 
 # ── 1. Build Docker image ────────────────────────────────────────────────────
 
-echo ">> Building Docker image..."
-docker build \
-    --file "$DOCKERFILE" \
-    --tag "$IMAGE_REF" \
-    "$BUILD_CONTEXT"
+if [[ "$DRY_RUN" == true ]]; then
+    echo ">> [DRY RUN] Skipping Docker build and push."
+    IMAGE_REF="${IMAGE_REF:-${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:dry-run}"
+else
+    echo ">> Building Docker image..."
+    docker build \
+        --file "$DOCKERFILE" \
+        --tag "$IMAGE_REF" \
+        "$BUILD_CONTEXT"
 
 # ── 2. Push to ACR ───────────────────────────────────────────────────────────
 
-echo ">> Logging in to ACR..."
-az acr login --name "$ACR_NAME"
+    echo ">> Logging in to ACR..."
+    az acr login --name "$ACR_NAME"
 
-echo ">> Pushing image to ACR..."
-docker push "$IMAGE_REF"
+    echo ">> Pushing image to ACR..."
+    docker push "$IMAGE_REF"
+fi
 
 # ── 3. Build extraEnvVars from .env.server ───────────────────────────────────────────
 # Forward all .env.server variables to the Container App, excluding:
@@ -220,11 +228,17 @@ fi
 EXTRA_ENV_JSON+="}"
 
 echo "  Extra env vars:  $(echo "$EXTRA_ENV_JSON" | python3 -c "import sys,json; print(', '.join(json.loads(sys.stdin.read()).keys()))")"
+
+# Warn about forwarded variables
+FORWARDED_KEYS=$(echo "$EXTRA_ENV_JSON" | python3 -c "import sys,json; keys=list(json.loads(sys.stdin.read()).keys()); print(', '.join(keys)) if keys else None")
+if [[ -n "$FORWARDED_KEYS" && "$FORWARDED_KEYS" != "None" ]]; then
+    echo ""
+    echo "  WARNING: The above variables from .env.server will be visible in ACA"
+    echo "  container configuration. Do not include secrets here unless intended."
+fi
 echo ""
 
 # ── 4. Deploy Bicep ──────────────────────────────────────────────────────────
-
-echo ">> Deploying Container App via Bicep..."
 
 # Build storage parameters (only passed when configured)
 STORAGE_PARAMS=""
@@ -234,31 +248,52 @@ if [[ -n "$STORAGE_LINK" ]]; then
     echo "  Cache mount:     $CACHE_MOUNT_PATH"
 fi
 
-az deployment group create \
-    --resource-group "$RESOURCE_GROUP" \
-    --template-file "$SCRIPT_DIR/main.bicep" \
-    --parameters "$PARAM_FILE" \
-    --parameters \
-        containerImage="$IMAGE_REF" \
-        environmentId="$ENV_ID" \
-        identityId="$IDENTITY_ID" \
-        identityClientId="$IDENTITY_CLIENT_ID" \
-        registryServer="$ACR_LOGIN_SERVER" \
-        entraClientId="$ENTRA_CLIENT_ID_VAL" \
-        entraTenantId="$ENTRA_TENANT_ID_VAL" \
-        extraEnvVars="$EXTRA_ENV_JSON" \
-        $STORAGE_PARAMS \
-    --output none
+if [[ "$DRY_RUN" == true ]]; then
+    echo ">> [DRY RUN] Showing deployment what-if..."
+    az deployment group what-if \
+        --resource-group "$RESOURCE_GROUP" \
+        --template-file "$SCRIPT_DIR/main.bicep" \
+        --parameters "$PARAM_FILE" \
+        --parameters \
+            containerImage="$IMAGE_REF" \
+            environmentId="$ENV_ID" \
+            identityId="$IDENTITY_ID" \
+            identityClientId="$IDENTITY_CLIENT_ID" \
+            registryServer="$ACR_LOGIN_SERVER" \
+            entraClientId="$ENTRA_CLIENT_ID_VAL" \
+            entraTenantId="$ENTRA_TENANT_ID_VAL" \
+            extraEnvVars="$EXTRA_ENV_JSON" \
+            $STORAGE_PARAMS
+    echo ""
+    echo "=== Dry run complete — no resources were modified ==="
+else
+    echo ">> Deploying Container App via Bicep..."
+    az deployment group create \
+        --resource-group "$RESOURCE_GROUP" \
+        --template-file "$SCRIPT_DIR/main.bicep" \
+        --parameters "$PARAM_FILE" \
+        --parameters \
+            containerImage="$IMAGE_REF" \
+            environmentId="$ENV_ID" \
+            identityId="$IDENTITY_ID" \
+            identityClientId="$IDENTITY_CLIENT_ID" \
+            registryServer="$ACR_LOGIN_SERVER" \
+            entraClientId="$ENTRA_CLIENT_ID_VAL" \
+            entraTenantId="$ENTRA_TENANT_ID_VAL" \
+            extraEnvVars="$EXTRA_ENV_JSON" \
+            $STORAGE_PARAMS \
+        --output none
 
 # ── 5. Report ────────────────────────────────────────────────────────────────
 
-FQDN=$(az containerapp show \
-    --name "${SERVER_NAME}-server" \
-    --resource-group "$RESOURCE_GROUP" \
-    --query 'properties.configuration.ingress.fqdn' \
-    --output tsv)
+    FQDN=$(az containerapp show \
+        --name "${SERVER_NAME}-server" \
+        --resource-group "$RESOURCE_GROUP" \
+        --query 'properties.configuration.ingress.fqdn' \
+        --output tsv)
 
-echo ""
-echo "=== Deployment complete ==="
-echo "  App URL:  https://${FQDN}"
-echo "  Health:   https://${FQDN}/health"
+    echo ""
+    echo "=== Deployment complete ==="
+    echo "  App URL:  https://${FQDN}"
+    echo "  Health:   https://${FQDN}/health"
+fi
