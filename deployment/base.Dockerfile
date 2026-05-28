@@ -64,7 +64,7 @@ COPY src/code_execution /app/code_execution
 # Create cache directory for MCP environments and add a non-root user for runtime
 RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
     mkdir -p /home/appuser/.cache/mcp-envs && \
-    chown -R appuser:appuser /app /home/appuser /opt/wheelhouse
+    chown -R appuser:appuser /app /home/appuser /opt/wheelhouse /opt/miniforge3/pkgs
 
 # Add /app to PYTHONPATH so kernel processes can import domain modules
 ENV PYTHONPATH="/app:${PYTHONPATH}"

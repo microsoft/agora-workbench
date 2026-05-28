@@ -10,8 +10,16 @@
 ARG BASE_IMAGE=mcp-server-base:local
 FROM ${BASE_IMAGE}
 
-# Copy chemistry package tree so Python module execution can resolve the
-# full package path consistently at runtime.
+# Copy warm config and chemistry_tools first (changes less often than server code)
+# to preserve the expensive conda build layer across server code edits.
+COPY --chown=appuser:appuser examples/domain_examples/chemistry/warm_config.yaml /app/domain_examples/chemistry/warm_config.yaml
+COPY --chown=appuser:appuser examples/domain_examples/chemistry/chemistry_tools /app/domain_examples/chemistry/chemistry_tools
+
+# Pre-build conda environment (warm start) — avoids runtime install that can
+# exceed ephemeral storage on container platforms like Azure Container Apps.
+RUN python -m code_execution.cli warm --config /app/domain_examples/chemistry/warm_config.yaml
+
+# Copy the full chemistry package tree (server code, tools metadata, skills, etc.)
 COPY --chown=appuser:appuser examples/domain_examples/chemistry /app/domain_examples/chemistry
 
 CMD ["python", "-m", "domain_examples.chemistry.server.chemistry_server"]
