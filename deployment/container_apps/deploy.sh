@@ -62,8 +62,8 @@ CACHE_MOUNT_PATH="${ACA_CACHE_MOUNT_PATH:-/home/appuser/.cache/mcp-envs}"
 SERVER_NAME=""
 IMAGE_TAG=""                         # auto-set to git short SHA if empty
 PARAM_FILE=""                        # auto-resolved from server name
-DOCKERFILE=""                        # user-provided Dockerfile path
-BUILD_CONTEXT=""                     # Docker build context directory
+DOCKERFILE=""                        # defaults to deployment/base.Dockerfile
+BUILD_CONTEXT=""                     # defaults to repo root
 DRY_RUN=false
 
 usage() {
@@ -73,8 +73,12 @@ Usage: $(basename "$0") [OPTIONS]
 Required:
   --server, -s          NAME    Server name (used for image naming and
                                 parameters/<name>.bicepparam lookup)
+
+Optional:
   --dockerfile, -f      PATH    Path to the Dockerfile to build
+                                (default: deployment/base.Dockerfile)
   --context, -c         PATH    Docker build context directory
+                                (default: repository root)
 
 Optional:
   --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env.server
@@ -112,19 +116,19 @@ if [[ -z "$SERVER_NAME" ]]; then
     echo "ERROR: --server is required." >&2; exit 1
 fi
 
-if [[ -z "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
-    echo "ERROR: --dockerfile is required." >&2; exit 1
+if [[ -z "$DOCKERFILE" ]]; then
+    DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
 fi
 
-if [[ -n "$DOCKERFILE" && ! -f "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
+if [[ ! -f "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
     echo "ERROR: Dockerfile not found: $DOCKERFILE" >&2; exit 1
 fi
 
-if [[ -z "$BUILD_CONTEXT" && "$DRY_RUN" == false ]]; then
-    echo "ERROR: --context is required." >&2; exit 1
+if [[ -z "$BUILD_CONTEXT" ]]; then
+    BUILD_CONTEXT="${REPO_ROOT}"
 fi
 
-if [[ -n "$BUILD_CONTEXT" && ! -d "$BUILD_CONTEXT" && "$DRY_RUN" == false ]]; then
+if [[ ! -d "$BUILD_CONTEXT" && "$DRY_RUN" == false ]]; then
     echo "ERROR: Build context directory not found: $BUILD_CONTEXT" >&2; exit 1
 fi
 

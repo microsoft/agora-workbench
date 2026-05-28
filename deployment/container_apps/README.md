@@ -39,10 +39,7 @@ az account set --subscription <SUBSCRIPTION_ID>
 #    See deploy.sh and .env.server.example for the full list of ACA_* variables.
 
 # 4. Deploy an example server (chemistry shown)
-./deploy.sh \
-  --server          chemistry \
-  --dockerfile      ../../deployment/base.Dockerfile \
-  --context         ../../
+./deploy.sh --server chemistry
 
 # 5. Verify
 az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
