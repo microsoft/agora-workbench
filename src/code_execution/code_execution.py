@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import logging
+import os
 from typing import Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -522,6 +523,15 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
         literals in assignments, function arguments, return statements, or
         container literals (list/dict/tuple/set).
 
+        Saving files for the user: write to ``AGORA_OUTPUT_DIR`` (available as
+        both an env var and a bare Python variable in the kernel).  Files
+        written there during this execute appear as downloadable artifacts
+        in the user's activity UI.  Files written elsewhere (e.g. ``/tmp``)
+        stay inside the kernel container and are not visible to the user.
+        Example::
+
+            df.to_csv(f"{{AGORA_OUTPUT_DIR}}/results.csv", index=False)
+
         Args:
             code: Python code to execute
             description: One-sentence summary of what the code does (shown in
@@ -637,6 +647,23 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             # Save the session to persist updated state
             server.session_manager.update_session(session.session_id, session)
 
+            # Compose full download URLs for artifacts.  The activity event
+            # carries fully-qualified URLs because the activity UI runs on a
+            # different origin and doesn't know per-server port mappings.
+            # SERVER_PUBLIC_URL overrides; default falls back to the server's
+            # own host:port (works for localhost dev and host-network deploys).
+            public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
+            artifacts_with_urls = [
+                {
+                    **a,
+                    "download_url": (
+                        f"{public_base}/artifacts/{session.session_id}/"
+                        f"{a['download_token']}/{a['name']}"
+                    ),
+                }
+                for a in result.artifacts
+            ]
+
             # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
             server.activity_publisher.publish_nowait(
                 {
@@ -648,13 +675,16 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
                     "success": result.success,
                     "duration_ms": result.execution_time * 1000.0,
                     "tool_calls": [tc.model_dump() for tc in result.tool_calls],
+                    "artifacts": artifacts_with_urls,
                     "error": result.error,
                     "session_id": session.session_id,
                 }
             )
 
-            # Return result with session_id
-            result_dict = result.model_dump()
+            # Return result with session_id.  Drop artifacts from the agent's
+            # view: the agent doesn't need download URLs (the user is who
+            # downloads), and the metadata adds token pressure for nothing.
+            result_dict = result.model_dump(exclude={"artifacts"})
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:

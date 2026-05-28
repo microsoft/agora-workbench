@@ -29,6 +29,8 @@ services:
       # Reach the shared activity-ui by its service name on the agora-activity network.
       # If activity-ui isn't up, the publisher fails open (no impact on tool execution).
       ACTIVITY_UI_URL: "http://activity-ui:8030"
+      # Externally-visible URL for this server, used in artifact download links.
+      SERVER_PUBLIC_URL: "http://localhost:8021"
       # Trust sibling domain-example servers as plain-HTTP push_object targets on
       # the shared docker network.  Bearer tokens still traverse HTTP, so this
       # is only safe because all peers are on a private docker network.

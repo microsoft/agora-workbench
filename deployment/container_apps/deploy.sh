@@ -188,7 +188,18 @@ if [[ "$DRY_RUN" == true ]]; then
     echo ">> [DRY RUN] Skipping Docker build and push."
     IMAGE_REF="${IMAGE_REF:-${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:dry-run}"
 else
-    echo ">> Building Docker image..."
+    # Build the base image first if the server Dockerfile uses it (ARG BASE_IMAGE)
+    BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
+    if [[ "$DOCKERFILE" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
+        echo ">> Building base image (mcp-server-base:local)..."
+        docker build \
+            --file "$BASE_DOCKERFILE" \
+            --tag "mcp-server-base:local" \
+            "$BUILD_CONTEXT"
+        echo ""
+    fi
+
+    echo ">> Building server image..."
     docker build \
         --file "$DOCKERFILE" \
         --tag "$IMAGE_REF" \

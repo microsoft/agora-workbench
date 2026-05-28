@@ -22,7 +22,7 @@ import uvicorn
 from fastapi import HTTPException
 from fastmcp import Context, FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 from . import environment_builders
@@ -344,6 +344,24 @@ class CodeExecutionServer:
     def get_tool_name(self) -> str:
         """Get the MCP tool name. Override to customize."""
         return f"execute_{self.server_config.name}_code"
+
+    def public_url(self) -> str:
+        """Best-effort base URL for outbound references (e.g. download links).
+
+        Falls back to ``http://localhost:<port>`` when called before
+        :meth:`run_http` has stashed the bind host/port.  Callers that need
+        the real externally-visible URL (containerized deployments behind a
+        proxy / Ingress) should set ``SERVER_PUBLIC_URL`` instead — that env
+        var takes precedence wherever this method is consulted.
+        """
+        host = getattr(self, "_bind_host", None) or "localhost"
+        port = getattr(self, "_bind_port", None) or 8000
+        # 0.0.0.0 is a bind address, not a reachable one.  Map it back to
+        # localhost for outward-facing URLs; for non-localhost deployments
+        # the operator should set SERVER_PUBLIC_URL explicitly.
+        if host == "0.0.0.0":
+            host = "localhost"
+        return f"http://{host}:{port}"
 
     def preprocess_code(self, code: str) -> str:
         """
@@ -899,7 +917,7 @@ class CodeExecutionServer:
         try:
             start_time = time.monotonic()
             working_dir_str = str(self.working_dir) if self.working_dir else None
-            stdout, stderr, success = await self.session_manager.execute_code_for_session(
+            stdout, stderr, success, artifacts = await self.session_manager.execute_code_for_session(
                 session_id=session_id, code=code, timeout=timeout, working_dir=working_dir_str
             )
             execution_time = time.monotonic() - start_time
@@ -910,6 +928,7 @@ class CodeExecutionServer:
                 execution_time=execution_time,
                 success=success,
                 error=None if success else "Kernel execution failed",
+                artifacts=artifacts,
             )
 
             result = self.postprocess_result(result)
@@ -1476,7 +1495,7 @@ class CodeExecutionServer:
                     f"del __pkl__, __f__\n"
                 )
                 working_dir_str = str(server.working_dir) if server.working_dir else None
-                stdout, stderr, success = await server.session_manager.execute_code_for_session(
+                stdout, stderr, success, _artifacts = await server.session_manager.execute_code_for_session(
                     session_id=session.session_id, code=serialize_code, timeout=60, working_dir=working_dir_str
                 )
 
@@ -1635,7 +1654,7 @@ for __name__, __value__ in list(globals().items()):
 
 print(__agora_json__.dumps(__agora_ns__, sort_keys=True))
 """
-        stdout, _stderr, success = await self.session_manager.execute_code_for_session(
+        stdout, _stderr, success, _artifacts = await self.session_manager.execute_code_for_session(
             session_id=session_id,
             code=inspect_code,
             timeout=10,
@@ -1694,7 +1713,7 @@ if {result_variable!r} in globals():
 else:
     print("__AGORA_MISSING__")
 """
-        stdout, _stderr, success = await self.session_manager.execute_code_for_session(
+        stdout, _stderr, success, _artifacts = await self.session_manager.execute_code_for_session(
             session_id=session_id,
             code=capture_code,
             timeout=10,
@@ -2256,6 +2275,12 @@ else:
             host: Host to bind to
             port: Port to bind to
         """
+        # Stash for ``public_url()`` so emit-side code (e.g. the activity
+        # publisher) can build artifact download URLs without knowing the
+        # bind config.
+        self._bind_host = host
+        self._bind_port = port
+
         # Build environment and register kernel on startup
         await self._startup()
 
@@ -2323,6 +2348,36 @@ else:
                     "bearer_methods_supported": ["header"],
                 }
             )
+
+        # Artifact download endpoint: streams a file produced by an execute
+        # under the session's outputs dir.  The auth middleware enforces a
+        # valid Bearer token; the (session_id, token) pair is the authz
+        # check — only sessions the caller can otherwise reach contain the
+        # token mapping, and tokens are unguessable UUIDs.  Filename in the
+        # URL is purely cosmetic so browser save-as picks a sensible default.
+        async def download_artifact(request: Request):
+            session_id = request.path_params["session_id"]
+            token = request.path_params["token"]
+            record = self.session_manager.get_artifact_record(session_id, token)
+            if record is None:
+                return JSONResponse(
+                    {"error": "artifact not found"},
+                    status_code=404,
+                )
+            return FileResponse(
+                path=str(record.path),
+                media_type=record.mime_type,
+                filename=Path(record.name).name,
+            )
+
+        app.routes.append(
+            Route(
+                "/artifacts/{session_id}/{token}/{filename:path}",
+                download_artifact,
+                methods=["GET"],
+                name="download_artifact",
+            )
+        )
 
         app.routes.append(
             Route(
@@ -2472,7 +2527,7 @@ else:
                     f"del __pkl__, __f__\n"
                 )
                 working_dir_str = str(self.working_dir) if self.working_dir else None
-                stdout, stderr, success = await self.session_manager.execute_code_for_session(
+                stdout, stderr, success, _artifacts = await self.session_manager.execute_code_for_session(
                     session_id=session.session_id, code=deserialize_code, timeout=60, working_dir=working_dir_str
                 )
 
@@ -2619,7 +2674,17 @@ else:
                     await self.app(scope, receive, send)
                     return
 
-                # Check authentication on StreamableHTTP endpoint
+                # Check authentication on StreamableHTTP endpoint.
+                #
+                # /artifacts/ is intentionally NOT in this list: download
+                # links are followed by browser navigation (a user clicking
+                # a link in the activity UI), which does not attach the
+                # Bearer token.  Authorization for those URLs is by
+                # possession of the unguessable UUID token embedded in the
+                # path — same model as a presigned URL.  The activity UI
+                # is the only place these URLs are surfaced, so the
+                # effective trust boundary is "whoever can read the
+                # activity UI can download its artifacts."
                 if path == "/mcp" or path.startswith("/object-transfer/"):
                     headers = dict(scope.get("headers", []))
                     auth_header = headers.get(b"authorization", b"").decode("utf-8")
