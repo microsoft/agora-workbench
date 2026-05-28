@@ -33,18 +33,18 @@ az account set --subscription <SUBSCRIPTION_ID>
   --location        eastus2 \
   --identity-id     /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
 
-# 3. Copy the ACA_* values printed by setup.sh into the repo-root .env file.
+# 3. Copy the ACA_* values printed by setup.sh into `deployment/.env.server`.
 #    deploy.sh reads infrastructure config (ACR, environment, identity) from
-#    .env and passes it to Bicep — do NOT duplicate these in .bicepparam files.
+#    `deployment/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
 #    See deploy.sh and .env.example for the full list of ACA_* variables.
 
-# 4. Deploy the office server
+# 4. Deploy an example server (chemistry shown)
 ./deploy.sh \
   --resource-group  agora-mcp-rg \
-  --server          office
+  --server          chemistry
 
 # 5. Verify
-az containerapp show -n office-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
+az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
 ```
 
 ## Architecture
@@ -65,10 +65,13 @@ az containerapp show -n office-server -g agora-mcp-rg --query properties.latestR
   └──────────┬───────────┘
              │
              │  ┌───────────────────────┐
-             ├──│  office-server app    │  ← Bicep (main.bicep)
+             ├──│ chemistry-server app  │  ← Bicep (main.bicep)
              │  └───────────────────────┘
              │  ┌───────────────────────┐
-             └──│  (other servers)      │
+             ├──│ earthscience-server   │
+             │  └───────────────────────┘
+             │  ┌───────────────────────┐
+             └──│ energysystems-server  │
                 └───────────────────────┘
 ```
 
@@ -77,7 +80,9 @@ az containerapp show -n office-server -g agora-mcp-rg --query properties.latestR
 | File | Description |
 |------|-------------|
 | `main.bicep` | Deploys a single Container App into existing infrastructure |
-| `parameters/office.bicepparam` | Parameter values for the office server |
+| `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
+| `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
+| `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
 | `deploy.sh` | Per-server: builds image, pushes to ACR, deploys Container App |
 
@@ -133,7 +138,7 @@ az containerapp env storage set \
 
 ### 3. Deploy with the storage link
 
-Add to your `.env`:
+Add to your `.env.server`:
 
 ```bash
 ACA_STORAGE_LINK=envcache
@@ -159,7 +164,7 @@ the file share. Subsequent replicas (and restarts) reuse the cached content.
 
 ## Adding a new server
 
-1. Copy `parameters/office.bicepparam` to `parameters/<name>.bicepparam`.
+1. Copy one of `parameters/chemistry.bicepparam`, `parameters/earthscience.bicepparam`, or `parameters/energysystems.bicepparam` to `parameters/<name>.bicepparam`.
 2. Update `serverName` and any server-specific overrides (e.g. cpu, memory).
 3. Optionally set the `command` parameter to override the image's `CMD`.
    When omitted, the container uses whatever `CMD` is set in your Dockerfile.

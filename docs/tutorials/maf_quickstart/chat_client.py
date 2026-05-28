@@ -1,8 +1,9 @@
 """BYO-LLM factory for the MAF quickstart tutorial.
 
-A thin wrapper around the project-wide LLM abstraction in ``agent_helpers/llm/``:
-maps the tutorial's ``LLM_PROVIDER`` env var onto a :class:`agent_helpers.llm.ModelSpec`
-and hands it to :func:`agent_helpers.llm.factories.make_maf_client`.
+A thin wrapper around the project-wide LLM abstraction in
+``agent_helpers/llm/``: maps the tutorial's ``LLM_PROVIDER`` env var onto a
+:class:`agent_helpers.llm.ModelSpec` and hands it to
+:func:`agent_helpers.llm.factories.make_maf_client`.
 
 Supported ``$LLM_PROVIDER`` values:
     azure_openai_entra  - Azure OpenAI via Entra ID token (default)

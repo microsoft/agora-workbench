@@ -69,7 +69,10 @@ config = ServerConfig(
     additional_commands=[
         # Install the energysystems_tools package into the conda environment
         # so that tool proxy imports resolve correctly inside the kernel.
-        f"python -m pip install --no-deps {_ENERGYSYSTEMS_TOOLS_PKG}",
+        # NOTE: _ENERGYSYSTEMS_TOOLS_PKG is an absolute path resolved at
+        # import time; it must be reachable from the kernel build context
+        # (the Dockerfile COPYs the repo layout to preserve this).
+        f'python -m pip install --no-deps "{_ENERGYSYSTEMS_TOOLS_PKG}"',
     ],
     # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
     # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.

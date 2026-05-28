@@ -4,7 +4,7 @@
 # User server images should extend the locally built or published base image.
 #
 # Build from the repository root:
-#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 #
 # Then create your own Dockerfile:
 #   FROM mcp-server-base:local

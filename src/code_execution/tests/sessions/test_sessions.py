@@ -772,5 +772,165 @@ class TestKernelExecuteLock:
         assert max_in_flight == 2, f"calls did not overlap (max_in_flight={max_in_flight})"
 
 
+class TestArtifactPipeline:
+    """Per-session artifact discovery and download-token lifecycle.
+
+    Each execute snapshots the session's outputs dir, runs the code, then
+    diffs the dir to surface new/modified files as downloadable artifacts.
+    These tests cover the diff/registration plumbing — they don't spin up a
+    real Jupyter kernel.
+    """
+
+    def _make_manager(self, tmp_path, monkeypatch):
+        """Build a SessionManager whose outputs dir is a temp path.
+
+        Re-pointing the module-level constant via monkeypatch ensures the
+        test never writes to ``~/agora-outputs``.
+        """
+        from ... import sessions as sessions_pkg
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        return sessions_pkg.SessionManager()
+
+    @pytest.mark.unit
+    def test_create_session_makes_outputs_dir(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        assert (tmp_path / session_id).is_dir()
+
+    @pytest.mark.unit
+    def test_snapshot_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        assert manager._snapshot_outputs_dir("nonexistent-session") == {}
+
+    @pytest.mark.unit
+    def test_diff_registers_new_file_with_token(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+
+        before = manager._snapshot_outputs_dir(session_id)
+        (outputs / "results.csv").write_text("x,y\n1,2\n")
+        after = manager._snapshot_outputs_dir(session_id)
+
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert len(records) == 1
+        record = records[0]
+        assert record["name"] == "results.csv"
+        assert record["size_bytes"] == len("x,y\n1,2\n")
+        assert record["mime_type"] == "text/csv"
+        assert "download_token" in record
+
+        # Token resolves to a usable record (handles the download endpoint).
+        resolved = manager.get_artifact_record(session_id, record["download_token"])
+        assert resolved is not None
+        assert resolved.path == outputs / "results.csv"
+
+    @pytest.mark.unit
+    def test_diff_ignores_unchanged_files(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "stable.txt").write_text("nope")
+
+        # Same snapshot both times -> no diff -> no records.
+        snapshot = manager._snapshot_outputs_dir(session_id)
+        assert manager._register_artifacts_from_diff(session_id, snapshot, snapshot) == []
+
+    @pytest.mark.unit
+    def test_diff_picks_up_modifications(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "changing.txt").write_text("v1")
+
+        before = manager._snapshot_outputs_dir(session_id)
+        # Make the file bigger and bump mtime to guarantee diff detection.
+        (outputs / "changing.txt").write_text("v2-grew")
+        import os as _os
+        _os.utime(outputs / "changing.txt", (time.time() + 5, time.time() + 5))
+        after = manager._snapshot_outputs_dir(session_id)
+
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert [r["name"] for r in records] == ["changing.txt"]
+
+    @pytest.mark.unit
+    def test_denylist_skips_pycache_and_hidden(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "__pycache__").mkdir()
+        (outputs / "__pycache__" / "junk.pyc").write_bytes(b"\x00")
+        (outputs / "module.pyc").write_bytes(b"\x00")
+        (outputs / ".hidden").write_text("nope")
+        (outputs / "real.csv").write_text("yes")
+
+        before = {}
+        after = manager._snapshot_outputs_dir(session_id)
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert [r["name"] for r in records] == ["real.csv"]
+
+    @pytest.mark.unit
+    def test_get_artifact_record_returns_none_for_unknown_token(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        assert manager.get_artifact_record(session_id, "nope") is None
+        assert manager.get_artifact_record("missing-session", "any") is None
+
+    @pytest.mark.unit
+    def test_get_artifact_record_returns_none_when_file_deleted(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "ephemeral.txt").write_text("bye")
+        records = manager._register_artifacts_from_diff(
+            session_id, {}, manager._snapshot_outputs_dir(session_id)
+        )
+        token = records[0]["download_token"]
+        (outputs / "ephemeral.txt").unlink()
+        assert manager.get_artifact_record(session_id, token) is None
+
+    @pytest.mark.unit
+    def test_outputs_preamble_runs_once_per_session(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        first = manager._prepare_outputs_preamble(session_id)
+        second = manager._prepare_outputs_preamble(session_id)
+        assert "AGORA_OUTPUT_DIR" in first
+        assert second == ""
+
+    @pytest.mark.unit
+    def test_cleanup_drops_state_and_removes_dir(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "foo.txt").write_text("data")
+        manager._register_artifacts_from_diff(
+            session_id, {}, manager._snapshot_outputs_dir(session_id)
+        )
+        assert session_id in manager._session_artifacts
+
+        manager._cleanup_session_artifacts(session_id)
+        assert session_id not in manager._session_artifacts
+        assert not outputs.exists()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

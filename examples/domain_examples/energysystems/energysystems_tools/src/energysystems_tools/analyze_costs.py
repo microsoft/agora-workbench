@@ -30,7 +30,7 @@ def analyze_costs(network_name: str) -> dict:
 
     # Check whether OPF dispatch results exist rather than testing
     # objective == 0 — a zero objective is valid (e.g. all-wind dispatch).
-    has_dispatch = "p" in n.generators_t and not n.generators_t.p.empty
+    has_dispatch = not n.generators_t.p.empty and len(n.generators_t.p.columns) > 0
     if not has_dispatch:
         raise ValueError(f"Network {network_name!r} has no solved OPF. Run run_optimal_power_flow first.")
 
@@ -54,8 +54,8 @@ def analyze_costs(network_name: str) -> dict:
     most_expensive_bus = ""
     max_avg_price = float("-inf")
 
-    if "marginal_price" in n.buses_t:
-        for bus_name in n.buses.index:
+    for bus_name in n.buses.index:
+        if bus_name in n.buses_t.marginal_price.columns:
             mp = n.buses_t.marginal_price[bus_name]
             avg = float(mp.mean())
             marginal_price_stats[bus_name] = {

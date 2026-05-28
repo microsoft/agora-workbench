@@ -102,6 +102,17 @@ class CodeExecutionResult(BaseModel):
             "returned to the agent to keep its context window small."
         ),
     )
+    artifacts: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Files newly created or modified under the session's outputs directory "
+            "during this execute. Each entry is a metadata dict — never the bytes — "
+            "of shape {name, size_bytes, mime_type, modified_at, download_url}. "
+            "Used by the activity UI to surface downloadable files; agent return "
+            "path drops this field via model_dump(exclude={'artifacts'}) so the "
+            "metadata doesn't eat the agent's token budget."
+        ),
+    )
 
 
 class ServerConfig(BaseModel):
@@ -110,7 +121,7 @@ class ServerConfig(BaseModel):
     Fields are organized into logical groups:
 
     **Identity** — server and tool naming/description:
-        name, description, server_description
+        name, description, server_description, entra_client_id, entra_tenant_id
 
     **Environment** — Python environment build settings:
         type, dependency_file, auto_build, build_dir, additional_commands
@@ -123,6 +134,11 @@ class ServerConfig(BaseModel):
 
     **Features** — optional server capabilities:
         domains_dir, tool_search_backend
+
+    For fields that also have an environment variable counterpart (e.g.,
+    output_truncation_threshold / CODE_OUTPUT_TRUNCATION_THRESHOLD), the
+    ServerConfig value takes precedence when set. The env var serves as
+    a deployment-wide default.
     """
 
     # --- Identity ---
@@ -137,6 +153,22 @@ class ServerConfig(BaseModel):
             "Server-level description (used as FastMCP ``instructions``). Falls back to "
             "``description`` when unset. Override when the server-as-a-whole pitch should "
             "differ from the per-tool ``execute_{name}_code`` description."
+        ),
+    )
+    entra_client_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Entra ID application (client) ID for this server's app registration. "
+            "When set, overrides the ENTRA_CLIENT_ID environment variable. Use this "
+            "when deploying multiple servers with distinct app registrations."
+        ),
+    )
+    entra_tenant_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Azure AD tenant ID for this server's app registration. "
+            "When set, overrides the ENTRA_TENANT_ID environment variable. Use this "
+            "when deploying multiple servers with distinct app registrations."
         ),
     )
 
@@ -184,21 +216,22 @@ class ServerConfig(BaseModel):
         default=300,
         description="Default execution timeout in seconds when not specified by the caller.",
     )
-    output_truncation_threshold: int = Field(
-        default=50_000,
+    output_truncation_threshold: Optional[int] = Field(
+        default=None,
+        ge=0,
         description=(
             "Maximum characters allowed in stdout/stderr before truncation. "
             "Large outputs are trimmed and a guidance message is appended. "
-            "Set to 0 to disable truncation. Can be overridden via the "
-            "CODE_OUTPUT_TRUNCATION_THRESHOLD environment variable."
+            "Set to 0 to disable truncation. When None, falls back to the "
+            "CODE_OUTPUT_TRUNCATION_THRESHOLD env var (default: 50000)."
         ),
     )
-    parallel_max_concurrency: int = Field(
-        default=0,
+    parallel_max_concurrency: Optional[int] = Field(
+        default=None,
         description=(
             "Maximum number of parallel code executions allowed. "
-            "0 means unlimited. Can be overridden via the "
-            "PARALLEL_EXECUTE_MAX_CONCURRENCY environment variable."
+            "0 means unlimited. When None, falls back to the "
+            "PARALLEL_EXECUTE_MAX_CONCURRENCY env var (default: 0)."
         ),
     )
 

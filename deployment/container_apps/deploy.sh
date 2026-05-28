@@ -3,23 +3,23 @@
 # Deploy an MCP code execution server to Azure Container Apps.
 #
 # This script:
-#   1. Loads infrastructure config from .env
+#   1. Loads infrastructure config from .env.server
 #   2. Builds the Docker image for the requested server
 #   3. Pushes the image to the existing Azure Container Registry
 #   4. Deploys (or updates) the Container App via Bicep
 #
 # Infrastructure values (resource group, ACR, environment, identity) are read
-# from ACA_* variables in .env.  Server-specific sizing lives in the
+# from ACA_* variables in .env.server.  Server-specific sizing lives in the
 # parameters/<name>.bicepparam file.
 #
 # Prerequisites:
 #   - az cli authenticated (`az login`)
 #   - Docker daemon running
-#   - .env configured with ACA_* variables (see .env.example)
+#   - .env.server configured with ACA_* variables (see .env.server.example)
 #
 # Usage:
-#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context
-#   ./deploy.sh --server office --dockerfile path/to/Dockerfile --context path/to/context --tag v1.2.3
+#   ./deploy.sh --server chemistry --dockerfile path/to/Dockerfile --context path/to/context
+#   ./deploy.sh --server chemistry --dockerfile path/to/Dockerfile --context path/to/context --tag v1.2.3
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
@@ -27,9 +27,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# ── Load .env ────────────────────────────────────────────────────────────────
+# ── Load .env.server ──────────────────────────────────────────────────────────
 
-ENV_FILE="${REPO_ROOT}/.env"
+ENV_FILE="${SCRIPT_DIR}/../.env.server"
 if [[ -f "$ENV_FILE" ]]; then
     # Source only non-comment, non-empty lines; strip surrounding quotes
     set -a
@@ -44,10 +44,10 @@ if [[ -f "$ENV_FILE" ]]; then
     done < <(grep -v '^[[:space:]]*$' "$ENV_FILE")
     set +a
 else
-    echo "WARNING: .env not found at $ENV_FILE — using environment variables only." >&2
+    echo "WARNING: .env.server not found at $ENV_FILE — using environment variables only." >&2
 fi
 
-# ── Defaults from .env (ACA_* variables) ─────────────────────────────────────
+# ── Defaults from .env.server (ACA_* variables) ─────────────────────────────────────
 
 RESOURCE_GROUP="${ACA_RESOURCE_GROUP:-}"
 ACR_NAME="${ACA_ACR_NAME:-agoramcpcr}"
@@ -76,9 +76,9 @@ Required:
   --context, -c         PATH    Docker build context directory
 
 Optional:
-  --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env
+  --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env.server
   --tag, -t             TAG     Docker image tag (default: git short SHA)
-  --acr-name            NAME    Override ACA_ACR_NAME from .env
+  --acr-name            NAME    Override ACA_ACR_NAME from .env.server
   --storage-link        NAME    ACA environment storage link name for Azure Files cache
   --cache-mount-path    PATH    Container mount path for cache (default: /home/appuser/.cache/mcp-envs)
   --param-file          PATH    Bicep parameter file override
@@ -128,7 +128,7 @@ fi
 # Validate required infrastructure variables
 for var in RESOURCE_GROUP ACR_NAME ACA_ENV_NAME IDENTITY_ID IDENTITY_CLIENT_ID ENTRA_CLIENT_ID_VAL ENTRA_TENANT_ID_VAL; do
     if [[ -z "${!var}" ]]; then
-        echo "ERROR: $var is not set. Configure ACA_* variables in .env or pass as flags." >&2
+        echo "ERROR: $var is not set. Configure ACA_* variables in .env.server or pass as flags." >&2
         exit 1
     fi
 done
@@ -185,8 +185,8 @@ az acr login --name "$ACR_NAME"
 echo ">> Pushing image to ACR..."
 docker push "$IMAGE_REF"
 
-# ── 3. Build extraEnvVars from .env ───────────────────────────────────────────
-# Forward all .env variables to the Container App, excluding:
+# ── 3. Build extraEnvVars from .env.server ───────────────────────────────────────────
+# Forward all .env.server variables to the Container App, excluding:
 #   - ACA_*             (deployment infrastructure only)
 #   - ENTRA_*           (already in baseEnv via dedicated params)
 #   - OBO_SIMULATION_MODE (hardcoded to false in baseEnv)

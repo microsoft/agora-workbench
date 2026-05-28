@@ -186,6 +186,12 @@
         word-break: break-word;
       }
       .tool-call.open .tool-call-detail { display: block; }
+      .artifacts { margin-top: 4px; }
+      .artifacts-label { color: #56d364; font-size: 11px; }
+      .artifact-row { padding: 2px 0 2px 14px; font-size: 12px; line-height: 1.4; }
+      .artifact-link { color: #79c0ff; text-decoration: none; }
+      .artifact-link:hover { text-decoration: underline; }
+      .artifact-meta { color: #6e7681; font-size: 10px; }
       .server { color: #d2a8ff; font-size: 11px; }
       .ts { color: #6e7681; font-size: 11px; margin-left: auto; }
       .desc { margin-top: 3px; color: #c9d1d9; }
@@ -338,16 +344,30 @@
         return joined.length > 90 ? joined.slice(0, 90) + "…" : joined;
       }
 
+      // Build a span with class + text in one shot.  We use this everywhere
+      // a server-controlled string would otherwise be interpolated into
+      // innerHTML.  textContent is the safe sink — it never parses HTML.
+      function span(className, text) {
+        const el = document.createElement("span");
+        el.className = className;
+        el.textContent = text;
+        return el;
+      }
+
       function buildToolCallRow(tc) {
         const row = document.createElement("div");
         row.className = "tool-call";
         const ok = tc.success !== false;
-        const mark = `<span class="mark ${ok ? "ok" : "fail"}">${ok ? "✓" : "✗"}</span>`;
-        const name = `<span class="tname">${tc.tool_name || "?"}</span>`;
-        const args = `<span class="targs">(${fmtArgsInline(tc.args)})</span>`;
-        const dur = typeof tc.duration_ms === "number" ? `<span class="tdur">${tc.duration_ms.toFixed(2)}ms</span>` : "";
-        const err = tc.error ? `<span class="terror">${tc.error}</span>` : "";
-        row.innerHTML = `${mark} ${name}${args}${dur}${err}`;
+        row.appendChild(span("mark " + (ok ? "ok" : "fail"), ok ? "✓" : "✗"));
+        row.appendChild(document.createTextNode(" "));
+        row.appendChild(span("tname", tc.tool_name || "?"));
+        row.appendChild(span("targs", "(" + fmtArgsInline(tc.args) + ")"));
+        if (typeof tc.duration_ms === "number") {
+          row.appendChild(span("tdur", tc.duration_ms.toFixed(2) + "ms"));
+        }
+        if (tc.error) {
+          row.appendChild(span("terror", tc.error));
+        }
 
         const detail = document.createElement("div");
         detail.className = "tool-call-detail";
@@ -367,17 +387,15 @@
 
         const row = document.createElement("div");
         row.className = "row";
-        const successHtml = typeof e.success === "boolean"
-          ? `<span class="${e.success ? "ok" : "fail"}">${e.success ? "✓" : "✗"}</span>`
-          : "";
-        const batchTag = e.batch_id ? `<span class="batch-tag">batch ${e.batch_id}</span>` : "";
-        row.innerHTML = `
-          <span class="badge ${e.type}">${e.type}</span>
-          <span class="server">${e.server || "?"}</span>
-          ${successHtml}
-          ${batchTag}
-          <span class="ts">${fmtTs(e.timestamp)}</span>
-        `;
+        row.appendChild(span("badge " + (e.type || ""), e.type || ""));
+        row.appendChild(span("server", e.server || "?"));
+        if (typeof e.success === "boolean") {
+          row.appendChild(span(e.success ? "ok" : "fail", e.success ? "✓" : "✗"));
+        }
+        if (e.batch_id) {
+          row.appendChild(span("batch-tag", "batch " + e.batch_id));
+        }
+        row.appendChild(span("ts", fmtTs(e.timestamp)));
         wrap.appendChild(row);
 
         if (e.description) {
@@ -410,17 +428,33 @@
         if (e.type === "workflow_planned") {
           const kv = document.createElement("div");
           kv.className = "kv";
-          const parts = [];
-          if (e.mode) parts.push(`mode <b>${e.mode}</b>`);
-          if (e.domain) parts.push(`domain <b>${e.domain}</b>`);
+          // Each part = a <span> holding "label " + <b>value</b>.  Built
+          // with DOM nodes so values can't inject markup.
+          const addPart = (labelText, value) => {
+            const s = document.createElement("span");
+            if (labelText) s.appendChild(document.createTextNode(labelText + " "));
+            const b = document.createElement("b");
+            b.textContent = value;
+            s.appendChild(b);
+            kv.appendChild(s);
+          };
+          let any = false;
+          if (e.mode) { addPart("mode", e.mode); any = true; }
+          if (e.domain) { addPart("domain", e.domain); any = true; }
           if (e.current_state || e.target_state) {
-            parts.push(`<b>${e.current_state || "?"}</b> → <b>${e.target_state || "?"}</b>`);
+            const s = document.createElement("span");
+            const b1 = document.createElement("b");
+            b1.textContent = e.current_state || "?";
+            s.appendChild(b1);
+            s.appendChild(document.createTextNode(" → "));
+            const b2 = document.createElement("b");
+            b2.textContent = e.target_state || "?";
+            s.appendChild(b2);
+            kv.appendChild(s);
+            any = true;
           }
-          if (e.tool_name) parts.push(`tool <b>${e.tool_name}</b>`);
-          if (parts.length) {
-            kv.innerHTML = parts.map((p) => `<span>${p}</span>`).join("");
-            wrap.appendChild(kv);
-          }
+          if (e.tool_name) { addPart("tool", e.tool_name); any = true; }
+          if (any) wrap.appendChild(kv);
         }
 
         // tool_calls: promoted to a first-class lane (this is the headline content for "what did the agent do").
@@ -462,6 +496,22 @@
           det.appendChild(sum);
           for (const d of e.displays) {
             det.appendChild(buildDisplayEl(d));
+          }
+          wrap.appendChild(det);
+        }
+
+        // artifacts: files written under the session's outputs dir during
+        // this execute, surfaced as download links.  Collapsed by default
+        // to match the figures/displays pattern.
+        if (Array.isArray(e.artifacts) && e.artifacts.length) {
+          const det = document.createElement("details");
+          det.className = "artifacts";
+          const sum = document.createElement("summary");
+          sum.className = "artifacts-label";
+          sum.textContent = `artifacts (${e.artifacts.length})`;
+          det.appendChild(sum);
+          for (const a of e.artifacts) {
+            det.appendChild(buildArtifactRow(a));
           }
           wrap.appendChild(det);
         }
@@ -509,6 +559,41 @@
         return fig;
       }
 
+      // Format a byte count as a short human-readable string.
+      function fmtBytes(n) {
+        if (typeof n !== "number" || n < 0) return "";
+        if (n < 1024) return n + " B";
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+        if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+        return (n / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+      }
+
+      // Render one entry from a code_executed event's `artifacts`.  Each
+      // row is a download link (cross-origin to the MCP server) with the
+      // filename, size, and mime type.  textContent everywhere; download_url
+      // is set via .href which doesn't parse HTML.
+      function buildArtifactRow(a) {
+        const row = document.createElement("div");
+        row.className = "artifact-row";
+        const link = document.createElement("a");
+        link.className = "artifact-link";
+        link.href = a.download_url || "#";
+        // download attr asks the browser to save-as rather than navigate;
+        // value is the suggested filename.
+        link.setAttribute("download", a.name || "");
+        link.setAttribute("rel", "noopener noreferrer");
+        link.textContent = a.name || "(unnamed)";
+        row.appendChild(link);
+        const meta = document.createElement("span");
+        meta.className = "artifact-meta";
+        const parts = [];
+        if (typeof a.size_bytes === "number") parts.push(fmtBytes(a.size_bytes));
+        if (a.mime_type) parts.push(a.mime_type);
+        meta.textContent = parts.length ? " · " + parts.join(" · ") : "";
+        row.appendChild(meta);
+        return row;
+      }
+
       function renderFeed() {
         const filtered = events.filter(visible);
         stats.textContent = `${filtered.length} / ${events.length} events · ${seenServers.size} servers`;
@@ -546,12 +631,12 @@
           header.className = "session-header";
           const label = sid === ORPHAN ? "(no session)" : `session ${sid.slice(0, 8)}`;
           const serverList = [...g.servers].join(", ") || "?";
-          header.innerHTML = `
-            <span class="caret">▼</span>
-            <span class="session-id">${label}</span>
-            <span class="server">${serverList}</span>
-            <span class="session-meta">${g.events.length} events · last ${fmtTs(g.lastSeen)}</span>
-          `;
+          header.appendChild(span("caret", "▼"));
+          header.appendChild(span("session-id", label));
+          header.appendChild(span("server", serverList));
+          header.appendChild(
+            span("session-meta", g.events.length + " events · last " + fmtTs(g.lastSeen))
+          );
           header.onclick = () => {
             if (collapsedSessions.has(sid)) collapsedSessions.delete(sid);
             else collapsedSessions.add(sid);

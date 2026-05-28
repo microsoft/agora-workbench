@@ -67,17 +67,16 @@ recommended order.
   (run `az login` first), but the BYO-LLM factory in
   [chat_client.py](chat_client.py) also supports Azure OpenAI API keys,
   OpenAI, and Ollama — see Step A.
-- `.env` populated at the repo root. Copy entries from
-  [.env.example](.env.example) and the repo-level
-  [.env.example](../../../.env.example) as needed.
+- `.env.agent` populated at the repo root. Copy entries from
+  [.env.agent.example](.env.agent.example) as needed.
 - **Docker** — both MCP servers run as local containers.
 
 ## Setup
 
 ### 1. Configure environment
 
-Copy the tutorial's [.env.example](.env.example) into your repo-root `.env`
-(or merge missing keys). The default and tested LLM path is **Azure OpenAI
+Copy [.env.agent.example](.env.agent.example) to `.env.agent` at the repo root
+and fill in values. The default and tested LLM path is **Azure OpenAI
 via Entra ID**.
 
 ### 2. Build the shared MCP base image (once)
@@ -85,8 +84,7 @@ via Entra ID**.
 Both domain servers inherit from this image:
 
 ```bash
-cd src
-docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 3. Start the chemistry MCP server
@@ -349,7 +347,7 @@ PyPSA versions the server environments resolve.)
 
 | Symptom | Likely cause |
 | --- | --- |
-| `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
+| `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env.agent` not loaded or missing the key. Check the repo-root `.env.agent`. |
 | `ImportError: cannot import name 'AzureOpenAIChatClient' from 'agent_framework.azure'` | You're on `agent-framework >= 1.2`, which removed that class. The tutorial's [chat_client.py](chat_client.py) already targets the unified `agent_framework.openai.OpenAIChatClient`; if you've forked or pinned to an older version, either update or pin `agent-framework<1.2`. |
 | `BadRequest: API version not supported` from `/responses` | The Responses API on your endpoint doesn't accept the configured `API_VERSION`. Try `API_VERSION="preview"` (some internal gateways only accept floating tags; public AOAI typically wants a dated preview like `2025-04-01-preview`). |
 | `404 DeploymentId Not Found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |

@@ -45,11 +45,10 @@ Run from the repo root:
     uv run python docs/tutorials/maf_quickstart/agent.py
 
 Prerequisites:
-  1. ``.env`` populated (see docs/tutorials/maf_quickstart/.env.example)
+  1. ``.env.agent`` populated (see docs/tutorials/maf_quickstart/.env.agent.example)
   2. ``az login`` (LLM auth uses Entra ID by default)
   3. Chemistry MCP server running locally:
-       cd src && docker build -f deployment/mcp_server/base.Dockerfile \\
-                              -t mcp-server-base:local .
+       docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
        cd examples/domain_examples/chemistry && docker compose up -d --build
   4. Energy systems MCP server running locally:
        cd examples/domain_examples/energysystems && docker compose up -d --build
@@ -74,10 +73,11 @@ from dotenv import load_dotenv
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-# Load the repo-root .env (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
-load_dotenv(REPO_ROOT / ".env")
+# Load the repo-root .env.agent (where AZURE_OPENAI_ENDPOINT, DATA_LAKE_*, etc. live).
+load_dotenv(REPO_ROOT / ".env.agent")
 
 LOGGER = logging.getLogger("maf_quickstart")
+
 
 # ---------------------------------------------------------------------------
 # Step A — build the chat client (BYO LLM)
@@ -190,7 +190,7 @@ def step_d_build_agent(chat_client, tools):
         "  * chem_search_chemistry_tools — server-side BM25 search over the\n"
         "      chemistry domain's typed helper catalog. Call with a\n"
         "      `query` string and optional `top` (default 5). Pass\n"
-        "      `query=\"\"` with `top=999` to list every helper.\n"
+        '      `query=""` with `top=999` to list every helper.\n'
         "  * chem_load_chemistry_skill — load a chemistry skill by name\n"
         "      (discover names via `chem_search_chemistry_tools` with\n"
         "      `category='skills'`).\n"

@@ -68,7 +68,9 @@ def add_time_series(
         t_df = getattr(n, t_attr)
         if attribute not in t_df:
             t_df[attribute] = pd.DataFrame(index=n.snapshots)
-        t_df[attribute][comp_name] = values
+        df = t_df[attribute]
+        df.loc[:, comp_name] = values
+        t_df[attribute] = df
 
         updated_components.append(comp_name)
 
