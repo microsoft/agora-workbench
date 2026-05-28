@@ -262,7 +262,7 @@ class TestUserTokenKernelPropagation:
         assert len(captured_code) == 1
         executed = captured_code[0]
         assert "USER_ASSERTION_TOKEN" not in executed
-        assert executed == "print('hello')"
+        assert "print('hello')" in executed
 
     @pytest.mark.asyncio
     async def test_execute_code_clears_token_when_removed(self):
@@ -307,7 +307,7 @@ class TestUserTokenKernelPropagation:
         )
         manager.storage.delete(session_id)
 
-        stdout, stderr, success = await manager.execute_code_for_session(session_id, "print('hello')", timeout=1.0)
+        stdout, stderr, success, _displays, _artifacts = await manager.execute_code_for_session(session_id, "print('hello')", timeout=1.0)
 
         assert success is False
         assert stdout == ""
@@ -357,7 +357,7 @@ class TestUserTokenKernelPropagation:
         session = manager.storage.retrieve(session_id)
         assert session is not None
         with patch.object(session, "touch", wraps=session.touch) as touch_spy:
-            stdout, stderr, success = await manager.execute_code_for_session(session_id, "print('hello')", timeout=5.0)
+            stdout, stderr, success, _displays, _artifacts = await manager.execute_code_for_session(session_id, "print('hello')", timeout=5.0)
 
         assert success is True
         assert stdout == ""
@@ -464,7 +464,7 @@ class TestUserTokenKernelPropagation:
 
         started = await manager.start_background_execution_for_session(session_id, "print('long run')", timeout=5.0)
 
-        stdout, stderr, success = await manager.execute_code_for_session(session_id, "print('blocked')", timeout=1.0)
+        stdout, stderr, success, _displays, _artifacts = await manager.execute_code_for_session(session_id, "print('blocked')", timeout=1.0)
         assert success is False
         assert stdout == ""
         assert f"Session busy — job {started['job_id']} is still running" in stderr

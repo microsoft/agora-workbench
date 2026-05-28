@@ -135,7 +135,7 @@ def _ensure_packages_in_environment_yml(dep_file: Path, packages: list[str]) -> 
     dep_file.write_text("".join(lines), encoding="utf-8")
 
 
-async def build_uv_environment(config: "ServerConfig"):
+async def build_uv_environment(config: "ServerConfig") -> None:
     """Build environment using uv.
 
     Args:
@@ -246,7 +246,7 @@ async def build_uv_environment(config: "ServerConfig"):
     marker_file.write_text("ok")
 
 
-async def build_conda_environment(config: "ServerConfig"):
+async def build_conda_environment(config: "ServerConfig") -> None:
     """Build environment using conda.
 
     Args:
@@ -333,7 +333,7 @@ async def build_conda_environment(config: "ServerConfig"):
             LOGGER.info(f"Additional command {i} completed successfully")
 
 
-async def build_pip_environment(config: "ServerConfig"):
+async def build_pip_environment(config: "ServerConfig") -> None:
     """Build environment using Python venv + pip.
 
     Args:

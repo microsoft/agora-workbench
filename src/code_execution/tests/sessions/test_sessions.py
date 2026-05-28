@@ -617,6 +617,62 @@ print(counter.increment())
         assert "7" in result2.stdout and "8" in result2.stdout and "9" in result2.stdout
 
 
+class TestDisplayDataCapture:
+    """The kernel polling loop must capture Jupyter display_data / execute_result
+    rich outputs (matplotlib figures, images, SVGs) so the activity UI can
+    render them.  Text-only payloads must NOT be returned as displays — they
+    are already in stdout.
+    """
+
+    @pytest.mark.unit
+    def test_extract_display_prefers_png(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/png": "BASE64HERE"},
+            {"width": 800},
+        )
+        assert out == {"mime_type": "image/png", "data": "BASE64HERE", "metadata": {"width": 800}}
+
+    @pytest.mark.unit
+    def test_extract_display_falls_back_to_svg(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/svg+xml": "<svg/>"},
+            {},
+        )
+        assert out is not None
+        assert out["mime_type"] == "image/svg+xml"
+        assert out["data"] == "<svg/>"
+
+    @pytest.mark.unit
+    def test_extract_display_text_only_returns_none(self):
+        """Pure text/plain payloads belong in stdout, not displays."""
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display({"text/plain": "just text"}, {}) is None
+        assert _extract_display({}, {}) is None
+        assert _extract_display(None, None) is None  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_extract_display_drops_html(self):
+        """text/html is intentionally NOT a capturable display type.
+
+        Rendering raw HTML in the activity UI is an XSS vector because
+        kernel code is LLM-generated and prompt-injectable.  HTML-only
+        payloads (e.g. a DataFrame ``_repr_html_``) fall through to None
+        so the UI shows nothing for them.
+        """
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display(
+            {"text/plain": "<DataFrame>", "text/html": "<table></table>"},
+            {},
+        ) is None
+        assert _extract_display({"text/html": "<script>alert(1)</script>"}, {}) is None
+
+
 class TestKernelExecuteLock:
     """Per-session asyncio.Lock that serializes execute_code_for_session calls.
 
@@ -663,7 +719,7 @@ class TestKernelExecuteLock:
             await asyncio.sleep(0.02)
             order.append(f"end:{code}")
             in_flight -= 1
-            return ("", "", True)
+            return ("", "", True, [])
 
         monkeypatch.setattr(manager, "_execute_code_locked", fake_locked)
 
@@ -703,7 +759,7 @@ class TestKernelExecuteLock:
             max_in_flight = max(max_in_flight, in_flight)
             await asyncio.sleep(0.05)
             in_flight -= 1
-            return ("", "", True)
+            return ("", "", True, [])
 
         monkeypatch.setattr(manager, "_execute_code_locked", fake_locked)
 
@@ -714,6 +770,330 @@ class TestKernelExecuteLock:
 
         # Different sessions => different locks => calls overlap.
         assert max_in_flight == 2, f"calls did not overlap (max_in_flight={max_in_flight})"
+
+
+class TestArtifactPipeline:
+    """Per-session artifact discovery and download-token lifecycle.
+
+    Each execute snapshots the session's outputs dir, runs the code, then
+    diffs the dir to surface new/modified files as downloadable artifacts.
+    These tests cover the diff/registration plumbing — they don't spin up a
+    real Jupyter kernel.
+    """
+
+    def _make_manager(self, tmp_path, monkeypatch):
+        """Build a SessionManager whose outputs dir is a temp path.
+
+        Re-pointing the module-level constant via monkeypatch ensures the
+        test never writes to ``~/agora-outputs``.
+        """
+        from ... import sessions as sessions_pkg
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        return sessions_pkg.SessionManager()
+
+    @pytest.mark.unit
+    def test_create_session_makes_outputs_dir(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        assert (tmp_path / session_id).is_dir()
+
+    @pytest.mark.unit
+    def test_snapshot_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        assert manager._snapshot_outputs_dir("nonexistent-session") == {}
+
+    @pytest.mark.unit
+    def test_diff_registers_new_file_with_token(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+
+        before = manager._snapshot_outputs_dir(session_id)
+        (outputs / "results.csv").write_text("x,y\n1,2\n")
+        after = manager._snapshot_outputs_dir(session_id)
+
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert len(records) == 1
+        record = records[0]
+        assert record["name"] == "results.csv"
+        assert record["size_bytes"] == len("x,y\n1,2\n")
+        assert record["mime_type"] == "text/csv"
+        assert "download_token" in record
+
+        # Token resolves to a usable record (handles the download endpoint).
+        resolved = manager.get_artifact_record(session_id, record["download_token"])
+        assert resolved is not None
+        assert resolved.path == outputs / "results.csv"
+
+    @pytest.mark.unit
+    def test_diff_ignores_unchanged_files(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "stable.txt").write_text("nope")
+
+        # Same snapshot both times -> no diff -> no records.
+        snapshot = manager._snapshot_outputs_dir(session_id)
+        assert manager._register_artifacts_from_diff(session_id, snapshot, snapshot) == []
+
+    @pytest.mark.unit
+    def test_diff_picks_up_modifications(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "changing.txt").write_text("v1")
+
+        before = manager._snapshot_outputs_dir(session_id)
+        # Make the file bigger and bump mtime to guarantee diff detection.
+        (outputs / "changing.txt").write_text("v2-grew")
+        import os as _os
+        _os.utime(outputs / "changing.txt", (time.time() + 5, time.time() + 5))
+        after = manager._snapshot_outputs_dir(session_id)
+
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert [r["name"] for r in records] == ["changing.txt"]
+
+    @pytest.mark.unit
+    def test_denylist_skips_pycache_and_hidden(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "__pycache__").mkdir()
+        (outputs / "__pycache__" / "junk.pyc").write_bytes(b"\x00")
+        (outputs / "module.pyc").write_bytes(b"\x00")
+        (outputs / ".hidden").write_text("nope")
+        (outputs / "real.csv").write_text("yes")
+
+        before = {}
+        after = manager._snapshot_outputs_dir(session_id)
+        records = manager._register_artifacts_from_diff(session_id, before, after)
+        assert [r["name"] for r in records] == ["real.csv"]
+
+    @pytest.mark.unit
+    def test_get_artifact_record_returns_none_for_unknown_token(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        assert manager.get_artifact_record(session_id, "nope") is None
+        assert manager.get_artifact_record("missing-session", "any") is None
+
+    @pytest.mark.unit
+    def test_get_artifact_record_returns_none_when_file_deleted(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "ephemeral.txt").write_text("bye")
+        records = manager._register_artifacts_from_diff(
+            session_id, {}, manager._snapshot_outputs_dir(session_id)
+        )
+        token = records[0]["download_token"]
+        (outputs / "ephemeral.txt").unlink()
+        assert manager.get_artifact_record(session_id, token) is None
+
+    @pytest.mark.unit
+    def test_outputs_preamble_runs_once_per_session(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        first = manager._prepare_outputs_preamble(session_id)
+        second = manager._prepare_outputs_preamble(session_id)
+        assert "AGORA_OUTPUT_DIR" in first
+        assert second == ""
+
+    @pytest.mark.unit
+    def test_cleanup_drops_state_and_removes_dir(self, tmp_path, monkeypatch):
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "foo.txt").write_text("data")
+        manager._register_artifacts_from_diff(
+            session_id, {}, manager._snapshot_outputs_dir(session_id)
+        )
+        assert session_id in manager._session_artifacts
+
+        manager._cleanup_session_artifacts(session_id)
+        assert session_id not in manager._session_artifacts
+        assert not outputs.exists()
+
+
+class TestBackgroundArtifactPipeline:
+    """Background-execute path surfaces files under AGORA_OUTPUT_DIR too.
+
+    Mirrors :class:`TestArtifactPipeline` for the foreground path; together
+    they guard the regression where the background path silently skipped
+    the preamble + snapshot/diff plumbing, leaving the kernel with no
+    ``AGORA_OUTPUT_DIR`` and the activity UI with no download links.
+    """
+
+    def _make_manager(self, tmp_path, monkeypatch):
+        from ... import sessions as sessions_pkg
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        return sessions_pkg.SessionManager()
+
+    @pytest.mark.unit
+    def test_background_job_carries_outputs_before_and_artifacts(self):
+        from ...sessions.manager import _BackgroundJob
+        job = _BackgroundJob(
+            job_id="j", session_id="s", msg_id="m", timeout=1.0, start_time=0.0,
+        )
+        assert job.outputs_before == {}
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_finalize_registers_artifacts(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+
+        before = manager._snapshot_outputs_dir(session_id)
+        (outputs / "out.csv").write_text("a,b\n1,2\n")
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, outputs_before=before,
+        )
+        manager._finalize_background_artifacts(job)
+
+        assert [a["name"] for a in job.artifacts] == ["out.csv"]
+        assert "download_token" in job.artifacts[0]
+
+    @pytest.mark.unit
+    def test_finalize_no_changes_yields_empty(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        before = manager._snapshot_outputs_dir(session_id)
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, outputs_before=before,
+        )
+        manager._finalize_background_artifacts(job)
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_finalize_is_best_effort_on_snapshot_failure(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+
+        def boom(*_a, **_k):
+            raise RuntimeError("simulated snapshot failure")
+        monkeypatch.setattr(manager, "_snapshot_outputs_dir", boom)
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0,
+        )
+        manager._finalize_background_artifacts(job)
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_check_job_terminal_includes_artifacts_without_urls(self, tmp_path, monkeypatch):
+        """Terminal-state result carries artifacts; URL composition is the
+        server layer's job, exactly like the foreground execute contract."""
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        job = _BackgroundJob(
+            job_id="j_xyz", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0,
+            status="completed", completed_at=0.5,
+            artifacts=[{
+                "name": "x.csv", "size_bytes": 4, "mime_type": "text/csv",
+                "modified_at": "2026-01-01T00:00:00+00:00",
+                "download_token": "abc",
+            }],
+        )
+        manager._background_jobs["j_xyz"] = job
+
+        result = manager.check_background_job("j_xyz")
+        assert result["status"] == "completed"
+        assert [a["name"] for a in result["artifacts"]] == ["x.csv"]
+        assert "download_url" not in result["artifacts"][0]
+
+    @pytest.mark.unit
+    def test_check_job_running_omits_artifacts(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        job = _BackgroundJob(
+            job_id="j_run", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, status="running",
+        )
+        manager._background_jobs["j_run"] = job
+
+        result = manager.check_background_job("j_run")
+        assert result["status"] == "running"
+        assert "artifacts" not in result
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_start_background_seeds_outputs_preamble_and_snapshot(self, tmp_path, monkeypatch):
+        """start_background_execution_for_session prepends the outputs preamble
+        (so kernels whose FIRST execute is background still get
+        AGORA_OUTPUT_DIR) and records the pre-execute snapshot on the job."""
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "preexisting.txt").write_text("v1")
+
+        captured = {}
+
+        class _StubKC:
+            def execute(self, code):
+                captured["code"] = code
+                return "msg-id-stub"
+
+        async def _stub_get_or_create_kernel(*_a, **_k):
+            return (object(), _StubKC())
+
+        async def _stub_collect(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(manager, "_get_or_create_kernel", _stub_get_or_create_kernel)
+        monkeypatch.setattr(manager, "_collect_background_job", _stub_collect)
+
+        result = await manager.start_background_execution_for_session(
+            session_id, "print(AGORA_OUTPUT_DIR)", timeout=30.0
+        )
+        job_id = result["job_id"]
+        job = manager._background_jobs[job_id]
+
+        # Outputs preamble must precede the user code.
+        assert "AGORA_OUTPUT_DIR" in captured["code"]
+        assert captured["code"].index("AGORA_OUTPUT_DIR") < captured["code"].index("print(AGORA_OUTPUT_DIR)")
+        # Pre-existing file is in the before-snapshot stored on the job.
+        assert "preexisting.txt" in job.outputs_before
 
 
 if __name__ == "__main__":

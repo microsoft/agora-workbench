@@ -92,6 +92,27 @@ class CodeExecutionResult(BaseModel):
         default_factory=list,
         description="Structured tool-call records captured during execution",
     )
+    displays: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Rich kernel outputs (matplotlib figures, images, SVGs, HTML) captured "
+            "from Jupyter display_data and execute_result messages. Each entry has "
+            "the shape ``{'mime_type': str, 'data': str, 'metadata': dict}``. "
+            "Streamed to the activity UI for rendering; excluded from the JSON "
+            "returned to the agent to keep its context window small."
+        ),
+    )
+    artifacts: list[dict] = Field(
+        default_factory=list,
+        description=(
+            "Files newly created or modified under the session's outputs directory "
+            "during this execute. Each entry is a metadata dict — never the bytes — "
+            "of shape {name, size_bytes, mime_type, modified_at, download_url}. "
+            "Used by the activity UI to surface downloadable files; agent return "
+            "path drops this field via model_dump(exclude={'artifacts'}) so the "
+            "metadata doesn't eat the agent's token budget."
+        ),
+    )
 
 
 class ServerConfig(BaseModel):
