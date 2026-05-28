@@ -98,7 +98,7 @@ class AssetPublisher(ABC):
             ``"https://account.blob.core.windows.net/container/session/name"``
             or ``"/mnt/shared/outputs/session/name"``).
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def can_handle(self, destination: str) -> bool:
@@ -110,7 +110,7 @@ class AssetPublisher(ABC):
         Returns:
             ``True`` if this publisher accepts the tag type.
         """
-        ...
+        raise NotImplementedError
 
     async def close(self) -> None:
         """Release any resources held by this publisher.
