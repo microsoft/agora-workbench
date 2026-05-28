@@ -477,6 +477,21 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
         return
     if final is None:
         return
+    # Compose full download URLs for any files written during the background
+    # execute.  Same shape as the foreground path: SessionManager hands back
+    # records carrying a ``download_token`` placeholder; the server layer is
+    # where SERVER_PUBLIC_URL is known.
+    public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
+    artifacts_with_urls = [
+        {
+            **a,
+            "download_url": (
+                f"{public_base}/artifacts/{session_id}/"
+                f"{a['download_token']}/{a['name']}"
+            ),
+        }
+        for a in (final.get("artifacts") or [])
+    ]
     server.activity_publisher.publish_nowait(
         {
             "type": "job_finished",
@@ -487,6 +502,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
             "stdout": final.get("stdout"),
             "stderr": final.get("stderr"),
             "error": final.get("error"),
+            "artifacts": artifacts_with_urls,
             "duration_ms": (
                 float(final.get("elapsed_seconds", 0.0)) * 1000.0 if final.get("elapsed_seconds") is not None else None
             ),
@@ -752,6 +768,10 @@ def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaita
             # Pass caller_identity so that missing-job and unauthorized-access both
             # raise ValueError("Job … not found"), preventing job-id existence probing.
             status = server.session_manager.check_background_job(job_id, caller_identity=caller_identity)
+            # Drop artifacts from the agent's view, matching the foreground
+            # execute_code path: the user — not the agent — downloads files,
+            # and the URLs already ride the job_finished activity event.
+            status.pop("artifacts", None)
             return json.dumps(status, indent=2)
         except Exception as e:
             LOGGER.error(f"check_job failed: {e}", exc_info=True)
