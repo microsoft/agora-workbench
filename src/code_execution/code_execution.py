@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
 from fastmcp import Context
@@ -494,7 +494,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
     )
 
 
-def build_tool(server: "CodeExecutionServer") -> Callable:
+def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]":
     """Setup the general code execution tool."""
 
     async def execute_code_tool(
@@ -656,10 +656,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             artifacts_with_urls = [
                 {
                     **a,
-                    "download_url": (
-                        f"{public_base}/artifacts/{session.session_id}/"
-                        f"{a['download_token']}/{a['name']}"
-                    ),
+                    "download_url": (f"{public_base}/artifacts/{session.session_id}/{a['download_token']}/{a['name']}"),
                 }
                 for a in result.artifacts
             ]
@@ -737,7 +734,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
     return execute_code_tool
 
 
-def build_check_job_tool(server: "CodeExecutionServer") -> Callable:
+def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]":
     """Build a tool that checks status/output for a background code-execution job."""
 
     async def check_job_tool(ctx: Context, job_id: str) -> str:

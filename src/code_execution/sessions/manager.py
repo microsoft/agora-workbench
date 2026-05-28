@@ -79,9 +79,7 @@ _COMPLETED_JOB_TTL_SECONDS = 3600.0  # 1 hour
 # a streaming download endpoint keyed on that token, and the activity UI shows
 # a download row.  No agent tool call is required — discovery happens by
 # diffing the directory snapshot taken before/after each execute.
-_OUTPUTS_BASE_DIR = Path(
-    os.environ.get("AGORA_OUTPUTS_BASE_DIR", str(Path.home() / "agora-outputs"))
-)
+_OUTPUTS_BASE_DIR = Path(os.environ.get("AGORA_OUTPUTS_BASE_DIR", str(Path.home() / "agora-outputs")))
 
 # File names ignored when scanning the outputs dir.  Suffix match (`.pyc`,
 # `.pyo`) and exact-component match (`__pycache__`, `.ipynb_checkpoints`).
@@ -154,6 +152,16 @@ class SessionConfig:
 
 
 class SessionManager:
+    """Manages the lifecycle of code-execution sessions and their Jupyter kernels.
+
+    Responsibilities include session creation, retrieval, timeout-based cleanup,
+    kernel provisioning (one ``AsyncKernelManager`` per session), background-job
+    tracking, and artifact registration for the ``/artifacts`` download endpoint.
+
+    Thread-safety is provided by an internal ``RLock`` for session-lifecycle
+    mutations and per-session ``asyncio.Lock`` instances for kernel access.
+    """
+
     def _touch_session_if_present(self, session_id: str) -> bool:
         """Atomically refresh a session's last-activity timestamp if it still exists."""
         with self._session_lifecycle_lock:
@@ -163,8 +171,6 @@ class SessionManager:
             session_for_keepalive.touch()
             self.storage.store(session_id, session_for_keepalive)
             return True
-
-    """Generic session manager with automatic cleanup."""
 
     def __init__(self, config: Optional[SessionConfig] = None):
         self.config = config or SessionConfig()
@@ -291,7 +297,7 @@ class SessionManager:
 
         return session
 
-    def update_session(self, session_id: str, session: Session):
+    def update_session(self, session_id: str, session: Session) -> None:
         """Update an existing session."""
         if self.storage.retrieve(session_id) is None:
             raise ValueError(f"Session {session_id} not found")
@@ -299,13 +305,13 @@ class SessionManager:
         session.touch()
         self.storage.store(session_id, session)
 
-    def update_status(self, session_id: str, status: str):
+    def update_status(self, session_id: str, status: str) -> None:
         """Update the status of a session."""
         session = self.get_session(session_id)
         session.update_status(status)
         self.storage.store(session_id, session)
 
-    def close_session(self, session_id: str):
+    def close_session(self, session_id: str) -> None:
         """
         Explicitly close a session.
 
@@ -922,8 +928,9 @@ class SessionManager:
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
-        code = self._prepare_outputs_preamble(session_id) + \
-            self._prepare_code_with_token_preamble(session_id, code, user_token)
+        code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
+            session_id, code, user_token
+        )
 
         # Snapshot the outputs dir before executing so we can diff against
         # the post-execute state and surface only files this execute created
@@ -1082,13 +1089,9 @@ class SessionManager:
         # effort observability.
         try:
             outputs_after = self._snapshot_outputs_dir(session_id)
-            artifacts = self._register_artifacts_from_diff(
-                session_id, outputs_before, outputs_after
-            )
+            artifacts = self._register_artifacts_from_diff(session_id, outputs_before, outputs_after)
         except Exception:
-            LOGGER.warning(
-                "Artifact discovery failed for session %s", session_id, exc_info=True
-            )
+            LOGGER.warning("Artifact discovery failed for session %s", session_id, exc_info=True)
             artifacts = []
 
         return stdout, stderr, success, displays, artifacts

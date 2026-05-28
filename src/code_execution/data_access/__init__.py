@@ -7,14 +7,12 @@ sources referenced by DataLake qualified names.
 
 from .resolution import (
     AssetResolutionMiddleware,
-    _resolved_assets,
     looks_like_qualified_name,
     should_resolve_as_asset,
 )
 
 __all__ = [
     "AssetResolutionMiddleware",
-    "_resolved_assets",
     "looks_like_qualified_name",
     "should_resolve_as_asset",
 ]

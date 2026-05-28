@@ -14,12 +14,29 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 
 # ============================================================================
-# Functions to enable JSON serialization
+# Internal helpers for JSON serialization
 # ============================================================================
 
 
-def resolve_class(path: str) -> type:
-    """Resolve a 'module.submodule:ClassName' or 'module.submodule.ClassName' string to a class."""
+def _resolve_class(path: str) -> type:
+    """Resolve a dotted or colon-separated class path string to a class object.
+
+    Accepts both ``'module.submodule:ClassName'`` (explicit colon separator)
+    and ``'module.submodule.ClassName'`` (dot-separated) formats.
+
+    Args:
+        path: Dotted or colon-separated path to a class, e.g.
+            ``'mypackage.mymodule.MyClass'`` or
+            ``'mypackage.mymodule:MyClass'``.
+
+    Returns:
+        The resolved class object.
+
+    Raises:
+        ImportError: If the module portion of *path* cannot be imported.
+        AttributeError: If the class name does not exist on the module.
+        TypeError: If the resolved object is not a class.
+    """
     # Allow both 'pkg.mod:Class' and 'pkg.mod.Class'
     if ":" in path:
         module_path, class_name = path.split(":", 1)
@@ -33,7 +50,16 @@ def resolve_class(path: str) -> type:
     return cls
 
 
-def class_to_string(cls: type) -> str:
+def _class_to_string(cls: type) -> str:
+    """Return the fully-qualified ``'module.qualname'`` string for a class.
+
+    Args:
+        cls: The class to serialize.
+
+    Returns:
+        A string of the form ``'<module>.<qualname>'``, e.g.
+        ``'mypackage.mymodule.MyClass'``.
+    """
     return f"{cls.__module__}.{cls.__qualname__}"
 
 
@@ -55,7 +81,7 @@ class ToolParameter(BaseModel):
     @field_validator("type", mode="before")
     def parse_type_input(cls, v: Any) -> Type[Any]:
         if isinstance(v, str):
-            return resolve_class(v)
+            return _resolve_class(v)
         return v
 
     @field_validator("type", mode="after")
@@ -66,7 +92,7 @@ class ToolParameter(BaseModel):
 
     @field_serializer("type")
     def serialize_type(self, v: Type[Any]) -> str:
-        return class_to_string(v)
+        return _class_to_string(v)
 
 
 class ReturnSpec(BaseModel):
@@ -86,7 +112,7 @@ class ReturnSpec(BaseModel):
     @field_validator("type", mode="before")
     def parse_type_input(cls, v: Any) -> Type[Any]:
         if isinstance(v, str):
-            return resolve_class(v)
+            return _resolve_class(v)
         return v
 
     @field_validator("type", mode="after")
@@ -97,10 +123,10 @@ class ReturnSpec(BaseModel):
 
     @field_serializer("type")
     def serialize_type(self, v: Type[Any]) -> str:
-        return class_to_string(v)
+        return _class_to_string(v)
 
     def __repr__(self) -> str:
-        return f"ReturnSpec({self.name}: {class_to_string(self.type)})"
+        return f"ReturnSpec({self.name}: {_class_to_string(self.type)})"
 
 
 class StateTransition(BaseModel):
