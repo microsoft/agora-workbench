@@ -29,6 +29,29 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+
+def _validate_artifact_name(name: str) -> None:
+    """Validate that an artifact name is safe for path construction.
+
+    Rejects absolute paths, parent-directory traversal (``..``), and empty
+    names to prevent writes outside the intended session directory.
+
+    Args:
+        name: The logical artifact name extracted from a destination tag.
+
+    Raises:
+        ValueError: If the name is unsafe.
+    """
+    if not name or not name.strip():
+        raise ValueError("Artifact name must not be empty.")
+    if Path(name).is_absolute():
+        raise ValueError(f"Artifact name must not be an absolute path: {name!r}")
+    # Check for '..' in any path segment after normalization.
+    normalized = name.replace("\\", "/")
+    if ".." in Path(normalized).parts:
+        raise ValueError(f"Artifact name must not contain parent traversal (..): {name!r}")
+
+
 # Regex for parsing tag-based destination strings.
 # Matches both closed (``<blob>name</blob>``) and unclosed (``<blob>name``)
 # forms to tolerate LLM output that occasionally omits the closing tag.
@@ -200,6 +223,8 @@ class BlobPublisher(AssetPublisher):
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
 
+        _validate_artifact_name(name)
+
         blob_path = f"{session_id}/{name}"
         LOGGER.info(
             "BlobPublisher: uploading %s → %s/%s/%s",
@@ -263,7 +288,14 @@ class LocalFilePublisher(AssetPublisher):
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
 
-        dest = self._base_dir / session_id / name
+        _validate_artifact_name(name)
+
+        dest = (self._base_dir / session_id / name).resolve()
+        # Belt-and-suspenders: verify the resolved path is still within the
+        # expected session directory even after symlink resolution.
+        session_root = (self._base_dir / session_id).resolve()
+        if not dest.is_relative_to(session_root):
+            raise ValueError(f"Resolved artifact path {dest} escapes the session directory {session_root}.")
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         LOGGER.info("LocalFilePublisher: copying %s → %s", local_path, dest)

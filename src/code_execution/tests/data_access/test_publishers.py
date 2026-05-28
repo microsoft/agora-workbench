@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ...data_access.publishers import (
-    AssetPublisher,
     BlobPublisher,
     LocalFilePublisher,
+    _validate_artifact_name,
     parse_destination_tag,
 )
 
@@ -55,6 +55,45 @@ class TestParseDestinationTag:
     def test_mismatched_tags_returns_none(self):
         # Closed with wrong tag → no match
         assert parse_destination_tag("<blob>name</local>") is None
+
+
+# ---------------------------------------------------------------------------
+# _validate_artifact_name
+# ---------------------------------------------------------------------------
+
+
+class TestValidateArtifactName:
+    """Tests for the ``_validate_artifact_name`` helper."""
+
+    def test_accepts_simple_filename(self):
+        _validate_artifact_name("results.csv")  # should not raise
+
+    def test_accepts_path_like_name(self):
+        _validate_artifact_name("subdir/report.pdf")  # should not raise
+
+    def test_rejects_empty(self):
+        with pytest.raises(ValueError, match="empty"):
+            _validate_artifact_name("")
+
+    def test_rejects_whitespace_only(self):
+        with pytest.raises(ValueError, match="empty"):
+            _validate_artifact_name("   ")
+
+    def test_rejects_absolute_path(self):
+        with pytest.raises(ValueError, match="absolute path"):
+            _validate_artifact_name("/etc/passwd")
+
+    def test_rejects_parent_traversal(self):
+        with pytest.raises(ValueError, match="parent traversal"):
+            _validate_artifact_name("../escape.txt")
+
+    def test_rejects_nested_parent_traversal(self):
+        with pytest.raises(ValueError, match="parent traversal"):
+            _validate_artifact_name("subdir/../../escape.txt")
+
+    def test_rejects_windows_style_traversal(self):
+        with pytest.raises(ValueError, match="parent traversal"):
+            _validate_artifact_name("subdir\\..\\..\\escape.txt")
 
 
 # ---------------------------------------------------------------------------
@@ -128,9 +167,7 @@ class TestBlobPublisherPublish:
         remote_uri = await pub.publish(local_path=src, name="results.csv", session_id="sess-1")
 
         assert remote_uri == "https://acct.blob.core.windows.net/mycontainer/sess-1/results.csv"
-        mock_service_client.get_blob_client.assert_called_once_with(
-            container="mycontainer", blob="sess-1/results.csv"
-        )
+        mock_service_client.get_blob_client.assert_called_once_with(container="mycontainer", blob="sess-1/results.csv")
         mock_blob_client.upload_blob.assert_called_once()
 
     @pytest.mark.asyncio
@@ -150,9 +187,7 @@ class TestBlobPublisherPublish:
         remote_uri = await pub.publish(local_path=src, name="subdir/report.pdf", session_id="sess-2")
 
         assert remote_uri == "https://acct.blob.core.windows.net/arts/sess-2/subdir/report.pdf"
-        mock_service_client.get_blob_client.assert_called_once_with(
-            container="arts", blob="sess-2/subdir/report.pdf"
-        )
+        mock_service_client.get_blob_client.assert_called_once_with(container="arts", blob="sess-2/subdir/report.pdf")
 
     @pytest.mark.asyncio
     async def test_publish_raises_if_file_missing(self, tmp_path):
@@ -161,6 +196,28 @@ class TestBlobPublisherPublish:
 
         with pytest.raises(FileNotFoundError):
             await pub.publish(local_path=tmp_path / "nonexistent.csv", name="x.csv", session_id="s")
+
+    @pytest.mark.asyncio
+    async def test_publish_rejects_parent_traversal(self, tmp_path):
+        src = tmp_path / "data.csv"
+        src.write_bytes(b"a,b\n")
+
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub._client = MagicMock()
+
+        with pytest.raises(ValueError, match="parent traversal"):
+            await pub.publish(local_path=src, name="../escape/data.csv", session_id="s")
+
+    @pytest.mark.asyncio
+    async def test_publish_rejects_absolute_path(self, tmp_path):
+        src = tmp_path / "data.csv"
+        src.write_bytes(b"a,b\n")
+
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub._client = MagicMock()
+
+        with pytest.raises(ValueError, match="absolute path"):
+            await pub.publish(local_path=src, name="/etc/passwd", session_id="s")
 
     @pytest.mark.asyncio
     async def test_close_resets_client(self):
@@ -239,6 +296,26 @@ class TestLocalFilePublisherPublish:
 
         with pytest.raises(FileNotFoundError):
             await pub.publish(local_path=tmp_path / "nonexistent.csv", name="x.csv", session_id="s")
+
+    @pytest.mark.asyncio
+    async def test_publish_rejects_parent_traversal(self, tmp_path):
+        src = tmp_path / "data.csv"
+        src.write_bytes(b"evil\n")
+
+        pub = LocalFilePublisher(base_dir=tmp_path / "outputs")
+
+        with pytest.raises(ValueError, match="parent traversal"):
+            await pub.publish(local_path=src, name="../../etc/crontab", session_id="sess")
+
+    @pytest.mark.asyncio
+    async def test_publish_rejects_absolute_path(self, tmp_path):
+        src = tmp_path / "data.csv"
+        src.write_bytes(b"evil\n")
+
+        pub = LocalFilePublisher(base_dir=tmp_path / "outputs")
+
+        with pytest.raises(ValueError, match="absolute path"):
+            await pub.publish(local_path=src, name="/etc/passwd", session_id="sess")
 
     def test_base_dir_resolved(self, tmp_path):
         pub = LocalFilePublisher(base_dir=tmp_path)
@@ -411,7 +488,8 @@ class TestFindArtifactByName:
         (outputs / "results.csv").write_text("a,b\n")
 
         before = sm._snapshot_outputs_dir(session_id)
-        import os as _os, time as _t
+        import os as _os
+        import time as _t
 
         _os.utime(outputs / "results.csv", (_t.time() + 1, _t.time() + 1))
         after = sm._snapshot_outputs_dir(session_id)
@@ -445,7 +523,8 @@ class TestFindArtifactByName:
         (outputs / "ghost.txt").write_text("temp")
 
         before = sm._snapshot_outputs_dir(session_id)
-        import os as _os, time as _t
+        import os as _os
+        import time as _t
 
         _os.utime(outputs / "ghost.txt", (_t.time() + 1, _t.time() + 1))
         after = sm._snapshot_outputs_dir(session_id)
