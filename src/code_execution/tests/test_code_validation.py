@@ -2,21 +2,21 @@
 
 import pytest
 
-from ..code_execution import CodeExecutionServer
-from ..code_execution.auth import create_noop_auth_config
-from ..code_execution.code_execution_models import EnvironmentConfig
+from .. import CodeExecutionServer
+from ..auth import create_noop_auth_config
+from ..code_execution_models import ServerConfig
 
 
 @pytest.fixture
 def server():
     """Create a minimal CodeExecutionServer for validation tests (no env build)."""
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="test",
         type="uv",
         description="Test environment",
         dependency_file="# empty",
     )
-    return CodeExecutionServer(environment_config=config, auth_config=create_noop_auth_config())
+    return CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 
 
 # =====================================================================
@@ -316,8 +316,8 @@ class TestSubclassCustomisation:
         class StricterServer(CodeExecutionServer):
             _BLOCKED_FS_CALLS = CodeExecutionServer._BLOCKED_FS_CALLS | {"open"}
 
-        config = EnvironmentConfig(name="strict", type="uv", description="Strict", dependency_file="# empty")
-        strict = StricterServer(environment_config=config, auth_config=create_noop_auth_config())
+        config = ServerConfig(name="strict", type="uv", description="Strict", dependency_file="# empty")
+        strict = StricterServer(server_config=config, auth_config=create_noop_auth_config())
 
         ok, _ = strict.validate_code("open('/tmp/file.txt')")
         assert ok is False
@@ -328,15 +328,15 @@ class TestSubclassCustomisation:
         class PermissiveServer(CodeExecutionServer):
             _ALLOWED_PATH_PREFIXES = CodeExecutionServer._ALLOWED_PATH_PREFIXES + ("/mnt/data",)
 
-        config = EnvironmentConfig(name="permissive", type="uv", description="Permissive", dependency_file="# empty")
-        permissive = PermissiveServer(environment_config=config, auth_config=create_noop_auth_config())
+        config = ServerConfig(name="permissive", type="uv", description="Permissive", dependency_file="# empty")
+        permissive = PermissiveServer(server_config=config, auth_config=create_noop_auth_config())
 
         # /mnt/data is NOT allowed by default, but the subclass adds it
         ok, _ = permissive.validate_code("open('/mnt/data/shared/file.csv')")
         assert ok is True
 
         # Verify the base server still rejects /mnt/data
-        base_config = EnvironmentConfig(name="base", type="uv", description="Base", dependency_file="# empty")
-        base = CodeExecutionServer(environment_config=base_config, auth_config=create_noop_auth_config())
+        base_config = ServerConfig(name="base", type="uv", description="Base", dependency_file="# empty")
+        base = CodeExecutionServer(server_config=base_config, auth_config=create_noop_auth_config())
         ok, _ = base.validate_code("open('/mnt/data/shared/file.csv')")
         assert ok is False

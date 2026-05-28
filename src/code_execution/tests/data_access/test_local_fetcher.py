@@ -6,7 +6,7 @@ Tests path handling, allowed_roots sandboxing, fetch, and fetch_to_file.
 
 import pytest
 
-from ...code_execution.data_access.fetchers import LocalFileFetcher
+from ...data_access.fetchers import LocalFileFetcher
 
 
 class TestLocalFileFetcherCanHandle:

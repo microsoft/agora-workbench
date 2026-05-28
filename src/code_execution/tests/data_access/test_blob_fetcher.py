@@ -13,7 +13,7 @@ from azure.core.exceptions import (
     ServiceRequestError,
 )
 
-from ...code_execution.data_access.fetchers import BlobFetcher
+from ...data_access.fetchers import BlobFetcher
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def mock_azure_blob_client(monkeypatch):
             result = await fetcher.fetch(url)  # Uses mocked Azure SDK
     """
     # Import the actual module to patch it directly
-    from ...code_execution.data_access import fetchers
+    from ...data_access import fetchers
 
     class MockAzureBlobClient:
         def __init__(self):

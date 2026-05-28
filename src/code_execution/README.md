@@ -9,7 +9,7 @@ Each domain (powergrid, process, foundry, etc.) defines a server under `domains/
 The main components are:
 
 - **`CodeExecutionServer`** (`code_execution/server.py`) — FastMCP-based server with subprocess code execution, Entra ID authentication, and customizable validation/preprocessing hooks
-- **`EnvironmentConfig`** (`code_execution/code_execution_models.py`) — defines the Python environment type (`uv`, `conda`, `pip`), dependencies, and build settings
+- **`ServerConfig`** (`code_execution/code_execution_models.py`) — defines the server identity, Python environment type (`uv`, `conda`, `pip`), dependencies, build settings, asset provisioning, execution policy, and feature flags
 - **Environment Builders** (`code_execution/environment_builders.py`) — automated virtual environment creation
 - **Session Management** (`code_execution/sessions/`) — stateful workflows across MCP calls, with decorators (`@auto_session_tool`, `@create_session_tool`, `@requires_session`), context-based session injection, and automatic cleanup
 
@@ -18,9 +18,10 @@ The main components are:
 Domain servers live in `domains/<name>/server/` and are registered in `server_registry.yaml`. A minimal server:
 
 ```python
-from code_execution import CodeExecutionServer, EnvironmentConfig
+from code_execution import CodeExecutionServer, ServerConfig
+from code_execution.auth import create_noop_auth_config
 
-config = EnvironmentConfig(
+config = ServerConfig(
     name="myenv",
     description="Execute Python code with custom packages",
     type="uv",
@@ -28,7 +29,7 @@ config = EnvironmentConfig(
     auto_build=True,
 )
 
-server = CodeExecutionServer(environment_config=config)
+server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 await server.run_http(host="0.0.0.0", port=8000)
 ```
 

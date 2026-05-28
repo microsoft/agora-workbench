@@ -75,7 +75,12 @@ The base package ships the full framework-agnostic layer:
 
 If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
 
-Copy `.env.example` to `.env` and configure credentials. See the comments in that file for available settings.
+Configure credentials for your use case:
+
+- **Running the tutorial agent locally** — copy `docs/tutorials/maf_quickstart/.env.agent.example` to `.env.agent` at the repo root.
+- **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server`.
+
+For a minimal, **agent-free** MCP flow (standalone `CodeExecutionServer` + direct MCP client / `curl` calls), see [`examples/agent_examples/agent_free_getting_started/README.md`](examples/agent_examples/agent_free_getting_started/README.md).
 
 ## Development
 
@@ -102,7 +107,7 @@ The search backend is pluggable via the `ToolSearchBackend` abstract base class 
 | Backend | Class | When to use |
 |---------|-------|-------------|
 | **BM25** (default) | `BM25ToolSearchBackend` | Local, zero-dependency keyword search over the YAML-derived tool catalog. |
-| **Azure AI Search** | `AzureAIToolSearchBackend` | Cloud-hosted semantic/vector search. Set `TOOL_SEARCH_ENDPOINT` in `.env`. |
+| **Azure AI Search** | `AzureAIToolSearchBackend` | Cloud-hosted semantic/vector search. Set `TOOL_SEARCH_ENDPOINT` in `deployment/.env.server`. |
 
 ## Authentication
 
@@ -125,10 +130,10 @@ MCP code-execution servers use `OBOCredentialProvider` (`code_execution/auth/obo
 
 ## Deployment
 
-Docker-based deployment for `CodeExecutionServer` instances. The shared base image and deployment tooling live in `src/deployment/mcp_server/`.
+Docker-based deployment for `CodeExecutionServer` instances. The shared base image and deployment tooling live in `deployment/`.
 
-- **Local development** — build the base image, extend it with your server, and run with Docker Compose. See [`src/deployment/mcp_server/README.md`](src/deployment/mcp_server/README.md).
-- **Azure Container Apps** — build, push, and deploy via Bicep. See [`src/deployment/mcp_server/container_apps/README.md`](src/deployment/mcp_server/container_apps/README.md).
+- **Local development** — build the base image, extend it with your server, and run with Docker Compose. See [`deployment/README.md`](deployment/README.md).
+- **Azure Container Apps** — build, push, and deploy via Bicep. See [`deployment/container_apps/README.md`](deployment/container_apps/README.md).
 
 ## Code Execution
 
@@ -138,17 +143,18 @@ Docker-based deployment for `CodeExecutionServer` instances. The shared base ima
 
 | Setting | Default | Description |
 |---|---|---|
-| Constructor parameter `output_truncation_threshold` | `50_000` | Maximum characters allowed per output stream before truncation is applied (that is, `stdout` and `stderr` are evaluated independently, not as a combined total). A guidance message is appended instructing the LLM to inspect large objects server-side. |
-| Environment variable `CODE_OUTPUT_TRUNCATION_THRESHOLD` | _(unset)_ | Overrides the constructor parameter when set. Takes precedence. |
+| `ServerConfig.output_truncation_threshold` | `50_000` | Maximum characters allowed per output stream before truncation is applied (that is, `stdout` and `stderr` are evaluated independently, not as a combined total). A guidance message is appended instructing the LLM to inspect large objects server-side. |
+| Environment variable `CODE_OUTPUT_TRUNCATION_THRESHOLD` | _(unset)_ | Overrides the config value when set. Takes precedence. |
 
 Set to `0` to **disable** truncation entirely (not recommended for production — very large outputs will be passed to the LLM unchanged).
 
 ```python
-# Custom threshold via constructor
-server = MyCodeExecutionServer(
-    environment_config=...,
+# Custom threshold via ServerConfig
+config = ServerConfig(
+    ...,
     output_truncation_threshold=100_000,  # 100 k chars
 )
+server = MyCodeExecutionServer(server_config=config)
 ```
 
 ```bash

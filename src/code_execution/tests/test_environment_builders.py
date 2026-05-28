@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from ..code_execution.code_execution_models import EnvironmentConfig
-from ..code_execution.environment_builders import (
+from ..code_execution_models import ServerConfig
+from ..environment_builders import (
     build_conda_environment,
     build_pip_environment,
     build_uv_environment,
@@ -16,9 +16,9 @@ from ..code_execution.environment_builders import (
 
 
 @pytest.fixture
-def uv_config(tmp_path: Path) -> EnvironmentConfig:
+def uv_config(tmp_path: Path) -> ServerConfig:
     """Create a test UV environment config."""
-    return EnvironmentConfig(
+    return ServerConfig(
         name="test_uv",
         description="Test UV environment",
         type="uv",
@@ -29,7 +29,7 @@ def uv_config(tmp_path: Path) -> EnvironmentConfig:
 
 
 @pytest.fixture
-def conda_config(tmp_path: Path) -> EnvironmentConfig:
+def conda_config(tmp_path: Path) -> ServerConfig:
     """Create a test Conda environment config."""
     env_yaml = """name: test_conda
 channels:
@@ -39,7 +39,7 @@ dependencies:
   - python=3.11
   - numpy
 """
-    return EnvironmentConfig(
+    return ServerConfig(
         name="test_conda",
         description="Test Conda environment",
         type="conda",
@@ -50,9 +50,9 @@ dependencies:
 
 
 @pytest.fixture
-def pip_config(tmp_path: Path) -> EnvironmentConfig:
+def pip_config(tmp_path: Path) -> ServerConfig:
     """Create a test pip environment config."""
-    return EnvironmentConfig(
+    return ServerConfig(
         name="test_pip",
         description="Test pip environment",
         type="pip",
@@ -131,9 +131,9 @@ async def test_uv_environment_reuse(uv_config):
     assert python_path.exists()
 
 
-def test_environment_config_get_build_dir():
+def test_server_config_get_build_dir():
     """Test that build_dir is constructed correctly."""
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="myenv",
         description="Test",
         type="uv",
@@ -146,9 +146,9 @@ def test_environment_config_get_build_dir():
     assert "mcp-envs" in str(build_dir)
 
 
-def test_environment_config_get_python_path():
+def test_server_config_get_python_path():
     """Test that Python path is constructed correctly."""
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="myenv",
         description="Test",
         type="uv",
@@ -160,11 +160,11 @@ def test_environment_config_get_python_path():
     assert "bin" in str(python_path)
 
 
-def test_environment_config_custom_build_dir(tmp_path):
+def test_server_config_custom_build_dir(tmp_path):
     """Test using a custom build directory."""
     custom_dir = tmp_path / "custom" / "location"
 
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="myenv",
         description="Test",
         type="pip",
@@ -192,7 +192,7 @@ async def test_additional_command_runs_inside_env(tmp_path: Path) -> None:
     and fail. We pass ``--noprofile --norc`` to bash to keep this honest.
     """
     marker = tmp_path / "which_python.txt"
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="test_addcmd_ok",
         description="additional_commands sanity",
         type="uv",
@@ -215,8 +215,7 @@ async def test_additional_command_runs_inside_env(tmp_path: Path) -> None:
 
     written = marker.read_text().strip()
     assert str(config.build_dir) in written, (
-        f"additional_command ran outside the env: python={written!r} "
-        f"build_dir={config.build_dir}"
+        f"additional_command ran outside the env: python={written!r} build_dir={config.build_dir}"
     )
 
 
@@ -230,7 +229,7 @@ async def test_additional_command_failure_raises(tmp_path: Path) -> None:
     with a half-built environment (e.g. a domain-tools pip package that
     silently failed to install). The build now raises ``RuntimeError``.
     """
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="test_addcmd_fail",
         description="additional_commands failure",
         type="uv",
@@ -246,4 +245,3 @@ async def test_additional_command_failure_raises(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="Additional command 1/1 failed"):
         await build_uv_environment(config)
-

@@ -5,7 +5,7 @@ import threading
 import pytest
 import time
 
-from ...code_execution.sessions import (
+from ...sessions import (
     MaxSessionsReachedError,
     Session,
     SessionManager,
@@ -276,7 +276,9 @@ class TestSessionManager:
 
         def _create():
             try:
-                session_id = manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+                session_id = manager.create_session(
+                    {}, user_identity="test_user", user_token="test-token", token_claims={}
+                )
                 results.append(session_id)
             except Exception as exc:
                 errors.append(exc)
@@ -613,6 +615,105 @@ print(counter.increment())
         assert "(4, 5, 6)" in result2.stdout
         # Sets have unpredictable order in output
         assert "7" in result2.stdout and "8" in result2.stdout and "9" in result2.stdout
+
+
+class TestKernelExecuteLock:
+    """Per-session asyncio.Lock that serializes execute_code_for_session calls.
+
+    Background: the Jupyter ``KernelClient`` exposes a single iopub queue.
+    Two coroutines polling that queue concurrently can each consume the
+    other's reply messages — the loser then spins until its timeout fires.
+    The lock prevents two ``execute_code_for_session`` bodies from running
+    against the same kernel client at the same time.
+    """
+
+    @pytest.mark.unit
+    def test_lock_is_per_session_and_stable(self):
+        """The same session_id returns the same lock; different ids do not."""
+        manager = SessionManager()
+        lock_a1 = manager._get_kernel_execute_lock("session-a")
+        lock_a2 = manager._get_kernel_execute_lock("session-a")
+        lock_b = manager._get_kernel_execute_lock("session-b")
+        assert lock_a1 is lock_a2
+        assert lock_a1 is not lock_b
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_serialize_on_same_session(self, monkeypatch):
+        """Two concurrent execute_code_for_session calls for the same session
+        must not run their inner kernel work in parallel."""
+        manager = SessionManager()
+        # Inject a fake session so the lookup at the top of
+        # execute_code_for_session succeeds.
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+
+        in_flight = 0
+        max_in_flight = 0
+        order: list[str] = []
+
+        async def fake_locked(*, code, **_kwargs):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            order.append(f"start:{code}")
+            # Yield to the event loop so the other coroutine has a chance to
+            # try and (incorrectly) enter the critical section.
+            await asyncio.sleep(0.02)
+            order.append(f"end:{code}")
+            in_flight -= 1
+            return ("", "", True)
+
+        monkeypatch.setattr(manager, "_execute_code_locked", fake_locked)
+
+        await asyncio.gather(
+            manager.execute_code_for_session(session_id, "A", timeout=5.0),
+            manager.execute_code_for_session(session_id, "B", timeout=5.0),
+        )
+
+        # If serialization works, max_in_flight never exceeds 1 and each call
+        # completes before the next one starts.
+        assert max_in_flight == 1, f"calls overlapped (max_in_flight={max_in_flight})"
+        assert order == ["start:A", "end:A", "start:B", "end:B"] or order == [
+            "start:B",
+            "end:B",
+            "start:A",
+            "end:A",
+        ], f"unexpected interleave: {order}"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_overlap_on_different_sessions(self, monkeypatch):
+        """Different sessions get separate locks; calls must overlap freely."""
+        manager = SessionManager()
+        sid_a = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        sid_b = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+
+        in_flight = 0
+        max_in_flight = 0
+
+        async def fake_locked(**_kwargs):
+            nonlocal in_flight, max_in_flight
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            await asyncio.sleep(0.05)
+            in_flight -= 1
+            return ("", "", True)
+
+        monkeypatch.setattr(manager, "_execute_code_locked", fake_locked)
+
+        await asyncio.gather(
+            manager.execute_code_for_session(sid_a, "A", timeout=5.0),
+            manager.execute_code_for_session(sid_b, "B", timeout=5.0),
+        )
+
+        # Different sessions => different locks => calls overlap.
+        assert max_in_flight == 2, f"calls did not overlap (max_in_flight={max_in_flight})"
 
 
 if __name__ == "__main__":

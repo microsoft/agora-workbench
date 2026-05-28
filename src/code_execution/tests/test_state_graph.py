@@ -235,7 +235,8 @@ class TestPipelinePropagation:
                 state_produces=("sim.flowsheet_solved", "sim.results_available"),
             ),
         ]
-        backend = BM25ToolSearchBackend(tools)
+        backend = BM25ToolSearchBackend()
+        backend.index(tools)
         results = await backend.search("solve flowsheet", top=1)
         assert len(results) == 1
         assert results[0].state_requires == ["sim.flowsheet_exists"]
@@ -372,7 +373,7 @@ class TestSkillFrontmatter:
         from code_execution.tools.search.state_graph import _discover_skills
 
         # Use the domain_examples directory as the test fixture source
-        domains_dir = Path(__file__).resolve().parents[2] / "domain_examples"
+        domains_dir = Path(__file__).resolve().parents[3] / "examples" / "domain_examples"
         return [s for s in _discover_skills(domains_dir) if s.get("states")]
 
     @pytest.mark.unit

@@ -2,7 +2,7 @@
 
 import pytest
 
-from ....code_execution.data_access.catalog.config import (
+from ....data_access.catalog.config import (
     CatalogConfig,
     FileOverride,
     SearchConfig,

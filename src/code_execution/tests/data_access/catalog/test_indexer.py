@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from ....code_execution.data_access.catalog.config import CatalogConfig, FileOverride, SourceConfig, SearchConfig
-from ....code_execution.data_access.catalog.db import CatalogDB
-from ....code_execution.data_access.catalog.indexer import CatalogIndexer, _build_indexable_text, _parse_blob_path
+from ....data_access.catalog.config import CatalogConfig, FileOverride, SourceConfig, SearchConfig
+from ....data_access.catalog.db import CatalogDB
+from ....data_access.catalog.indexer import CatalogIndexer, _build_indexable_text, _parse_blob_path
 
 
 class TestParseBlobPath:
@@ -190,7 +190,7 @@ class TestCatalogIndexerLocal:
         await indexer.index()
         uris = db.get_existing_uris()
         uri = next(iter(uris))
-        from ....code_execution.data_access.catalog.db import artifact_id_from_uri
+        from ....data_access.catalog.db import artifact_id_from_uri
 
         record = db.get_artifact(artifact_id_from_uri(uri))
         assert record.description == "Override description"

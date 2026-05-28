@@ -10,11 +10,11 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
-from ...code_execution.data_access.resolution import (
+from ...data_access.resolution import (
     AssetResolutionMiddleware,
     _resolved_assets,
 )
-from ...code_execution.sessions import Session
+from ...sessions import Session
 
 
 def _patch_set_current_session():
@@ -50,7 +50,8 @@ def mock_session():
     """Create a mock Session with data manager."""
     session = MagicMock(spec=Session)
     session.session_id = "test-session-123"
-    session.data = {"_asset_counter": 0}
+    session.data = {}
+    session._asset_counter = 0
     session.object_store = MagicMock()
     session.object_store.store = MagicMock()
     session.data_manager = MagicMock()
@@ -271,7 +272,7 @@ class TestAssetResolutionMiddleware:
             await middleware.on_call_tool(mock_context, call_next)
 
         # Verify counter was incremented twice
-        assert mock_session.data["_asset_counter"] == 2
+        assert mock_session._asset_counter == 2
 
     async def test_object_store_metadata(self, mock_server, mock_context, mock_session):
         """Test that asset metadata is stored in session object store."""

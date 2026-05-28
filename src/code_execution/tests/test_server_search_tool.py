@@ -8,9 +8,9 @@ import pytest
 
 import code_execution.tools as code_execution_tools
 
-from ..code_execution import CodeExecutionServer, EnvironmentConfig
-from ..code_execution.auth import create_noop_auth_config
-from ..code_execution.tool_registry import ToolDefinition, ToolRegistry, StateTransition
+from .. import CodeExecutionServer, ServerConfig
+from ..auth import create_noop_auth_config
+from ..tool_registry import ToolDefinition, ToolRegistry, StateTransition
 
 
 # ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ from ..code_execution.tool_registry import ToolDefinition, ToolRegistry, StateTr
 
 def _make_server(tools: list[ToolDefinition] | None = None) -> CodeExecutionServer:
     """Create a minimal CodeExecutionServer for unit tests."""
-    config = EnvironmentConfig(
+    config = ServerConfig(
         name="testdomain",
         type="uv",
         description="Test environment",
@@ -32,7 +32,7 @@ def _make_server(tools: list[ToolDefinition] | None = None) -> CodeExecutionServ
         for t in tools:
             registry.register_tool(t)
     return CodeExecutionServer(
-        environment_config=config,
+        server_config=config,
         tool_registry=registry,
         auth_config=create_noop_auth_config(),
     )
@@ -255,6 +255,9 @@ class _AsyncSearchBackend:
     def __init__(self):
         self.initialized = False
         self.closed = False
+
+    def index(self, tools, skills=None, server_name=""):
+        pass
 
     async def initialize(self):
         self.initialized = True

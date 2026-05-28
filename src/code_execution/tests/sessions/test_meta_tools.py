@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from ...code_execution.sessions import SessionManager
-from ...code_execution.sessions.meta_tools import create_inspect_session_tool
+from ...sessions import SessionManager
+from ...sessions.meta_tools import create_inspect_session_tool
 
 
 @pytest.mark.asyncio

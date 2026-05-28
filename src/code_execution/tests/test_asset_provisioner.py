@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from code_execution.code_execution.asset_provisioner import (
+from code_execution.asset_provisioner import (
     _compute_sha256,
     _is_blob_source,
     _is_https_source,
     _is_local_source,
     provision_assets,
 )
-from code_execution.code_execution.code_execution_models import AssetSpec, EnvironmentConfig
+from code_execution.code_execution_models import AssetSpec, ServerConfig
 
 
 class TestHelpers:
@@ -65,9 +65,9 @@ class TestProvisionAssets:
 
     @pytest.fixture
     def config_with_local_asset(self, tmp_path, source_file):
-        """Create an EnvironmentConfig with a local file asset."""
+        """Create a ServerConfig with a local file asset."""
         cache_dir = tmp_path / "cache" / "myenv"
-        return EnvironmentConfig(
+        return ServerConfig(
             name="myenv",
             description="Test env",
             type="uv",
@@ -134,7 +134,7 @@ class TestProvisionAssets:
     @pytest.mark.asyncio
     async def test_provision_no_assets(self, tmp_path):
         """Test that provisioning with no assets is a no-op."""
-        config = EnvironmentConfig(
+        config = ServerConfig(
             name="empty",
             description="No assets",
             type="uv",
@@ -147,7 +147,7 @@ class TestProvisionAssets:
     @pytest.mark.asyncio
     async def test_provision_file_not_found(self, tmp_path):
         """Test that provisioning raises when local source doesn't exist."""
-        config = EnvironmentConfig(
+        config = ServerConfig(
             name="missing",
             description="Missing source",
             type="uv",
@@ -171,7 +171,7 @@ class TestProvisionAssets:
         src.parent.mkdir(parents=True)
         src.write_bytes(b'{"vocab": []}')
 
-        config = EnvironmentConfig(
+        config = ServerConfig(
             name="fileuri",
             description="File URI test",
             type="uv",

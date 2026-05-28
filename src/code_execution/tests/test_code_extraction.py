@@ -2,7 +2,7 @@
 
 import ast
 
-from ..code_execution.code_extraction import (
+from ..code_extraction import (
     _VAR_PREFIX_ASSET,
     ASSET_PATHLIB_IMPORT,
     build_asset_preamble,
