@@ -5,6 +5,12 @@ Provides infrastructure for fetching and caching data assets from various
 sources referenced by DataLake qualified names.
 """
 
+from .publishers import (
+    AssetPublisher,
+    BlobPublisher,
+    LocalFilePublisher,
+    parse_destination_tag,
+)
 from .resolution import (
     AssetResolutionMiddleware,
     _resolved_assets,
@@ -13,6 +19,10 @@ from .resolution import (
 )
 
 __all__ = [
+    "AssetPublisher",
+    "BlobPublisher",
+    "LocalFilePublisher",
+    "parse_destination_tag",
     "AssetResolutionMiddleware",
     "_resolved_assets",
     "looks_like_qualified_name",

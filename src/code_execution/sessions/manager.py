@@ -583,6 +583,31 @@ class SessionManager:
             return None
         return record
 
+    def find_artifact_by_name(self, session_id: str, artifact_name: str) -> Optional[_ArtifactRecord]:
+        """Find a registered artifact by its relative name within a session.
+
+        Looks up a previously registered artifact (i.e. one that was discovered
+        during a snapshot-diff after an execute) by its relative filename.  This
+        is used by the publish pipeline to resolve the local path of an artifact
+        before pushing it to remote storage.
+
+        Args:
+            session_id: The session that owns the artifact.
+            artifact_name: Relative filename as registered (e.g. ``"results.csv"``
+                or ``"subdir/report.pdf"``).
+
+        Returns:
+            The :class:`_ArtifactRecord` if found and the backing file still
+            exists, otherwise ``None``.
+        """
+        registry = self._session_artifacts.get(session_id, {})
+        for record in registry.values():
+            if record.name == artifact_name:
+                if record.path.is_file():
+                    return record
+                return None
+        return None
+
     def _cleanup_session_artifacts(self, session_id: str) -> None:
         """Drop the token map and remove the on-disk outputs dir."""
         self._session_artifacts.pop(session_id, None)
