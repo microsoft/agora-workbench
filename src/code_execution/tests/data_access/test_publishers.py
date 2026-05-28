@@ -370,7 +370,13 @@ class TestPublishArtifactTool:
     async def test_publish_succeeds(self, tmp_path, monkeypatch):
         """End-to-end: artifact registered, publisher copies the file."""
         from ... import sessions as sessions_pkg
-        from ...sessions import SessionManager, SessionConfig
+        from ...sessions import (
+            SessionManager,
+            SessionConfig,
+            set_current_user_identity,
+            set_current_request_token,
+            set_current_token_claims,
+        )
 
         monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
         sm = SessionManager(SessionConfig())
@@ -382,7 +388,9 @@ class TestPublishArtifactTool:
         server.session_manager = sm
 
         # Create a session and register an artifact.
-        session_id = sm.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session_id = sm.create_session(
+            data={}, user_identity="u@t", user_token="tok", token_claims={"oid": "u", "tid": "t"}
+        )
         outputs = sm._get_outputs_dir(session_id)
         (outputs / "results.csv").write_text("x,y\n1,2\n")
 
@@ -394,21 +402,37 @@ class TestPublishArtifactTool:
         after = sm._snapshot_outputs_dir(session_id)
         sm._register_artifacts_from_diff(session_id, before, after)
 
-        # Invoke the tool via the FastMCP API — run() sends session_id via context.
-        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
-        assert mcp_tool is not None
+        # Set auth context so _get_or_create_session succeeds.
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
 
-        # Run the tool without MCP session context: session_id comes from ctx=None
-        # so we call the underlying function directly.
+        # Mock _restore_auth_context_for_mcp_session since we set context manually.
+        server._restore_auth_context_for_mcp_session = MagicMock()
+
+        # Create a mock ctx that returns our session_id.
+        mock_ctx = MagicMock()
+        mock_ctx.session_id = session_id
+
+        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
         result_json = await mcp_tool.fn(
-            ctx=None,
+            ctx=mock_ctx,
             artifact_name="results.csv",
             destination="<local>results.csv</local>",
         )
-        # When no session context, the tool returns an error — test this behaviour.
         result = json.loads(result_json)
-        assert result["success"] is False
-        assert "no active session" in result["error"]
+        assert result["success"] is True
+        assert "remote_uri" in result
+
+        # Verify file was actually copied to the publisher's destination.
+        dest = base_out / session_id / "results.csv"
+        assert dest.exists()
+        assert dest.read_text() == "x,y\n1,2\n"
+
+        # Clean up auth context.
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
 
     @pytest.mark.asyncio
     async def test_publish_invalid_destination(self, tmp_path, monkeypatch):
@@ -448,7 +472,7 @@ class TestPublishArtifactTool:
 
     @pytest.mark.asyncio
     async def test_publish_no_session(self, tmp_path):
-        """Returns error JSON when there is no active session (ctx=None)."""
+        """Returns error JSON when there is no auth context (ctx=None)."""
         pub = LocalFilePublisher(base_dir=tmp_path)
         server = _make_server_with_publishers([pub])
 
@@ -462,7 +486,7 @@ class TestPublishArtifactTool:
         result = json.loads(result_json)
 
         assert result["success"] is False
-        assert "no active session" in result["error"]
+        assert "session authentication failed" in result["error"]
 
 
 # ---------------------------------------------------------------------------

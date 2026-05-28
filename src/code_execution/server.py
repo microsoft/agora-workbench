@@ -58,6 +58,7 @@ from .tool_proxy import (
 )
 
 if TYPE_CHECKING:
+    from .data_access.publishers import AssetPublisher
     from .sessions import Session
     from .tool_registry import ToolRegistry
     from .tools.tool_search import ToolSearchBackend
@@ -146,7 +147,7 @@ class CodeExecutionServer:
         auth_config: Optional["AuthConfig"] = None,
         working_dir: Optional[Path] = None,
         tool_search_backend: Optional["ToolSearchBackend"] = None,
-        publishers: Optional[list] = None,
+        publishers: "Optional[list[AssetPublisher]]" = None,
     ):
         """
         Initialize the code execution server.
@@ -172,7 +173,7 @@ class CodeExecutionServer:
         self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
         self._custom_tool_search_backend = tool_search_backend
-        self._publishers: list = list(publishers or [])
+        self._publishers: "list[AssetPublisher]" = list(publishers or [])
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -2102,11 +2103,14 @@ else:
             """
             import json as _json
 
-            session_id = None
+            mcp_session_id = None
             if ctx:
                 try:
-                    session_id = ctx.session_id
+                    mcp_session_id = ctx.session_id
                 except (RuntimeError, AttributeError):
+                    # ctx.session_id may raise if the MCP transport does not
+                    # provide a session identifier (e.g. stdio transport).
+                    # Fall through to let _get_or_create_session handle it.
                     pass
 
             # Parse the destination tag to validate its format and extract the name.
@@ -2146,12 +2150,17 @@ else:
                     indent=2,
                 )
 
-            # Resolve the artifact from the session registry.
-            if session_id is None:
+            # Authenticate and resolve the session (same pattern as other
+            # session-scoped tools: restore auth context, verify ownership).
+            try:
+                server._restore_auth_context_for_mcp_session(mcp_session_id)
+                session = await server._get_or_create_session(tool_name, session_id=mcp_session_id)
+                session_id = session.session_id
+            except Exception as exc:
                 return _json.dumps(
                     {
                         "success": False,
-                        "error": "Cannot publish: no active session found.",
+                        "error": f"Cannot publish: session authentication failed: {exc}",
                     },
                     indent=2,
                 )
@@ -2233,11 +2242,11 @@ else:
         self.mcp.tool(
             name=tool_name,
             description=(
-                f"Publish an artifact from the session output directory to remote storage. "
-                f"The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
-                f"execute call. Use a tagged destination to select the publisher: "
-                f"<blob>results.csv</blob> for Azure Blob Storage, "
-                f"<local>output</local> for local file storage."
+                "Publish an artifact from the session output directory to remote storage. "
+                "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
+                "execute call. Use a tagged destination to select the publisher: "
+                "<blob>results.csv</blob> for Azure Blob Storage, "
+                "<local>output</local> for local file storage."
             ),
         )(publish_artifact)
 
@@ -2452,6 +2461,11 @@ else:
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
         await self._close_tool_search_backends()
+        for publisher in self._publishers:
+            try:
+                await publisher.close()
+            except Exception:
+                LOGGER.debug("Publisher close raised; ignoring during shutdown", exc_info=True)
         try:
             await self.activity_publisher.stop()
         except Exception:
