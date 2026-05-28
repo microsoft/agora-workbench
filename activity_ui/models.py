@@ -43,6 +43,11 @@ class ActivityEvent(BaseModel):
     duration_ms: Optional[float] = None
     tool_calls: Optional[list[dict[str, Any]]] = None
     error: Optional[str] = None
+    # Files written to the session's outputs dir during this execute.  Each
+    # entry: {name, size_bytes, mime_type, modified_at, download_url}.  The
+    # UI renders a collapsed "artifacts (N)" disclosure with a download link
+    # per entry; payload never contains the file bytes themselves.
+    artifacts: Optional[list[dict[str, Any]]] = None
 
     # set on most events so the UI can group by session
     session_id: Optional[str] = None

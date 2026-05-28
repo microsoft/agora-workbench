@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
+import mimetypes
 import os
 import queue
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Optional, Tuple, TYPE_CHECKING
@@ -26,6 +28,46 @@ LOGGER = logging.getLogger(__name__)
 
 _MAX_COMPLETED_JOBS = 200
 _COMPLETED_JOB_TTL_SECONDS = 3600.0  # 1 hour
+
+# Artifact pipeline: each session gets a dedicated outputs subdirectory inside
+# the container/host.  Files written there during an execute become artifacts:
+# the session manager registers them with a UUID token, the MCP server exposes
+# a streaming download endpoint keyed on that token, and the activity UI shows
+# a download row.  No agent tool call is required — discovery happens by
+# diffing the directory snapshot taken before/after each execute.
+_OUTPUTS_BASE_DIR = Path(
+    os.environ.get("AGORA_OUTPUTS_BASE_DIR", str(Path.home() / "agora-outputs"))
+)
+
+# File names ignored when scanning the outputs dir.  Suffix match (`.pyc`,
+# `.pyo`) and exact-component match (`__pycache__`, `.ipynb_checkpoints`).
+# Hidden files (starting with `.`) are also ignored to avoid surfacing
+# editor swap files, lock files, etc.
+_ARTIFACT_DENY_SUFFIXES: Tuple[str, ...] = (".pyc", ".pyo")
+_ARTIFACT_DENY_COMPONENTS: Tuple[str, ...] = ("__pycache__", ".ipynb_checkpoints")
+
+# Per-artifact size cap.  Activity events carry only metadata, so the cap
+# isn't about event size — it's about avoiding registering accidental
+# multi-gigabyte artifacts that the user didn't mean to expose.
+_MAX_ARTIFACT_SIZE_BYTES: int = 500 * 1024 * 1024  # 500 MB
+
+
+@dataclass
+class _ArtifactRecord:
+    """In-memory mapping from download token to a file on disk.
+
+    Lives on ``SessionManager._session_artifacts[session_id][token]``.  The
+    HTTP download endpoint looks the file up by (session_id, token) and
+    streams it from ``path``; the URL's filename component is purely
+    cosmetic and not used for the lookup.
+    """
+
+    token: str
+    path: Path
+    name: str
+    size_bytes: int
+    mime_type: str
+    modified_at: float
 
 
 class MaxSessionsReachedError(RuntimeError):
@@ -98,6 +140,12 @@ class SessionManager:
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
+        # Artifact pipeline state.  ``_session_artifacts`` is the
+        # token -> record map used by the HTTP download endpoint;
+        # ``_kernel_outputs_initialized`` tracks which kernels have already
+        # received the AGORA_OUTPUT_DIR preamble so we only inject it once.
+        self._session_artifacts: dict[str, dict[str, _ArtifactRecord]] = {}
+        self._kernel_outputs_initialized: set[str] = set()
 
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
@@ -153,6 +201,21 @@ class SessionManager:
 
             # Store
             self.storage.store(session_id, session)
+
+            # Create the per-session outputs directory.  Done eagerly so the
+            # kernel can write to it on the very first execute.  Failure to
+            # create is non-fatal: artifact discovery just becomes a no-op for
+            # this session.
+            try:
+                self._get_outputs_dir(session_id).mkdir(parents=True, exist_ok=True)
+            except OSError:
+                LOGGER.warning(
+                    "Could not create outputs dir for session %s under %s; "
+                    "artifact download will be disabled for this session.",
+                    session_id,
+                    _OUTPUTS_BASE_DIR,
+                    exc_info=True,
+                )
 
         LOGGER.info(f"Created session {session_id} (total={self.storage.count()})")
 
@@ -393,6 +456,144 @@ class SessionManager:
 
         return code
 
+    # ------------------------------------------------------------------
+    # Artifact pipeline
+    # ------------------------------------------------------------------
+
+    def _get_outputs_dir(self, session_id: str) -> Path:
+        """Per-session subdir under :data:`_OUTPUTS_BASE_DIR`."""
+        return _OUTPUTS_BASE_DIR / session_id
+
+    def _prepare_outputs_preamble(self, session_id: str) -> str:
+        """Inject AGORA_OUTPUT_DIR setup into the kernel once per session.
+
+        Sets both the env var (so subprocess and library code see it) and a
+        bare ``AGORA_OUTPUT_DIR`` symbol in the kernel namespace (so the
+        agent can ``df.to_csv(f"{AGORA_OUTPUT_DIR}/x.csv")`` without an
+        ``import os``).  Subsequent executes return empty; the kernel
+        already has these set.
+        """
+        if session_id in self._kernel_outputs_initialized:
+            return ""
+        outputs_dir = str(self._get_outputs_dir(session_id))
+        self._kernel_outputs_initialized.add(session_id)
+        return (
+            "import os as __agora_os__\n"
+            f"__agora_os__.environ['AGORA_OUTPUT_DIR'] = {outputs_dir!r}\n"
+            f"AGORA_OUTPUT_DIR = {outputs_dir!r}\n"
+            "del __agora_os__\n"
+        )
+
+    def _is_denylisted_artifact(self, path: Path) -> bool:
+        """Skip caches, hidden files, and known-noise filenames."""
+        if path.name.startswith("."):
+            return True
+        if path.suffix in _ARTIFACT_DENY_SUFFIXES:
+            return True
+        if any(part in _ARTIFACT_DENY_COMPONENTS for part in path.parts):
+            return True
+        return False
+
+    def _snapshot_outputs_dir(self, session_id: str) -> dict[str, Tuple[int, float]]:
+        """Return ``{relative_path: (size, mtime)}`` for files in the outputs dir.
+
+        Used to diff before/after each execute and identify new or modified
+        artifacts.  Returns empty if the dir doesn't exist (session whose
+        mkdir failed at create time, or a path-misconfigured deployment).
+        """
+        outputs_dir = self._get_outputs_dir(session_id)
+        if not outputs_dir.is_dir():
+            return {}
+        snapshot: dict[str, Tuple[int, float]] = {}
+        for path in outputs_dir.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(outputs_dir)
+            if self._is_denylisted_artifact(rel):
+                continue
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            snapshot[str(rel)] = (stat.st_size, stat.st_mtime)
+        return snapshot
+
+    def _register_artifacts_from_diff(
+        self,
+        session_id: str,
+        before: dict[str, Tuple[int, float]],
+        after: dict[str, Tuple[int, float]],
+    ) -> list[dict]:
+        """Diff two snapshots and register each new/changed file as an artifact.
+
+        Returns a list of metadata dicts suitable for the
+        ``CodeExecutionResult.artifacts`` field.  The dicts contain a
+        ``download_token`` placeholder rather than a fully-qualified URL —
+        URL composition happens in the MCP server layer where the public
+        base URL is known.
+        """
+        outputs_dir = self._get_outputs_dir(session_id)
+        registry = self._session_artifacts.setdefault(session_id, {})
+        records: list[dict] = []
+        for rel_path, after_info in after.items():
+            if before.get(rel_path) == after_info:
+                continue  # unchanged
+            size_bytes, mtime = after_info
+            if size_bytes > _MAX_ARTIFACT_SIZE_BYTES:
+                LOGGER.warning(
+                    "Skipping artifact %s in session %s: %d bytes exceeds cap %d",
+                    rel_path,
+                    session_id,
+                    size_bytes,
+                    _MAX_ARTIFACT_SIZE_BYTES,
+                )
+                continue
+            token = uuid.uuid4().hex
+            record = _ArtifactRecord(
+                token=token,
+                path=outputs_dir / rel_path,
+                name=rel_path,
+                size_bytes=size_bytes,
+                mime_type=mimetypes.guess_type(rel_path)[0] or "application/octet-stream",
+                modified_at=mtime,
+            )
+            registry[token] = record
+            records.append(
+                {
+                    "name": rel_path,
+                    "size_bytes": size_bytes,
+                    "mime_type": record.mime_type,
+                    "modified_at": datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat(),
+                    "download_token": token,
+                }
+            )
+        return records
+
+    def get_artifact_record(self, session_id: str, token: str) -> Optional[_ArtifactRecord]:
+        """Look up an artifact for the download endpoint.
+
+        Returns ``None`` for unknown sessions/tokens *and* for tokens whose
+        backing file has been removed — both surface as 404 at the HTTP
+        layer.
+        """
+        record = self._session_artifacts.get(session_id, {}).get(token)
+        if record is None:
+            return None
+        if not record.path.is_file():
+            return None
+        return record
+
+    def _cleanup_session_artifacts(self, session_id: str) -> None:
+        """Drop the token map and remove the on-disk outputs dir."""
+        self._session_artifacts.pop(session_id, None)
+        self._kernel_outputs_initialized.discard(session_id)
+        outputs_dir = self._get_outputs_dir(session_id)
+        if outputs_dir.exists():
+            try:
+                shutil.rmtree(outputs_dir, ignore_errors=True)
+            except OSError:
+                LOGGER.warning("Failed to remove outputs dir for session %s", session_id, exc_info=True)
+
     async def _collect_background_job(
         self,
         job: _BackgroundJob,
@@ -602,7 +803,7 @@ class SessionManager:
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
-    ) -> Tuple[str, str, bool]:
+    ) -> Tuple[str, str, bool, list[dict]]:
         """
         Execute code in the session's Jupyter kernel.
 
@@ -617,7 +818,12 @@ class SessionManager:
             working_dir: Optional working directory for kernel
 
         Returns:
-            Tuple of (stdout, stderr, success)
+            Tuple of ``(stdout, stderr, success, artifacts)`` where
+            ``artifacts`` is a list of metadata dicts (one per new/modified
+            file under the session's outputs dir) with shape
+            ``{name, size_bytes, mime_type, modified_at, download_token}``.
+            Each ``download_token`` is unguessable and valid for the
+            session's lifetime; the MCP server composes the full URL.
         """
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).
@@ -633,11 +839,12 @@ class SessionManager:
                     "Please create a new session and retry."
                 ),
                 False,
+                [],
             )
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
-            return "", f"Session busy — job {running_job_id} is still running", False
+            return "", f"Session busy — job {running_job_id} is still running", False, []
 
         async with self._get_kernel_execute_lock(session_id):
             return await self._execute_code_locked(
@@ -658,12 +865,18 @@ class SessionManager:
         working_dir: Optional[str],
         user_token: Optional[str],
         user_identity: Optional[str],
-    ) -> Tuple[str, str, bool]:
+    ) -> Tuple[str, str, bool, list[dict]]:
         """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
-        code = self._prepare_code_with_token_preamble(session_id, code, user_token)
+        code = self._prepare_outputs_preamble(session_id) + \
+            self._prepare_code_with_token_preamble(session_id, code, user_token)
+
+        # Snapshot the outputs dir before executing so we can diff against
+        # the post-execute state and surface only files this execute created
+        # or modified.
+        outputs_before = self._snapshot_outputs_dir(session_id)
 
         # Execute code
         msg_id = kc.execute(code)
@@ -688,13 +901,14 @@ class SessionManager:
                             "Please create a new session and retry."
                         ),
                         False,
+                        [],
                     )
                 last_keepalive = now
 
             if time.monotonic() - start_time > timeout:
                 await km.interrupt_kernel()
                 await asyncio.sleep(1.0)
-                return "", f"Execution timeout after {timeout}s", False
+                return "", f"Execution timeout after {timeout}s", False, []
 
             try:
                 msg = await kc.get_iopub_msg(timeout=1.0)
@@ -767,7 +981,22 @@ class SessionManager:
 
         self._kernel_last_used[session_id] = time.time()
 
-        return stdout, stderr, success
+        # Diff outputs dir post-execute and register any new/modified files
+        # as artifacts.  Failures here must not fail the execute itself —
+        # the kernel already ran successfully; artifact surfacing is best-
+        # effort observability.
+        try:
+            outputs_after = self._snapshot_outputs_dir(session_id)
+            artifacts = self._register_artifacts_from_diff(
+                session_id, outputs_before, outputs_after
+            )
+        except Exception:
+            LOGGER.warning(
+                "Artifact discovery failed for session %s", session_id, exc_info=True
+            )
+            artifacts = []
+
+        return stdout, stderr, success, artifacts
 
     async def _shutdown_kernel(self, session_id: str):
         """Shutdown and remove a kernel."""
@@ -803,6 +1032,7 @@ class SessionManager:
             del self._kernel_last_used[session_id]
             self._kernel_tokens.pop(session_id, None)
             self._kernel_execute_locks.pop(session_id, None)
+            self._cleanup_session_artifacts(session_id)
 
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
