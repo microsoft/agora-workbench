@@ -91,6 +91,12 @@ class _BackgroundJob:
     error: Optional[str] = None
     completed_at: Optional[float] = None
     task: Optional[asyncio.Task] = None
+    # Pre-execute snapshot of the session's outputs dir, captured at
+    # submit time; the terminal handler diffs against the post-execute
+    # snapshot to surface new/modified files as artifacts.  Mirrors the
+    # before/after pattern in :meth:`_execute_code_locked`.
+    outputs_before: dict[str, Tuple[int, float]] = field(default_factory=dict)
+    artifacts: list[dict] = field(default_factory=list)
 
 
 class SessionConfig:
@@ -594,6 +600,29 @@ class SessionManager:
             except OSError:
                 LOGGER.warning("Failed to remove outputs dir for session %s", session_id, exc_info=True)
 
+    def _finalize_background_artifacts(self, job: _BackgroundJob) -> None:
+        """Diff the outputs dir against the pre-execute snapshot and record
+        new/modified files on the job.
+
+        Best-effort: snapshot or registration failures are logged and leave
+        ``job.artifacts`` empty rather than failing the job — matches the
+        foreground path's behavior in :meth:`_execute_code_locked`.  Skipped
+        when the session has already been cleaned up (the outputs dir is
+        gone, so the snapshot would be empty anyway).
+        """
+        try:
+            outputs_after = self._snapshot_outputs_dir(job.session_id)
+            job.artifacts = self._register_artifacts_from_diff(
+                job.session_id, job.outputs_before, outputs_after
+            )
+        except Exception:
+            LOGGER.warning(
+                "Background artifact discovery failed for session %s job %s",
+                job.session_id,
+                job.job_id,
+                exc_info=True,
+            )
+
     async def _collect_background_job(
         self,
         job: _BackgroundJob,
@@ -624,6 +653,8 @@ class SessionManager:
                     job.success = False
                     job.error = f"Execution timeout after {job.timeout}s"
                     job.status = "failed"
+                    # Capture anything written before the interrupt fired.
+                    self._finalize_background_artifacts(job)
                     self._mark_job_finished(job)
                     return
 
@@ -681,12 +712,14 @@ class SessionManager:
 
             job.status = "completed" if job.success else "failed"
             self._kernel_last_used[job.session_id] = time.time()
+            self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
         except Exception as e:
             job.success = False
             job.error = f"Background job failed: {e}"
             job.stderr_parts.append(str(e))
             job.status = "failed"
+            self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
 
     async def start_background_execution_for_session(
@@ -710,7 +743,16 @@ class SessionManager:
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
-        code = self._prepare_code_with_token_preamble(session_id, code, user_token)
+        # Same preamble shape as the foreground path: outputs preamble
+        # must run before the token preamble so AGORA_OUTPUT_DIR is
+        # populated even when this background call is the kernel's
+        # first execute.  Snapshot before kc.execute so the terminal
+        # handler can diff for artifacts.
+        code = (
+            self._prepare_outputs_preamble(session_id)
+            + self._prepare_code_with_token_preamble(session_id, code, user_token)
+        )
+        outputs_before = self._snapshot_outputs_dir(session_id)
         msg_id = kc.execute(code)
 
         job_id = f"j_{uuid.uuid4().hex[:12]}"
@@ -721,6 +763,7 @@ class SessionManager:
             timeout=timeout,
             start_time=time.monotonic(),
             user_identity=user_identity,
+            outputs_before=outputs_before,
         )
         job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
         self._background_jobs[job_id] = job
@@ -764,6 +807,11 @@ class SessionManager:
         result["success"] = job.success
         if job.error:
             result["error"] = job.error
+        # Artifacts are populated by _finalize_background_artifacts when the
+        # job reaches a terminal state; carry them here without download URLs
+        # — URL composition happens in the MCP server layer where the public
+        # base URL is known (matches the foreground path's contract).
+        result["artifacts"] = list(job.artifacts)
         return result
 
     async def await_background_job(self, job_id: str) -> Optional[dict[str, Any]]:
