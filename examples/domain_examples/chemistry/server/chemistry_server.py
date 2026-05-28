@@ -23,6 +23,7 @@ from pathlib import Path
 
 from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
+from code_execution.data_access.publishers import LocalFilePublisher
 from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 
 # Path to the chemistry_tools package (relative to this file so it works
@@ -88,10 +89,15 @@ tool_registry = ToolRegistry()
 for tool_def in CHEMISTRY_TOOLS:
     tool_registry.register_tool(tool_def)
 
+# Configure a LocalFilePublisher so the publish_artifact tool is available.
+# Artifacts are written to /tmp/published_artifacts/{session_id}/{name}.
+_PUBLISH_DIR = Path(os.getenv("PUBLISH_DIR", "/tmp/published_artifacts"))
+
 server = ChemistryServer(
     server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
+    publishers=[LocalFilePublisher(base_dir=_PUBLISH_DIR)],
 )
 
 if __name__ == "__main__":
