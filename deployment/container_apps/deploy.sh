@@ -117,7 +117,13 @@ if [[ -z "$SERVER_NAME" ]]; then
 fi
 
 if [[ -z "$DOCKERFILE" ]]; then
-    DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
+    # Prefer a server-specific Dockerfile if one exists
+    SERVER_DOCKERFILE="${REPO_ROOT}/examples/domain_examples/${SERVER_NAME}/Dockerfile"
+    if [[ -f "$SERVER_DOCKERFILE" ]]; then
+        DOCKERFILE="$SERVER_DOCKERFILE"
+    else
+        DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
+    fi
 fi
 
 if [[ ! -f "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
