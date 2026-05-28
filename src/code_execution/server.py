@@ -377,7 +377,7 @@ class CodeExecutionServer:
     _BLOCKED_MODULES = execution_defaults._BLOCKED_MODULES
     _ALLOWED_PATH_PREFIXES = execution_defaults._ALLOWED_PATH_PREFIXES
 
-    def validate_code(self, *args, **kwargs):
+    def validate_code(self, code: str) -> tuple[bool, "Optional[str]"]:
         """
         Validate user-provided code before execution.
         This is a thin instance-method wrapper around the default implementation
@@ -386,7 +386,7 @@ class CodeExecutionServer:
 
         Override to adjust behavior.
         """
-        return execution_defaults.validate_code(self, *args, **kwargs)
+        return execution_defaults.validate_code(self, code)
 
     def postprocess_result(self, result: CodeExecutionResult) -> CodeExecutionResult:
         """
