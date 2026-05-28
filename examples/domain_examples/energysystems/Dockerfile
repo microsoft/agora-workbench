@@ -13,4 +13,7 @@ FROM ${BASE_IMAGE}
 # Copy the full domain tree (server, tools, skills, energysystems_tools package)
 COPY --chown=appuser:appuser examples/domain_examples/energysystems /app/domain_examples/energysystems
 
+# Pre-build environment (warm start)
+RUN python -m domain_examples.energysystems.server.energysystems_server --warm
+
 CMD ["python", "-m", "domain_examples.energysystems.server.energysystems_server"]

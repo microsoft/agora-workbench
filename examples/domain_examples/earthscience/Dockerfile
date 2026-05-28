@@ -14,4 +14,7 @@ FROM ${BASE_IMAGE}
 # the full package path consistently at runtime.
 COPY --chown=appuser:appuser examples/domain_examples/earthscience /app/domain_examples/earthscience
 
+# Pre-build environment (warm start)
+RUN python -m domain_examples.earthscience.server.earthscience_server --warm
+
 CMD ["python", "-m", "domain_examples.earthscience.server.earthscience_server"]

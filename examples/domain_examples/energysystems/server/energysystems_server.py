@@ -14,6 +14,7 @@ See the README for full instructions.
 
 import asyncio
 import os
+import sys
 from pathlib import Path
 
 from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
@@ -120,6 +121,9 @@ server = EnergySystemsServer(
 )
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8000"))
-    asyncio.run(server.run_http(host=host, port=port))
+    if "--warm" in sys.argv:
+        asyncio.run(server.warm())
+    else:
+        host = os.getenv("HOST", "0.0.0.0")
+        port = int(os.getenv("PORT", "8000"))
+        asyncio.run(server.run_http(host=host, port=port))

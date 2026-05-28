@@ -337,6 +337,18 @@ class CodeExecutionServer:
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
 
+    async def warm(self):
+        """Build environment and provision assets without starting the server.
+
+        Use this during Docker builds to pre-build the environment so it's
+        ready at runtime without needing network access or ephemeral storage.
+        At runtime, _ensure_environment() detects the pre-built env and skips
+        the build step.
+        """
+        LOGGER.info(f"Warming environment: {self.server_config.name}")
+        await self._ensure_environment()
+        LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
+
     # ========================================================================
     # Optional hooks - can be overridden by subclasses
     # ========================================================================
