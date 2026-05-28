@@ -2,7 +2,7 @@
 #
 # Prerequisites — build the base image first:
 #   # From the repository root:
-#   docker build -f deployment/mcp_server/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 #
 # Then build this server image (from src/):
 #   docker build -f examples/domain_examples/energysystems/Dockerfile -t energysystems-server:local .

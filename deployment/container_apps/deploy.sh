@@ -171,7 +171,18 @@ echo ""
 
 # ── 1. Build Docker image ────────────────────────────────────────────────────
 
-echo ">> Building Docker image..."
+# Build the base image first if the server Dockerfile uses it (ARG BASE_IMAGE)
+BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
+if [[ "$DOCKERFILE" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
+    echo ">> Building base image (mcp-server-base:local)..."
+    docker build \
+        --file "$BASE_DOCKERFILE" \
+        --tag "mcp-server-base:local" \
+        "$BUILD_CONTEXT"
+    echo ""
+fi
+
+echo ">> Building server image..."
 docker build \
     --file "$DOCKERFILE" \
     --tag "$IMAGE_REF" \
