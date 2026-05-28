@@ -26,6 +26,9 @@ FROM mcr.microsoft.com/devcontainers/python:3.11 AS base
 
 WORKDIR /app
 
+# Create non-root user early so subsequent installs can be owned correctly
+RUN useradd -m -d /home/appuser -s /bin/bash appuser
+
 # Remove problematic Yarn repository that has GPG key issues
 RUN rm -f /etc/apt/sources.list.d/yarn.list
 
@@ -41,11 +44,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx
 
-# Install mamba with version pinning
+# Install mamba with version pinning (owned by appuser to avoid chown layer)
 ARG MINIFORGE_VERSION=25.11.0-1
 RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/download/${MINIFORGE_VERSION}/Miniforge3-Linux-x86_64.sh" && \
     bash Miniforge3-Linux-x86_64.sh -b -p /opt/miniforge3 && \
-    rm Miniforge3-Linux-x86_64.sh
+    rm Miniforge3-Linux-x86_64.sh && \
+    chown -R appuser:appuser /opt/miniforge3
 ENV PATH="/opt/miniforge3/bin:$PATH"
 
 # Ensure pip is up to date
@@ -57,7 +61,7 @@ RUN python -m pip install --upgrade pip
 RUN mkdir -p /opt/wheelhouse && \
     python -m pip download --dest /opt/wheelhouse \
     "ipykernel>=6.29.0" \
-    && ls -1 /opt/wheelhouse | head -n 5
+    && chown -R appuser:appuser /opt/wheelhouse
 
 # Copy package metadata for dependency resolution, then install runtime deps
 COPY pyproject.toml /app/pyproject.toml
@@ -69,10 +73,10 @@ RUN python -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'
 # .dockerignore excludes tests/ and dev files from this COPY
 COPY src/code_execution /app/code_execution
 
-# Create cache directory for MCP environments and add a non-root user for runtime
-RUN useradd -m -d /home/appuser -s /bin/bash appuser && \
-    mkdir -p /home/appuser/.cache/mcp-envs && \
-    chown -R appuser:appuser /app /home/appuser /opt/wheelhouse /opt/miniforge3/pkgs
+# Set up remaining appuser directories (no large chown needed — miniforge
+# and wheelhouse were already owned correctly in their install layers)
+RUN mkdir -p /home/appuser/.cache/mcp-envs && \
+    chown -R appuser:appuser /app /home/appuser
 
 # Add /app to PYTHONPATH so kernel processes can import domain modules
 ENV PYTHONPATH="/app:${PYTHONPATH}"
