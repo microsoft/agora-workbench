@@ -9,7 +9,15 @@
 # Then create your own Dockerfile:
 #   FROM mcp-server-base:local
 #   COPY --chown=appuser:appuser my_server/ /app/my_server/
+#   RUN python -m my_server.server --warm
 #   CMD ["python", "-m", "my_server.server"]
+#
+# The --warm flag pre-builds the Python environment (conda/pip/uv) during
+# docker build, so the container starts immediately at runtime without needing
+# network access or large ephemeral storage. The server's _ensure_environment()
+# detects the pre-built env and skips building. This step must be in the
+# server-specific Dockerfile (not here) because it requires the server code
+# to already be COPY'd into the image.
 
 # ============================================================================
 # Stage: Base image with common dependencies

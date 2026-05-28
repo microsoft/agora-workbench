@@ -164,9 +164,29 @@ the file share. Subsequent replicas (and restarts) reuse the cached content.
 
 1. Copy one of `parameters/chemistry.bicepparam`, `parameters/earthscience.bicepparam`, or `parameters/energysystems.bicepparam` to `parameters/<name>.bicepparam`.
 2. Update `serverName` and any server-specific overrides (e.g. cpu, memory).
-3. Optionally set the `command` parameter to override the image's `CMD`.
-   When omitted, the container uses whatever `CMD` is set in your Dockerfile.
-4. Run:
+3. Create a Dockerfile extending the base image with the warm-start pattern:
+   ```dockerfile
+   ARG BASE_IMAGE=mcp-server-base:local
+   FROM ${BASE_IMAGE}
+
+   COPY --chown=appuser:appuser path/to/your/server /app/domain_examples/<name>
+
+   # Pre-build environment during docker build (required for ACA deployment).
+   # The server's --warm flag builds the conda/pip/uv environment and exits.
+   # At runtime, the server detects the pre-built env and starts immediately.
+   RUN python -m domain_examples.<name>.server.<name>_server --warm
+
+   CMD ["python", "-m", "domain_examples.<name>.server.<name>_server"]
+   ```
+4. Ensure your server script handles `--warm`:
+   ```python
+   if __name__ == "__main__":
+       if "--warm" in sys.argv:
+           asyncio.run(server.warm())
+       else:
+           asyncio.run(server.run_http(host=host, port=port))
+   ```
+5. Run:
    ```bash
-   ./deploy.sh --server <name> --dockerfile /path/to/Dockerfile --context /path/to/context
+   ./deploy.sh --server <name>
    ```
