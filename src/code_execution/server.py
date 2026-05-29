@@ -2321,6 +2321,7 @@ else:
             )
 
         app.routes.append(Route("/health", health_check, methods=["GET"]))
+        app.routes.append(Route("/healthz", health_check, methods=["GET"]))
 
         # OAuth 2.0 Protected Resource Metadata (RFC 9728)
         # Enables MCP clients (e.g. Copilot CLI) to discover the authorization
@@ -2672,7 +2673,7 @@ else:
                 path = scope.get("path", "")
 
                 # Skip auth for health check and OAuth metadata
-                if path == "/health" or path.startswith("/.well-known/"):
+                if path in ("/health", "/healthz") or path.startswith("/.well-known/"):
                     await self.app(scope, receive, send)
                     return
 
