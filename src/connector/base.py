@@ -59,6 +59,7 @@ class ConnectorServer(BaseMCPServer):
 
         # Upstream state
         self._upstream_catalogs: dict[str, list[ToolDefinition]] = {}
+        self._upstream_sessions: dict[str, str] = {}  # upstream_name -> MCP session ID
 
         # Tool search
         self._tool_search_backends: list[Any] = []
@@ -319,6 +320,49 @@ class ConnectorServer(BaseMCPServer):
     # MCP Proxy Infrastructure
     # ========================================================================
 
+    async def _ensure_upstream_session(self, upstream: UpstreamConfig, headers: dict[str, str]) -> str:
+        """Ensure an MCP session exists for the upstream, creating one if needed.
+
+        Returns the upstream session ID.
+        """
+        if upstream.name in self._upstream_sessions:
+            return self._upstream_sessions[upstream.name]
+
+        upstream_url = upstream.url.rstrip("/")
+        init_headers = {
+            **headers,
+            "Accept": "text/event-stream, application/json",
+        }
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": str(uuid.uuid4()),
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": f"{self._server_name}-proxy", "version": "1.0"},
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{upstream_url}/mcp", json=init_request, headers=init_headers)
+            resp.raise_for_status()
+            session_id = resp.headers.get("mcp-session-id")
+            if not session_id:
+                raise RuntimeError(f"Upstream '{upstream.name}' did not return Mcp-Session-Id on initialize")
+
+            # Send initialized notification
+            notif_headers = {**init_headers, "Mcp-Session-Id": session_id}
+            await client.post(
+                f"{upstream_url}/mcp",
+                json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                headers=notif_headers,
+            )
+
+        self._upstream_sessions[upstream.name] = session_id
+        LOGGER.info("Established MCP session with upstream '%s': %s", upstream.name, session_id[:12])
+        return session_id
+
     async def _proxy_mcp_tool_call(
         self,
         upstream: UpstreamConfig,
@@ -328,7 +372,7 @@ class ConnectorServer(BaseMCPServer):
     ) -> str:
         """Proxy an MCP tool call to an upstream server.
 
-        Forwards the caller's Bearer token and MCP session context.
+        Manages upstream MCP sessions and forwards the caller's Bearer token.
         """
         upstream_url = upstream.url.rstrip("/")
 
@@ -340,22 +384,22 @@ class ConnectorServer(BaseMCPServer):
                 tool_name,
             )
 
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream, application/json",
+        }
         if request_token:
             headers["Authorization"] = f"Bearer {request_token}"
 
-        if ctx:
-            try:
-                session_id = ctx.session_id
-                if session_id:
-                    headers["Mcp-Session-Id"] = session_id
-            except (RuntimeError, AttributeError) as exc:
-                LOGGER.debug(
-                    "Skipping MCP session ID forwarding for upstream '%s' tool '%s': %s",
-                    upstream.name,
-                    tool_name,
-                    exc,
-                )
+        # Establish/reuse upstream MCP session
+        try:
+            upstream_session_id = await self._ensure_upstream_session(upstream, headers)
+            headers["Mcp-Session-Id"] = upstream_session_id
+        except Exception as exc:
+            LOGGER.error("Failed to establish session with upstream '%s': %s", upstream.name, exc)
+            return json.dumps(
+                {"success": False, "error": f"Cannot establish session with upstream '{upstream.name}': {exc}"}
+            )
 
         request_id = str(uuid.uuid4())
         mcp_request = {
@@ -368,8 +412,19 @@ class ConnectorServer(BaseMCPServer):
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(f"{upstream_url}/mcp", json=mcp_request, headers=headers)
+
+                # If session expired, retry with a fresh session
+                if response.status_code in (400, 404):
+                    LOGGER.info("Upstream session may have expired for '%s', re-establishing...", upstream.name)
+                    self._upstream_sessions.pop(upstream.name, None)
+                    upstream_session_id = await self._ensure_upstream_session(upstream, headers)
+                    headers["Mcp-Session-Id"] = upstream_session_id
+                    response = await client.post(f"{upstream_url}/mcp", json=mcp_request, headers=headers)
+
                 response.raise_for_status()
-                result = response.json()
+
+                # Parse SSE response (upstream returns text/event-stream)
+                result = self._parse_mcp_response(response)
 
                 if "error" in result:
                     error = result["error"]
@@ -398,6 +453,17 @@ class ConnectorServer(BaseMCPServer):
             return json.dumps(
                 {"success": False, "error": f"Cannot reach upstream '{upstream.name}': {type(exc).__name__}: {exc}"}
             )
+
+    @staticmethod
+    def _parse_mcp_response(response: httpx.Response) -> dict:
+        """Parse an MCP response, handling both JSON and SSE formats."""
+        content_type = response.headers.get("content-type", "")
+        if "text/event-stream" in content_type:
+            for line in response.text.split("\n"):
+                if line.startswith("data: "):
+                    return json.loads(line[6:])
+            return {"error": {"message": "No data in SSE response"}}
+        return response.json()
 
     # ========================================================================
     # BaseMCPServer abstract implementations
