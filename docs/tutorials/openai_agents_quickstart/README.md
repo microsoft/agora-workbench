@@ -303,8 +303,7 @@ cd examples/domain_examples/chemistry && docker compose down
 - **Tool deferred-loading** — for large tool surfaces, layer in the SDK's
   built-in `ToolSearchTool()` / `tool_namespace(...)` so the model can
   search-and-then-call instead of receiving every tool schema upfront.
-- **Bring up the agora-workbench adapter** — once
-  [PR A from the adapter plan](../../OPENAI_AGENTS_ADAPTER_PLAN.md#5-pr-sequencing)
+- **Bring up the agora-workbench adapter** — once the adapter PR sequence
   lands, swap the local `chat_client.py` for `make_openai_agents_model`
   and the inline MCP setup for the shared
   `tools.mcp.adapters.openai_agents` adapter.
