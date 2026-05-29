@@ -29,23 +29,6 @@ from agent_helpers.llm.spec import ModelSpec
 
 LOGGER = logging.getLogger(__name__)
 
-# openai-agents tries to ship traces to OpenAI's platform tracing endpoint
-# (api.openai.com/v1/traces), which requires a real OpenAI **platform** API
-# key — distinct from your Azure OpenAI key or Entra token. When the agent
-# runs against Azure, every turn raises a 401/403 from the tracing exporter
-# even though the model call itself succeeded, which looks like a "license"
-# or auth failure in the logs. Disable tracing globally so the SDK doesn't
-# try to export anything.
-#
-# See: https://community.openai.com/t/agents-sdk-with-azure-hosted-models/1157781
-try:
-    from agents import set_tracing_disabled
-
-    set_tracing_disabled(disabled=True)
-except ImportError:  # pragma: no cover — openai-agents not installed yet
-    pass
-
-
 def _make_azure_model(spec: ModelSpec) -> Any:
     """Build an Azure OpenAI model backed by ``AsyncAzureOpenAI``.
 
@@ -56,6 +39,22 @@ def _make_azure_model(spec: ModelSpec) -> Any:
     ``OpenAIChatCompletionsModel`` for older gateways that don't expose
     ``/responses``.
     """
+    # openai-agents tries to ship traces to OpenAI's platform tracing endpoint
+    # (api.openai.com/v1/traces), which requires a real OpenAI **platform** API
+    # key — distinct from your Azure OpenAI key or Entra token. When the agent
+    # runs against Azure, every turn raises a 401/403 from the tracing exporter
+    # even though the model call itself succeeded, which looks like a "license"
+    # or auth failure in the logs. Disable tracing globally for this Azure path
+    # so the SDK doesn't try to export anything.
+    #
+    # See: https://community.openai.com/t/agents-sdk-with-azure-hosted-models/1157781
+    try:
+        from agents import set_tracing_disabled
+
+        set_tracing_disabled(disabled=True)
+    except ImportError:  # pragma: no cover — openai-agents not installed yet
+        pass
+
     from openai import AsyncAzureOpenAI
 
     client_kwargs: dict[str, Any] = {
