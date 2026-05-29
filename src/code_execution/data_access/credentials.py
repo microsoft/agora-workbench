@@ -140,7 +140,12 @@ class MsalCacheCredential:
     async def __aenter__(self):
         return self
 
-    async def __aexit__(self, *args):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None = None,
+        exc_value: BaseException | None = None,
+        traceback: Any = None,
+    ) -> None:
         await self.close()
 
 
@@ -165,7 +170,7 @@ def create_storage_credential():
 
     managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
 
-    credentials = [MsalCacheCredential()]
+    credentials: list[MsalCacheCredential | ManagedIdentityCredential] = [MsalCacheCredential()]
 
     if managed_identity_client_id:
         credentials.append(ManagedIdentityCredential(client_id=managed_identity_client_id))
