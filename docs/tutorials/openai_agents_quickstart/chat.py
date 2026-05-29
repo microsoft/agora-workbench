@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 
 from agent import (
     step_a_chat_client,
