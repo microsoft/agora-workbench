@@ -2615,6 +2615,22 @@ else:
 
         app.routes.append(Route("/object-transfer/receive", object_transfer_receive, methods=["POST"]))
 
+        # Tool catalog endpoint: returns the server's ToolRegistry as JSON.
+        # Used by ConnectorServers to aggregate tool catalogs from upstream servers.
+        async def catalog(request: Request):
+            """Return the server's tool catalog for connector aggregation."""
+            tools_data = []
+            if self.tool_registry:
+                tools_data = [t.model_dump(mode="json") for t in self.tool_registry.tools]
+            return JSONResponse(
+                {
+                    "server_name": self.server_config.name,
+                    "tools": tools_data,
+                }
+            )
+
+        app.routes.append(Route("/catalog", catalog, methods=["GET"]))
+
     def _create_middleware(self):
         """
         Create Starlette middleware list as (middleware_class, kwargs) tuples.
