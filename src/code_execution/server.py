@@ -2258,6 +2258,8 @@ else:
             description=(
                 "Publish an artifact from the session output directory to remote storage or "
                 "make it downloadable via the GUI. "
+                "Only use this tool when the user explicitly requests a file download, "
+                "export, or save — do not publish artifacts proactively. "
                 "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
                 "execute call. Use a tagged destination to select the publisher: "
                 "<gui>results.csv</gui> for browser download via the activity UI, "

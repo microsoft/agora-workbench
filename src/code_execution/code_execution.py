@@ -524,9 +524,12 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
         Saving files for the user: write to ``AGORA_OUTPUT_DIR`` (available as
         both an env var and a bare Python variable in the kernel).  Files
-        written there during this execute appear as downloadable artifacts
-        in the user's activity UI.  Files written elsewhere (e.g. ``/tmp``)
-        stay inside the kernel container and are not visible to the user.
+        written there are registered as publishable artifacts.  To make a
+        file downloadable in the user's browser, publish it with the
+        publish_artifact tool using ``<gui>filename</gui>`` — but only do
+        so when the user explicitly asks for a download or export.
+        Files written elsewhere (e.g. ``/tmp``) stay inside the kernel
+        container and are not visible to the user.
         Example::
 
             df.to_csv(f"{{AGORA_OUTPUT_DIR}}/results.csv", index=False)
