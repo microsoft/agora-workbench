@@ -64,6 +64,8 @@ IMAGE_TAG=""                         # auto-set to git short SHA if empty
 PARAM_FILE=""                        # auto-resolved from server name
 DOCKERFILE=""                        # defaults to deployment/base.Dockerfile
 BUILD_CONTEXT=""                     # defaults to repo root
+TEMPLATE_FILE=""                     # defaults to main.bicep
+SKIP_BASE_BUILD=false
 DRY_RUN=false
 
 usage() {
@@ -79,6 +81,8 @@ Optional:
                                 (default: deployment/base.Dockerfile)
   --context, -c         PATH    Docker build context directory
                                 (default: repository root)
+  --template            PATH    Bicep template file (default: main.bicep)
+  --skip-base-build             Skip building the mcp-server-base image
 
 Optional:
   --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env.server
@@ -101,6 +105,8 @@ while [[ $# -gt 0 ]]; do
         --server|-s)          SERVER_NAME="$2";     shift 2 ;;
         --dockerfile|-f)      DOCKERFILE="$2";      shift 2 ;;
         --context|-c)         BUILD_CONTEXT="$2";   shift 2 ;;
+        --template)           TEMPLATE_FILE="$2";   shift 2 ;;
+        --skip-base-build)    SKIP_BASE_BUILD=true; shift ;;
         --tag|-t)             IMAGE_TAG="$2";       shift 2 ;;
         --acr-name)           ACR_NAME="$2";        shift 2 ;;
         --storage-link)       STORAGE_LINK="$2";    shift 2 ;;
@@ -163,7 +169,11 @@ fi
 DOCKERFILE="$(cd "$(dirname "$DOCKERFILE")" && pwd)/$(basename "$DOCKERFILE")"
 BUILD_CONTEXT="$(cd "$BUILD_CONTEXT" && pwd)"
 ACR_LOGIN_SERVER="${ACR_NAME}.azurecr.io"
-IMAGE_REF="${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:${IMAGE_TAG}"
+IMAGE_REF="${ACR_LOGIN_SERVER}/${SERVER_NAME}:${IMAGE_TAG}"
+
+if [[ -z "$TEMPLATE_FILE" ]]; then
+    TEMPLATE_FILE="$SCRIPT_DIR/main.bicep"
+fi
 
 # Resolve the environment resource ID
 ENV_ID=$(az containerapp env show \
@@ -171,8 +181,9 @@ ENV_ID=$(az containerapp env show \
     --name "$ACA_ENV_NAME" \
     --query id --output tsv)
 
-echo "=== MCP Server ACA Deployment ==="
+echo "=== ACA Deployment ==="
 echo "  Server:         $SERVER_NAME"
+echo "  Template:       $TEMPLATE_FILE"
 echo "  Dockerfile:     $DOCKERFILE"
 echo "  Build context:  $BUILD_CONTEXT"
 echo "  Resource Group: $RESOURCE_GROUP"
@@ -190,7 +201,7 @@ if [[ "$DRY_RUN" == true ]]; then
 else
     # Build the base image first if the server Dockerfile uses it (ARG BASE_IMAGE)
     BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
-    if [[ "$DOCKERFILE" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
+    if [[ "$SKIP_BASE_BUILD" == false && "$DOCKERFILE" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
         echo ">> Building base image (mcp-server-base:local)..."
         docker build \
             --file "$BASE_DOCKERFILE" \
@@ -273,7 +284,7 @@ if [[ "$DRY_RUN" == true ]]; then
     echo ">> [DRY RUN] Showing deployment what-if..."
     az deployment group what-if \
         --resource-group "$RESOURCE_GROUP" \
-        --template-file "$SCRIPT_DIR/main.bicep" \
+        --template-file "$TEMPLATE_FILE" \
         --parameters "$PARAM_FILE" \
         --parameters \
             containerImage="$IMAGE_REF" \
@@ -289,9 +300,9 @@ if [[ "$DRY_RUN" == true ]]; then
     echo "=== Dry run complete — no resources were modified ==="
 else
     echo ">> Deploying Container App via Bicep..."
-    az deployment group create \
+    DEPLOY_OUTPUT=$(az deployment group create \
         --resource-group "$RESOURCE_GROUP" \
-        --template-file "$SCRIPT_DIR/main.bicep" \
+        --template-file "$TEMPLATE_FILE" \
         --parameters "$PARAM_FILE" \
         --parameters \
             containerImage="$IMAGE_REF" \
@@ -303,15 +314,21 @@ else
             entraTenantId="$ENTRA_TENANT_ID_VAL" \
             extraEnvVars="$EXTRA_ENV_JSON" \
             $STORAGE_PARAMS \
-        --output none
+        --query 'properties.outputs' \
+        --output json)
 
 # ── 5. Report ────────────────────────────────────────────────────────────────
 
-    FQDN=$(az containerapp show \
-        --name "${SERVER_NAME}-server" \
-        --resource-group "$RESOURCE_GROUP" \
-        --query 'properties.configuration.ingress.fqdn' \
-        --output tsv)
+    FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; o=json.loads(sys.stdin.read()); print(o.get('fqdn',{}).get('value',''))" 2>/dev/null)
+
+    # Fallback: query the container app directly if outputs aren't available
+    if [[ -z "$FQDN" ]]; then
+        FQDN=$(az containerapp show \
+            --name "${SERVER_NAME}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.fqdn' \
+            --output tsv 2>/dev/null || true)
+    fi
 
     echo ""
     echo "=== Deployment complete ==="
