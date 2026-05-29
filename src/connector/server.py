@@ -19,14 +19,11 @@ from collections import defaultdict
 from typing import Any, Optional
 
 import httpx
-import uvicorn
 from fastmcp import Context, FastMCP
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
 
 from code_execution.activity_publisher import ActivityPublisher
 from code_execution.auth.base import AuthConfig
+from code_execution.base_server import BaseMCPServer
 from code_execution.sessions.context import get_current_request_token
 from code_execution.tool_registry import ToolDefinition
 from code_execution.tools.tool_search import ToolInfo
@@ -36,7 +33,7 @@ from .config import ConnectorConfig, UpstreamConfig
 LOGGER = logging.getLogger(__name__)
 
 
-class ConnectorServer:
+class ConnectorServer(BaseMCPServer):
     """
     Lightweight MCP server that proxies tool calls to upstream domain servers.
 
@@ -54,6 +51,7 @@ class ConnectorServer:
         config: ConnectorConfig,
         auth_config: Optional[AuthConfig] = None,
     ):
+        super().__init__()
         self.config = config
 
         # Upstream state
@@ -625,201 +623,32 @@ class ConnectorServer:
             )
 
     # ========================================================================
-    # HTTP Server
+    # BaseMCPServer abstract implementations
     # ========================================================================
 
-    async def run_http(self, host: str = "0.0.0.0", port: int = 8000):
-        """Run the connector server with StreamableHTTP transport."""
-        self._bind_host = host
-        self._bind_port = port
+    async def _health_payload(self) -> dict[str, Any]:
+        """Return health check payload with upstream status."""
+        upstream_status = {}
+        for upstream in self.config.upstreams:
+            has_tools = upstream.name in self._upstream_catalogs
+            upstream_status[upstream.name] = "connected" if has_tools else "unavailable"
+        return {
+            "status": "healthy",
+            "connector": self.config.name,
+            "mode": self.config.mode,
+            "upstreams": upstream_status,
+        }
 
-        await self._startup()
+    async def _catalog_payload(self) -> dict[str, Any]:
+        """Return the aggregated tool catalog from all upstreams."""
+        all_tools = []
+        for tools in self._upstream_catalogs.values():
+            all_tools.extend([t.model_dump(mode="json") for t in tools])
+        return {
+            "server_name": self.config.name,
+            "tools": all_tools,
+        }
 
-        # Build the Streamable HTTP app
-        app = self.mcp.http_app(transport="streamable-http")
-
-        # Add middleware
-        for middleware_cls, middleware_kwargs in self._create_middleware():
-            app.add_middleware(middleware_cls, **middleware_kwargs)
-
-        # Add custom endpoints
-        self._add_custom_endpoints(app)
-
-        # Run with uvicorn
-        config = uvicorn.Config(app, host=host, port=port, log_level="info", ws="wsproto")
-        server = uvicorn.Server(config)
-        await server.serve()
-
-    def _add_custom_endpoints(self, app):
-        """Add health and metadata endpoints."""
-        connector = self
-
-        async def health_check(request: Request):
-            """Health check endpoint."""
-            upstream_status = {}
-            for upstream in connector.config.upstreams:
-                has_tools = upstream.name in connector._upstream_catalogs
-                upstream_status[upstream.name] = "connected" if has_tools else "unavailable"
-            return JSONResponse(
-                {
-                    "status": "healthy",
-                    "connector": connector.config.name,
-                    "mode": connector.config.mode,
-                    "upstreams": upstream_status,
-                }
-            )
-
-        app.routes.append(Route("/health", health_check, methods=["GET"]))
-
-        # Catalog endpoint — returns the aggregated catalog
-        async def catalog(request: Request):
-            """Return the connector's aggregated tool catalog."""
-            all_tools = []
-            for tools in connector._upstream_catalogs.values():
-                all_tools.extend([t.model_dump(mode="json") for t in tools])
-            return JSONResponse(
-                {
-                    "server_name": connector.config.name,
-                    "tools": all_tools,
-                }
-            )
-
-        app.routes.append(Route("/catalog", catalog, methods=["GET"]))
-
-        # OAuth protected resource metadata (RFC 9728)
-        if connector.entra_client_id and connector.entra_tenant_id:
-
-            async def protected_resource_metadata(request: Request):
-                return JSONResponse(
-                    {
-                        "resource": f"api://{connector.entra_client_id}",
-                        "authorization_servers": [
-                            f"https://login.microsoftonline.com/{connector.entra_tenant_id}/v2.0"
-                        ],
-                        "scopes_supported": [f"api://{connector.entra_client_id}/.default"],
-                        "bearer_methods_supported": ["header"],
-                    }
-                )
-
-            app.routes.append(
-                Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"])
-            )
-
-    def _create_middleware(self):
-        """Create Starlette middleware for the connector.
-
-        Uses the same auth pattern as CodeExecutionServer: validates Bearer
-        tokens on /mcp, skips /health and /.well-known, and stores the
-        validated token/identity in context vars. Includes WWW-Authenticate
-        header on 401 responses per RFC 9728.
-        """
-        middleware: list[tuple[type, dict]] = []
-        connector = self
-
-        from code_execution.sessions.context import (
-            set_current_request_token,
-            set_current_token_claims,
-            set_current_user_identity,
-        )
-
-        # Build WWW-Authenticate value for 401 responses
-        www_authenticate = ""
-        if connector.auth_config.www_authenticate_value:
-            www_authenticate = connector.auth_config.www_authenticate_value
-        elif connector.entra_client_id and connector.entra_tenant_id:
-            www_authenticate = 'Bearer resource_metadata="/.well-known/oauth-protected-resource"'
-
-        class ConnectorAuthMiddleware:
-            """Auth middleware for the connector server."""
-
-            def __init__(self, app):
-                self.app = app
-
-            async def __call__(self, scope, receive, send):
-                if scope["type"] != "http":
-                    await self.app(scope, receive, send)
-                    return
-
-                path = scope.get("path", "")
-
-                # Skip auth for health check and OAuth metadata
-                if path == "/health" or path.startswith("/.well-known/") or path == "/catalog":
-                    await self.app(scope, receive, send)
-                    return
-
-                # Require auth on /mcp
-                if path == "/mcp":
-                    headers = dict(scope.get("headers", []))
-                    auth_header = headers.get(b"authorization", b"").decode("utf-8")
-
-                    # Build 401 response headers (always include WWW-Authenticate)
-                    resp_401_headers: list[tuple[bytes, bytes]] = [
-                        (b"content-type", b"text/plain"),
-                    ]
-                    if www_authenticate:
-                        resp_401_headers.append((b"www-authenticate", www_authenticate.encode("utf-8")))
-
-                    if not auth_header or not auth_header.startswith("Bearer "):
-                        await send(
-                            {
-                                "type": "http.response.start",
-                                "status": 401,
-                                "headers": resp_401_headers,
-                            }
-                        )
-                        await send(
-                            {
-                                "type": "http.response.body",
-                                "body": b"Missing or invalid Authorization header.",
-                            }
-                        )
-                        return
-
-                    token = auth_header.replace("Bearer ", "")
-
-                    try:
-                        token_data = await connector.auth_config.token_validator.validate(token)
-                        user_identity = connector.auth_config.identity_extractor.extract(token_data)
-                        if not user_identity:
-                            await send(
-                                {
-                                    "type": "http.response.start",
-                                    "status": 401,
-                                    "headers": resp_401_headers,
-                                }
-                            )
-                            await send(
-                                {
-                                    "type": "http.response.body",
-                                    "body": b"Token missing required user identity claims.",
-                                }
-                            )
-                            return
-
-                        # Store in context for downstream use (especially token forwarding)
-                        set_current_request_token(token)
-                        set_current_token_claims(token_data)
-                        set_current_user_identity(user_identity)
-
-                    except Exception as exc:
-                        LOGGER.warning("Token validation failed: %s", exc, exc_info=True)
-                        await send(
-                            {
-                                "type": "http.response.start",
-                                "status": 401,
-                                "headers": resp_401_headers,
-                            }
-                        )
-                        await send(
-                            {
-                                "type": "http.response.body",
-                                "body": b"Authentication failed. Please provide a valid Bearer token.",
-                            }
-                        )
-                        return
-
-                await self.app(scope, receive, send)
-
-        middleware.append((ConnectorAuthMiddleware, {}))
-
-        return middleware
+    def _extract_user_identity(self, token_data: dict) -> Optional[str]:
+        """Extract user identity using the configured identity extractor."""
+        return self.auth_config.identity_extractor.extract(token_data)
