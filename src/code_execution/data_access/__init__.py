@@ -5,6 +5,10 @@ Provides infrastructure for fetching and caching data assets from various
 sources referenced by DataLake qualified names.
 """
 
+from .credentials import (
+    MsalCacheCredential,
+    create_storage_credential,
+)
 from .publishers import (
     AssetPublisher,
     BlobPublisher,
@@ -19,6 +23,8 @@ from .resolution import (
 )
 
 __all__ = [
+    "MsalCacheCredential",
+    "create_storage_credential",
     "AssetPublisher",
     "BlobPublisher",
     "LocalFilePublisher",

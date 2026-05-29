@@ -37,11 +37,20 @@ services:
       # Mount a host directory for published artifacts so they're accessible
       # outside the container. The LocalFilePublisher writes to PUBLISH_DIR.
       - ./published_artifacts:/tmp/published_artifacts
+      # Mount Azure CLI token cache files (read-only) for AzureCliCredential.
+      # The Python SDK reads msal_token_cache.json directly; az CLI binary
+      # session files are not needed.
+      - ${HOME}/.azure/msal_token_cache.json:/home/appuser/.azure/msal_token_cache.json:ro
+      - ${HOME}/.azure/azureProfile.json:/home/appuser/.azure/azureProfile.json:ro
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"
       # Directory where LocalFilePublisher writes artifacts (must match the volume mount).
       PUBLISH_DIR: "/tmp/published_artifacts"
+      # BlobPublisher configuration — set BLOB_PUBLISH_ACCOUNT_URL to enable.
+      # Authentication uses the standard credential chain (Azure CLI → Managed Identity).
+      BLOB_PUBLISH_ACCOUNT_URL: "${BLOB_PUBLISH_ACCOUNT_URL:-}"
+      BLOB_PUBLISH_CONTAINER: "${BLOB_PUBLISH_CONTAINER:-artifacts}"
       # Reach the shared activity-ui by its service name on the agora-activity network.
       # If activity-ui isn't up, the publisher fails open (no impact on tool execution).
       ACTIVITY_UI_URL: "http://activity-ui:8030"
