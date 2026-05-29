@@ -43,7 +43,7 @@ class TestSearchConfig:
 
     def test_defaults(self):
         cfg = SearchConfig()
-        assert cfg.embedding_model == "nomic-ai/nomic-embed-text-v1.5"
+        assert cfg.embedding_model == "azure-openai"
         assert cfg.hybrid_alpha == 0.5
         assert cfg.azure_openai_endpoint is None
 
@@ -68,7 +68,7 @@ class TestCatalogConfig:
         assert len(cfg.sources) == 1
         assert cfg.sources[0].path == "/data/weather/"
         assert cfg.sources[0].domain == "earthscience"
-        assert cfg.search.embedding_model == "nomic-ai/nomic-embed-text-v1.5"
+        assert cfg.search.embedding_model == "azure-openai"
 
     def test_from_yaml_full(self, tmp_path):
         config_file = tmp_path / "catalog.yaml"

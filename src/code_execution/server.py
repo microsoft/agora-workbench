@@ -351,6 +351,19 @@ class CodeExecutionServer:
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
 
+    async def warm(self):
+        """Build environment and provision assets without starting the server.
+
+        Use this during Docker builds to pre-build the environment so it's
+        ready at runtime without needing network access or ephemeral storage.
+        At runtime, _ensure_environment() detects the pre-built env and skips
+        the build step.
+        """
+        LOGGER.info(f"Warming environment: {self.server_config.name}")
+        await self._ensure_environment()
+        await self._register_kernel(kernel_name="tools-py")
+        LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
+
     # ========================================================================
     # Optional hooks - can be overridden by subclasses
     # ========================================================================
@@ -839,6 +852,12 @@ class CodeExecutionServer:
         """
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
+
+        # Skip if kernel is already registered (e.g., pre-registered during warm build)
+        kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
+        if kernel_dir.exists():
+            LOGGER.info(f"Kernel '{kernel_name}' already registered at {kernel_dir}")
+            return
 
         LOGGER.info(f"Registering Jupyter kernel '{kernel_name}' with Python: {self._python_executable}")
 
