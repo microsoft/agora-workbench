@@ -1,9 +1,9 @@
-"""Tests for ConnectorConfig model."""
+"""Tests for connector configuration models."""
 
 import pytest
 from pydantic import ValidationError
 
-from connector import ConnectorConfig, GatewayPolicy, UpstreamConfig
+from connector import GatewayConfig, GatewayPolicy, RouterConfig, UpstreamConfig
 
 
 class TestUpstreamConfig:
@@ -45,57 +45,46 @@ class TestGatewayPolicy:
             GatewayPolicy(max_calls_per_minute=0)
 
 
-class TestConnectorConfig:
-    """Tests for ConnectorConfig model."""
+class TestRouterConfig:
+    """Tests for RouterConfig model."""
 
-    def test_router_mode(self):
-        config = ConnectorConfig(
+    def test_basic(self):
+        config = RouterConfig(
             name="science-hub",
-            mode="router",
             upstreams=[
                 UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
                 UpstreamConfig(name="gis", url="http://gis:8000"),
             ],
         )
-        assert config.mode == "router"
+        assert config.name == "science-hub"
         assert len(config.upstreams) == 2
-        assert config.gateway_policy is None
 
-    def test_gateway_mode(self):
-        config = ConnectorConfig(
+    def test_requires_at_least_one_upstream(self):
+        with pytest.raises(ValidationError):
+            RouterConfig(name="bad", upstreams=[])
+
+
+class TestGatewayConfig:
+    """Tests for GatewayConfig model."""
+
+    def test_basic(self):
+        config = GatewayConfig(
             name="chem-gateway",
-            mode="gateway",
-            upstreams=[
-                UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
-            ],
-            gateway_policy=GatewayPolicy(
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(
                 max_calls_per_minute=60,
                 blocked_tools=["parallel_execute"],
             ),
         )
-        assert config.mode == "gateway"
-        assert config.gateway_policy.max_calls_per_minute == 60
-        assert config.gateway_policy.blocked_tools == ["parallel_execute"]
+        assert config.name == "chem-gateway"
+        assert config.upstream.name == "chemistry"
+        assert config.policy.max_calls_per_minute == 60
+        assert config.policy.blocked_tools == ["parallel_execute"]
 
-    def test_invalid_mode(self):
-        with pytest.raises(ValidationError):
-            ConnectorConfig(
-                name="bad",
-                mode="invalid",
-                upstreams=[UpstreamConfig(name="x", url="http://x:8000")],
-            )
-
-    def test_requires_upstreams(self):
-        with pytest.raises(ValidationError):
-            ConnectorConfig(name="bad", mode="router")
-
-    def test_gateway_rejects_multiple_upstreams(self):
-        with pytest.raises(ValidationError, match="exactly one upstream"):
-            ConnectorConfig(
-                name="bad-gateway",
-                mode="gateway",
-                upstreams=[
-                    UpstreamConfig(name="a", url="http://a:8000"),
-                    UpstreamConfig(name="b", url="http://b:8000"),
-                ],
-            )
+    def test_default_policy(self):
+        config = GatewayConfig(
+            name="gw",
+            upstream=UpstreamConfig(name="x", url="http://x:8000"),
+        )
+        assert config.policy.allowed_tools is None
+        assert config.policy.blocked_tools == []

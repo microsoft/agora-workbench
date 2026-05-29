@@ -1,11 +1,14 @@
-"""Integration tests for ConnectorServer (router and gateway modes)."""
+"""Integration tests for RouterServer and GatewayServer."""
 
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from connector import ConnectorConfig, ConnectorServer, GatewayPolicy, UpstreamConfig
+from connector import GatewayConfig, GatewayPolicy, RouterConfig, UpstreamConfig
+from connector.base import ConnectorServer
+from connector.gateway import GatewayServer
+from connector.router import RouterServer
 
 
 # Sample catalog responses from mock upstreams
@@ -67,14 +70,13 @@ def _mock_response(data: dict) -> httpx.Response:
     return httpx.Response(200, json=data, request=request)
 
 
-class TestConnectorServerRouter:
-    """Tests for ConnectorServer in router mode."""
+class TestRouterServer:
+    """Tests for RouterServer."""
 
     @pytest.fixture
     def router_config(self):
-        return ConnectorConfig(
+        return RouterConfig(
             name="science-hub",
-            mode="router",
             description="Aggregated science tools",
             upstreams=[
                 UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
@@ -85,7 +87,7 @@ class TestConnectorServerRouter:
     @pytest.mark.asyncio
     async def test_fetches_catalogs_on_startup(self, router_config):
         """Router fetches catalogs from all upstreams during startup."""
-        connector = ConnectorServer(config=router_config)
+        server = RouterServer(router_config)
 
         async def mock_get(url, **kwargs):
             if "chemistry" in url:
@@ -94,24 +96,24 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._sync_upstream_catalogs()
+            await server._sync_upstream_catalogs()
 
-        assert "chemistry" in connector._upstream_catalogs
-        assert "gis" in connector._upstream_catalogs
-        assert len(connector._upstream_catalogs["chemistry"]) == 2
-        assert len(connector._upstream_catalogs["gis"]) == 1
+        assert "chemistry" in server._upstream_catalogs
+        assert "gis" in server._upstream_catalogs
+        assert len(server._upstream_catalogs["chemistry"]) == 2
+        assert len(server._upstream_catalogs["gis"]) == 1
 
     @pytest.mark.asyncio
     async def test_registers_proxy_tools(self, router_config):
         """Router registers execute_code proxy for each upstream."""
-        connector = ConnectorServer(config=router_config)
+        server = RouterServer(router_config)
 
         async def mock_get(url, **kwargs):
             if "chemistry" in url:
@@ -120,29 +122,26 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._startup()
+            await server._startup()
 
-        # Check that execute_code proxies are registered
-        tools = await connector.mcp.list_tools()
+        tools = await server.mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "execute_chemistry_code" in tool_names
         assert "execute_gis_code" in tool_names
-        # Search tool should be registered
         assert "search_science-hub_tools" in tool_names
 
     @pytest.mark.asyncio
     async def test_expose_tools_filter(self):
         """Router respects expose_tools glob patterns."""
-        config = ConnectorConfig(
+        config = RouterConfig(
             name="filtered",
-            mode="router",
             upstreams=[
                 UpstreamConfig(
                     name="chemistry",
@@ -151,29 +150,28 @@ class TestConnectorServerRouter:
                 ),
             ],
         )
-        connector = ConnectorServer(config=config)
+        server = RouterServer(config)
 
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._sync_upstream_catalogs()
+            await server._sync_upstream_catalogs()
 
-        # Only compute_descriptors should pass the filter
-        chem_tools = connector._upstream_catalogs["chemistry"]
+        chem_tools = server._upstream_catalogs["chemistry"]
         assert len(chem_tools) == 1
         assert chem_tools[0].name == "compute_descriptors"
 
     @pytest.mark.asyncio
     async def test_handles_upstream_failure_gracefully(self, router_config):
         """Router continues if one upstream is unreachable."""
-        connector = ConnectorServer(config=router_config)
+        server = RouterServer(router_config)
 
         async def mock_get(url, **kwargs):
             if "chemistry" in url:
@@ -182,23 +180,22 @@ class TestConnectorServerRouter:
                 raise httpx.ConnectError("Connection refused")
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._sync_upstream_catalogs()
+            await server._sync_upstream_catalogs()
 
-        # Chemistry should succeed, gis should be absent
-        assert "chemistry" in connector._upstream_catalogs
-        assert "gis" not in connector._upstream_catalogs
+        assert "chemistry" in server._upstream_catalogs
+        assert "gis" not in server._upstream_catalogs
 
     @pytest.mark.asyncio
     async def test_search_tool_aggregates_all_upstreams(self, router_config):
         """Aggregated search index includes tools from all upstreams."""
-        connector = ConnectorServer(config=router_config)
+        server = RouterServer(router_config)
 
         async def mock_get(url, **kwargs):
             if "chemistry" in url:
@@ -207,26 +204,24 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._startup()
+            await server._startup()
 
-        # Check search tool is registered
-        tools = await connector.mcp.list_tools()
+        tools = await server.mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "search_science-hub_tools" in tool_names
 
     @pytest.mark.asyncio
     async def test_tool_aliases_are_applied(self):
         """Router applies tool_aliases when fetching catalog."""
-        config = ConnectorConfig(
+        config = RouterConfig(
             name="aliased",
-            mode="router",
             upstreams=[
                 UpstreamConfig(
                     name="chemistry",
@@ -235,40 +230,36 @@ class TestConnectorServerRouter:
                 ),
             ],
         )
-        connector = ConnectorServer(config=config)
+        server = RouterServer(config)
 
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._sync_upstream_catalogs()
+            await server._sync_upstream_catalogs()
 
-        chem_tools = connector._upstream_catalogs["chemistry"]
+        chem_tools = server._upstream_catalogs["chemistry"]
         tool_names = {t.name for t in chem_tools}
         assert "chem_descriptors" in tool_names
         assert "compute_descriptors" not in tool_names
-        # cluster_molecules should be unchanged
         assert "cluster_molecules" in tool_names
 
 
-class TestConnectorServerGateway:
-    """Tests for ConnectorServer in gateway mode."""
+class TestGatewayServer:
+    """Tests for GatewayServer."""
 
     @pytest.fixture
     def gateway_config(self):
-        return ConnectorConfig(
+        return GatewayConfig(
             name="chem-gateway",
-            mode="gateway",
-            upstreams=[
-                UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
-            ],
-            gateway_policy=GatewayPolicy(
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(
                 max_calls_per_minute=5,
                 blocked_tools=["parallel_execute"],
             ),
@@ -277,59 +268,56 @@ class TestConnectorServerGateway:
     @pytest.mark.asyncio
     async def test_gateway_registers_single_upstream(self, gateway_config):
         """Gateway registers tools from the single upstream."""
-        connector = ConnectorServer(config=gateway_config)
+        server = GatewayServer(gateway_config)
 
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._startup()
+            await server._startup()
 
-        tools = await connector.mcp.list_tools()
+        tools = await server.mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "execute_chemistry_code" in tool_names
 
     def test_rate_limiting(self, gateway_config):
         """Gateway enforces rate limiting."""
-        connector = ConnectorServer(config=gateway_config)
+        server = GatewayServer(gateway_config)
 
         # Should allow 5 calls
         for _ in range(5):
-            assert connector._check_rate_limit("user1", 5) is True
+            assert server._check_rate_limit("user1", 5) is True
 
         # 6th call should be denied
-        assert connector._check_rate_limit("user1", 5) is False
+        assert server._check_rate_limit("user1", 5) is False
 
         # Different user should still be allowed
-        assert connector._check_rate_limit("user2", 5) is True
+        assert server._check_rate_limit("user2", 5) is True
 
     @pytest.mark.asyncio
     async def test_gateway_blocks_blocked_tools(self, gateway_config):
         """Gateway rejects calls to tools listed in blocked_tools."""
-        connector = ConnectorServer(config=gateway_config)
+        server = GatewayServer(gateway_config)
 
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=None)
             mock_client_cls.return_value = mock_client
 
-            await connector._startup()
+            await server._startup()
 
-        # The gateway's execute_code proxy checks code content for blocked tool names.
-        # Verify the blocked_tools policy field is set correctly
-        assert connector.config.gateway_policy is not None
-        assert "parallel_execute" in connector.config.gateway_policy.blocked_tools
+        assert "parallel_execute" in server.config.policy.blocked_tools
 
 
 class TestConnectorServerMatchesExposeFilter:
