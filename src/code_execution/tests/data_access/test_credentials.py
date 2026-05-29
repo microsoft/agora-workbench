@@ -89,7 +89,10 @@ class TestMsalCacheCredentialGetToken:
             token = await cred.get_token("https://storage.azure.com/.default")
 
             assert token.token == "fake-token-123"
-            assert token.expires_on == 3600
+            # expires_on should be an absolute timestamp (now + expires_in)
+            import time as _time
+
+            assert token.expires_on >= int(_time.time()) + 3599
             mock_cls.assert_called_once_with(
                 _AZURE_CLI_CLIENT_ID,
                 authority="https://login.microsoftonline.com/organizations",

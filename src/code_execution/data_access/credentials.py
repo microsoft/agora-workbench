@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -130,7 +131,8 @@ class MsalCacheCredential:
             scopes[0][:50],
             account.get("username", "?"),
         )
-        return AccessToken(result["access_token"], result["expires_in"])
+        expires_on = int(time.time()) + int(result["expires_in"])
+        return AccessToken(result["access_token"], expires_on)
 
     async def close(self) -> None:
         """No-op — no persistent connections to release."""
