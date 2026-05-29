@@ -18,6 +18,7 @@ EventType = Literal[
     "skill_loaded",
     "workflow_planned",
     "batch_cancelled",
+    "artifact_published",
 ]
 
 
