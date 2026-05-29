@@ -94,7 +94,7 @@ class ConnectorServer(BaseMCPServer):
 
         Called after catalogs are synced but before the search tool is built.
         """
-        ...
+        raise NotImplementedError("Subclasses must implement _setup_tools()")
 
     # ========================================================================
     # Lifecycle
