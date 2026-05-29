@@ -50,8 +50,8 @@ class SearchConfig(BaseModel):
     """Search/embedding configuration."""
 
     embedding_model: str = Field(
-        default="nomic-ai/nomic-embed-text-v1.5",
-        description="Model name: a sentence-transformers model ID or 'azure-openai'",
+        default="azure-openai",
+        description="Embedding model: 'azure-openai' (requires endpoint configuration)",
     )
     azure_openai_endpoint: Optional[str] = Field(
         None, description="Azure OpenAI endpoint (required if embedding_model is 'azure-openai')"

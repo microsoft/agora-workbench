@@ -58,6 +58,7 @@ from .tool_proxy import (
 )
 
 if TYPE_CHECKING:
+    from .data_access.publishers import AssetPublisher
     from .sessions import Session
     from .tool_registry import ToolRegistry
     from .tools.tool_search import ToolSearchBackend
@@ -146,6 +147,7 @@ class CodeExecutionServer(BaseMCPServer):
         auth_config: Optional["AuthConfig"] = None,
         working_dir: Optional[Path] = None,
         tool_search_backend: Optional["ToolSearchBackend"] = None,
+        publishers: "Optional[list[AssetPublisher]]" = None,
     ):
         """
         Initialize the code execution server.
@@ -161,6 +163,10 @@ class CodeExecutionServer(BaseMCPServer):
                 If provided, this backend is used instead of creating one from config.
                 Enables custom search backends (e.g. vector DB, Elasticsearch) without
                 modifying the built-in factory.
+            publishers: Optional list of :class:`~.data_access.AssetPublisher` instances
+                that the ``{name}_publish_artifact`` MCP tool will dispatch to.
+                Publishers are checked in order via ``can_handle()``; the first match wins.
+                When ``None`` or empty no publish tool is registered.
         """
         super().__init__()
         self.server_config = server_config
@@ -168,6 +174,7 @@ class CodeExecutionServer(BaseMCPServer):
         self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
         self._custom_tool_search_backend = tool_search_backend
+        self._publishers: "list[AssetPublisher]" = list(publishers or [])
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -337,6 +344,19 @@ class CodeExecutionServer(BaseMCPServer):
     async def _build_pip_environment(self, config: ServerConfig):
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
+
+    async def warm(self):
+        """Build environment and provision assets without starting the server.
+
+        Use this during Docker builds to pre-build the environment so it's
+        ready at runtime without needing network access or ephemeral storage.
+        At runtime, _ensure_environment() detects the pre-built env and skips
+        the build step.
+        """
+        LOGGER.info(f"Warming environment: {self.server_config.name}")
+        await self._ensure_environment()
+        await self._register_kernel(kernel_name="tools-py")
+        LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
     # ========================================================================
     # Optional hooks - can be overridden by subclasses
@@ -600,6 +620,10 @@ class CodeExecutionServer(BaseMCPServer):
         # Setup object transfer tool for server-to-server object transfer
         self._setup_transfer_tool()
 
+        # Setup artifact publish tool (only when publishers are configured)
+        if self._publishers:
+            self._setup_publish_artifact_tool()
+
     # ========================================================================
     # Session Management Helpers
     # ========================================================================
@@ -823,6 +847,12 @@ class CodeExecutionServer(BaseMCPServer):
         """
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
+
+        # Skip if kernel is already registered (e.g., pre-registered during warm build)
+        kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
+        if kernel_dir.exists():
+            LOGGER.info(f"Kernel '{kernel_name}' already registered at {kernel_dir}")
+            return
 
         LOGGER.info(f"Registering Jupyter kernel '{kernel_name}' with Python: {self._python_executable}")
 
@@ -2051,6 +2081,199 @@ else:
         payload["status"] = "partial_failure" if payload["failed"] else payload["status"]
         return payload
 
+    def _setup_publish_artifact_tool(self) -> None:
+        """Register the ``{name}_publish_artifact`` MCP tool.
+
+        The tool is only registered when at least one publisher was provided
+        at construction time.  It resolves the artifact by name from the
+        session's registered artifacts, selects the appropriate publisher via
+        ``can_handle()``, uploads the file, emits an activity event, and
+        returns the remote URI.
+        """
+        from .data_access.publishers import parse_destination_tag
+
+        server = self
+        tool_name = f"{self.server_config.name}_publish_artifact"
+
+        async def publish_artifact(
+            ctx: Context,
+            artifact_name: str,
+            destination: str,
+        ) -> str:
+            """Push an artifact from the session output directory to remote storage.
+
+            The artifact must have been written to ``AGORA_OUTPUT_DIR`` during a
+            previous execute call so that it is registered in the session's artifact
+            registry.
+
+            The *destination* tag selects the publisher:
+            - ``<blob>results.csv</blob>`` → BlobPublisher
+            - ``<local>output</local>`` → LocalFilePublisher
+
+            The inner value of the tag is used as the logical name; path-like
+            values (e.g. ``subdir/report.pdf``) are accepted.
+
+            Args:
+                artifact_name: Filename relative to ``AGORA_OUTPUT_DIR``
+                    (e.g. ``"results.csv"`` or ``"subdir/report.pdf"``).
+                destination: Tagged destination string that selects the publisher
+                    and provides the logical upload name
+                    (e.g. ``"<blob>results.csv</blob>"``).
+
+            Returns:
+                JSON object with ``success``, ``remote_uri``, and ``artifact_name``.
+            """
+            import json as _json
+
+            mcp_session_id = None
+            if ctx:
+                try:
+                    mcp_session_id = ctx.session_id
+                except (RuntimeError, AttributeError):
+                    # ctx.session_id may raise if the MCP transport does not
+                    # provide a session identifier (e.g. stdio transport).
+                    # Fall through to let _get_or_create_session handle it.
+                    pass
+
+            # Parse the destination tag to validate its format and extract the name.
+            parsed = parse_destination_tag(destination)
+            if parsed is None:
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"Invalid destination format {destination!r}. "
+                            "Expected a tag-based destination such as "
+                            "<blob>results.csv</blob> or <local>output</local>."
+                        ),
+                    },
+                    indent=2,
+                )
+
+            _tag_type, logical_name = parsed
+
+            # Find the publisher that handles this destination tag.
+            publisher = None
+            for p in server._publishers:
+                if p.can_handle(destination):
+                    publisher = p
+                    break
+
+            if publisher is None:
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"No publisher configured for destination {destination!r}. "
+                            f"Registered publisher types: "
+                            f"{[type(p).__name__ for p in server._publishers]}."
+                        ),
+                    },
+                    indent=2,
+                )
+
+            # Authenticate and resolve the session (same pattern as other
+            # session-scoped tools: restore auth context, verify ownership).
+            try:
+                server._restore_auth_context_for_mcp_session(mcp_session_id)
+                session = await server._get_or_create_session(tool_name, session_id=mcp_session_id)
+                session_id = session.session_id
+            except Exception as exc:
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Cannot publish: session authentication failed: {exc}",
+                    },
+                    indent=2,
+                )
+
+            record = server.session_manager.find_artifact_by_name(session_id, artifact_name)
+            if record is None:
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": (
+                            f"Artifact {artifact_name!r} not found in session {session_id}. "
+                            "Ensure the file was written to AGORA_OUTPUT_DIR during a "
+                            "previous execute call."
+                        ),
+                    },
+                    indent=2,
+                )
+
+            # Publish the artifact.
+            try:
+                remote_uri = await publisher.publish(
+                    local_path=record.path,
+                    name=logical_name,
+                    session_id=session_id,
+                )
+            except Exception as exc:
+                LOGGER.error(
+                    "publish_artifact failed for %r → %r: %s",
+                    artifact_name,
+                    destination,
+                    exc,
+                    exc_info=True,
+                )
+                server.activity_publisher.publish_nowait(
+                    {
+                        "type": "artifact_published",
+                        "success": False,
+                        "artifact_name": artifact_name,
+                        "destination": destination,
+                        "session_id": session_id,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Publish failed: {type(exc).__name__}: {exc}",
+                    },
+                    indent=2,
+                )
+
+            LOGGER.info(
+                "publish_artifact: %r → %r (session %s)",
+                artifact_name,
+                remote_uri,
+                session_id,
+            )
+            server.activity_publisher.publish_nowait(
+                {
+                    "type": "artifact_published",
+                    "success": True,
+                    "artifact_name": artifact_name,
+                    "destination": destination,
+                    "remote_uri": remote_uri,
+                    "session_id": session_id,
+                    "size_bytes": record.size_bytes,
+                    "mime_type": record.mime_type,
+                }
+            )
+            return _json.dumps(
+                {
+                    "success": True,
+                    "artifact_name": artifact_name,
+                    "remote_uri": remote_uri,
+                },
+                indent=2,
+            )
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                "Publish an artifact from the session output directory to remote storage. "
+                "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
+                "execute call. Use a tagged destination to select the publisher: "
+                "<blob>results.csv</blob> for Azure Blob Storage, "
+                "<local>output</local> for local file storage."
+            ),
+        )(publish_artifact)
+
+        LOGGER.info("Registered publish artifact tool: %s", tool_name)
+
     def _setup_parallel_execution_tools(self) -> None:
         """Register map-style parallel execution tools."""
         execute_name = f"{self.server_config.name}_parallel_execute"
@@ -2255,6 +2478,11 @@ else:
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
         await self._close_tool_search_backends()
+        for publisher in self._publishers:
+            try:
+                await publisher.close()
+            except Exception:
+                LOGGER.debug("Publisher close raised; ignoring during shutdown", exc_info=True)
         try:
             await self.activity_publisher.stop()
         except Exception:
@@ -2263,7 +2491,7 @@ else:
 
     def _add_custom_endpoints(self, app):
         """Add custom endpoints to FastMCP."""
-        # Base class adds /health, /catalog, /.well-known/oauth-protected-resource
+        # Base class adds /health, /healthz, /catalog, /.well-known/oauth-protected-resource
         super()._add_custom_endpoints(app)
 
         # Artifact download endpoint: streams a file produced by an execute

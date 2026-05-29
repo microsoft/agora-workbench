@@ -146,6 +146,7 @@ class BaseMCPServer(ABC):
             return JSONResponse(payload)
 
         app.routes.append(Route("/health", health_check, methods=["GET"]))
+        app.routes.append(Route("/healthz", health_check, methods=["GET"]))
 
         async def catalog(request: Request):
             payload = await server._catalog_payload()
@@ -187,7 +188,7 @@ class BaseMCPServer(ABC):
 
         Subclasses can override to add more skip prefixes.
         """
-        return ["/health", "/.well-known/", "/catalog"]
+        return ["/health", "/healthz", "/.well-known/", "/catalog"]
 
     def _create_middleware(self) -> list[tuple[type, dict]]:
         """Create Starlette middleware list as (middleware_class, kwargs) tuples.

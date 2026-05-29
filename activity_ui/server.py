@@ -116,6 +116,7 @@ def create_app() -> FastAPI:
 
         return EventSourceResponse(event_generator())
 
+    @app.get("/health")
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
