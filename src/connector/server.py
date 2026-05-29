@@ -542,8 +542,13 @@ class ConnectorServer:
                 session_id = ctx.session_id
                 if session_id:
                     headers["Mcp-Session-Id"] = session_id
-            except (RuntimeError, AttributeError):
-                pass
+            except (RuntimeError, AttributeError) as exc:
+                LOGGER.debug(
+                    "Skipping MCP session ID forwarding for upstream '%s' tool '%s': %s",
+                    upstream.name,
+                    tool_name,
+                    exc,
+                )
 
         # Build MCP tool call request (JSON-RPC 2.0) with unique request ID
         request_id = str(uuid.uuid4())
