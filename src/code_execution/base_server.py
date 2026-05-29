@@ -61,12 +61,12 @@ class BaseMCPServer(ABC):
     @abstractmethod
     async def _startup(self) -> None:
         """Initialize server resources (called once before serving)."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def _shutdown(self) -> None:
         """Clean up server resources."""
-        ...
+        raise NotImplementedError
 
     # ========================================================================
     # Endpoint payloads (abstract)
@@ -75,12 +75,12 @@ class BaseMCPServer(ABC):
     @abstractmethod
     async def _health_payload(self) -> dict[str, Any]:
         """Return the JSON body for GET /health."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def _catalog_payload(self) -> dict[str, Any]:
         """Return the JSON body for GET /catalog."""
-        ...
+        raise NotImplementedError
 
     # ========================================================================
     # Auth helpers
@@ -89,7 +89,7 @@ class BaseMCPServer(ABC):
     @abstractmethod
     def _extract_user_identity(self, token_data: dict) -> Optional[str]:
         """Extract a unique user identity string from validated token claims."""
-        ...
+        raise NotImplementedError
 
     async def validate_token(self, token: str, request_path: str = "/mcp", request_method: str = "POST") -> dict:
         """Validate a bearer token using the configured TokenValidator.
