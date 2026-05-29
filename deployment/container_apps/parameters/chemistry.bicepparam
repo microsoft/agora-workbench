@@ -15,7 +15,7 @@ param containerPort = 8000
 
 // ── Resource sizing (ACA consumption plan) ──────────────────────────────────
 
-param cpu         = '1.0'
-param memory      = '2Gi'
+param cpu         = '2.0'
+param memory      = '4Gi'
 param minReplicas = 1
 param maxReplicas = 3
