@@ -22,6 +22,13 @@ LOGGER = logging.getLogger(__name__)
 # callback reads it to know which parameters were resolved to cache paths.
 _resolved_assets: contextvars.ContextVar[list] = contextvars.ContextVar("_resolved_assets", default=[])
 
+# Parameters that should be excluded from asset resolution even when they
+# match the ``<type>id</type>`` tag format.  Keyed by (tool_name_suffix, param_name).
+# Tool name suffix is used because tool names are prefixed with the server name.
+_RESOLUTION_EXEMPT_PARAMS: set[tuple[str, str]] = {
+    ("_publish_artifact", "destination"),
+}
+
 
 def looks_like_qualified_name(value: str) -> bool:
     """
@@ -95,10 +102,17 @@ class AssetResolutionMiddleware(Middleware):
         arguments = original_arguments.copy()
 
         # Quick scan: do any arguments contain asset tags?
+        # Skip parameters that are exempt from resolution (e.g. publish_artifact's
+        # destination param uses the same tag syntax for routing, not asset lookup).
+        tool_name = context.message.name
         assets_to_resolve = {
             param_name: param_value
             for param_name, param_value in arguments.items()
-            if isinstance(param_value, str) and should_resolve_as_asset(param_value)
+            if isinstance(param_value, str)
+            and should_resolve_as_asset(param_value)
+            and not any(
+                tool_name.endswith(suffix) and param_name == pname for suffix, pname in _RESOLUTION_EXEMPT_PARAMS
+            )
         }
 
         if not assets_to_resolve:

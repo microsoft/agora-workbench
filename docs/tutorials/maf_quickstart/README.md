@@ -46,7 +46,7 @@ recommended order.
 
 > **Data catalog — currently a placeholder.** The repo includes a
 > server-side catalog package
-> ([`catalog_tools.py`](../../../src/code_execution/code_execution/catalog_tools.py))
+> ([`catalog_tools.py`](../../../src/code_execution/catalog_tools.py))
 > that can register `search_data`, `get_artifact`, `list_domains`, and
 > `query_catalog` MCP tools from a catalog configuration such as
 > [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)).
@@ -90,7 +90,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the chemistry MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](../../../src/code_execution/code_execution/auth/),
+> [`create_noop_auth_config()`](../../../src/code_execution/auth/),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8020` so it's
 > not reachable from outside the host. **Do not deploy this configuration
@@ -141,9 +141,9 @@ own function so you can map README sections to code.
 [chat_client.py](chat_client.py). agora-workbench is **BYO LLM**: any
 object that satisfies MAF's `ChatClient` protocol works. The tutorial
 factory is a thin wrapper around the framework-agnostic
-[`ModelSpec`](../../../src/llm/spec.py) +
-[`make_maf_client`](../../../src/llm/factories/maf.py) abstraction in
-`src/llm/`, and dispatches on `$LLM_PROVIDER`:
+[`ModelSpec`](../../../agent_helpers/llm/spec.py) +
+[`make_maf_client`](../../../agent_helpers/llm/factories/maf.py) abstraction in
+`agent_helpers/llm/`, and dispatches on `$LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
 | --- | --- | --- | --- |
@@ -159,7 +159,7 @@ factory is a thin wrapper around the framework-agnostic
 > kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to
-[`auth.providers.get_token_provider()`](../../../src/utilities/auth/providers.py),
+[`get_token_provider()`](../../../src/code_execution/auth/azure_credentials.py),
 which returns a callable backed by the same
 `AzureCliCredential → ManagedIdentityCredential` chain used everywhere
 else in the repo. No new credentials are needed.
@@ -182,7 +182,7 @@ else in the repo. No new credentials are needed.
 catalog search has moved into the MCP server itself: when a server is
 launched with a `catalog.yaml` (see
 [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)),
-[`register_catalog_tools`](../../../src/code_execution/code_execution/catalog_tools.py)
+[`register_catalog_tools`](../../../src/code_execution/catalog_tools.py)
 indexes the declared sources on startup and exposes `search_data`,
 `get_artifact`, and `list_domains` as MCP tools. The agent discovers them
 automatically through the `MCPStreamableHTTPTool` connection — no
@@ -223,7 +223,7 @@ exposes appears to the LLM as `chem_<original_name>`.
 pip package, which is installed into the kernel's conda env at server
 build time. The server then auto-injects an instrumented Python proxy
 for each helper into the kernel namespace via
-[`tool_proxy.py`](../../../src/code_execution/code_execution/tool_proxy.py),
+[`tool_proxy.py`](../../../src/code_execution/tool_proxy.py),
 so inside `execute_chemistry_code` the agent can simply call them as
 plain Python functions — no imports required:
 
@@ -375,7 +375,7 @@ working, layer in:
   servers (template:
   [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml))
   and wire it into the server entry point via
-  [`register_catalog_tools`](../../../src/code_execution/code_execution/catalog_tools.py).
+  [`register_catalog_tools`](../../../src/code_execution/catalog_tools.py).
   Once registered, the agent automatically picks up `search_data`,
   `get_artifact`, and `list_domains` — no changes to `agent.py` required.
 - **Workflow planning** — servers with state-annotated tools also expose

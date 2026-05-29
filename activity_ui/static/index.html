@@ -123,6 +123,38 @@
         border-left: 2px solid #30363d;
         padding-left: 8px;
       }
+      .displays {
+        margin-top: 6px;
+        border-left: 2px solid #d2a8ff44;
+        padding-left: 8px;
+      }
+      .displays-label {
+        color: #6e7681;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+      .display-figure {
+        margin: 4px 0;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 4px;
+        padding: 6px;
+        display: inline-block;
+        max-width: 100%;
+      }
+      .display-figure img,
+      .display-figure svg {
+        max-width: 100%;
+        height: auto;
+        display: block;
+      }
+      .display-figure .mime-badge {
+        color: #6e7681;
+        font-size: 10px;
+        margin-bottom: 4px;
+      }
       .tool-calls-label {
         color: #6e7681;
         font-size: 10px;
@@ -455,6 +487,19 @@
           wrap.appendChild(det);
         }
 
+        if (Array.isArray(e.displays) && e.displays.length) {
+          const det = document.createElement("details");
+          det.className = "displays";
+          const sum = document.createElement("summary");
+          sum.className = "displays-label";
+          sum.textContent = `figures (${e.displays.length})`;
+          det.appendChild(sum);
+          for (const d of e.displays) {
+            det.appendChild(buildDisplayEl(d));
+          }
+          wrap.appendChild(det);
+        }
+
         // artifacts: files written under the session's outputs dir during
         // this execute, surfaced as download links.  Collapsed by default
         // to match the figures/displays pattern.
@@ -472,6 +517,46 @@
         }
 
         return wrap;
+      }
+
+      // Render one rich-output entry from a code_executed event's `displays`.
+      // Supported MIME types: image/png (base64), image/svg+xml (raw XML).
+      // Anything else falls back to a small placeholder so unhandled payloads
+      // are still visible.
+      //
+      // Security: both PNG and SVG are rendered via `<img>` data URLs.  For
+      // SVG, this puts the browser into "secure static mode" — scripts and
+      // event handlers inside the SVG are disabled, external fetches are
+      // blocked.  Do NOT switch SVG to innerHTML/DOMParser; kernel code is
+      // LLM-generated and prompt-injectable.
+      function buildDisplayEl(d) {
+        const fig = document.createElement("div");
+        fig.className = "display-figure";
+        const badge = document.createElement("div");
+        badge.className = "mime-badge";
+        badge.textContent = d.mime_type || "(unknown)";
+        fig.appendChild(badge);
+
+        if (d.mime_type === "image/png" && typeof d.data === "string") {
+          const img = document.createElement("img");
+          img.alt = "kernel output (image/png)";
+          img.src = `data:image/png;base64,${d.data}`;
+          fig.appendChild(img);
+        } else if (d.mime_type === "image/svg+xml" && typeof d.data === "string") {
+          const img = document.createElement("img");
+          img.alt = "kernel output (image/svg+xml)";
+          // btoa() needs latin-1; encode UTF-8 first so non-ASCII text in
+          // the SVG (axis labels, titles) survives the round-trip.
+          img.src = "data:image/svg+xml;base64," +
+            btoa(unescape(encodeURIComponent(d.data)));
+          fig.appendChild(img);
+        } else {
+          const placeholder = document.createElement("div");
+          placeholder.className = "mime-badge";
+          placeholder.textContent = `(payload not rendered: ${d.mime_type || "no MIME"})`;
+          fig.appendChild(placeholder);
+        }
+        return fig;
       }
 
       // Format a byte count as a short human-readable string.

@@ -1,16 +1,16 @@
 # Example MCP server list for local development.
 #
 # This file is *not* loaded automatically by anything — it's a sample of the
-# yaml format that utilities.mcp_clients.load_server_registry understands.
+# yaml format that agent_helpers.mcp_clients.load_server_registry understands.
 # Copy it (or write your own), then load it explicitly:
 #
-#     from utilities.mcp_clients import load_server_registry, connect_mcp_servers
+#     from agent_helpers.mcp_clients import load_server_registry, connect_mcp_servers
 #
 #     configs = load_server_registry("docs/tutorials/maf_quickstart/local_servers.yaml")
 #     servers = await connect_mcp_servers(configs)
 #
 # Servers below are the three domain examples shipped under
-# src/domain_examples/. Start them with `docker compose up` from each
+# examples/domain_examples/. Start them with `docker compose up` from each
 # domain's directory.
 
 # Optional default scope, used for any non-localhost entry that omits its own.

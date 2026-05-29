@@ -22,22 +22,30 @@
 # ============================================================================
 # Stage: Base image with common dependencies
 # ============================================================================
-FROM mcr.microsoft.com/devcontainers/python:3.11 AS base
+FROM mcr.microsoft.com/azurelinux/base/python:3.12 AS base
 
 WORKDIR /app
 
 # Create non-root user early so subsequent installs can be owned correctly
-RUN useradd -m -d /home/appuser -s /bin/bash appuser
+RUN tdnf install -y shadow-utils && tdnf clean all && \
+    useradd -m -d /home/appuser -s /bin/bash appuser
 
-# Remove problematic Yarn repository that has GPG key issues
-RUN rm -f /etc/apt/sources.list.d/yarn.list
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (tdnf is Azure Linux's package manager)
+# NOTE: Compiler toolchain (gcc, gcc-c++, make, glibc-devel, python3-devel,
+# openssl-devel, libffi-devel, sqlite-devel, pkgconf) is intentionally omitted
+# — all current Python deps install from manylinux wheels. Domain server images
+# that add packages requiring source builds should install these themselves.
+RUN tdnf install -y \
+    ca-certificates \
+    bash \
     curl \
     git \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    tar \
+    gzip \
+    bzip2 \
+    xz \
+    gawk \
+    && tdnf clean all
 
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
@@ -53,20 +61,20 @@ RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/download/${MIN
 ENV PATH="/opt/miniforge3/bin:$PATH"
 
 # Ensure pip is up to date
-RUN python -m pip install --upgrade pip
+RUN python3 -m pip install --upgrade pip
 
 # Pre-download wheels for Jupyter kernel stack to speed up runtime env builds.
 # The CodeExecutionServer registers an ipykernel, and ipykernel pulls in IPython.
 # Having these wheels locally avoids repeated downloads during environment creation.
 RUN mkdir -p /opt/wheelhouse && \
-    python -m pip download --dest /opt/wheelhouse \
+    python3 -m pip download --dest /opt/wheelhouse \
     "ipykernel>=6.29.0" \
     && chown -R appuser:appuser /opt/wheelhouse
 
 # Copy package metadata for dependency resolution, then install runtime deps
 COPY pyproject.toml /app/pyproject.toml
-RUN python -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'))['project']['dependencies']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
-    pip install --no-input -r /tmp/reqs.txt && \
+RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'))['project']['dependencies']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
+    python3 -m pip install --no-input -r /tmp/reqs.txt && \
     rm /tmp/reqs.txt
 
 # Copy shared code (used by all servers)
@@ -79,7 +87,7 @@ RUN mkdir -p /home/appuser/.cache/mcp-envs && \
     chown -R appuser:appuser /app /home/appuser
 
 # Add /app to PYTHONPATH so kernel processes can import domain modules
-ENV PYTHONPATH="/app:${PYTHONPATH}"
+ENV PYTHONPATH="/app"
 ENV HOME=/home/appuser
 
 # Authentication: pass ENTRA_CLIENT_ID and ENTRA_TENANT_ID at runtime

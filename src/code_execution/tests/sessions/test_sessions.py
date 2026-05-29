@@ -617,6 +617,62 @@ print(counter.increment())
         assert "7" in result2.stdout and "8" in result2.stdout and "9" in result2.stdout
 
 
+class TestDisplayDataCapture:
+    """The kernel polling loop must capture Jupyter display_data / execute_result
+    rich outputs (matplotlib figures, images, SVGs) so the activity UI can
+    render them.  Text-only payloads must NOT be returned as displays — they
+    are already in stdout.
+    """
+
+    @pytest.mark.unit
+    def test_extract_display_prefers_png(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/png": "BASE64HERE"},
+            {"width": 800},
+        )
+        assert out == {"mime_type": "image/png", "data": "BASE64HERE", "metadata": {"width": 800}}
+
+    @pytest.mark.unit
+    def test_extract_display_falls_back_to_svg(self):
+        from ...sessions.manager import _extract_display
+
+        out = _extract_display(
+            {"text/plain": "<Figure>", "image/svg+xml": "<svg/>"},
+            {},
+        )
+        assert out is not None
+        assert out["mime_type"] == "image/svg+xml"
+        assert out["data"] == "<svg/>"
+
+    @pytest.mark.unit
+    def test_extract_display_text_only_returns_none(self):
+        """Pure text/plain payloads belong in stdout, not displays."""
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display({"text/plain": "just text"}, {}) is None
+        assert _extract_display({}, {}) is None
+        assert _extract_display(None, None) is None  # type: ignore[arg-type]
+
+    @pytest.mark.unit
+    def test_extract_display_drops_html(self):
+        """text/html is intentionally NOT a capturable display type.
+
+        Rendering raw HTML in the activity UI is an XSS vector because
+        kernel code is LLM-generated and prompt-injectable.  HTML-only
+        payloads (e.g. a DataFrame ``_repr_html_``) fall through to None
+        so the UI shows nothing for them.
+        """
+        from ...sessions.manager import _extract_display
+
+        assert _extract_display(
+            {"text/plain": "<DataFrame>", "text/html": "<table></table>"},
+            {},
+        ) is None
+        assert _extract_display({"text/html": "<script>alert(1)</script>"}, {}) is None
+
+
 class TestKernelExecuteLock:
     """Per-session asyncio.Lock that serializes execute_code_for_session calls.
 
@@ -874,6 +930,170 @@ class TestArtifactPipeline:
         manager._cleanup_session_artifacts(session_id)
         assert session_id not in manager._session_artifacts
         assert not outputs.exists()
+
+
+class TestBackgroundArtifactPipeline:
+    """Background-execute path surfaces files under AGORA_OUTPUT_DIR too.
+
+    Mirrors :class:`TestArtifactPipeline` for the foreground path; together
+    they guard the regression where the background path silently skipped
+    the preamble + snapshot/diff plumbing, leaving the kernel with no
+    ``AGORA_OUTPUT_DIR`` and the activity UI with no download links.
+    """
+
+    def _make_manager(self, tmp_path, monkeypatch):
+        from ... import sessions as sessions_pkg
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        return sessions_pkg.SessionManager()
+
+    @pytest.mark.unit
+    def test_background_job_carries_outputs_before_and_artifacts(self):
+        from ...sessions.manager import _BackgroundJob
+        job = _BackgroundJob(
+            job_id="j", session_id="s", msg_id="m", timeout=1.0, start_time=0.0,
+        )
+        assert job.outputs_before == {}
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_finalize_registers_artifacts(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+
+        before = manager._snapshot_outputs_dir(session_id)
+        (outputs / "out.csv").write_text("a,b\n1,2\n")
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, outputs_before=before,
+        )
+        manager._finalize_background_artifacts(job)
+
+        assert [a["name"] for a in job.artifacts] == ["out.csv"]
+        assert "download_token" in job.artifacts[0]
+
+    @pytest.mark.unit
+    def test_finalize_no_changes_yields_empty(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        before = manager._snapshot_outputs_dir(session_id)
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, outputs_before=before,
+        )
+        manager._finalize_background_artifacts(job)
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_finalize_is_best_effort_on_snapshot_failure(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+
+        def boom(*_a, **_k):
+            raise RuntimeError("simulated snapshot failure")
+        monkeypatch.setattr(manager, "_snapshot_outputs_dir", boom)
+
+        job = _BackgroundJob(
+            job_id="j", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0,
+        )
+        manager._finalize_background_artifacts(job)
+        assert job.artifacts == []
+
+    @pytest.mark.unit
+    def test_check_job_terminal_includes_artifacts_without_urls(self, tmp_path, monkeypatch):
+        """Terminal-state result carries artifacts; URL composition is the
+        server layer's job, exactly like the foreground execute contract."""
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        job = _BackgroundJob(
+            job_id="j_xyz", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0,
+            status="completed", completed_at=0.5,
+            artifacts=[{
+                "name": "x.csv", "size_bytes": 4, "mime_type": "text/csv",
+                "modified_at": "2026-01-01T00:00:00+00:00",
+                "download_token": "abc",
+            }],
+        )
+        manager._background_jobs["j_xyz"] = job
+
+        result = manager.check_background_job("j_xyz")
+        assert result["status"] == "completed"
+        assert [a["name"] for a in result["artifacts"]] == ["x.csv"]
+        assert "download_url" not in result["artifacts"][0]
+
+    @pytest.mark.unit
+    def test_check_job_running_omits_artifacts(self, tmp_path, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        job = _BackgroundJob(
+            job_id="j_run", session_id=session_id, msg_id="m",
+            timeout=1.0, start_time=0.0, status="running",
+        )
+        manager._background_jobs["j_run"] = job
+
+        result = manager.check_background_job("j_run")
+        assert result["status"] == "running"
+        assert "artifacts" not in result
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_start_background_seeds_outputs_preamble_and_snapshot(self, tmp_path, monkeypatch):
+        """start_background_execution_for_session prepends the outputs preamble
+        (so kernels whose FIRST execute is background still get
+        AGORA_OUTPUT_DIR) and records the pre-execute snapshot on the job."""
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "preexisting.txt").write_text("v1")
+
+        captured = {}
+
+        class _StubKC:
+            def execute(self, code):
+                captured["code"] = code
+                return "msg-id-stub"
+
+        async def _stub_get_or_create_kernel(*_a, **_k):
+            return (object(), _StubKC())
+
+        async def _stub_collect(*_a, **_k):
+            return None
+
+        monkeypatch.setattr(manager, "_get_or_create_kernel", _stub_get_or_create_kernel)
+        monkeypatch.setattr(manager, "_collect_background_job", _stub_collect)
+
+        result = await manager.start_background_execution_for_session(
+            session_id, "print(AGORA_OUTPUT_DIR)", timeout=30.0
+        )
+        job_id = result["job_id"]
+        job = manager._background_jobs[job_id]
+
+        # Outputs preamble must precede the user code.
+        assert "AGORA_OUTPUT_DIR" in captured["code"]
+        assert captured["code"].index("AGORA_OUTPUT_DIR") < captured["code"].index("print(AGORA_OUTPUT_DIR)")
+        # Pre-existing file is in the before-snapshot stored on the job.
+        assert "preexisting.txt" in job.outputs_before
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import os
 import queue
+import re
 import shutil
 import time
 import uuid
@@ -18,6 +19,49 @@ from jupyter_client.manager import AsyncKernelManager
 
 from .session import Session
 from .storage import InMemoryStorage, SessionStorageBackend
+
+# Display-data capture: priority of renderable MIME types to extract from
+# Jupyter `display_data` / `execute_result` messages.  Higher priority first.
+#
+# `text/html` is deliberately NOT captured.  Kernel code is LLM-generated and
+# therefore prompt-injectable from any document the agent reads; raw HTML
+# rendered in the UI is a direct XSS vector.  If interactive HTML payloads
+# (plotly, bokeh) are wanted later, render them via a sandboxed iframe — do
+# not relax the policy here.
+_DISPLAY_MIME_PRIORITY: Tuple[str, ...] = ("image/png", "image/svg+xml")
+
+# Hard cap on total display-data bytes captured per execute, to keep activity
+# events transportable.  matplotlib PNGs are typically <500 KB so 5 MB
+# accommodates a few plots without risking an unbounded SSE payload.
+_MAX_DISPLAY_BYTES_PER_EXECUTE: int = 5 * 1024 * 1024
+
+# IPython colorizes tracebacks with ANSI SGR escape sequences when emitting
+# `error` messages.  The activity UI is a browser <pre>, not a terminal, so
+# the codes show up as garbage like ``␛[0;31m``.  Strip them at the source.
+_ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_SGR_RE.sub("", text)
+
+
+def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
+    """Pick the richest renderable representation from a Jupyter display payload.
+
+    Returns a dict suitable for the Activity UI:
+
+        {"mime_type": "image/png", "data": "<base64>", "metadata": {...}}
+
+    or ``None`` if the payload has no renderable image / HTML / SVG.
+    Plain-text representations are intentionally NOT returned — they are
+    already captured into stdout by the caller.
+    """
+    if not data:
+        return None
+    for mime in _DISPLAY_MIME_PRIORITY:
+        if mime in data:
+            return {"mime_type": mime, "data": data[mime], "metadata": metadata or {}}
+    return None
 
 if TYPE_CHECKING:
     from jupyter_client.asynchronous.client import AsyncKernelClient
@@ -35,9 +79,7 @@ _COMPLETED_JOB_TTL_SECONDS = 3600.0  # 1 hour
 # a streaming download endpoint keyed on that token, and the activity UI shows
 # a download row.  No agent tool call is required — discovery happens by
 # diffing the directory snapshot taken before/after each execute.
-_OUTPUTS_BASE_DIR = Path(
-    os.environ.get("AGORA_OUTPUTS_BASE_DIR", str(Path.home() / "agora-outputs"))
-)
+_OUTPUTS_BASE_DIR = Path(os.environ.get("AGORA_OUTPUTS_BASE_DIR", str(Path.home() / "agora-outputs")))
 
 # File names ignored when scanning the outputs dir.  Suffix match (`.pyc`,
 # `.pyo`) and exact-component match (`__pycache__`, `.ipynb_checkpoints`).
@@ -91,6 +133,12 @@ class _BackgroundJob:
     error: Optional[str] = None
     completed_at: Optional[float] = None
     task: Optional[asyncio.Task] = None
+    # Pre-execute snapshot of the session's outputs dir, captured at
+    # submit time; the terminal handler diffs against the post-execute
+    # snapshot to surface new/modified files as artifacts.  Mirrors the
+    # before/after pattern in :meth:`_execute_code_locked`.
+    outputs_before: dict[str, Tuple[int, float]] = field(default_factory=dict)
+    artifacts: list[dict] = field(default_factory=list)
 
 
 class SessionConfig:
@@ -110,6 +158,16 @@ class SessionConfig:
 
 
 class SessionManager:
+    """Manages the lifecycle of code-execution sessions and their Jupyter kernels.
+
+    Responsibilities include session creation, retrieval, timeout-based cleanup,
+    kernel provisioning (one ``AsyncKernelManager`` per session), background-job
+    tracking, and artifact registration for the ``/artifacts`` download endpoint.
+
+    Thread-safety is provided by an internal ``RLock`` for session-lifecycle
+    mutations and per-session ``asyncio.Lock`` instances for kernel access.
+    """
+
     def _touch_session_if_present(self, session_id: str) -> bool:
         """Atomically refresh a session's last-activity timestamp if it still exists."""
         with self._session_lifecycle_lock:
@@ -119,8 +177,6 @@ class SessionManager:
             session_for_keepalive.touch()
             self.storage.store(session_id, session_for_keepalive)
             return True
-
-    """Generic session manager with automatic cleanup."""
 
     def __init__(self, config: Optional[SessionConfig] = None):
         self.config = config or SessionConfig()
@@ -247,7 +303,7 @@ class SessionManager:
 
         return session
 
-    def update_session(self, session_id: str, session: Session):
+    def update_session(self, session_id: str, session: Session) -> None:
         """Update an existing session."""
         if self.storage.retrieve(session_id) is None:
             raise ValueError(f"Session {session_id} not found")
@@ -255,13 +311,13 @@ class SessionManager:
         session.touch()
         self.storage.store(session_id, session)
 
-    def update_status(self, session_id: str, status: str):
+    def update_status(self, session_id: str, status: str) -> None:
         """Update the status of a session."""
         session = self.get_session(session_id)
         session.update_status(status)
         self.storage.store(session_id, session)
 
-    def close_session(self, session_id: str):
+    def close_session(self, session_id: str) -> None:
         """
         Explicitly close a session.
 
@@ -583,6 +639,31 @@ class SessionManager:
             return None
         return record
 
+    def find_artifact_by_name(self, session_id: str, artifact_name: str) -> Optional[_ArtifactRecord]:
+        """Find a registered artifact by its relative name within a session.
+
+        Looks up a previously registered artifact (i.e. one that was discovered
+        during a snapshot-diff after an execute) by its relative filename.  This
+        is used by the publish pipeline to resolve the local path of an artifact
+        before pushing it to remote storage.
+
+        Args:
+            session_id: The session that owns the artifact.
+            artifact_name: Relative filename as registered (e.g. ``"results.csv"``
+                or ``"subdir/report.pdf"``).
+
+        Returns:
+            The :class:`_ArtifactRecord` if found and the backing file still
+            exists, otherwise ``None``.
+        """
+        registry = self._session_artifacts.get(session_id, {})
+        for record in registry.values():
+            if record.name == artifact_name:
+                if record.path.is_file():
+                    return record
+                return None
+        return None
+
     def _cleanup_session_artifacts(self, session_id: str) -> None:
         """Drop the token map and remove the on-disk outputs dir."""
         self._session_artifacts.pop(session_id, None)
@@ -593,6 +674,29 @@ class SessionManager:
                 shutil.rmtree(outputs_dir, ignore_errors=True)
             except OSError:
                 LOGGER.warning("Failed to remove outputs dir for session %s", session_id, exc_info=True)
+
+    def _finalize_background_artifacts(self, job: _BackgroundJob) -> None:
+        """Diff the outputs dir against the pre-execute snapshot and record
+        new/modified files on the job.
+
+        Best-effort: snapshot or registration failures are logged and leave
+        ``job.artifacts`` empty rather than failing the job — matches the
+        foreground path's behavior in :meth:`_execute_code_locked`.  Skipped
+        when the session has already been cleaned up (the outputs dir is
+        gone, so the snapshot would be empty anyway).
+        """
+        try:
+            outputs_after = self._snapshot_outputs_dir(job.session_id)
+            job.artifacts = self._register_artifacts_from_diff(
+                job.session_id, job.outputs_before, outputs_after
+            )
+        except Exception:
+            LOGGER.warning(
+                "Background artifact discovery failed for session %s job %s",
+                job.session_id,
+                job.job_id,
+                exc_info=True,
+            )
 
     async def _collect_background_job(
         self,
@@ -624,6 +728,8 @@ class SessionManager:
                     job.success = False
                     job.error = f"Execution timeout after {job.timeout}s"
                     job.status = "failed"
+                    # Capture anything written before the interrupt fired.
+                    self._finalize_background_artifacts(job)
                     self._mark_job_finished(job)
                     return
 
@@ -648,7 +754,7 @@ class SessionManager:
                         job.stderr_parts.append(text)
                 elif msg_type == "error":
                     traceback = "\n".join(content.get("traceback", []))
-                    job.stderr_parts.append(traceback)
+                    job.stderr_parts.append(_strip_ansi(traceback))
                     job.success = False
                 elif msg_type == "execute_result":
                     data = content.get("data", {})
@@ -681,12 +787,14 @@ class SessionManager:
 
             job.status = "completed" if job.success else "failed"
             self._kernel_last_used[job.session_id] = time.time()
+            self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
         except Exception as e:
             job.success = False
             job.error = f"Background job failed: {e}"
             job.stderr_parts.append(str(e))
             job.status = "failed"
+            self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
 
     async def start_background_execution_for_session(
@@ -710,7 +818,16 @@ class SessionManager:
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
-        code = self._prepare_code_with_token_preamble(session_id, code, user_token)
+        # Same preamble shape as the foreground path: outputs preamble
+        # must run before the token preamble so AGORA_OUTPUT_DIR is
+        # populated even when this background call is the kernel's
+        # first execute.  Snapshot before kc.execute so the terminal
+        # handler can diff for artifacts.
+        code = (
+            self._prepare_outputs_preamble(session_id)
+            + self._prepare_code_with_token_preamble(session_id, code, user_token)
+        )
+        outputs_before = self._snapshot_outputs_dir(session_id)
         msg_id = kc.execute(code)
 
         job_id = f"j_{uuid.uuid4().hex[:12]}"
@@ -721,6 +838,7 @@ class SessionManager:
             timeout=timeout,
             start_time=time.monotonic(),
             user_identity=user_identity,
+            outputs_before=outputs_before,
         )
         job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
         self._background_jobs[job_id] = job
@@ -764,6 +882,11 @@ class SessionManager:
         result["success"] = job.success
         if job.error:
             result["error"] = job.error
+        # Artifacts are populated by _finalize_background_artifacts when the
+        # job reaches a terminal state; carry them here without download URLs
+        # — URL composition happens in the MCP server layer where the public
+        # base URL is known (matches the foreground path's contract).
+        result["artifacts"] = list(job.artifacts)
         return result
 
     async def await_background_job(self, job_id: str) -> Optional[dict[str, Any]]:
@@ -803,7 +926,7 @@ class SessionManager:
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
-    ) -> Tuple[str, str, bool, list[dict]]:
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """
         Execute code in the session's Jupyter kernel.
 
@@ -818,12 +941,19 @@ class SessionManager:
             working_dir: Optional working directory for kernel
 
         Returns:
-            Tuple of ``(stdout, stderr, success, artifacts)`` where
-            ``artifacts`` is a list of metadata dicts (one per new/modified
-            file under the session's outputs dir) with shape
-            ``{name, size_bytes, mime_type, modified_at, download_token}``.
-            Each ``download_token`` is unguessable and valid for the
-            session's lifetime; the MCP server composes the full URL.
+            Tuple of ``(stdout, stderr, success, displays, artifacts)``:
+
+            * ``displays`` — rich-output payloads emitted by the kernel
+              (e.g. matplotlib figures via ``display_data`` or trailing
+              expressions via ``execute_result``).  Each entry has the
+              shape ``{"mime_type": str, "data": <base64 for image/png;
+              raw for svg/html>, "metadata": dict}``.  Empty when the
+              code produced only text output.
+            * ``artifacts`` — metadata dicts (one per new/modified file
+              under the session's outputs dir) with shape ``{name,
+              size_bytes, mime_type, modified_at, download_token}``.
+              Each ``download_token`` is unguessable and valid for the
+              session's lifetime; the MCP server composes the full URL.
         """
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).
@@ -840,11 +970,12 @@ class SessionManager:
                 ),
                 False,
                 [],
+                [],
             )
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
-            return "", f"Session busy — job {running_job_id} is still running", False, []
+            return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
         async with self._get_kernel_execute_lock(session_id):
             return await self._execute_code_locked(
@@ -865,13 +996,14 @@ class SessionManager:
         working_dir: Optional[str],
         user_token: Optional[str],
         user_identity: Optional[str],
-    ) -> Tuple[str, str, bool, list[dict]]:
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
         km, kc = await self._get_or_create_kernel(
             session_id, working_dir, user_token=user_token, user_identity=user_identity
         )
-        code = self._prepare_outputs_preamble(session_id) + \
-            self._prepare_code_with_token_preamble(session_id, code, user_token)
+        code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
+            session_id, code, user_token
+        )
 
         # Snapshot the outputs dir before executing so we can diff against
         # the post-execute state and surface only files this execute created
@@ -883,7 +1015,27 @@ class SessionManager:
 
         stdout_parts = []
         stderr_parts = []
+        displays: list[dict] = []
+        displays_bytes = 0
         success = True
+
+        def _maybe_capture_display(content_data: dict, content_meta: dict) -> None:
+            """Append a renderable display payload to ``displays`` if room remains."""
+            nonlocal displays_bytes
+            entry = _extract_display(content_data, content_meta)
+            if entry is None:
+                return
+            size = len(entry["data"]) if isinstance(entry["data"], (str, bytes)) else 0
+            if displays_bytes + size > _MAX_DISPLAY_BYTES_PER_EXECUTE:
+                LOGGER.warning(
+                    "Dropping kernel display payload (%s, %d bytes): per-execute cap %d bytes reached",
+                    entry["mime_type"],
+                    size,
+                    _MAX_DISPLAY_BYTES_PER_EXECUTE,
+                )
+                return
+            displays_bytes += size
+            displays.append(entry)
 
         start_time = time.monotonic()
         keepalive_interval_seconds = self.execution_session_keepalive_seconds
@@ -902,13 +1054,14 @@ class SessionManager:
                         ),
                         False,
                         [],
+                        [],
                     )
                 last_keepalive = now
 
             if time.monotonic() - start_time > timeout:
                 await km.interrupt_kernel()
                 await asyncio.sleep(1.0)
-                return "", f"Execution timeout after {timeout}s", False, []
+                return "", f"Execution timeout after {timeout}s", False, [], []
 
             try:
                 msg = await kc.get_iopub_msg(timeout=1.0)
@@ -935,15 +1088,30 @@ class SessionManager:
             elif msg_type == "error":
                 # Execution error
                 traceback = "\n".join(content.get("traceback", []))
-                stderr_parts.append(traceback)
+                stderr_parts.append(_strip_ansi(traceback))
                 success = False
 
             elif msg_type == "execute_result":
-                # Result of expression
+                # Result of expression: capture the text/plain repr to stdout
+                # AND any renderable rich-output (image/png, svg, html) as a
+                # display payload.
                 data = content.get("data", {})
                 text_result = data.get("text/plain", "")
                 if text_result:
                     stdout_parts.append(text_result)
+                _maybe_capture_display(data, content.get("metadata", {}))
+
+            elif msg_type in ("display_data", "update_display_data"):
+                # Rich output from explicit display(...) calls or implicit
+                # matplotlib emit.  The text/plain rep (e.g. "<Figure size
+                # 800x600 with 1 Axes>") goes to stdout so the agent has
+                # context that a figure was produced; the image / svg / html
+                # rep goes to the displays list for the activity UI.
+                data = content.get("data", {})
+                text_result = data.get("text/plain", "")
+                if text_result:
+                    stdout_parts.append(text_result)
+                _maybe_capture_display(data, content.get("metadata", {}))
 
             elif msg_type == "status":
                 # Execution state changed
@@ -974,6 +1142,13 @@ class SessionManager:
                             t = data.get("text/plain", "")
                             if t:
                                 stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
+                        elif r_type in ("display_data", "update_display_data"):
+                            data = r_content.get("data", {})
+                            t = data.get("text/plain", "")
+                            if t:
+                                stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
                     break
 
         stdout = "".join(stdout_parts)
@@ -987,16 +1162,12 @@ class SessionManager:
         # effort observability.
         try:
             outputs_after = self._snapshot_outputs_dir(session_id)
-            artifacts = self._register_artifacts_from_diff(
-                session_id, outputs_before, outputs_after
-            )
+            artifacts = self._register_artifacts_from_diff(session_id, outputs_before, outputs_after)
         except Exception:
-            LOGGER.warning(
-                "Artifact discovery failed for session %s", session_id, exc_info=True
-            )
+            LOGGER.warning("Artifact discovery failed for session %s", session_id, exc_info=True)
             artifacts = []
 
-        return stdout, stderr, success, artifacts
+        return stdout, stderr, success, displays, artifacts
 
     async def _shutdown_kernel(self, session_id: str):
         """Shutdown and remove a kernel."""

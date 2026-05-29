@@ -24,6 +24,8 @@ from pathlib import Path
 
 from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
+from code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
+from code_execution.data_access.credentials import create_storage_credential
 from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 
 # Path to the chemistry_tools package (relative to this file so it works
@@ -89,10 +91,29 @@ tool_registry = ToolRegistry()
 for tool_def in CHEMISTRY_TOOLS:
     tool_registry.register_tool(tool_def)
 
+# Configure publishers so the publish_artifact tool is available.
+_PUBLISH_DIR = Path(os.getenv("PUBLISH_DIR", "/tmp/published_artifacts"))
+
+# Build the list of publishers. LocalFilePublisher is always available;
+# BlobPublisher is enabled when BLOB_PUBLISH_ACCOUNT_URL is set.
+_publishers: list[AssetPublisher] = [LocalFilePublisher(base_dir=_PUBLISH_DIR)]
+
+_blob_account_url = os.getenv("BLOB_PUBLISH_ACCOUNT_URL")
+_blob_container = os.getenv("BLOB_PUBLISH_CONTAINER", "artifacts")
+if _blob_account_url:
+    _publishers.append(
+        BlobPublisher(
+            account_url=_blob_account_url,
+            container=_blob_container,
+            credential=create_storage_credential(),
+        )
+    )
+
 server = ChemistryServer(
     server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
+    publishers=_publishers,
 )
 
 if __name__ == "__main__":

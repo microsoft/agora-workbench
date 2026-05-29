@@ -5,7 +5,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
 from fastmcp import Context
@@ -477,6 +477,21 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
         return
     if final is None:
         return
+    # Compose full download URLs for any files written during the background
+    # execute.  Same shape as the foreground path: SessionManager hands back
+    # records carrying a ``download_token`` placeholder; the server layer is
+    # where SERVER_PUBLIC_URL is known.
+    public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
+    artifacts_with_urls = [
+        {
+            **a,
+            "download_url": (
+                f"{public_base}/artifacts/{session_id}/"
+                f"{a['download_token']}/{a['name']}"
+            ),
+        }
+        for a in (final.get("artifacts") or [])
+    ]
     server.activity_publisher.publish_nowait(
         {
             "type": "job_finished",
@@ -487,6 +502,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
             "stdout": final.get("stdout"),
             "stderr": final.get("stderr"),
             "error": final.get("error"),
+            "artifacts": artifacts_with_urls,
             "duration_ms": (
                 float(final.get("elapsed_seconds", 0.0)) * 1000.0 if final.get("elapsed_seconds") is not None else None
             ),
@@ -494,7 +510,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
     )
 
 
-def build_tool(server: "CodeExecutionServer") -> Callable:
+def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]":
     """Setup the general code execution tool."""
 
     async def execute_code_tool(
@@ -656,10 +672,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
             artifacts_with_urls = [
                 {
                     **a,
-                    "download_url": (
-                        f"{public_base}/artifacts/{session.session_id}/"
-                        f"{a['download_token']}/{a['name']}"
-                    ),
+                    "download_url": (f"{public_base}/artifacts/{session.session_id}/{a['download_token']}/{a['name']}"),
                 }
                 for a in result.artifacts
             ]
@@ -678,13 +691,19 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
                     "artifacts": artifacts_with_urls,
                     "error": result.error,
                     "session_id": session.session_id,
+                    "displays": result.displays,
                 }
             )
 
-            # Return result with session_id.  Drop artifacts from the agent's
-            # view: the agent doesn't need download URLs (the user is who
-            # downloads), and the metadata adds token pressure for nothing.
-            result_dict = result.model_dump(exclude={"artifacts"})
+            # Return result with session_id.  Both ``displays`` and
+            # ``artifacts`` are excluded from the JSON returned to the agent:
+            # matplotlib PNGs (displays) can be hundreds of KB and would blow
+            # the agent's context window for no gain — text/plain reprs are
+            # already in ``stdout``, and the rich payload is streamed to the
+            # activity UI.  Artifact metadata is similarly the user's concern
+            # (download URLs), not the agent's, and adds token pressure for
+            # nothing — both payloads ride the code_executed activity event.
+            result_dict = result.model_dump(exclude={"displays", "artifacts"})
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:
@@ -731,7 +750,7 @@ def build_tool(server: "CodeExecutionServer") -> Callable:
     return execute_code_tool
 
 
-def build_check_job_tool(server: "CodeExecutionServer") -> Callable:
+def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]":
     """Build a tool that checks status/output for a background code-execution job."""
 
     async def check_job_tool(ctx: Context, job_id: str) -> str:
@@ -749,6 +768,10 @@ def build_check_job_tool(server: "CodeExecutionServer") -> Callable:
             # Pass caller_identity so that missing-job and unauthorized-access both
             # raise ValueError("Job … not found"), preventing job-id existence probing.
             status = server.session_manager.check_background_job(job_id, caller_identity=caller_identity)
+            # Drop artifacts from the agent's view, matching the foreground
+            # execute_code path: the user — not the agent — downloads files,
+            # and the URLs already ride the job_finished activity event.
+            status.pop("artifacts", None)
             return json.dumps(status, indent=2)
         except Exception as e:
             LOGGER.error(f"check_job failed: {e}", exc_info=True)

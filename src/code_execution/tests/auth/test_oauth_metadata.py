@@ -194,6 +194,14 @@ class TestWWWAuthenticateHeader:
         response = client.get("/health")
         assert response.status_code == 200
 
+    def test_healthz_endpoint_unaffected(self):
+        """Kubernetes-style /healthz should also return 200 with no auth."""
+        server = _create_server()
+        client = TestClient(_create_test_app_with_auth(server))
+
+        response = client.get("/healthz")
+        assert response.status_code == 200
+
 
 class TestProtectedResourceMetadataWithAuthConfig:
     """Test metadata endpoint when a pluggable auth_config is used instead of Entra params."""

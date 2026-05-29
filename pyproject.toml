@@ -49,6 +49,10 @@ agent = [
     "tenacity>=9.1.2",
     "tiktoken>=0.11.0",
 ]
+# OpenAI Agents SDK adapter (docs/tutorials/openai_agents_quickstart)
+openai-agents = [
+    "openai-agents>=0.15.0",
+]
 # Activity UI monitoring service
 ui = [
     "sse-starlette>=3.3.0",
@@ -82,6 +86,11 @@ dev = [
     "pytest-json-report>=1.5.0",
     "pytest-timeout>=2.4.0",
     "ruff>=0.15.12",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
 ]
 
 [tool.pytest.ini_options]
