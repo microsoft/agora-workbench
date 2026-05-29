@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from code_execution.connector import ConnectorConfig, GatewayPolicy, UpstreamConfig
+from connector import ConnectorConfig, GatewayPolicy, UpstreamConfig
 
 
 class TestUpstreamConfig:

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from code_execution.connector import ConnectorConfig, ConnectorServer, GatewayPolicy, UpstreamConfig
+from connector import ConnectorConfig, ConnectorServer, GatewayPolicy, UpstreamConfig
 
 
 # Sample catalog responses from mock upstreams
@@ -94,7 +94,7 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -120,7 +120,7 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -156,7 +156,7 @@ class TestConnectorServerRouter:
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -182,7 +182,7 @@ class TestConnectorServerRouter:
                 raise httpx.ConnectError("Connection refused")
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -207,7 +207,7 @@ class TestConnectorServerRouter:
                 return _mock_response(GIS_CATALOG)
             raise httpx.RequestError(f"Unknown URL: {url}")
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -240,7 +240,7 @@ class TestConnectorServerRouter:
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -282,7 +282,7 @@ class TestConnectorServerGateway:
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -317,7 +317,7 @@ class TestConnectorServerGateway:
         async def mock_get(url, **kwargs):
             return _mock_response(CHEMISTRY_CATALOG)
 
-        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+        with patch("connector.server.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = mock_get
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)

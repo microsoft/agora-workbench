@@ -25,11 +25,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ..activity_publisher import ActivityPublisher
-from ..auth.base import AuthConfig
-from ..sessions.context import get_current_request_token
-from ..tool_registry import ToolDefinition
-from ..tools.tool_search import ToolInfo
+from code_execution.activity_publisher import ActivityPublisher
+from code_execution.auth.base import AuthConfig
+from code_execution.sessions.context import get_current_request_token
+from code_execution.tool_registry import ToolDefinition
+from code_execution.tools.tool_search import ToolInfo
+
 from .config import ConnectorConfig, UpstreamConfig
 
 LOGGER = logging.getLogger(__name__)
@@ -70,7 +71,7 @@ class ConnectorServer:
 
         # Auth config
         if auth_config is None:
-            from ..auth import create_noop_auth_config
+            from code_execution.auth import create_noop_auth_config
 
             auth_config = create_noop_auth_config()
         self.auth_config = auth_config
@@ -421,7 +422,7 @@ class ConnectorServer:
     @staticmethod
     def _get_user_id_from_context() -> str:
         """Extract user identity from the current request context."""
-        from ..sessions.context import get_current_user_identity
+        from code_execution.sessions.context import get_current_user_identity
 
         identity = get_current_user_identity()
         return identity or "anonymous"
@@ -432,8 +433,8 @@ class ConnectorServer:
 
     def _setup_search_tool(self):
         """Build an aggregated search index over all upstream catalogs."""
-        from ..tools import create_tool_search_backend
-        from ..tools.tool_search import ToolSearchResult  # noqa: F811
+        from code_execution.tools import create_tool_search_backend
+        from code_execution.tools.tool_search import ToolSearchResult  # noqa: F811
 
         connector_name = self.config.name
         tool_name = f"search_{connector_name}_tools"
@@ -710,7 +711,7 @@ class ConnectorServer:
         middleware: list[tuple[type, dict]] = []
         connector = self
 
-        from ..sessions.context import (
+        from code_execution.sessions.context import (
             set_current_request_token,
             set_current_token_claims,
             set_current_user_identity,
