@@ -12,6 +12,7 @@ from .credentials import (
 from .publishers import (
     AssetPublisher,
     BlobPublisher,
+    GuiPublisher,
     LocalFilePublisher,
     parse_destination_tag,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "create_storage_credential",
     "AssetPublisher",
     "BlobPublisher",
+    "GuiPublisher",
     "LocalFilePublisher",
     "parse_destination_tag",
     "AssetResolutionMiddleware",

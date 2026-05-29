@@ -178,6 +178,13 @@ class CodeExecutionServer:
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
+
+        # GuiPublisher is always available so agents can use <gui>name</gui>
+        # to make outputs downloadable without requiring external storage.
+        from .data_access.publishers import GuiPublisher
+
+        self._gui_publisher = GuiPublisher(public_url_fn=self.public_url)
+        self._publishers.insert(0, self._gui_publisher)
         # Resolution: ServerConfig overrides env var; env var provides deployment default.
         if server_config.parallel_max_concurrency is not None:
             parallel_execute_max_concurrency = server_config.parallel_max_concurrency
@@ -606,9 +613,8 @@ class CodeExecutionServer:
         # Setup object transfer tool for server-to-server object transfer
         self._setup_transfer_tool()
 
-        # Setup artifact publish tool (only when publishers are configured)
-        if self._publishers:
-            self._setup_publish_artifact_tool()
+        # Setup artifact publish tool (always available via GuiPublisher)
+        self._setup_publish_artifact_tool()
 
     # ========================================================================
     # Session Management Helpers
@@ -2087,6 +2093,7 @@ else:
             registry.
 
             The *destination* tag selects the publisher:
+            - ``<gui>results.csv</gui>`` → GuiPublisher (browser download)
             - ``<blob>results.csv</blob>`` → BlobPublisher
             - ``<local>output</local>`` → LocalFilePublisher
 
@@ -2183,6 +2190,11 @@ else:
 
             # Publish the artifact.
             try:
+                # GuiPublisher needs the download token to build the URL.
+                from .data_access.publishers import GuiPublisher as _GuiPub
+
+                if isinstance(publisher, _GuiPub):
+                    publisher._download_token = record.token
                 remote_uri = await publisher.publish(
                     local_path=record.path,
                     name=logical_name,
@@ -2244,9 +2256,11 @@ else:
         self.mcp.tool(
             name=tool_name,
             description=(
-                "Publish an artifact from the session output directory to remote storage. "
+                "Publish an artifact from the session output directory to remote storage or "
+                "make it downloadable via the GUI. "
                 "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
                 "execute call. Use a tagged destination to select the publisher: "
+                "<gui>results.csv</gui> for browser download via the activity UI, "
                 "<blob>results.csv</blob> for Azure Blob Storage, "
                 "<local>output</local> for local file storage."
             ),

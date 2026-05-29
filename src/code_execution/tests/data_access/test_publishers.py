@@ -327,6 +327,90 @@ class TestLocalFilePublisherPublish:
 
 
 # ---------------------------------------------------------------------------
+# GuiPublisher
+# ---------------------------------------------------------------------------
+
+
+class TestGuiPublisherCanHandle:
+    """Tests for GuiPublisher.can_handle()."""
+
+    def test_handles_gui_closed_tag(self):
+        from ...data_access.publishers import GuiPublisher
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        assert pub.can_handle("<gui>results.csv</gui>") is True
+
+    def test_handles_gui_unclosed_tag(self):
+        from ...data_access.publishers import GuiPublisher
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        assert pub.can_handle("<gui>results.csv") is True
+
+    def test_rejects_blob_tag(self):
+        from ...data_access.publishers import GuiPublisher
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        assert pub.can_handle("<blob>results.csv</blob>") is False
+
+    def test_rejects_local_tag(self):
+        from ...data_access.publishers import GuiPublisher
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        assert pub.can_handle("<local>output</local>") is False
+
+
+class TestGuiPublisherPublish:
+    """Tests for GuiPublisher.publish()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_download_url(self, tmp_path):
+        from ...data_access.publishers import GuiPublisher
+
+        artifact = tmp_path / "results.csv"
+        artifact.write_text("data")
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        pub._download_token = "abc123"
+
+        url = await pub.publish(artifact, "results.csv", "session-1")
+        assert url == "http://localhost:8000/artifacts/session-1/abc123/results.csv"
+
+    @pytest.mark.asyncio
+    async def test_uses_server_public_url_env(self, tmp_path, monkeypatch):
+        from ...data_access.publishers import GuiPublisher
+
+        monkeypatch.setenv("SERVER_PUBLIC_URL", "https://my-server.example.com")
+        artifact = tmp_path / "out.png"
+        artifact.write_bytes(b"\x89PNG")
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        pub._download_token = "tok42"
+
+        url = await pub.publish(artifact, "out.png", "sess-2")
+        assert url == "https://my-server.example.com/artifacts/sess-2/tok42/out.png"
+
+    @pytest.mark.asyncio
+    async def test_raises_without_token(self, tmp_path):
+        from ...data_access.publishers import GuiPublisher
+
+        artifact = tmp_path / "file.txt"
+        artifact.write_text("hello")
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        with pytest.raises(RuntimeError, match="download token"):
+            await pub.publish(artifact, "file.txt", "session-1")
+
+    @pytest.mark.asyncio
+    async def test_raises_for_missing_file(self, tmp_path):
+        from ...data_access.publishers import GuiPublisher
+
+        pub = GuiPublisher(public_url_fn=lambda: "http://localhost:8000")
+        pub._download_token = "tok"
+        with pytest.raises(FileNotFoundError):
+            await pub.publish(tmp_path / "ghost.txt", "ghost.txt", "session-1")
+
+
+# ---------------------------------------------------------------------------
 # publish_artifact MCP tool (via CodeExecutionServer)
 # ---------------------------------------------------------------------------
 
@@ -360,11 +444,12 @@ class TestPublishArtifactTool:
         assert "test_publish_artifact" in tool_names
 
     @pytest.mark.asyncio
-    async def test_tool_not_registered_without_publishers(self):
+    async def test_tool_always_registered_with_gui_publisher(self):
+        """GuiPublisher is auto-registered, so publish tool is always available."""
         server = _make_server_with_publishers([])
 
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "test_publish_artifact" not in tool_names
+        assert "test_publish_artifact" in tool_names
 
     @pytest.mark.asyncio
     async def test_publish_succeeds(self, tmp_path, monkeypatch):
