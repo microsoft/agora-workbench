@@ -4,7 +4,7 @@
 #   cd src
 #   docker build -f activity_ui/Dockerfile -t activity-ui:local .
 
-FROM mcr.microsoft.com/devcontainers/python:3.12
+FROM mcr.microsoft.com/azurelinux/base/python:3.12
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
