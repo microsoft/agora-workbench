@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import time
+import uuid
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -125,11 +126,11 @@ class ConnectorServer:
                 try:
                     await backend.close()
                 except Exception:
-                    pass
+                    LOGGER.warning("Failed to close search backend during shutdown", exc_info=True)
         try:
             await self.activity_publisher.stop()
         except Exception:
-            pass
+            LOGGER.debug("ActivityPublisher stop raised during shutdown; ignoring", exc_info=True)
         LOGGER.info("Connector shutdown complete.")
 
     # ========================================================================
@@ -177,6 +178,12 @@ class ConnectorServer:
         # Apply expose_tools filter
         if upstream.expose_tools and upstream.expose_tools != ["*"]:
             tools = [t for t in tools if self._matches_expose_filter(t.name, upstream.expose_tools)]
+
+        # Apply tool aliases (rename tools for the connector's namespace)
+        if upstream.tool_aliases:
+            for tool_def in tools:
+                if tool_def.name in upstream.tool_aliases:
+                    tool_def.name = upstream.tool_aliases[tool_def.name]
 
         return tools
 
@@ -334,6 +341,30 @@ class ConnectorServer:
             background: bool = False,
         ) -> str:
             """Execute Python code (proxied through gateway with policy enforcement)."""
+            # Tool allow/deny policy enforcement
+            if policy:
+                if policy.blocked_tools:
+                    # Check if any blocked tool names appear in the code
+                    for blocked in policy.blocked_tools:
+                        if blocked in code:
+                            return json.dumps(
+                                {
+                                    "success": False,
+                                    "error": f"Tool '{blocked}' is blocked by gateway policy.",
+                                }
+                            )
+                if policy.allowed_tools is not None:
+                    # When allowed_tools is set, only allow calls containing those tools
+                    # This is a best-effort check on the code content
+                    has_allowed = any(tool in code for tool in policy.allowed_tools)
+                    if not has_allowed and policy.allowed_tools:
+                        return json.dumps(
+                            {
+                                "success": False,
+                                "error": (f"Code does not use any allowed tools. Allowed: {policy.allowed_tools}"),
+                            }
+                        )
+
             # Rate limiting
             if policy and policy.max_calls_per_minute:
                 user_id = server._get_user_id_from_context()
@@ -484,22 +515,40 @@ class ConnectorServer:
     ) -> str:
         """Proxy an MCP tool call to an upstream server.
 
-        Forwards the caller's Bearer token for authentication. Uses the
-        upstream's streamable-HTTP MCP endpoint.
+        Forwards the caller's Bearer token and MCP session context for
+        authentication and session continuity.
         """
         upstream_url = upstream.url.rstrip("/")
 
-        # Get the caller's Bearer token to forward
+        # Get the caller's Bearer token to forward.
+        # Note: in background tasks ContextVars may not be inherited;
+        # callers that need guaranteed auth should ensure context propagation.
         request_token = get_current_request_token()
+        if not request_token:
+            LOGGER.warning(
+                "No request token available for proxy call to '%s' tool '%s'. Auth pass-through will be skipped.",
+                upstream.name,
+                tool_name,
+            )
 
         headers: dict[str, str] = {"Content-Type": "application/json"}
         if request_token:
             headers["Authorization"] = f"Bearer {request_token}"
 
-        # Build MCP tool call request (JSON-RPC 2.0)
+        # Forward MCP session ID if available (enables session-scoped behavior on upstream)
+        if ctx:
+            try:
+                session_id = ctx.session_id
+                if session_id:
+                    headers["Mcp-Session-Id"] = session_id
+            except (RuntimeError, AttributeError):
+                pass
+
+        # Build MCP tool call request (JSON-RPC 2.0) with unique request ID
+        request_id = str(uuid.uuid4())
         mcp_request = {
             "jsonrpc": "2.0",
-            "id": 1,
+            "id": request_id,
             "method": "tools/call",
             "params": {
                 "name": tool_name,
@@ -655,7 +704,8 @@ class ConnectorServer:
 
         Uses the same auth pattern as CodeExecutionServer: validates Bearer
         tokens on /mcp, skips /health and /.well-known, and stores the
-        validated token/identity in context vars.
+        validated token/identity in context vars. Includes WWW-Authenticate
+        header on 401 responses per RFC 9728.
         """
         middleware: list[tuple[type, dict]] = []
         connector = self
@@ -665,6 +715,13 @@ class ConnectorServer:
             set_current_token_claims,
             set_current_user_identity,
         )
+
+        # Build WWW-Authenticate value for 401 responses
+        www_authenticate = ""
+        if connector.auth_config.www_authenticate_value:
+            www_authenticate = connector.auth_config.www_authenticate_value
+        elif connector.entra_client_id and connector.entra_tenant_id:
+            www_authenticate = 'Bearer resource_metadata="/.well-known/oauth-protected-resource"'
 
         class ConnectorAuthMiddleware:
             """Auth middleware for the connector server."""
@@ -689,12 +746,19 @@ class ConnectorServer:
                     headers = dict(scope.get("headers", []))
                     auth_header = headers.get(b"authorization", b"").decode("utf-8")
 
+                    # Build 401 response headers (always include WWW-Authenticate)
+                    resp_401_headers: list[tuple[bytes, bytes]] = [
+                        (b"content-type", b"text/plain"),
+                    ]
+                    if www_authenticate:
+                        resp_401_headers.append((b"www-authenticate", www_authenticate.encode("utf-8")))
+
                     if not auth_header or not auth_header.startswith("Bearer "):
                         await send(
                             {
                                 "type": "http.response.start",
                                 "status": 401,
-                                "headers": [(b"content-type", b"text/plain")],
+                                "headers": resp_401_headers,
                             }
                         )
                         await send(
@@ -715,7 +779,7 @@ class ConnectorServer:
                                 {
                                     "type": "http.response.start",
                                     "status": 401,
-                                    "headers": [(b"content-type", b"text/plain")],
+                                    "headers": resp_401_headers,
                                 }
                             )
                             await send(
@@ -732,18 +796,18 @@ class ConnectorServer:
                         set_current_user_identity(user_identity)
 
                     except Exception as exc:
-                        LOGGER.warning("Token validation failed: %s", exc)
+                        LOGGER.warning("Token validation failed: %s", exc, exc_info=True)
                         await send(
                             {
                                 "type": "http.response.start",
                                 "status": 401,
-                                "headers": [(b"content-type", b"text/plain")],
+                                "headers": resp_401_headers,
                             }
                         )
                         await send(
                             {
                                 "type": "http.response.body",
-                                "body": f"Authentication failed: {exc}".encode("utf-8"),
+                                "body": b"Authentication failed. Please provide a valid Bearer token.",
                             }
                         )
                         return

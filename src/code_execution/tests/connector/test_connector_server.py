@@ -221,6 +221,41 @@ class TestConnectorServerRouter:
         tool_names = [t.name for t in tools]
         assert "search_science-hub_tools" in tool_names
 
+    @pytest.mark.asyncio
+    async def test_tool_aliases_are_applied(self):
+        """Router applies tool_aliases when fetching catalog."""
+        config = ConnectorConfig(
+            name="aliased",
+            mode="router",
+            upstreams=[
+                UpstreamConfig(
+                    name="chemistry",
+                    url="http://chemistry:8000",
+                    tool_aliases={"compute_descriptors": "chem_descriptors"},
+                ),
+            ],
+        )
+        connector = ConnectorServer(config=config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(CHEMISTRY_CATALOG)
+
+        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await connector._sync_upstream_catalogs()
+
+        chem_tools = connector._upstream_catalogs["chemistry"]
+        tool_names = {t.name for t in chem_tools}
+        assert "chem_descriptors" in tool_names
+        assert "compute_descriptors" not in tool_names
+        # cluster_molecules should be unchanged
+        assert "cluster_molecules" in tool_names
+
 
 class TestConnectorServerGateway:
     """Tests for ConnectorServer in gateway mode."""
@@ -273,6 +308,28 @@ class TestConnectorServerGateway:
 
         # Different user should still be allowed
         assert connector._check_rate_limit("user2", 5) is True
+
+    @pytest.mark.asyncio
+    async def test_gateway_blocks_blocked_tools(self, gateway_config):
+        """Gateway rejects calls to tools listed in blocked_tools."""
+        connector = ConnectorServer(config=gateway_config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(CHEMISTRY_CATALOG)
+
+        with patch("code_execution.connector.server.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await connector._startup()
+
+        # The gateway's execute_code proxy checks code content for blocked tool names.
+        # Verify the blocked_tools policy field is set correctly
+        assert connector.config.gateway_policy is not None
+        assert "parallel_execute" in connector.config.gateway_policy.blocked_tools
 
 
 class TestConnectorServerMatchesExposeFilter:

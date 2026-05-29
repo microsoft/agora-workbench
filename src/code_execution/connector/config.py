@@ -4,7 +4,7 @@ Configuration models for ConnectorServer.
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UpstreamConfig(BaseModel):
@@ -75,11 +75,6 @@ class ConnectorConfig(BaseModel):
         default=None,
         description="Policy configuration (only used in gateway mode).",
     )
-    catalog_refresh_interval: Optional[int] = Field(
-        default=None,
-        ge=0,
-        description=("Seconds between catalog re-fetches from upstreams. 0 or None means fetch only at startup."),
-    )
     entra_client_id: Optional[str] = Field(
         default=None,
         description="Entra ID application client ID for this connector's app registration.",
@@ -88,3 +83,10 @@ class ConnectorConfig(BaseModel):
         default=None,
         description="Azure AD tenant ID for this connector's app registration.",
     )
+
+    @model_validator(mode="after")
+    def _validate_gateway_single_upstream(self) -> "ConnectorConfig":
+        """Gateway mode requires exactly one upstream."""
+        if self.mode == "gateway" and len(self.upstreams) != 1:
+            raise ValueError("Gateway mode requires exactly one upstream, got %d." % len(self.upstreams))
+        return self

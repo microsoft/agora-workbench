@@ -88,3 +88,14 @@ class TestConnectorConfig:
     def test_requires_upstreams(self):
         with pytest.raises(ValidationError):
             ConnectorConfig(name="bad", mode="router")
+
+    def test_gateway_rejects_multiple_upstreams(self):
+        with pytest.raises(ValidationError, match="exactly one upstream"):
+            ConnectorConfig(
+                name="bad-gateway",
+                mode="gateway",
+                upstreams=[
+                    UpstreamConfig(name="a", url="http://a:8000"),
+                    UpstreamConfig(name="b", url="http://b:8000"),
+                ],
+            )
