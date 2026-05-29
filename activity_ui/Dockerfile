@@ -13,10 +13,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY activity_ui/requirements.txt /app/requirements.txt
-RUN pip install --no-input -r /app/requirements.txt
+RUN pip3 install --no-input -r /app/requirements.txt
 
 COPY activity_ui /app/activity_ui
 
 EXPOSE 8030
 
-CMD ["python", "-m", "activity_ui.server"]
+CMD ["python3", "-m", "activity_ui.server"]
