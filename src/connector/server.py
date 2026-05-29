@@ -23,7 +23,7 @@ from fastmcp import Context, FastMCP
 
 from code_execution.activity_publisher import ActivityPublisher
 from code_execution.auth.base import AuthConfig
-from code_execution.base_server import BaseMCPServer
+from base import BaseMCPServer
 from code_execution.sessions.context import get_current_request_token
 from code_execution.tool_registry import ToolDefinition
 from code_execution.tools.tool_search import ToolInfo

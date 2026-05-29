@@ -9,7 +9,7 @@ inherit from this to avoid divergence in their transport/auth layers.
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import uvicorn
 from fastapi import HTTPException
@@ -18,12 +18,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from .auth.base import AuthConfig, TokenValidationError
-from .sessions.context import (
-    set_current_request_token,
-    set_current_token_claims,
-    set_current_user_identity,
-)
+if TYPE_CHECKING:
+    from code_execution.auth.base import AuthConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +42,7 @@ class BaseMCPServer(ABC):
 
     # These attributes must be set by subclass __init__
     mcp: FastMCP
-    auth_config: AuthConfig
+    auth_config: "AuthConfig"
     entra_client_id: Optional[str]
     entra_tenant_id: Optional[str]
 
@@ -97,6 +93,8 @@ class BaseMCPServer(ABC):
         Returns decoded token claims if valid.
         Raises HTTPException if token is invalid.
         """
+        from code_execution.auth.base import TokenValidationError
+
         try:
             return await self.auth_config.token_validator.validate(
                 token, request_path=request_path, request_method=request_method
@@ -200,6 +198,12 @@ class BaseMCPServer(ABC):
 
         Subclasses can override to add additional middleware or change behavior.
         """
+        from code_execution.sessions.context import (
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
         middleware: list[tuple[type, dict]] = []
         server = self
 

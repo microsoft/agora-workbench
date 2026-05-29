@@ -33,7 +33,7 @@ from .code_execution_models import (
     ToolCallRecord,
 )
 from .auth.base import AuthConfig
-from .base_server import BaseMCPServer
+from base import BaseMCPServer
 from .data_access import AssetResolutionMiddleware
 from .sessions import (
     MaxSessionsReachedError,

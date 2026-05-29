@@ -70,7 +70,7 @@ homepage = "https://github.com/msr-central/agora-agent"
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["code_execution*", "connector*", "agent_helpers*", "activity_ui*"]
+include = ["base*", "code_execution*", "connector*", "agent_helpers*", "activity_ui*"]
 exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [build-system]
