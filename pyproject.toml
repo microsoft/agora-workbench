@@ -54,6 +54,10 @@ agent = [
 openai-agents = [
     "openai-agents>=0.15.0",
 ]
+# GitHub Copilot SDK adapter (docs/tutorials/copilot_sdk_quickstart)
+copilot-sdk = [
+    "github-copilot-sdk>=0.3.0",
+]
 # Domain-specific (geospatial examples)
 geo = [
     "rasterio>=1.4.0",
