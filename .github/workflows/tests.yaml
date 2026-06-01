@@ -13,6 +13,7 @@ on:
   pull_request:
     paths:
       - 'src/**'
+      - 'activity_ui/**'
       - 'agent_helpers/**'
       - 'examples/**'
       - '.github/workflows/tests.yaml'
@@ -66,6 +67,12 @@ jobs:
         run: |
           uv sync --extra agent
           uv run pytest agent_helpers/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
+
+      - name: Run activity UI tests
+        id: activity_ui_tests
+        continue-on-error: true
+        run: |
+          uv run pytest activity_ui/tests/ -m "not live" -v --json-report --json-report-file=activity-ui-report.json
       
       - name: Test Summary
         if: always()
@@ -74,6 +81,7 @@ jobs:
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
           llm_status="${{ steps.llm_tests.outcome }}"
+          activity_ui_status="${{ steps.activity_ui_tests.outcome }}"
           
           echo "## Test Results"
           if [ "$auth_status" == "success" ]; then
@@ -99,8 +107,14 @@ jobs:
           else
             echo "❌ LLM tests failed"
           fi
+
+          if [ "$activity_ui_status" == "success" ]; then
+            echo "✅ Activity UI tests passed"
+          else
+            echo "❌ Activity UI tests failed"
+          fi
           
-          if [ "$auth_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ]; then
+          if [ "$auth_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1
