@@ -48,6 +48,9 @@ param entraClientId string = ''
 @description('Entra ID tenant ID.')
 param entraTenantId string = ''
 
+@description('Additional audience URI for service-to-service token validation (e.g. api://agora-activity-ui.<rg>).')
+param entraAudience string = ''
+
 // ── Container parameters ────────────────────────────────────────────────────
 
 @description('Full container image reference including tag.')
@@ -175,10 +178,10 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
           openIdIssuer: '${environment().authentication.loginEndpoint}${entraTenantId}/v2.0'
         }
         validation: {
-          allowedAudiences: [
+          allowedAudiences: union([
             'api://${entraClientId}'
             entraClientId
-          ]
+          ], empty(entraAudience) ? [] : [entraAudience])
         }
       }
     }

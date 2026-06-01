@@ -288,6 +288,11 @@ fi
 BICEP_ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID_VAL"
 if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$ACTIVITY_UI_CLIENT_ID_VAL" ]]; then
     BICEP_ENTRA_CLIENT_ID="$ACTIVITY_UI_CLIENT_ID_VAL"
+    # Pass the scoped audience URI so EasyAuth accepts managed-identity tokens.
+    ACTIVITY_UI_AUDIENCE_VAL="${ACTIVITY_UI_AUDIENCE:-}"
+    if [[ -n "$ACTIVITY_UI_AUDIENCE_VAL" ]]; then
+        OPTIONAL_PARAMS+=" entraAudience=$ACTIVITY_UI_AUDIENCE_VAL"
+    fi
 fi
 
 if [[ "$DRY_RUN" == true ]]; then
