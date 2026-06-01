@@ -105,9 +105,12 @@ The Container App receives these at runtime:
 
 Connector-specific values are usually declared in `parameters/connector.bicepparam`, for example:
 
-- `CONNECTOR_MODE`
-- `UPSTREAM_*` (one per upstream)
-- `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`
+- `CONNECTOR_MODE` — `"router"` (default, aggregates multiple upstreams) or `"gateway"` (single upstream with policy enforcement)
+- `UPSTREAM_<NAME>_URL` — one per upstream server (e.g., `UPSTREAM_CHEMISTRY_URL`)
+- `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` — set on **upstream** servers, not the connector
+
+Note: gateway mode requires exactly one `UPSTREAM_*_URL`; multiple upstreams with
+`CONNECTOR_MODE=gateway` is invalid and will fail at startup.
 
 ## Connector network deployment
 

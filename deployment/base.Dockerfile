@@ -80,6 +80,7 @@ RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb
 # Copy shared code (used by all servers)
 # .dockerignore excludes tests/ and dev files from this COPY
 COPY src/code_execution /app/code_execution
+COPY src/connector /app/connector
 
 # Set up remaining appuser directories (no large chown needed — miniforge
 # and wheelhouse were already owned correctly in their install layers)

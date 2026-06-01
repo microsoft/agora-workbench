@@ -76,7 +76,7 @@ services:
     environment:
       MCP_SERVER_AUTH_ENABLED: "false"
       MCP_SERVER_MODE: "development"
-      CONNECTOR_MODE: "gateway"
+      CONNECTOR_MODE: "router"
       UPSTREAM_CHEMISTRY_URL: "http://chemistry-mcp-server:8000/mcp"
       UPSTREAM_EARTHSCIENCE_URL: "http://earthscience-mcp-server:8000/mcp"
       OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-mcp-server,earthscience-mcp-server"
@@ -85,7 +85,9 @@ services:
       UV_LINK_MODE: "copy"
       UV_NO_CACHE: "1"
     command:
-      - mcp-connector-server
+      - python
+      - -m
+      - connector
     ports:
       - "8010:8000"
     depends_on:

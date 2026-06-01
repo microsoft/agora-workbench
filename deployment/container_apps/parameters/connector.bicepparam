@@ -24,7 +24,7 @@ param maxReplicas = 10
 // Replace values below with your upstream URLs inside the ACA environment.
 
 param extraEnvVars = {
-  CONNECTOR_MODE: 'gateway'
+  CONNECTOR_MODE: 'router'
   UPSTREAM_CHEMISTRY_URL: 'http://chemistry-server:8000/mcp'
   UPSTREAM_GIS_URL: 'http://gis-server:8000/mcp'
   OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: 'chemistry-server,gis-server'
