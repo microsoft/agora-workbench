@@ -41,7 +41,10 @@ az account set --subscription <SUBSCRIPTION_ID>
 # 4. Deploy an example server (chemistry shown)
 ./deploy.sh --server chemistry
 
-# 5. Verify
+# 5. Deploy a connector network (upstreams first, connector last)
+./deploy.sh --network networks/science-hub.yaml
+
+# 6. Verify
 az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
 ```
 
@@ -81,8 +84,10 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 | `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
+| `parameters/connector.bicepparam` | Connector parameter template (`MCP_CONNECTOR_*` + trusted hosts) |
+| `networks/science-hub.yaml` | Example network manifest for ordered upstream + connector deployment |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
-| `deploy.sh` | Per-server: builds image, pushes to ACR, deploys Container App |
+| `deploy.sh` | Per-server and network orchestration with health gating |
 
 ## Environment variables
 
@@ -96,6 +101,53 @@ The Container App receives these at runtime:
 | `ENTRA_TENANT_ID` | Bicep parameter | Entra tenant ID |
 | `AZURE_CLIENT_ID` | Bicep parameter | Managed identity client ID |
 | `OBO_SIMULATION_MODE` | hardcoded `false` | Must be false in production |
+
+Connector-specific values are usually declared in `parameters/connector.bicepparam`, for example:
+
+- `MCP_CONNECTOR_MODE`
+- `MCP_CONNECTOR_SOURCES`
+- `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`
+
+## Connector network deployment
+
+`deploy.sh --network` deploys a full topology in order:
+
+1. Deploy all upstream servers
+2. Wait for each upstream `/health` endpoint to pass
+3. Deploy the connector
+
+Manifest format:
+
+```yaml
+name: science-hub
+connector:
+  server: science-hub
+  params: ../parameters/connector.bicepparam
+upstreams:
+  - server: chemistry
+    params: ../parameters/chemistry.bicepparam
+    internal: true
+  - server: earthscience
+    params: ../parameters/earthscience.bicepparam
+    internal: true
+```
+
+Behavior notes:
+
+- `internal: true` sets upstream ingress to `external: false` (internal-only).
+- Connector deployments skip the Azure Files env-cache mount (stateless by default).
+- Relative `params`, `dockerfile`, and `context` values are resolved from the manifest directory.
+
+## Auth topology for connector networks
+
+When a connector fronts domain servers, treat the connector as the primary external auth boundary.
+
+Two supported patterns:
+
+1. **One Entra app for the connector**  
+   Upstream domain servers validate the connector managed-identity token for service-to-service calls.
+2. **Shared audience / token pass-through**  
+   Reuse existing end-user token validation if connector and upstreams share tenant/audience expectations.
 
 ## Environment caching with Azure Files
 

@@ -36,6 +36,12 @@ See [`example/docker-compose.yml`](example/docker-compose.yml) for a ready-to-us
 docker compose up --build
 ```
 
+Connector network example (connector + two upstream domain servers):
+
+```bash
+docker compose -f deployment/example/docker-compose.network.yml up --build
+```
+
 ### 4. Deploy to Azure Container Apps
 
 See [`container_apps/README.md`](container_apps/README.md) for infrastructure setup. Quick start:
@@ -46,6 +52,9 @@ cd container_apps
   --server my-server \
   --dockerfile /path/to/your/Dockerfile \
   --context /path/to/build/context
+
+# Or deploy a full connector topology
+./deploy.sh --network networks/science-hub.yaml
 ```
 
 ## Authentication
@@ -57,6 +66,10 @@ The server supports two auth modes:
 - **Entra ID (production)** — Pass `ENTRA_CLIENT_ID` and `ENTRA_TENANT_ID` at runtime
   via your `.env.server` file or docker-compose environment. Configure your server with
   `create_entra_auth_config()`.
+
+For connector networks, treat the connector as the external auth boundary.
+Upstream domain servers should validate connector service-to-service identity tokens
+or share tenant/audience settings for end-user token pass-through.
 
 ## Environment Variables
 
@@ -74,12 +87,14 @@ deployment/
 ├── README.md                # This file
 ├── example/
 │   ├── Dockerfile           # Example server Dockerfile
-│   └── docker-compose.yml   # Example local compose setup
+│   ├── docker-compose.yml   # Example local compose setup
+│   └── docker-compose.network.yml  # Connector + upstream network example
 └── container_apps/
     ├── deploy.sh            # Build, push, and deploy to Azure Container Apps
     ├── main.bicep           # ARM template for the Container App
     ├── README.md            # Container Apps setup guide
-    └── parameters/          # Per-server Bicep parameter files
+    ├── networks/            # Network manifest examples for ordered deployment
+    └── parameters/          # Per-server Bicep parameter files (includes connector template)
 ```
 
 ## Build Context
@@ -142,4 +157,3 @@ ServerConfig(
 ```
 
 Supported source schemes: `https://`, `az://<container>/<blob>`, `file://`, or bare local paths.
-

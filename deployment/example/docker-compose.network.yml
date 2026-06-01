@@ -1,0 +1,97 @@
+services:
+  chemistry-mcp-server:
+    build:
+      context: ../../src/domain_examples/chemistry
+    image: chemistry-mcp-server:latest
+    container_name: chemistry-mcp-server
+    env_file:
+      - ../../sample.env
+    environment:
+      MCP_SERVER_AUTH_ENABLED: "false"
+      MCP_SERVER_MODE: "development"
+      UV_COMPILE_BYTECODE: "1"
+      UV_LINK_MODE: "copy"
+      UV_NO_CACHE: "1"
+    command:
+      - uv
+      - run
+      - --directory
+      - /app
+      - python
+      - server.py
+      - --transport
+      - streamable-http
+      - --port
+      - "8000"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  earthscience-mcp-server:
+    build:
+      context: ../../src/domain_examples/earthscience
+    image: earthscience-mcp-server:latest
+    container_name: earthscience-mcp-server
+    env_file:
+      - ../../sample.env
+    environment:
+      MCP_SERVER_AUTH_ENABLED: "false"
+      MCP_SERVER_MODE: "development"
+      UV_COMPILE_BYTECODE: "1"
+      UV_LINK_MODE: "copy"
+      UV_NO_CACHE: "1"
+    command:
+      - uv
+      - run
+      - --directory
+      - /app
+      - python
+      - server.py
+      - --transport
+      - streamable-http
+      - --port
+      - "8000"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  science-hub-connector:
+    build:
+      context: ../..
+      dockerfile: deployment/base.Dockerfile
+    image: science-hub-connector:latest
+    container_name: science-hub-connector
+    env_file:
+      - ../../sample.env
+    environment:
+      MCP_SERVER_AUTH_ENABLED: "false"
+      MCP_SERVER_MODE: "development"
+      CONNECTOR_MODE: "gateway"
+      UPSTREAM_CHEMISTRY_URL: "http://chemistry-mcp-server:8000/mcp"
+      UPSTREAM_EARTHSCIENCE_URL: "http://earthscience-mcp-server:8000/mcp"
+      MCP_CONNECTOR_MODE: "gateway"
+      MCP_CONNECTOR_SOURCES: '{"chemistry":"http://chemistry-mcp-server:8000/mcp","earthscience":"http://earthscience-mcp-server:8000/mcp"}'
+      OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-mcp-server,earthscience-mcp-server"
+      MCP_SERVER_PORT: "8000"
+      UV_COMPILE_BYTECODE: "1"
+      UV_LINK_MODE: "copy"
+      UV_NO_CACHE: "1"
+    command:
+      - mcp-connector-server
+    ports:
+      - "8010:8000"
+    depends_on:
+      chemistry-mcp-server:
+        condition: service_healthy
+      earthscience-mcp-server:
+        condition: service_healthy
