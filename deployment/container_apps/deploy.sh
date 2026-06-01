@@ -371,15 +371,93 @@ import yaml
 path = Path(sys.argv[1])
 data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
-connector = data.get("connector")
-if not isinstance(connector, dict):
-    raise ValueError("network manifest requires a 'connector' object")
+# --- Parse connectors (support both singular and plural keys) ---
+connector_single = data.get("connector")
+connectors_list = data.get("connectors")
 
+if connector_single and connectors_list:
+    raise ValueError("network manifest cannot have both 'connector' and 'connectors' — use one or the other")
+
+if connectors_list is not None:
+    if not isinstance(connectors_list, list) or not connectors_list:
+        raise ValueError("'connectors' must be a non-empty list")
+    connectors = connectors_list
+elif connector_single is not None:
+    if not isinstance(connector_single, dict):
+        raise ValueError("'connector' must be an object")
+    connectors = [connector_single]
+else:
+    raise ValueError("network manifest requires a 'connector' or 'connectors' key")
+
+# --- Parse upstreams ---
 upstreams = data.get("upstreams", [])
 if not isinstance(upstreams, list):
     raise ValueError("network manifest 'upstreams' must be a list")
 
+# --- Validate connectors ---
+connector_names = []
+for i, c in enumerate(connectors):
+    if not isinstance(c, dict):
+        raise ValueError(f"connectors[{i}] must be an object")
+    name = str(c.get("server", "")).strip()
+    if not name:
+        raise ValueError(f"connectors[{i}] requires a 'server' name")
+    if name in connector_names:
+        raise ValueError(f"duplicate connector server name: '{name}'")
+    connector_names.append(name)
 
+connector_name_set = set(connector_names)
+
+# Validate depends_on references
+for c in connectors:
+    deps = c.get("depends_on", [])
+    if not isinstance(deps, list):
+        raise ValueError(f"connector '{c['server']}': depends_on must be a list")
+    name = c["server"]
+    for dep in deps:
+        if dep == name:
+            raise ValueError(f"connector '{name}' cannot depend on itself")
+        if dep not in connector_name_set:
+            raise ValueError(
+                f"connector '{name}' depends on '{dep}' which is not a known connector. "
+                f"Available: {connector_names}. Note: depends_on is for connector-to-connector "
+                f"ordering only (upstreams are always deployed first)."
+            )
+
+# --- Topological sort (preserves manifest order as tie-breaker) ---
+# Kahn's algorithm with stable ordering
+in_degree = {name: 0 for name in connector_names}
+dependents = {name: [] for name in connector_names}
+
+for c in connectors:
+    name = c["server"]
+    for dep in c.get("depends_on", []):
+        in_degree[name] += 1
+        dependents[dep].append(name)
+
+# Start with zero in-degree nodes, in manifest order
+queue = [name for name in connector_names if in_degree[name] == 0]
+sorted_connectors = []
+
+while queue:
+    # Pick the first node in manifest order among ready nodes
+    current = queue.pop(0)
+    sorted_connectors.append(current)
+    for dependent in dependents[current]:
+        in_degree[dependent] -= 1
+        if in_degree[dependent] == 0:
+            queue.append(dependent)
+    # Re-sort queue by original manifest order for determinism
+    queue.sort(key=lambda n: connector_names.index(n))
+
+if len(sorted_connectors) != len(connector_names):
+    remaining = [n for n in connector_names if n not in sorted_connectors]
+    raise ValueError(f"circular dependency detected among connectors: {remaining}")
+
+# Build lookup for connector dicts by server name
+connector_by_name = {c["server"]: c for c in connectors}
+
+# --- Emit nodes: upstreams first, then connectors in topo order ---
 def emit(role: str, node: dict, internal_default: bool) -> None:
     server = str(node.get("server", "")).strip()
     params = str(node.get("params", "")).strip()
@@ -398,7 +476,8 @@ for upstream in upstreams:
         raise ValueError("all upstream entries must be objects")
     emit("upstream", upstream, True)
 
-emit("connector", connector, False)
+for name in sorted_connectors:
+    emit("connector", connector_by_name[name], False)
 PY
     )
 
@@ -436,9 +515,8 @@ PY
 
         deploy_server "$server" "$dockerfile" "$context" "$resolved_param_file" "$external_ingress" "$is_connector"
 
-        if [[ "$role" == "upstream" ]]; then
-            wait_for_upstream_health "$server" "$internal" "$port"
-        fi
+        # Health-check all nodes before deploying their dependents
+        wait_for_upstream_health "$server" "$internal" "$port"
     done
 }
 

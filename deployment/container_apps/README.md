@@ -116,11 +116,10 @@ Note: gateway mode requires exactly one `UPSTREAM_*_URL`; multiple upstreams wit
 
 `deploy.sh --network` deploys a full topology in order:
 
-1. Deploy all upstream servers
-2. Wait for each upstream `/health` endpoint to pass
-3. Deploy the connector
+1. Deploy all upstream servers, health-checking each
+2. Deploy connectors in dependency order, health-checking each
 
-Manifest format:
+### Single-connector manifest
 
 ```yaml
 name: science-hub
@@ -136,12 +135,50 @@ upstreams:
     internal: true
 ```
 
-Behavior notes:
+### Multi-connector manifest
+
+Use `connectors` (plural) with `depends_on` to express ordering between connectors:
+
+```yaml
+name: science-hub-gateway
+connectors:
+  - server: science-router
+    params: ../parameters/router.bicepparam
+    internal: true
+  - server: science-gateway
+    params: ../parameters/gateway.bicepparam
+    depends_on: [science-router]
+upstreams:
+  - server: chemistry
+    params: ../parameters/chemistry.bicepparam
+    internal: true
+  - server: earthscience
+    params: ../parameters/earthscience.bicepparam
+    internal: true
+```
+
+This deploys: upstreams → science-router (health-check) → science-gateway.
+
+### Manifest reference
+
+| Field | Applies to | Description |
+|-------|-----------|-------------|
+| `server` | all | Container App name |
+| `params` | all | Path to `.bicepparam` file |
+| `internal` | all | If `true`, ingress is private (default: `true` for upstreams, `false` for connectors) |
+| `dockerfile` | all | Path to Dockerfile (optional, auto-detected for upstreams) |
+| `context` | all | Docker build context (optional, defaults to Dockerfile directory) |
+| `port` | all | Health-check port (default: `8000`) |
+| `depends_on` | connectors | List of connector `server` names that must deploy first |
+
+### Behavior notes
 
 - `internal: true` sets upstream ingress to `external: false` (internal-only).
 - Connector deployments skip the Azure Files env-cache mount (stateless by default).
 - Relative `params`, `dockerfile`, and `context` values are resolved from the manifest directory.
 - Internal health checks use `curl` (or `wget`) inside the upstream container when ingress is private.
+- `depends_on` is connector-to-connector only — upstreams are always deployed before any connector.
+- Circular dependencies are detected and rejected at manifest parse time.
 
 ## Auth topology for connector networks
 
