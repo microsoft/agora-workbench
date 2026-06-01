@@ -81,7 +81,7 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 | File | Description |
 |------|-------------|
 | `main.bicep` | Deploys a single MCP server Container App |
-| `activity-ui.bicep` | Deploys the Activity UI monitoring sidecar (EasyAuth + ingest secret) |
+| `activity-ui.bicep` | Deploys the Activity UI monitoring sidecar (EasyAuth + managed identity) |
 | `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
@@ -112,11 +112,10 @@ you can wire `ACTIVITY_UI_URL` into their environment.
 
 1. An **Entra ID app registration** for the Activity UI (separate from MCP servers):
    - Redirect URI: `https://<activity-ui-fqdn>/.auth/login/aad/callback`
-   - Generate a client secret (for EasyAuth browser login)
-   - Expose an API scope: `api://<client-id>/.default`
-2. Grant the MCP servers' **managed identity** permission to acquire tokens for
-   the activity UI's app registration (add it as an authorized client application,
-   or assign an app role).
+   - Application ID URI: `api://<client-id>`
+   - Federated credential linking the managed identity (for secretless EasyAuth)
+   - `ActivityEventWriter` app role assigned to the MCP managed identity
+2. Use `setup-app-registrations.sh` to create all of the above automatically.
 
 ### Deploy
 
@@ -129,12 +128,8 @@ you can wire `ACTIVITY_UI_URL` into their environment.
   --skip-base-build
 ```
 
-The `entraClientSecret` parameter is required by the Bicep template. Pass it
-at deploy time via the az CLI prompt, or supply it directly:
-
-```bash
-az deployment group create ... --parameters entraClientSecret="<secret>"
-```
+No secrets are required — EasyAuth uses the managed identity's federated
+credential for the OAuth code exchange.
 
 ### Wire MCP servers
 

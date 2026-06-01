@@ -11,7 +11,8 @@
 // Prerequisites (same as main.bicep — created once via setup.sh):
 //   - Resource group, ACR, ACA Managed Environment, Managed Identity
 //   - Entra ID app registration for the activity UI (browser login + API audience)
-//   - MCP servers' managed identity authorized to acquire tokens for this app
+//   - Federated credential on the app registration (managed identity → EasyAuth)
+//   - MCP servers' managed identity assigned the ActivityEventWriter app role
 //
 // Usage:
 //   az deployment group create \
@@ -47,10 +48,6 @@ param entraClientId string = ''
 @description('Entra ID tenant ID.')
 param entraTenantId string = ''
 
-@secure()
-@description('Client secret for the Entra app registration (EasyAuth browser login).')
-param entraClientSecret string = ''
-
 // ── Container parameters ────────────────────────────────────────────────────
 
 @description('Full container image reference including tag.')
@@ -68,10 +65,6 @@ param memory string = '0.5Gi'
 // ── Variables ───────────────────────────────────────────────────────────────
 
 var appName = 'activity-ui'
-
-var appSecrets = [
-  { name: 'entra-client-secret', value: entraClientSecret }
-]
 
 var appEnv = [
   { name: 'ACTIVITY_UI_HOST', value: '0.0.0.0' }
@@ -95,7 +88,6 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
-      secrets: appSecrets
       ingress: {
         external: true
         targetPort: containerPort
@@ -157,6 +149,8 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
 
 // ── EasyAuth (Entra ID) ─────────────────────────────────────────────────────
 // Protects all endpoints. Browser users get redirected to Entra login.
+// The OAuth code exchange uses the app's federated credential (linked to the
+// managed identity) — no client secret required.
 // MCP servers authenticate via Bearer token (managed identity → activity UI
 // app registration audience). Health probes are excluded.
 
@@ -178,7 +172,6 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
       azureActiveDirectory: {
         registration: {
           clientId: entraClientId
-          clientSecretSettingName: 'entra-client-secret'
           openIdIssuer: 'https://login.microsoftonline.com/${entraTenantId}/v2.0'
         }
         validation: {
