@@ -329,8 +329,8 @@ def emit(role: str, node: dict, internal_default: bool) -> None:
         raise ValueError(f"{role} entries require 'server' and 'params'")
 
     internal = bool(node.get("internal", internal_default))
-    dockerfile = str(node.get("dockerfile", "")).strip()
-    context = str(node.get("context", "")).strip()
+    dockerfile = str(node.get("dockerfile", "")).strip() or "_"
+    context = str(node.get("context", "")).strip() or "_"
     port = int(node.get("port", 8000))
 
     print(f"{role}\t{server}\t{params}\t{str(internal).lower()}\t{dockerfile}\t{context}\t{port}")
@@ -355,8 +355,8 @@ for node in "${nodes[@]}"; do
         resolved_param_file="$MANIFEST_DIR/$params"
     fi
 
-    # Resolve Dockerfile
-    if [[ -z "$dockerfile" ]]; then
+    # Resolve Dockerfile ("_" is sentinel for unset)
+    if [[ "$dockerfile" == "_" || -z "$dockerfile" ]]; then
         server_df="${REPO_ROOT}/examples/domain_examples/${server}/Dockerfile"
         if [[ -f "$server_df" ]]; then
             dockerfile="$server_df"
@@ -367,8 +367,8 @@ for node in "${nodes[@]}"; do
         dockerfile="$MANIFEST_DIR/$dockerfile"
     fi
 
-    # Resolve build context (default: repo root)
-    if [[ -z "$context" ]]; then
+    # Resolve build context (default: repo root; "_" is sentinel for unset)
+    if [[ "$context" == "_" || -z "$context" ]]; then
         context="$REPO_ROOT"
     elif [[ "$context" != /* ]]; then
         context="$MANIFEST_DIR/$context"
@@ -387,8 +387,10 @@ for node in "${nodes[@]}"; do
 
     deploy_node "$server" "$dockerfile" "$context" "$resolved_param_file" "$external_ingress" "$is_connector"
 
-    # Health-check before deploying dependents
-    wait_for_health "$server" "$internal" "$port"
+    # Health-check before deploying dependents (skip in dry-run)
+    if [[ "$DRY_RUN" != true ]]; then
+        wait_for_health "$server" "$internal" "$port"
+    fi
 done
 
 echo "=== Network deploy complete ==="
