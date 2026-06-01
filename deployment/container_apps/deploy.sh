@@ -56,6 +56,7 @@ IDENTITY_ID="${ACA_IDENTITY_ID:-}"
 IDENTITY_CLIENT_ID="${ACA_IDENTITY_CLIENT_ID:-}"
 ENTRA_CLIENT_ID_VAL="${ENTRA_CLIENT_ID:-}"
 ENTRA_TENANT_ID_VAL="${ENTRA_TENANT_ID:-}"
+ACTIVITY_UI_CLIENT_ID_VAL="${ACTIVITY_UI_CLIENT_ID:-}"
 STORAGE_LINK="${ACA_STORAGE_LINK:-}"
 CACHE_MOUNT_PATH="${ACA_CACHE_MOUNT_PATH:-/home/appuser/.cache/mcp-envs}"
 
@@ -283,6 +284,12 @@ if [[ "$TEMPLATE_FILE" == *"main.bicep" ]]; then
     fi
 fi
 
+# Activity UI has its own app registration — use ACTIVITY_UI_CLIENT_ID if set.
+BICEP_ENTRA_CLIENT_ID="$ENTRA_CLIENT_ID_VAL"
+if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$ACTIVITY_UI_CLIENT_ID_VAL" ]]; then
+    BICEP_ENTRA_CLIENT_ID="$ACTIVITY_UI_CLIENT_ID_VAL"
+fi
+
 if [[ "$DRY_RUN" == true ]]; then
     echo ">> [DRY RUN] Showing deployment what-if..."
     az deployment group what-if \
@@ -295,7 +302,7 @@ if [[ "$DRY_RUN" == true ]]; then
             identityId="$IDENTITY_ID" \
             identityClientId="$IDENTITY_CLIENT_ID" \
             registryServer="$ACR_LOGIN_SERVER" \
-            entraClientId="$ENTRA_CLIENT_ID_VAL" \
+            entraClientId="$BICEP_ENTRA_CLIENT_ID" \
             entraTenantId="$ENTRA_TENANT_ID_VAL" \
             $OPTIONAL_PARAMS
     echo ""
@@ -312,7 +319,7 @@ else
             identityId="$IDENTITY_ID" \
             identityClientId="$IDENTITY_CLIENT_ID" \
             registryServer="$ACR_LOGIN_SERVER" \
-            entraClientId="$ENTRA_CLIENT_ID_VAL" \
+            entraClientId="$BICEP_ENTRA_CLIENT_ID" \
             entraTenantId="$ENTRA_TENANT_ID_VAL" \
             $OPTIONAL_PARAMS \
         --query 'properties.outputs' \
@@ -341,11 +348,11 @@ else
 
     # If deploying the Activity UI, update the app registration redirect URI
     # so EasyAuth callbacks work without manual intervention.
-    if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$FQDN" && -n "$ENTRA_CLIENT_ID_VAL" ]]; then
+    if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$FQDN" && -n "$BICEP_ENTRA_CLIENT_ID" ]]; then
         REDIRECT_URI="https://${FQDN}/.auth/login/aad/callback"
         echo ""
         echo ">> Updating app registration redirect URI..."
-        az ad app update --id "$ENTRA_CLIENT_ID_VAL" \
+        az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
             --web-redirect-uris "$REDIRECT_URI" \
             --output none
         echo "   Set to: $REDIRECT_URI"
