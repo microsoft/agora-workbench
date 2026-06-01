@@ -20,11 +20,12 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from .auth import require_event_writer
 from .models import ActivityEvent
 
 LOGGER = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ def create_app() -> FastAPI:
     bus = EventBus()
     app.state.bus = bus
 
-    @app.post("/events")
+    @app.post("/events", dependencies=[Depends(require_event_writer)])
     async def ingest_event(event: ActivityEvent) -> dict[str, str]:
         await bus.publish(event)
         return {"status": "ok"}
@@ -111,6 +112,8 @@ def create_app() -> FastAPI:
                     except asyncio.TimeoutError:
                         # Heartbeat to keep proxies / browsers from closing the connection.
                         yield {"event": "ping", "data": ""}
+            except asyncio.CancelledError:
+                pass
             finally:
                 await bus.unsubscribe(q)
 
