@@ -39,6 +39,7 @@ set -euo pipefail
 TENANT_ID=""
 IDENTITY_ID=""
 RESOURCE_GROUP=""
+SERVICE_MGMT_REF=""
 MCP_APP_NAME=""
 ACTIVITY_UI_APP_NAME=""
 ACTIVITY_UI_FQDN=""
@@ -55,6 +56,7 @@ Required:
   --resource-group, -g  NAME    Resource group name (scopes app identifier URIs for uniqueness)
 
 Optional:
+  --service-management-reference ID  Service Tree ID (required on Microsoft tenant)
   --mcp-app-name        NAME    Display name for MCP app registration (default: "Agora MCP Servers")
   --activity-ui-name    NAME    Display name for Activity UI app registration (default: "Agora Activity UI")
   --activity-ui-fqdn    FQDN    Activity UI hostname (sets redirect URI for EasyAuth callback)
@@ -70,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --tenant-id|-t)       TENANT_ID="$2";          shift 2 ;;
         --identity-id)        IDENTITY_ID="$2";        shift 2 ;;
         --resource-group|-g)  RESOURCE_GROUP="$2";     shift 2 ;;
+        --service-management-reference) SERVICE_MGMT_REF="$2"; shift 2 ;;
         --mcp-app-name)       MCP_APP_NAME="$2";       shift 2 ;;
         --activity-ui-name)   ACTIVITY_UI_APP_NAME="$2"; shift 2 ;;
         --activity-ui-fqdn)   ACTIVITY_UI_FQDN="$2";   shift 2 ;;
@@ -149,6 +152,7 @@ else
     MCP_APP_ID=$(az ad app create \
         --display-name "$MCP_APP_NAME" \
         --sign-in-audience AzureADMyOrg \
+        ${SERVICE_MGMT_REF:+--service-management-reference "$SERVICE_MGMT_REF"} \
         --query appId -o tsv)
     echo "   Created: $MCP_APP_ID"
 
@@ -184,6 +188,7 @@ else
         --display-name "$ACTIVITY_UI_APP_NAME" \
         --sign-in-audience AzureADMyOrg \
         --web-redirect-uris "$REDIRECT_URI" \
+        ${SERVICE_MGMT_REF:+--service-management-reference "$SERVICE_MGMT_REF"} \
         --query appId -o tsv)
     echo "   Created: $UI_APP_ID"
 
