@@ -38,10 +38,18 @@ az account set --subscription <SUBSCRIPTION_ID>
 #    `deployment/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
 #    See deploy.sh and .env.server.example for the full list of ACA_* variables.
 
-# 4. Deploy an example server (chemistry shown)
+# 4. Set up Entra app registrations (MCP servers + Activity UI)
+./setup-app-registrations.sh \
+  --tenant-id <TENANT_ID> \
+  --identity-id /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
+
+# 5. Copy the printed ENTRA_* values into `deployment/.env.server`.
+#    (ACTIVITY_UI_* values are used when deploying the Activity UI sidecar — see PR #168.)
+
+# 6. Deploy an example server (chemistry shown)
 ./deploy.sh --server chemistry
 
-# 5. Verify
+# 7. Verify
 az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
 ```
 
@@ -82,6 +90,7 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
+| `setup-app-registrations.sh` | One-time: creates Entra app registrations, app roles, identity grants |
 | `deploy.sh` | Per-server: builds image, pushes to ACR, deploys Container App |
 
 ## Environment variables
