@@ -325,10 +325,4 @@ echo "   entraClientId=$UI_APP_ID"
 echo "   entraTenantId=$TENANT_ID"
 echo "   identityId=$IDENTITY_ID"
 echo ""
-if [[ -z "$ACTIVITY_UI_FQDN" ]]; then
-    echo " NOTE: After deploying the Activity UI, update the redirect URI:"
-    echo "   az ad app update --id $UI_APP_ID \\"
-    echo "     --web-redirect-uris \"https://<fqdn>/.auth/login/aad/callback\""
-    echo ""
-fi
 echo "============================================================"
