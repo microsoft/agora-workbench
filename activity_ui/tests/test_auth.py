@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def _auth_disabled():
     """Disable auth for tests that don't need it."""
     with patch.dict("os.environ", {"ACTIVITY_UI_AUTH_DISABLED": "true"}):
-        import activity_ui.auth as auth_mod
+        from activity_ui import auth as auth_mod
 
         auth_mod._validator = None  # Reset singleton
         yield
@@ -30,7 +30,7 @@ def _auth_enabled():
         "ACTIVITY_UI_CLIENT_ID": "test-client-id",
     }
     with patch.dict("os.environ", env):
-        import activity_ui.auth as auth_mod
+        from activity_ui import auth as auth_mod
 
         auth_mod._validator = None  # Reset singleton
         yield
@@ -133,9 +133,9 @@ class TestStreamToken:
     @pytest.mark.usefixtures("_auth_enabled")
     def test_stream_token_query_param_fallback(self, client):
         """Stream token can be passed as query param for non-browser clients."""
-        from activity_ui.auth import mint_stream_token
+        import activity_ui.auth as auth_mod
 
-        token = mint_stream_token("test-user")
+        token = auth_mod.mint_stream_token("test-user")
         resp = client.get(f"/events/recent?token={token}")
         assert resp.status_code == 200
 

@@ -143,6 +143,7 @@ def create_app() -> FastAPI:
                         # Heartbeat to keep proxies / browsers from closing the connection.
                         yield {"event": "ping", "data": ""}
             except asyncio.CancelledError:
+                # Expected when the client disconnects or the server shuts down; cleanup runs in finally.
                 pass
             finally:
                 await bus.unsubscribe(q)

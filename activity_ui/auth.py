@@ -62,7 +62,7 @@ class TokenValidator(ABC):
         Raises:
             TokenValidationError: If the token is invalid.
         """
-        ...
+        raise NotImplementedError("Subclasses must implement validate().")
 
 
 # ── Entra ID implementation ──────────────────────────────────────────────────
