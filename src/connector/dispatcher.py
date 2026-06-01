@@ -116,7 +116,7 @@ class DispatcherServer(ConnectorServer):
             try:
                 await self._health_check_task
             except asyncio.CancelledError:
-                pass
+                pass  # Expected after cancel() during shutdown
 
         for backend in self._tool_search_backends:
             if hasattr(backend, "close"):
@@ -560,8 +560,10 @@ def _get_session_id_from_context(ctx: Optional[Context]) -> str:
             session_id = ctx.session_id
             if session_id:
                 return str(session_id)
-        except (AttributeError, Exception):
-            pass
+        except AttributeError:
+            pass  # Context implementation lacks session_id attribute
+        except Exception as exc:
+            LOGGER.debug("Unexpected error extracting session ID from context: %s", exc, exc_info=True)
     # Fallback: generate a unique ID (no affinity possible)
     import uuid
 
