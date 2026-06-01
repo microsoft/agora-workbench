@@ -21,11 +21,13 @@
 # Usage:
 #   ./setup-app-registrations.sh \
 #     --tenant-id 72f988bf-86f1-41af-91ab-2d7cd011db47 \
+#     --resource-group agora-mcp-rg \
 #     --identity-id /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
 #
 #   # With Activity UI FQDN (if already deployed):
 #   ./setup-app-registrations.sh \
 #     --tenant-id <TENANT> \
+#     --resource-group <RG> \
 #     --identity-id <ID> \
 #     --activity-ui-fqdn activity-ui.happyocean.eastus.azurecontainerapps.io
 # ---------------------------------------------------------------------------
