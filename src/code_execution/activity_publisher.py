@@ -52,6 +52,10 @@ class ActivityPublisher:
     ) -> None:
         self.server_name = server_name
         self.ui_url = (ui_url if ui_url is not None else os.getenv("ACTIVITY_UI_URL", "")).rstrip("/")
+        # Entra audience for token acquisition (activity UI app registration).
+        # When set, the publisher acquires a managed-identity token for this scope.
+        self._audience = os.getenv("ACTIVITY_UI_AUDIENCE", "")
+        self._credential: Any = None
         self._queue: collections.deque[dict[str, Any]] = collections.deque(maxlen=queue_size)
         self._wake = asyncio.Event()
         self._task: Optional[asyncio.Task[None]] = None
@@ -70,6 +74,14 @@ class ActivityPublisher:
         if self._task is not None:
             return
         self._client = httpx.AsyncClient(timeout=self._timeout)
+        # Initialize managed identity credential if audience is configured.
+        if self._audience:
+            try:
+                from azure.identity.aio import DefaultAzureCredential
+
+                self._credential = DefaultAzureCredential()
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("ActivityPublisher: failed to init credential, publishing without auth: %s", exc)
         self._task = asyncio.create_task(self._drain_loop(), name="activity-publisher-drain")
         LOGGER.info("ActivityPublisher → %s", self.ui_url)
 
@@ -83,6 +95,8 @@ class ActivityPublisher:
                 self._task.cancel()
         if self._client is not None:
             await self._client.aclose()
+        if self._credential is not None:
+            await self._credential.close()
 
     def publish_nowait(self, event: dict[str, Any]) -> None:
         """Enqueue an event for delivery. Always safe; never raises."""
@@ -106,8 +120,17 @@ class ActivityPublisher:
                 self._wake.clear()
                 continue
 
+            # Acquire auth header if credential is available.
+            headers: dict[str, str] = {}
+            if self._credential and self._audience:
+                try:
+                    token = await self._credential.get_token(f"{self._audience}/.default")
+                    headers["Authorization"] = f"Bearer {token.token}"
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.debug("ActivityPublisher token acquisition failed: %s", exc)
+
             event = self._queue.popleft()
             try:
-                await self._client.post(url, json=event)
+                await self._client.post(url, json=event, headers=headers)
             except Exception as exc:  # noqa: BLE001 - intentional broad: observability is best-effort
                 LOGGER.debug("ActivityPublisher POST failed: %s", exc)
