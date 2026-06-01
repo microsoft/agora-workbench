@@ -10,6 +10,7 @@ execution servers to **Azure Container Apps (ACA)**.
 | [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) | Resource provisioning and image push |
 | [Bicep CLI](https://learn.microsoft.com/azure/azure-resource-manager/bicep/install) (ships with `az`) | Compile / deploy templates |
 | Docker | Build container images |
+| Python 3 + PyYAML (`yaml`) | `.env` parsing and `--network` manifest orchestration |
 
 You also need:
 
@@ -104,8 +105,8 @@ The Container App receives these at runtime:
 
 Connector-specific values are usually declared in `parameters/connector.bicepparam`, for example:
 
-- `MCP_CONNECTOR_MODE`
-- `MCP_CONNECTOR_SOURCES`
+- `CONNECTOR_MODE`
+- `UPSTREAM_*` (one per upstream)
 - `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`
 
 ## Connector network deployment
@@ -137,6 +138,7 @@ Behavior notes:
 - `internal: true` sets upstream ingress to `external: false` (internal-only).
 - Connector deployments skip the Azure Files env-cache mount (stateless by default).
 - Relative `params`, `dockerfile`, and `context` values are resolved from the manifest directory.
+- Internal health checks use `curl` (or `wget`) inside the upstream container when ingress is private.
 
 ## Auth topology for connector networks
 

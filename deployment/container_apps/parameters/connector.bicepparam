@@ -27,7 +27,5 @@ param extraEnvVars = {
   CONNECTOR_MODE: 'gateway'
   UPSTREAM_CHEMISTRY_URL: 'http://chemistry-server:8000/mcp'
   UPSTREAM_GIS_URL: 'http://gis-server:8000/mcp'
-  MCP_CONNECTOR_MODE: 'gateway'
-  MCP_CONNECTOR_SOURCES: '{"chemistry":"http://chemistry-server:8000/mcp","gis":"http://gis-server:8000/mcp"}'
   OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: 'chemistry-server,gis-server'
 }

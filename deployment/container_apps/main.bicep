@@ -69,7 +69,7 @@ param maxReplicas int = 3
 @description('Additional environment variables as key-value pairs.')
 param extraEnvVars object = {}
 
-@description('MCP_SERVER_* env vars passed by deploy.sh from deployment/.env.server.')
+@description('MCP_SERVER_* env vars passed by deploy.sh from deployment/.env.server. On key collisions, these values override extraEnvVars.')
 param passthroughEnvVars object = {}
 
 @description('Container startup command. When empty (default), the image CMD is used.')

@@ -79,8 +79,6 @@ services:
       CONNECTOR_MODE: "gateway"
       UPSTREAM_CHEMISTRY_URL: "http://chemistry-mcp-server:8000/mcp"
       UPSTREAM_EARTHSCIENCE_URL: "http://earthscience-mcp-server:8000/mcp"
-      MCP_CONNECTOR_MODE: "gateway"
-      MCP_CONNECTOR_SOURCES: '{"chemistry":"http://chemistry-mcp-server:8000/mcp","earthscience":"http://earthscience-mcp-server:8000/mcp"}'
       OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-mcp-server,earthscience-mcp-server"
       MCP_SERVER_PORT: "8000"
       UV_COMPILE_BYTECODE: "1"

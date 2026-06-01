@@ -59,6 +59,13 @@ CACHE_MOUNT_PATH="${ACA_CACHE_MOUNT_PATH:-/home/appuser/.cache/mcp-envs}"
 ENTRA_CLIENT_ID_VAL="${MCP_SERVER_ENTRA_CLIENT_ID:-${ENTRA_CLIENT_ID:-}}"
 ENTRA_TENANT_ID_VAL="${MCP_SERVER_ENTRA_TENANT_ID:-${ENTRA_TENANT_ID:-}}"
 
+require_python() {
+    if ! command -v python >/dev/null 2>&1; then
+        echo "ERROR: python is required by deploy.sh for .env/network parsing." >&2
+        exit 1
+    fi
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --server)
@@ -137,6 +144,7 @@ ENV_ID="$(az containerapp env show --name "$ACA_ENV_NAME" --resource-group "$RES
 # Also exclude ACA_* infra vars.
 PASSTHROUGH_ENV_JSON='{}'
 if [[ -f "$SCRIPT_DIR/../.env.server" ]]; then
+    require_python
     PASSTHROUGH_ENV_JSON="$(
         python - <<'PY' "$SCRIPT_DIR/../.env.server"
 import json, re, sys
@@ -294,10 +302,14 @@ wait_for_upstream_health() {
         fi
 
         if [[ "$internal_only" == "true" ]]; then
+            # For internal-only ingress, probe from inside the app container.
+            # Some images include curl; others only ship wget.
+            local exec_health_cmd
+            exec_health_cmd="sh -lc 'curl -fsS http://localhost:${port}/health >/dev/null || wget -q -O- http://localhost:${port}/health >/dev/null'"
             if az containerapp exec \
                 --name "$app_name" \
                 --resource-group "$RESOURCE_GROUP" \
-                --command "sh -lc 'curl -fsS http://localhost:${port}/health'" >/dev/null 2>&1; then
+                --command "$exec_health_cmd" >/dev/null 2>&1; then
                 echo "   ✓ Upstream healthy via in-container /health"
                 return 0
             fi
@@ -339,6 +351,15 @@ run_network_manifest() {
 
     local manifest_dir
     manifest_dir="$(cd "$(dirname "$manifest_path")" && pwd)"
+
+    require_python
+    if ! python - <<'PY' >/dev/null 2>&1
+import yaml
+PY
+    then
+        echo "ERROR: PyYAML is required for --network manifests. Install it (e.g. 'python -m pip install pyyaml')." >&2
+        exit 1
+    fi
 
     mapfile -t nodes < <(
         python - <<'PY' "$manifest_path"
