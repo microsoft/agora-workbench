@@ -172,7 +172,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
       azureActiveDirectory: {
         registration: {
           clientId: entraClientId
-          openIdIssuer: 'https://login.microsoftonline.com/${entraTenantId}/v2.0'
+          openIdIssuer: '${environment().authentication.loginEndpoint}${entraTenantId}/v2.0'
         }
         validation: {
           allowedAudiences: [
