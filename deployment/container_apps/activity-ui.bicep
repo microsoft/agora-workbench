@@ -73,6 +73,9 @@ var appEnv = [
   { name: 'ACTIVITY_UI_HOST', value: '0.0.0.0' }
   { name: 'ACTIVITY_UI_PORT', value: string(containerPort) }
   { name: 'AZURE_CLIENT_ID', value: identityClientId }
+  { name: 'ENTRA_TENANT_ID', value: entraTenantId }
+  { name: 'ACTIVITY_UI_CLIENT_ID', value: entraClientId }
+  { name: 'ACTIVITY_UI_AUDIENCE', value: entraAudience }
 ]
 
 // ── Container App ───────────────────────────────────────────────────────────
