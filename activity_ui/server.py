@@ -116,8 +116,8 @@ def create_app() -> FastAPI:
     async def recent_events() -> JSONResponse:
         return JSONResponse([e.model_dump() for e in bus.snapshot()])
 
-    @app.get("/stream")
-    async def stream(request: Request, claims: dict = Depends(require_stream_reader)) -> EventSourceResponse:
+    @app.get("/stream", dependencies=[Depends(require_stream_reader)])
+    async def stream(request: Request) -> EventSourceResponse:
         q = await bus.subscribe()
 
         # Determine when the stream token expires so we can close the connection
