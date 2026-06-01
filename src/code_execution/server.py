@@ -18,7 +18,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional, TYPE_CHECKING
 
-import uvicorn
 from fastapi import HTTPException
 from fastmcp import Context, FastMCP
 from starlette.requests import Request
@@ -33,7 +32,8 @@ from .code_execution_models import (
     ServerConfig,
     ToolCallRecord,
 )
-from .auth.base import AuthConfig, TokenValidationError
+from .auth.base import AuthConfig
+from base import BaseMCPServer
 from .data_access import AssetResolutionMiddleware
 from .sessions import (
     MaxSessionsReachedError,
@@ -70,7 +70,7 @@ logging.getLogger("azure.identity").setLevel(logging.WARNING)
 LOGGER = logging.getLogger(__name__)
 
 
-class CodeExecutionServer:
+class CodeExecutionServer(BaseMCPServer):
     """
     Base class for MCP code execution servers.
 
@@ -168,6 +168,7 @@ class CodeExecutionServer:
                 Publishers are checked in order via ``can_handle()``; the first match wins.
                 When ``None`` or empty no publish tool is registered.
         """
+        super().__init__()
         self.server_config = server_config
         self.tool_registry = tool_registry
         self._tool_proxies_injected: set[str] = set()
@@ -178,6 +179,13 @@ class CodeExecutionServer:
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
+
+        # GuiPublisher is always available so agents can use <gui>name</gui>
+        # to make outputs downloadable without requiring external storage.
+        from .data_access.publishers import GuiPublisher
+
+        self._gui_publisher = GuiPublisher(public_url_fn=self.public_url)
+        self._publishers.insert(0, self._gui_publisher)
         # Resolution: ServerConfig overrides env var; env var provides deployment default.
         if server_config.parallel_max_concurrency is not None:
             parallel_execute_max_concurrency = server_config.parallel_max_concurrency
@@ -619,9 +627,8 @@ class CodeExecutionServer:
         # Setup object transfer tool for server-to-server object transfer
         self._setup_transfer_tool()
 
-        # Setup artifact publish tool (only when publishers are configured)
-        if self._publishers:
-            self._setup_publish_artifact_tool()
+        # Setup artifact publish tool (always available via GuiPublisher)
+        self._setup_publish_artifact_tool()
 
     # ========================================================================
     # Session Management Helpers
@@ -2106,6 +2113,7 @@ else:
             registry.
 
             The *destination* tag selects the publisher:
+            - ``<gui>results.csv</gui>`` → GuiPublisher (browser download)
             - ``<blob>results.csv</blob>`` → BlobPublisher
             - ``<local>output</local>`` → LocalFilePublisher
 
@@ -2202,6 +2210,11 @@ else:
 
             # Publish the artifact.
             try:
+                # GuiPublisher needs the download token to build the URL.
+                from .data_access.publishers import GuiPublisher as _GuiPub
+
+                if isinstance(publisher, _GuiPub):
+                    publisher._download_token = record.token
                 remote_uri = await publisher.publish(
                     local_path=record.path,
                     name=logical_name,
@@ -2263,9 +2276,13 @@ else:
         self.mcp.tool(
             name=tool_name,
             description=(
-                "Publish an artifact from the session output directory to remote storage. "
+                "Publish an artifact from the session output directory to remote storage or "
+                "make it downloadable via the GUI. "
+                "Only use this tool when the user explicitly requests a file download, "
+                "export, or save — do not publish artifacts proactively. "
                 "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
                 "execute call. Use a tagged destination to select the publisher: "
+                "<gui>results.csv</gui> for browser download via the activity UI, "
                 "<blob>results.csv</blob> for Azure Blob Storage, "
                 "<local>output</local> for local file storage."
             ),
@@ -2400,34 +2417,29 @@ else:
     # Authentication
     # ========================================================================
 
-    async def validate_token(self, token: str, request_path: str = "/mcp", request_method: str = "POST") -> dict:
-        """
-        Validate a bearer token using the configured TokenValidator.
+    # ========================================================================
+    # BaseMCPServer abstract implementations
+    # ========================================================================
 
-        Delegates to ``self.auth_config.token_validator``.
+    async def _health_payload(self) -> dict[str, Any]:
+        """Return health check payload."""
+        python_exe = await self.get_python_executable() if self._environment_ready else "not built"
+        return {
+            "status": "healthy",
+            "environment": self.server_config.name,
+            "python": python_exe,
+            "environment_ready": self._environment_ready,
+        }
 
-        Args:
-            token: Bearer token from Authorization header
-            request_path: The request URI path
-            request_method: The HTTP method
-
-        Returns:
-            Decoded token claims if valid
-
-        Raises:
-            HTTPException: If token is invalid
-        """
-        try:
-            return await self.auth_config.token_validator.validate(
-                token, request_path=request_path, request_method=request_method
-            )
-        except TokenValidationError as e:
-            raise HTTPException(status_code=e.status_code, detail=str(e))
-        except HTTPException:
-            raise
-        except Exception as e:
-            LOGGER.error(f"Token validation error: {e}", exc_info=True)
-            raise HTTPException(status_code=401, detail=f"Token validation failed: {e}")
+    async def _catalog_payload(self) -> dict[str, Any]:
+        """Return tool catalog for connector aggregation."""
+        tools_data = []
+        if self.tool_registry:
+            tools_data = [t.model_dump(mode="json") for t in self.tool_registry.tools]
+        return {
+            "server_name": self.server_config.name,
+            "tools": tools_data,
+        }
 
     # ========================================================================
     # Server Lifecycle
@@ -2493,92 +2505,10 @@ else:
             LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
         LOGGER.info("Server shutdown complete")
 
-    async def run_http(
-        self,
-        host: str = "0.0.0.0",
-        port: int = 8000,
-    ):
-        """
-        Run the MCP server with StreamableHTTP transport and Entra ID auth.
-
-        Args:
-            host: Host to bind to
-            port: Port to bind to
-        """
-        # Stash for ``public_url()`` so emit-side code (e.g. the activity
-        # publisher) can build artifact download URLs without knowing the
-        # bind config.
-        self._bind_host = host
-        self._bind_port = port
-
-        # Build environment and register kernel on startup
-        await self._startup()
-
-        # Build the Streamable HTTP app (compatible with MCPStreamableHTTPTool)
-        app = self.mcp.http_app(transport="streamable-http")
-
-        # Add Starlette middleware (ASGI level, outermost layer)
-        # See "Middleware Architecture" in class docstring for full documentation.
-        # Note: Starlette inserts each middleware at the front of the stack,
-        # so later calls here will run earlier (outermost).
-        for middleware_cls, middleware_kwargs in self._create_middleware():
-            app.add_middleware(middleware_cls, **middleware_kwargs)
-
-        # Add custom endpoints
-        self._add_custom_endpoints(app)
-
-        # Run with uvicorn
-        config = uvicorn.Config(app, host=host, port=port, log_level="info", ws="wsproto")
-        server = uvicorn.Server(config)
-        await server.serve()
-
     def _add_custom_endpoints(self, app):
         """Add custom endpoints to FastMCP."""
-
-        # Add health check endpoint using Starlette route
-        async def health_check(request: Request):
-            """Health check endpoint (no auth required)."""
-            python_exe = await self.get_python_executable() if self._environment_ready else "not built"
-            return JSONResponse(
-                {
-                    "status": "healthy",
-                    "environment": self.server_config.name,
-                    "python": python_exe,
-                    "environment_ready": self._environment_ready,
-                }
-            )
-
-        app.routes.append(Route("/health", health_check, methods=["GET"]))
-        app.routes.append(Route("/healthz", health_check, methods=["GET"]))
-
-        # OAuth 2.0 Protected Resource Metadata (RFC 9728)
-        # Enables MCP clients (e.g. Copilot CLI) to discover the authorization
-        # server and perform OAuth 2.1 flows automatically.
-        async def protected_resource_metadata(request: Request):
-            """Return OAuth 2.0 Protected Resource Metadata per RFC 9728."""
-            if not self.entra_client_id or not self.entra_tenant_id:
-                return JSONResponse(
-                    {
-                        "error": (
-                            "OAuth protected-resource metadata is not available "
-                            "for the current authentication configuration."
-                        )
-                    },
-                    status_code=404,
-                )
-            return JSONResponse(
-                {
-                    # The resource identifier must match a registered identifier
-                    # URI on the Entra app registration so that Azure AD can
-                    # bind the token to the correct audience (RFC 8707).
-                    "resource": f"api://{self.entra_client_id}",
-                    "authorization_servers": [f"https://login.microsoftonline.com/{self.entra_tenant_id}/v2.0"],
-                    "scopes_supported": [
-                        f"api://{self.entra_client_id}/.default",
-                    ],
-                    "bearer_methods_supported": ["header"],
-                }
-            )
+        # Base class adds /health, /healthz, /catalog, /.well-known/oauth-protected-resource
+        super()._add_custom_endpoints(app)
 
         # Artifact download endpoint: streams a file produced by an execute
         # under the session's outputs dir.  The auth middleware enforces a
@@ -2607,15 +2537,6 @@ else:
                 download_artifact,
                 methods=["GET"],
                 name="download_artifact",
-            )
-        )
-
-        app.routes.append(
-            Route(
-                "/.well-known/oauth-protected-resource",
-                protected_resource_metadata,
-                methods=["GET"],
-                name="protected_resource_metadata",
             )
         )
 
@@ -2844,167 +2765,6 @@ else:
 
         app.routes.append(Route("/object-transfer/receive", object_transfer_receive, methods=["POST"]))
 
-    def _create_middleware(self):
-        """
-        Create Starlette middleware list as (middleware_class, kwargs) tuples.
-
-        These are ASGI-level middleware that process HTTP requests before FastMCP.
-        See "Middleware Architecture" in class docstring for full execution flow.
-        """
-        middleware: list[tuple[type, dict]] = []
-
-        class MCPSessionMiddleware:
-            """Middleware to extract and log MCP session ID from headers."""
-
-            def __init__(self, app):
-                self.app = app
-
-            async def __call__(self, scope, receive, send):
-                """Extract Mcp-Session-Id header if present."""
-                # Forward non-HTTP scopes untouched
-                if scope["type"] != "http":
-                    await self.app(scope, receive, send)
-                    return
-
-                path = scope.get("path", "")
-
-                # Only process MCP endpoint
-                if path == "/mcp":
-                    headers = dict(scope.get("headers", []))
-                    # Extract Mcp-Session-Id header and store in scope for access by handlers
-                    mcp_session_id_header = headers.get(b"mcp-session-id", b"").decode("utf-8")
-                    if mcp_session_id_header:
-                        LOGGER.info(f"Received Mcp-Session-Id header: {mcp_session_id_header}")
-                        # Store in scope so it's available to downstream handlers
-                        scope["mcp_session_id"] = mcp_session_id_header
-                    else:
-                        scope["mcp_session_id"] = None
-
-                # Pass through to next middleware/handler
-                await self.app(scope, receive, send)
-
-        class AuthMiddleware:
-            """Global auth middleware for MCP StreamableHTTP endpoint."""
-
-            def __init__(self, app, server_instance, www_authenticate):
-                self.app = app
-                self.server_instance = server_instance
-                self.www_authenticate = www_authenticate.encode("utf-8")
-
-            async def __call__(self, scope, receive, send):
-                """Check authentication for MCP StreamableHTTP endpoint."""
-                # Forward non-HTTP scopes (lifespan, websockets) untouched
-                if scope["type"] != "http":
-                    await self.app(scope, receive, send)
-                    return
-
-                path = scope.get("path", "")
-
-                # Skip auth for health check and OAuth metadata
-                if path in ("/health", "/healthz") or path.startswith("/.well-known/"):
-                    await self.app(scope, receive, send)
-                    return
-
-                # Check authentication on StreamableHTTP endpoint.
-                #
-                # /artifacts/ is intentionally NOT in this list: download
-                # links are followed by browser navigation (a user clicking
-                # a link in the activity UI), which does not attach the
-                # Bearer token.  Authorization for those URLs is by
-                # possession of the unguessable UUID token embedded in the
-                # path — same model as a presigned URL.  The activity UI
-                # is the only place these URLs are surfaced, so the
-                # effective trust boundary is "whoever can read the
-                # activity UI can download its artifacts."
-                if path == "/mcp" or path.startswith("/object-transfer/"):
-                    headers = dict(scope.get("headers", []))
-                    auth_header = headers.get(b"authorization", b"").decode("utf-8")
-
-                    # Both modes require Bearer token
-                    if not auth_header or not auth_header.startswith("Bearer "):
-                        # Send 401 response with WWW-Authenticate (RFC 9728 §5.1)
-                        await send(
-                            {
-                                "type": "http.response.start",
-                                "status": 401,
-                                "headers": [
-                                    (b"content-type", b"text/plain"),
-                                    (b"www-authenticate", self.www_authenticate),
-                                ],
-                            }
-                        )
-                        error_msg = "Missing or invalid Authorization header. Please provide a Bearer token."
-                        await send(
-                            {
-                                "type": "http.response.body",
-                                "body": error_msg.encode("utf-8"),
-                            }
-                        )
-                        return
-
-                    token = auth_header.replace("Bearer ", "")
-
-                    # Validate token via pluggable TokenValidator
-                    request_method = scope.get("method", "POST")
-                    try:
-                        token_data = await self.server_instance.validate_token(
-                            token, request_path=path, request_method=request_method
-                        )
-
-                        # Extract user identity via pluggable IdentityExtractor
-                        user_identity = self.server_instance._extract_user_identity(token_data)
-                        if not user_identity:
-                            raise HTTPException(
-                                status_code=401,
-                                detail="Token missing required user identity claims",
-                            )
-
-                        user_name = token_data.get("name") or token_data.get("preferred_username")
-                        LOGGER.info(f"Authenticated request from: {user_name} (identity: {user_identity})")
-
-                        # Store token, validated claims, and user identity in context
-                        set_current_request_token(token)
-                        set_current_token_claims(token_data)
-                        set_current_user_identity(user_identity)
-                    except HTTPException as e:
-                        # Send error response with WWW-Authenticate on 401
-                        resp_headers = [(b"content-type", b"text/plain")]
-                        if e.status_code == 401:
-                            resp_headers.append((b"www-authenticate", self.www_authenticate))
-                        await send(
-                            {
-                                "type": "http.response.start",
-                                "status": e.status_code,
-                                "headers": resp_headers,
-                            }
-                        )
-                        await send(
-                            {
-                                "type": "http.response.body",
-                                "body": e.detail.encode("utf-8"),
-                            }
-                        )
-                        return
-
-                # Pass through to next middleware/handler
-                await self.app(scope, receive, send)
-
-        # NOTE: Starlette inserts later middleware as outermost.
-        # MCPSessionMiddleware runs first (outermost), then AuthMiddleware.
-        # See "Middleware Architecture" in class docstring for complete flow.
-        middleware.append((MCPSessionMiddleware, {}))
-
-        # Use WWW-Authenticate from auth_config if available, otherwise build from env.
-        if self.auth_config.www_authenticate_value:
-            www_authenticate = self.auth_config.www_authenticate_value
-        else:
-            public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-            if public_base_url:
-                metadata_url = f"{public_base_url}/.well-known/oauth-protected-resource"
-            else:
-                metadata_url = "/.well-known/oauth-protected-resource"
-            www_authenticate = f'Bearer resource_metadata="{metadata_url}"'
-
-        middleware.append((AuthMiddleware, {"server_instance": self, "www_authenticate": www_authenticate}))
-
-        return middleware
+    def _auth_protected_paths(self) -> list[str]:
+        """Paths requiring Bearer auth — extends base with /object-transfer/."""
+        return ["/mcp", "/object-transfer/"]

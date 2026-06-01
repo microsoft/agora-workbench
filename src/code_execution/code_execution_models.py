@@ -107,10 +107,10 @@ class CodeExecutionResult(BaseModel):
         description=(
             "Files newly created or modified under the session's outputs directory "
             "during this execute. Each entry is a metadata dict — never the bytes — "
-            "of shape {name, size_bytes, mime_type, modified_at, download_url}. "
-            "Used by the activity UI to surface downloadable files; agent return "
-            "path drops this field via model_dump(exclude={'artifacts'}) so the "
-            "metadata doesn't eat the agent's token budget."
+            "of shape {name, size_bytes, mime_type, modified_at, download_token}. "
+            "Lightweight artifact names are returned to the agent so it can "
+            "publish them via <gui>name</gui>; download URLs are not composed "
+            "until the agent explicitly publishes."
         ),
     )
 

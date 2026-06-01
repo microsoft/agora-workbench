@@ -4,7 +4,6 @@ import ast
 import asyncio
 import json
 import logging
-import os
 from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -477,21 +476,6 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
         return
     if final is None:
         return
-    # Compose full download URLs for any files written during the background
-    # execute.  Same shape as the foreground path: SessionManager hands back
-    # records carrying a ``download_token`` placeholder; the server layer is
-    # where SERVER_PUBLIC_URL is known.
-    public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
-    artifacts_with_urls = [
-        {
-            **a,
-            "download_url": (
-                f"{public_base}/artifacts/{session_id}/"
-                f"{a['download_token']}/{a['name']}"
-            ),
-        }
-        for a in (final.get("artifacts") or [])
-    ]
     server.activity_publisher.publish_nowait(
         {
             "type": "job_finished",
@@ -502,7 +486,6 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
             "stdout": final.get("stdout"),
             "stderr": final.get("stderr"),
             "error": final.get("error"),
-            "artifacts": artifacts_with_urls,
             "duration_ms": (
                 float(final.get("elapsed_seconds", 0.0)) * 1000.0 if final.get("elapsed_seconds") is not None else None
             ),
@@ -541,9 +524,12 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
         Saving files for the user: write to ``AGORA_OUTPUT_DIR`` (available as
         both an env var and a bare Python variable in the kernel).  Files
-        written there during this execute appear as downloadable artifacts
-        in the user's activity UI.  Files written elsewhere (e.g. ``/tmp``)
-        stay inside the kernel container and are not visible to the user.
+        written there are registered as publishable artifacts.  To make a
+        file downloadable in the user's browser, publish it with the
+        publish_artifact tool using ``<gui>filename</gui>`` — but only do
+        so when the user explicitly asks for a download or export.
+        Files written elsewhere (e.g. ``/tmp``) stay inside the kernel
+        container and are not visible to the user.
         Example::
 
             df.to_csv(f"{{AGORA_OUTPUT_DIR}}/results.csv", index=False)
@@ -663,21 +649,9 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             # Save the session to persist updated state
             server.session_manager.update_session(session.session_id, session)
 
-            # Compose full download URLs for artifacts.  The activity event
-            # carries fully-qualified URLs because the activity UI runs on a
-            # different origin and doesn't know per-server port mappings.
-            # SERVER_PUBLIC_URL overrides; default falls back to the server's
-            # own host:port (works for localhost dev and host-network deploys).
-            public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
-            artifacts_with_urls = [
-                {
-                    **a,
-                    "download_url": (f"{public_base}/artifacts/{session.session_id}/{a['download_token']}/{a['name']}"),
-                }
-                for a in result.artifacts
-            ]
-
             # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
+            # Artifact download URLs are no longer emitted here — agents use the
+            # publish_artifact tool with <gui>name</gui> to explicitly surface files.
             server.activity_publisher.publish_nowait(
                 {
                     "type": "code_executed" if result.success else "code_failed",
@@ -688,22 +662,23 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                     "success": result.success,
                     "duration_ms": result.execution_time * 1000.0,
                     "tool_calls": [tc.model_dump() for tc in result.tool_calls],
-                    "artifacts": artifacts_with_urls,
                     "error": result.error,
                     "session_id": session.session_id,
                     "displays": result.displays,
                 }
             )
 
-            # Return result with session_id.  Both ``displays`` and
-            # ``artifacts`` are excluded from the JSON returned to the agent:
-            # matplotlib PNGs (displays) can be hundreds of KB and would blow
-            # the agent's context window for no gain — text/plain reprs are
-            # already in ``stdout``, and the rich payload is streamed to the
-            # activity UI.  Artifact metadata is similarly the user's concern
-            # (download URLs), not the agent's, and adds token pressure for
-            # nothing — both payloads ride the code_executed activity event.
-            result_dict = result.model_dump(exclude={"displays", "artifacts"})
+            # Return result with session_id.  ``displays`` are excluded (rich
+            # payloads ride the activity event).  Lightweight artifact names are
+            # included so the agent knows what files are available for publishing
+            # via <gui>name</gui>.
+            result_dict = result.model_dump(exclude={"displays"})
+            # Strip download tokens from artifact metadata — agent only needs
+            # names/sizes to decide what to publish.
+            result_dict["artifacts"] = [
+                {"name": a["name"], "size_bytes": a["size_bytes"], "mime_type": a["mime_type"]}
+                for a in result.artifacts
+            ]
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:
