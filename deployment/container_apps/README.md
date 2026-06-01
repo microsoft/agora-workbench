@@ -43,7 +43,8 @@ az account set --subscription <SUBSCRIPTION_ID>
   --tenant-id <TENANT_ID> \
   --identity-id /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
 
-# 5. Copy the ENTRA_* and ACTIVITY_UI_* values into `deployment/.env.server`.
+# 5. Copy the printed ENTRA_* values into `deployment/.env.server`.
+#    (ACTIVITY_UI_* values are used when deploying the Activity UI sidecar — see PR #168.)
 
 # 6. Deploy an example server (chemistry shown)
 ./deploy.sh --server chemistry

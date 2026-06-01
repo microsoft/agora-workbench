@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
         --activity-ui-name)   ACTIVITY_UI_APP_NAME="$2"; shift 2 ;;
         --activity-ui-fqdn)   ACTIVITY_UI_FQDN="$2";   shift 2 ;;
         -h|--help)            usage ;;
-        *)                    echo "Unknown option: $1" >&2; usage ;;
+        *)                    echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
 
@@ -111,7 +111,7 @@ find_app_by_uri() {
 
 # Generate a stable GUID from a seed string (deterministic, avoids drift on re-runs).
 generate_uuid() {
-    python3 -c "import uuid; print(uuid.uuid5(uuid.NAMESPACE_DNS, '$1'))"
+    python3 -c "import uuid, sys; print(uuid.uuid5(uuid.NAMESPACE_DNS, sys.argv[1]))" "$1"
 }
 
 echo "=== Entra ID App Registration Setup ==="
@@ -158,7 +158,7 @@ fi
 echo "   Setting identifier URI ($MCP_IDENTIFIER_URI)..."
 az ad app update --id "$MCP_APP_ID" \
     --identifier-uris "$MCP_IDENTIFIER_URI" \
-    --output none 2>/dev/null || true
+    --output none
 echo "   Done."
 echo ""
 
@@ -193,14 +193,24 @@ fi
 echo "   Setting identifier URI ($UI_IDENTIFIER_URI)..."
 az ad app update --id "$UI_APP_ID" \
     --identifier-uris "api://$UI_APP_ID" "$UI_IDENTIFIER_URI" \
-    --output none 2>/dev/null || true
+    --output none
 
-# Update redirect URI if FQDN provided (even on existing app)
+# Update redirect URI if FQDN provided (appends to existing URIs)
 if [[ -n "$ACTIVITY_UI_FQDN" ]]; then
-    echo "   Updating redirect URI for FQDN: $ACTIVITY_UI_FQDN"
-    az ad app update --id "$UI_APP_ID" \
-        --web-redirect-uris "https://${ACTIVITY_UI_FQDN}/.auth/login/aad/callback" \
-        --output none
+    NEW_URI="https://${ACTIVITY_UI_FQDN}/.auth/login/aad/callback"
+    EXISTING_URIS=$(az ad app show --id "$UI_APP_ID" \
+        --query "web.redirectUris" -o tsv 2>/dev/null || true)
+    if echo "$EXISTING_URIS" | grep -qF "$NEW_URI"; then
+        echo "   Redirect URI already configured."
+    else
+        # Collect existing + new into a space-separated list
+        ALL_URIS=$(echo "$EXISTING_URIS" | tr '\n' ' ')
+        ALL_URIS="${ALL_URIS}${NEW_URI}"
+        echo "   Adding redirect URI for FQDN: $ACTIVITY_UI_FQDN"
+        az ad app update --id "$UI_APP_ID" \
+            --web-redirect-uris $ALL_URIS \
+            --output none
+    fi
 fi
 
 echo "   Done."
@@ -220,19 +230,22 @@ if [[ -n "$EXISTING_ROLE" ]]; then
     APP_ROLE_ID="$EXISTING_ROLE"
 else
     echo "   Adding app role 'ActivityEventWriter'..."
+    # Merge with existing app roles to avoid overwriting them
+    UI_OBJECT_ID=$(az ad app show --id "$UI_APP_ID" --query id -o tsv)
+    EXISTING_ROLES=$(az rest --method GET \
+        --uri "https://graph.microsoft.com/v1.0/applications/${UI_OBJECT_ID}" \
+        --query "appRoles" 2>/dev/null || echo "[]")
+    NEW_ROLE="{\"id\": \"$APP_ROLE_ID\", \"allowedMemberTypes\": [\"Application\"], \"displayName\": \"Activity Event Writer\", \"description\": \"Allows MCP servers to publish events to the Activity UI\", \"value\": \"ActivityEventWriter\", \"isEnabled\": true}"
+    MERGED_ROLES=$(python3 -c "
+import json, sys
+existing = json.loads(sys.argv[1]) if sys.argv[1] != '[]' else []
+existing.append(json.loads(sys.argv[2]))
+print(json.dumps({'appRoles': existing}))
+" "$EXISTING_ROLES" "$NEW_ROLE")
     az rest --method PATCH \
-        --uri "https://graph.microsoft.com/v1.0/applications/$(az ad app show --id "$UI_APP_ID" --query id -o tsv)" \
+        --uri "https://graph.microsoft.com/v1.0/applications/${UI_OBJECT_ID}" \
         --headers "Content-Type=application/json" \
-        --body "{
-            \"appRoles\": [{
-                \"id\": \"$APP_ROLE_ID\",
-                \"allowedMemberTypes\": [\"Application\"],
-                \"displayName\": \"Activity Event Writer\",
-                \"description\": \"Allows MCP servers to publish events to the Activity UI\",
-                \"value\": \"ActivityEventWriter\",
-                \"isEnabled\": true
-            }]
-        }" --output none
+        --body "$MERGED_ROLES" --output none
     echo "   Done."
 fi
 echo ""
