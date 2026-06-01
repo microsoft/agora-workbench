@@ -35,9 +35,9 @@ az account set --subscription <SUBSCRIPTION_ID>
   --identity-id     /subscriptions/<SUB>/resourceGroups/<RG>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<NAME>
 
 # 3. Copy the ACA_* values printed by setup.sh into `deployment/.env.server`.
-#    deploy.sh reads infrastructure config (ACR, environment, identity) from
-#    `deployment/.env.server` and passes it to Bicep — do NOT duplicate these in .bicepparam files.
-#    See deploy.sh and .env.server.example for the full list of ACA_* variables.
+#    The deploy scripts read infrastructure config (ACR, environment, identity) from
+#    `deployment/.env.server` and pass it to Bicep — do NOT duplicate these in .bicepparam files.
+#    See .env.server.example for the full list of ACA_* variables.
 
 # 4. Set up Entra app registrations (MCP servers + Activity UI)
 ./setup-app-registrations.sh \
@@ -48,19 +48,19 @@ az account set --subscription <SUBSCRIPTION_ID>
 #    (ACTIVITY_UI_* values are used when deploying the Activity UI sidecar — see PR #168.)
 
 # 6. Deploy an example server (chemistry shown)
-./deploy.sh --server chemistry
+./deploy-server.sh --server chemistry
 
-# 5. Deploy a connector network (upstreams first, connector last)
-./deploy.sh --network networks/science-hub.yaml
+# 7. Or deploy a connector network (upstreams first, connectors in order)
+./deploy-network.sh networks/science-hub.yaml
 
-# 7. Verify
+# 8. Verify
 az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.latestRevisionFqdn -o tsv
 ```
 
 ## Architecture
 
 ```
-  One-time setup (setup.sh)              Per-server (deploy.sh + Bicep)
+  One-time setup (setup.sh)              Per-deploy (deploy-server/network.sh + Bicep)
   ─────────────────────────              ──────────────────────────────
   ┌──────────────────────┐
   │   Resource Group     │
@@ -74,6 +74,9 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
   │   ACA Managed Env    │
   └──────────┬───────────┘
              │
+             │  ┌───────────────────────┐
+             ├──│ activity-ui           │  ← Bicep (activity-ui.bicep)
+             │  └───────────────────────┘
              │  ┌───────────────────────┐
              ├──│ chemistry-server app  │  ← Bicep (main.bicep)
              │  └───────────────────────┘
@@ -89,15 +92,20 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 
 | File | Description |
 |------|-------------|
-| `main.bicep` | Deploys a single Container App into existing infrastructure |
+| `main.bicep` | Deploys a single MCP server Container App |
+| `activity-ui.bicep` | Deploys the Activity UI monitoring sidecar (EasyAuth + managed identity) |
 | `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
 | `parameters/connector.bicepparam` | Connector parameter template (`CONNECTOR_MODE`, `UPSTREAM_*_URL`) |
+| `parameters/activity-ui.bicepparam` | Parameter values for the Activity UI |
 | `networks/science-hub.yaml` | Example network manifest for ordered upstream + connector deployment |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
 | `setup-app-registrations.sh` | One-time: creates Entra app registrations, app roles, identity grants |
-| `deploy.sh` | Per-server and network orchestration with health gating |
+| `deploy-server.sh` | Deploy a single server or Activity UI to ACA |
+| `deploy-network.sh` | Deploy a connector network from a YAML manifest |
+| `deploy.sh` | Dispatcher: routes `--network` to deploy-network.sh, else deploy-server.sh |
+| `_deploy-common.sh` | Shared config loading and helper functions (sourced, not run directly) |
 
 ## Environment variables
 
@@ -116,6 +124,7 @@ Connector-specific values are usually declared in `parameters/connector.biceppar
 
 - `CONNECTOR_MODE` — `"router"` (default, aggregates multiple upstreams) or `"gateway"` (single upstream with policy enforcement)
 - `UPSTREAM_<NAME>_URL` — one per upstream server (e.g., `UPSTREAM_CHEMISTRY_URL`)
+- `GATEWAY_*` — optional gateway policy settings such as `GATEWAY_BLOCKED_TOOLS` and `GATEWAY_MAX_CALLS_PER_MINUTE`
 - `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` — set on **upstream** servers, not the connector
 
 Note: gateway mode requires exactly one `UPSTREAM_*_URL`; multiple upstreams with
@@ -123,7 +132,7 @@ Note: gateway mode requires exactly one `UPSTREAM_*_URL`; multiple upstreams wit
 
 ## Connector network deployment
 
-`deploy.sh --network` deploys a full topology in order:
+`deploy-network.sh` deploys a full topology in order:
 
 1. Deploy all upstream servers, health-checking each
 2. Deploy connectors in dependency order, health-checking each
@@ -200,6 +209,62 @@ Two supported patterns:
 2. **Shared audience / token pass-through**  
    Reuse existing end-user token validation if connector and upstreams share tenant/audience expectations.
 
+## Activity UI deployment
+
+The Activity UI is a lightweight monitoring sidecar that receives events from
+MCP servers and streams them to browsers. Deploy it **before** MCP servers so
+you can wire `ACTIVITY_UI_URL` into their environment.
+
+### Prerequisites
+
+1. An **Entra ID app registration** for the Activity UI (separate from MCP servers):
+   - Redirect URI: `https://<activity-ui-fqdn>/.auth/login/aad/callback`
+   - Application ID URI: `api://<client-id>`
+   - Federated credential linking the managed identity (for secretless EasyAuth)
+   - `ActivityEventWriter` app role assigned to the MCP managed identity
+2. Use `setup-app-registrations.sh` to create all of the above automatically.
+
+### Deploy
+
+```bash
+./deploy-server.sh \
+  --server activity-ui \
+  --template activity-ui.bicep \
+  --dockerfile activity_ui/Dockerfile \
+  --context . \
+  --skip-base-build
+```
+
+No secrets are required — EasyAuth uses the managed identity's federated
+credential for the OAuth code exchange.
+
+### Wire MCP servers
+
+After deployment, `deploy-server.sh` prints the Activity UI URL. Add these to your
+`.env.server`:
+
+```bash
+# FQDN printed by deploy-server.sh
+ACTIVITY_UI_URL=https://<activity-ui-fqdn>
+# The Entra app registration client ID for the activity UI (audience for token acquisition)
+ACTIVITY_UI_AUDIENCE=api://<activity-ui-entra-client-id>
+```
+
+Then redeploy MCP servers — the publisher acquires a managed-identity token
+scoped to the activity UI's app registration and sends it as a Bearer token.
+EasyAuth on the activity UI validates it automatically.
+
+### How auth works
+
+| Endpoint | Protection |
+|----------|-----------|
+| `/` `/stream` `/events/recent` | EasyAuth (Entra ID browser login via cookie) |
+| `/events` | EasyAuth (Entra ID Bearer token from MCP server managed identity) |
+| `/health` `/healthz` | Excluded from EasyAuth (ACA probes) |
+
+No shared secrets are used. MCP servers authenticate using their managed
+identity to acquire a token for the activity UI's app registration audience.
+
 ## Environment caching with Azure Files
 
 For servers that build Python environments at startup or provision large assets
@@ -246,16 +311,16 @@ ACA_STORAGE_LINK=envcache
 # ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-envs  # default, override if needed
 ```
 
-Then deploy as usual — `deploy.sh` passes the storage parameters to Bicep:
+Then deploy as usual — `deploy-server.sh` passes the storage parameters to Bicep:
 
 ```bash
-./deploy.sh --server my-server --dockerfile /path/to/Dockerfile --context /path/to/context
+./deploy-server.sh --server my-server --dockerfile /path/to/Dockerfile --context /path/to/context
 ```
 
 Or pass explicitly:
 
 ```bash
-./deploy.sh --server my-server \
+./deploy-server.sh --server my-server \
   --storage-link envcache \
   --dockerfile /path/to/Dockerfile --context /path/to/context
 ```

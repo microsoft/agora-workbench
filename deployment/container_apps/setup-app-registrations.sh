@@ -160,10 +160,10 @@ else
     az ad sp create --id "$MCP_APP_ID" --output none 2>/dev/null || true
 fi
 
-# Set Application ID URI (resource-group-scoped for tenant uniqueness)
+# Set Application ID URI (keep api://<appId> for EasyAuth + scoped URI for lookup)
 echo "   Setting identifier URI ($MCP_IDENTIFIER_URI)..."
 az ad app update --id "$MCP_APP_ID" \
-    --identifier-uris "$MCP_IDENTIFIER_URI" \
+    --identifier-uris "api://$MCP_APP_ID" "$MCP_IDENTIFIER_URI" \
     --output none
 echo "   Done."
 echo ""

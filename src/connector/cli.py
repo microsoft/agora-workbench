@@ -43,7 +43,7 @@ def parse_upstreams_from_env() -> list[tuple[str, str]]:
             if not value.strip():
                 raise ConfigError(f"Environment variable {key} is set but empty")
             upstreams.append((name, value.strip()))
-    return upstreams
+    return sorted(upstreams, key=lambda upstream: upstream[0])
 
 
 def validate_upstream_names(upstreams: list[tuple[str, str]]) -> None:
@@ -102,7 +102,15 @@ def build_config():
         blocked_tools = [t.strip() for t in blocked_tools_raw.split(",") if t.strip()]
 
         max_calls_raw = os.getenv("GATEWAY_MAX_CALLS_PER_MINUTE")
-        max_calls_per_minute = int(max_calls_raw) if max_calls_raw else None
+        if max_calls_raw:
+            try:
+                max_calls_per_minute = int(max_calls_raw)
+            except ValueError as exc:
+                raise ConfigError(
+                    f"Invalid GATEWAY_MAX_CALLS_PER_MINUTE='{max_calls_raw}'. Must be an integer."
+                ) from exc
+        else:
+            max_calls_per_minute = None
 
         policy = GatewayPolicy(
             blocked_tools=blocked_tools,
@@ -150,12 +158,16 @@ def main() -> None:
 
     try:
         router_config, gateway_config = build_config()
+        port_raw = os.getenv("CONNECTOR_PORT", os.getenv("MCP_SERVER_PORT", "8000"))
+        try:
+            port = int(port_raw)
+        except ValueError as exc:
+            raise ConfigError(f"Invalid CONNECTOR_PORT/MCP_SERVER_PORT='{port_raw}'. Must be an integer.") from exc
     except ConfigError as exc:
         LOGGER.error("Configuration error: %s", exc)
         sys.exit(1)
 
     auth_config = build_auth_config()
-    port = int(os.getenv("CONNECTOR_PORT", os.getenv("MCP_SERVER_PORT", "8000")))
 
     import asyncio
 

@@ -166,7 +166,9 @@ class CodeExecutionServer(BaseMCPServer):
             publishers: Optional list of :class:`~.data_access.AssetPublisher` instances
                 that the ``{name}_publish_artifact`` MCP tool will dispatch to.
                 Publishers are checked in order via ``can_handle()``; the first match wins.
-                When ``None`` or empty no publish tool is registered.
+                A :class:`~.data_access.GuiPublisher` is always prepended (see
+                ``__init__``) so the publish tool is registered unconditionally and
+                ``<gui>name</gui>`` destinations work even when this list is ``None``.
         """
         super().__init__()
         self.server_config = server_config
@@ -2090,11 +2092,14 @@ else:
     def _setup_publish_artifact_tool(self) -> None:
         """Register the ``{name}_publish_artifact`` MCP tool.
 
-        The tool is only registered when at least one publisher was provided
-        at construction time.  It resolves the artifact by name from the
-        session's registered artifacts, selects the appropriate publisher via
-        ``can_handle()``, uploads the file, emits an activity event, and
-        returns the remote URI.
+        The tool is always registered: a :class:`~.data_access.GuiPublisher` is
+        prepended to ``self._publishers`` in ``__init__``, so there is always at
+        least one publisher (``<gui>name</gui>``) available even when the caller
+        passes no ``publishers``.  Operator-supplied publishers (Blob, local)
+        extend the set.  At call time the tool resolves the artifact by name from
+        the session's registered artifacts, selects the appropriate publisher via
+        ``can_handle()``, uploads the file, emits an activity event, and returns
+        the remote URI.
         """
         from .data_access.publishers import parse_destination_tag
 
@@ -2231,6 +2236,7 @@ else:
                 server.activity_publisher.publish_nowait(
                     {
                         "type": "artifact_published",
+                        "description": f"publish {artifact_name} → {destination} failed: {type(exc).__name__}",
                         "success": False,
                         "artifact_name": artifact_name,
                         "destination": destination,
@@ -2255,6 +2261,7 @@ else:
             server.activity_publisher.publish_nowait(
                 {
                     "type": "artifact_published",
+                    "description": f"publish {artifact_name} → {destination}",
                     "success": True,
                     "artifact_name": artifact_name,
                     "destination": destination,

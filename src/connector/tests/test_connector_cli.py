@@ -1,10 +1,12 @@
 """Tests for connector.cli environment-variable config parsing."""
 
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from connector import cli
 from connector.cli import (
     ConfigError,
     build_config,
@@ -27,14 +29,14 @@ class TestParseUpstreamsFromEnv:
             ("gis", "http://gis:8000/mcp"),
         ]
 
-    def test_returns_sorted_by_name(self):
+    def test_returns_sorted_by_lowercased_name(self):
         env = {
-            "UPSTREAM_ZEBRA_URL": "http://z:8000",
+            "UPSTREAM_bETA_URL": "http://b:8000",
             "UPSTREAM_ALPHA_URL": "http://a:8000",
         }
         with patch.dict(os.environ, env, clear=True):
             result = parse_upstreams_from_env()
-        assert [name for name, _ in result] == ["alpha", "zebra"]
+        assert [name for name, _ in result] == ["alpha", "beta"]
 
     def test_lowercases_name(self):
         env = {"UPSTREAM_MyService_URL": "http://svc:8000"}
@@ -125,6 +127,16 @@ class TestBuildConfig:
             with pytest.raises(ConfigError, match="exactly one upstream"):
                 build_config()
 
+    def test_invalid_gateway_max_calls_raises(self):
+        env = {
+            "CONNECTOR_MODE": "gateway",
+            "UPSTREAM_CHEMISTRY_URL": "http://chemistry:8000/mcp",
+            "GATEWAY_MAX_CALLS_PER_MINUTE": "abc",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ConfigError, match="GATEWAY_MAX_CALLS_PER_MINUTE"):
+                build_config()
+
     def test_no_upstreams_raises(self):
         env = {"CONNECTOR_MODE": "router"}
         with patch.dict(os.environ, env, clear=True):
@@ -160,3 +172,17 @@ class TestBuildConfig:
         with patch.dict(os.environ, env, clear=True):
             router_config, _ = build_config()
         assert router_config is not None
+
+
+class TestMain:
+    def test_invalid_port_exits_with_config_error(self, caplog):
+        with (
+            patch.dict(os.environ, {"CONNECTOR_PORT": "abc"}, clear=True),
+            patch("connector.cli.build_config", return_value=(SimpleNamespace(name="connector", upstreams=[]), None)),
+            patch("connector.cli.build_auth_config", return_value=None),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            cli.main()
+
+        assert exc_info.value.code == 1
+        assert "CONNECTOR_PORT/MCP_SERVER_PORT" in caplog.text

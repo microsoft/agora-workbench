@@ -78,6 +78,15 @@ class ActivityEvent(BaseModel):
     # skill_loaded
     skill_name: Optional[str] = None
 
+    # artifact_published: a file pushed to a publisher (GUI download, Blob, local).
+    # remote_uri is the destination URI — an http(s) download URL for <gui>/<blob>
+    # destinations (rendered as a link) or a filesystem path for <local>.
+    artifact_name: Optional[str] = None
+    destination: Optional[str] = None  # the raw tag, e.g. "<gui>results.csv</gui>"
+    remote_uri: Optional[str] = None
+    size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
+
     # workflow_planned
     domain: Optional[str] = None
     mode: Optional[str] = None

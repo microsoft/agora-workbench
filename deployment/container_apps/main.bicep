@@ -69,7 +69,7 @@ param maxReplicas int = 3
 @description('Additional environment variables as key-value pairs.')
 param extraEnvVars object = {}
 
-@description('Runtime env vars passed by deploy.sh from deployment/.env.server (all non-ACA_* vars). On key collisions, these values override extraEnvVars.')
+@description('Runtime env vars forwarded from deployment/.env.server. On key collisions, these values override extraEnvVars from .bicepparam files.')
 param passthroughEnvVars object = {}
 
 @description('Container startup command. When empty (default), the image CMD is used.')
