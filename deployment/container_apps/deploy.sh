@@ -353,14 +353,40 @@ else
 
     # If deploying the Activity UI, update the app registration redirect URI
     # so EasyAuth callbacks work without manual intervention.
+    # Include both the main FQDN and the active revision FQDN (ACA exposes both).
     if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$FQDN" && -n "$BICEP_ENTRA_CLIENT_ID" ]]; then
         REDIRECT_URI="https://${FQDN}/.auth/login/aad/callback"
+
+        # Get active revision name to build revision-specific redirect URI
+        APP_NAME="${SERVER_NAME}"
+        REVISION_NAME=$(az containerapp revision list \
+            --name "$APP_NAME" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query "[?properties.active].name | [0]" \
+            --output tsv 2>/dev/null || true)
+
+        REVISION_REDIRECT_URI=""
+        if [[ -n "$REVISION_NAME" ]]; then
+            # Revision FQDN follows pattern: <revision-name>.<env-suffix>
+            ENV_SUFFIX="${FQDN#"${APP_NAME}".}"
+            REVISION_REDIRECT_URI="https://${REVISION_NAME}.${ENV_SUFFIX}/.auth/login/aad/callback"
+        fi
+
         echo ""
-        echo ">> Updating app registration redirect URI..."
-        az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
-            --web-redirect-uris "$REDIRECT_URI" \
-            --output none
-        echo "   Set to: $REDIRECT_URI"
+        echo ">> Updating app registration redirect URIs..."
+        if [[ -n "$REVISION_REDIRECT_URI" ]]; then
+            az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
+                --web-redirect-uris "$REDIRECT_URI" "$REVISION_REDIRECT_URI" \
+                --output none
+        else
+            az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
+                --web-redirect-uris "$REDIRECT_URI" \
+                --output none
+        fi
+        echo "   Main:     $REDIRECT_URI"
+        if [[ -n "$REVISION_REDIRECT_URI" ]]; then
+            echo "   Revision: $REVISION_REDIRECT_URI"
+        fi
     fi
 
     echo ""

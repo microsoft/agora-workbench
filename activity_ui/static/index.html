@@ -729,33 +729,62 @@
       renderTypeChips();
       renderServerChips();
 
-      // Replay buffer first so a refresh keeps context.
-      fetch("/events/recent")
-        .then((r) => r.json())
-        .then((batch) => {
-          batch.forEach((e) => {
-            events.push(e);
-            if (e.server) seenServers.add(e.server);
-          });
-          renderServerChips();
-          renderFeed();
-        })
-        .catch((err) => console.error("recent fetch failed", err));
-
-      setConn("", "connecting…");
-      const es = new EventSource("/stream");
-      es.addEventListener("open", () => setConn("live", "live"));
-      es.addEventListener("activity", (msg) => {
-        try {
-          ingest(JSON.parse(msg.data));
-        } catch (err) {
-          console.error("bad event", err, msg.data);
+      // Acquire stream token (sets HttpOnly cookie), then connect.
+      async function acquireStreamToken() {
+        const resp = await fetch("/stream-token", { method: "POST" });
+        if (!resp.ok) {
+          console.warn("stream-token fetch failed:", resp.status);
+          return false;
         }
-      });
-      es.addEventListener("error", () => {
-        // EventSource auto-reconnects. Reflect the gap in the UI.
-        setConn("down", "disconnected — retrying");
-      });
+        return true;
+      }
+
+      async function connect() {
+        const hasToken = await acquireStreamToken();
+        if (!hasToken) {
+          setConn("down", "auth failed — retrying");
+          setTimeout(connect, 5000);
+          return;
+        }
+
+        // Replay buffer first so a refresh keeps context.
+        try {
+          const r = await fetch("/events/recent");
+          if (r.ok) {
+            const batch = await r.json();
+            batch.forEach((e) => {
+              events.push(e);
+              if (e.server) seenServers.add(e.server);
+            });
+            renderServerChips();
+            renderFeed();
+          }
+        } catch (err) {
+          console.error("recent fetch failed", err);
+        }
+
+        setConn("", "connecting…");
+        const es = new EventSource("/stream");
+        es.addEventListener("open", () => setConn("live", "live"));
+        es.addEventListener("activity", (msg) => {
+          try {
+            ingest(JSON.parse(msg.data));
+          } catch (err) {
+            console.error("bad event", err, msg.data);
+          }
+        });
+        es.addEventListener("token_expired", () => {
+          // Server closed stream due to token expiry — refresh and reconnect
+          es.close();
+          connect();
+        });
+        es.addEventListener("error", () => {
+          // EventSource auto-reconnects. Reflect the gap in the UI.
+          setConn("down", "disconnected — retrying");
+        });
+      }
+
+      connect();
     </script>
   </body>
 </html>
