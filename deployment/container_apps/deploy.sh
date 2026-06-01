@@ -272,12 +272,15 @@ echo ""
 
 # ── 4. Deploy Bicep ──────────────────────────────────────────────────────────
 
-# Build storage parameters (only passed when configured)
-STORAGE_PARAMS=""
-if [[ -n "$STORAGE_LINK" ]]; then
-    STORAGE_PARAMS="storageLink=$STORAGE_LINK cacheMountPath=$CACHE_MOUNT_PATH"
-    echo "  Storage link:    $STORAGE_LINK"
-    echo "  Cache mount:     $CACHE_MOUNT_PATH"
+# Build optional parameters (only relevant for main.bicep / MCP server templates)
+OPTIONAL_PARAMS=""
+if [[ "$TEMPLATE_FILE" == *"main.bicep" ]]; then
+    OPTIONAL_PARAMS="extraEnvVars=$EXTRA_ENV_JSON"
+    if [[ -n "$STORAGE_LINK" ]]; then
+        OPTIONAL_PARAMS+=" storageLink=$STORAGE_LINK cacheMountPath=$CACHE_MOUNT_PATH"
+        echo "  Storage link:    $STORAGE_LINK"
+        echo "  Cache mount:     $CACHE_MOUNT_PATH"
+    fi
 fi
 
 if [[ "$DRY_RUN" == true ]]; then
@@ -294,8 +297,7 @@ if [[ "$DRY_RUN" == true ]]; then
             registryServer="$ACR_LOGIN_SERVER" \
             entraClientId="$ENTRA_CLIENT_ID_VAL" \
             entraTenantId="$ENTRA_TENANT_ID_VAL" \
-            extraEnvVars="$EXTRA_ENV_JSON" \
-            $STORAGE_PARAMS
+            $OPTIONAL_PARAMS
     echo ""
     echo "=== Dry run complete — no resources were modified ==="
 else
@@ -312,8 +314,7 @@ else
             registryServer="$ACR_LOGIN_SERVER" \
             entraClientId="$ENTRA_CLIENT_ID_VAL" \
             entraTenantId="$ENTRA_TENANT_ID_VAL" \
-            extraEnvVars="$EXTRA_ENV_JSON" \
-            $STORAGE_PARAMS \
+            $OPTIONAL_PARAMS \
         --query 'properties.outputs' \
         --output json)
 
@@ -321,10 +322,18 @@ else
 
     FQDN=$(echo "$DEPLOY_OUTPUT" | python3 -c "import sys,json; o=json.loads(sys.stdin.read()); print(o.get('fqdn',{}).get('value',''))" 2>/dev/null)
 
-    # Fallback: query the container app directly if outputs aren't available
+    # Fallback: query the container app directly if outputs aren't available.
+    # Try the server name as-is first, then with '-server' suffix (main.bicep convention).
     if [[ -z "$FQDN" ]]; then
         FQDN=$(az containerapp show \
             --name "${SERVER_NAME}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --query 'properties.configuration.ingress.fqdn' \
+            --output tsv 2>/dev/null || true)
+    fi
+    if [[ -z "$FQDN" ]]; then
+        FQDN=$(az containerapp show \
+            --name "${SERVER_NAME}-server" \
             --resource-group "$RESOURCE_GROUP" \
             --query 'properties.configuration.ingress.fqdn' \
             --output tsv 2>/dev/null || true)

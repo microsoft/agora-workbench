@@ -129,8 +129,12 @@ you can wire `ACTIVITY_UI_URL` into their environment.
   --skip-base-build
 ```
 
-The deployment will prompt for the `entraClientSecret` parameter (the client
-secret from the activity UI's Entra app registration).
+The `entraClientSecret` parameter is required by the Bicep template. Pass it
+at deploy time via the az CLI prompt, or supply it directly:
+
+```bash
+az deployment group create ... --parameters entraClientSecret="<secret>"
+```
 
 ### Wire MCP servers
 
