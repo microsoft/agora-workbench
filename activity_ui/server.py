@@ -21,12 +21,14 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from .auth import (
+    NoOpTokenValidator,
+    _get_validator,
     mint_stream_token,
     require_event_writer,
     require_stream_reader,
@@ -105,7 +107,13 @@ def create_app() -> FastAPI:
         be logged in via EasyAuth. The token is set as an HttpOnly cookie.
         """
         # Extract identity from EasyAuth-injected header (trusted on protected paths)
-        subject = request.headers.get("X-MS-CLIENT-PRINCIPAL-ID", "anonymous")
+        subject = request.headers.get("X-MS-CLIENT-PRINCIPAL-ID")
+        if not subject:
+            # In local dev (NoOp mode), allow anonymous stream tokens
+            if isinstance(_get_validator(), NoOpTokenValidator):
+                subject = "anonymous"
+            else:
+                raise HTTPException(status_code=401, detail="Missing identity header")
         token = mint_stream_token(subject)
         response = Response(content='{"status":"ok"}', media_type="application/json")
         response.headers["Cache-Control"] = "no-store"

@@ -113,8 +113,10 @@ class EntraTokenValidator(TokenValidator):
             LOGGER.warning("Token validation failed: %s", exc)
             raise TokenValidationError(str(exc), status_code=401)
 
-        # Check roles claim
+        # Check roles claim (normalize to list in case of unexpected type)
         roles = payload.get("roles", [])
+        if not isinstance(roles, list):
+            roles = [roles] if isinstance(roles, str) else []
         if _REQUIRED_ROLE not in roles:
             LOGGER.debug("Token missing required role %r, has: %s", _REQUIRED_ROLE, roles)
             raise TokenValidationError(f"Missing required role: {_REQUIRED_ROLE}", status_code=403)
@@ -229,9 +231,13 @@ def mint_stream_token(subject: str) -> str:
 def validate_stream_token(token: str) -> dict:
     """Validate a stream token. Returns claims or raises TokenValidationError."""
     try:
-        claims = jwt.decode(token, _STREAM_TOKEN_SECRET, algorithms=[_STREAM_TOKEN_ALGORITHM])
+        claims = jwt.decode(
+            token, _STREAM_TOKEN_SECRET, algorithms=[_STREAM_TOKEN_ALGORITHM], options={"require": ["exp", "iat"]}
+        )
     except jwt.ExpiredSignatureError:
         raise TokenValidationError("Stream token expired", status_code=401)
+    except jwt.MissingRequiredClaimError as exc:
+        raise TokenValidationError(f"Stream token missing required claim: {exc}", status_code=401)
     except jwt.InvalidTokenError as exc:
         raise TokenValidationError(f"Invalid stream token: {exc}", status_code=401)
 

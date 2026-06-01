@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def _auth_disabled():
     """Disable auth for tests that don't need it."""
     with patch.dict("os.environ", {"ACTIVITY_UI_AUTH_DISABLED": "true"}):
-        from activity_ui import auth as auth_mod
+        import activity_ui.auth as auth_mod
 
         auth_mod._validator = None  # Reset singleton
         yield
@@ -30,7 +30,7 @@ def _auth_enabled():
         "ACTIVITY_UI_CLIENT_ID": "test-client-id",
     }
     with patch.dict("os.environ", env):
-        from activity_ui import auth as auth_mod
+        import activity_ui.auth as auth_mod
 
         auth_mod._validator = None  # Reset singleton
         yield

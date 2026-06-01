@@ -358,27 +358,33 @@ else
         REDIRECT_URI="https://${FQDN}/.auth/login/aad/callback"
 
         # Get active revision name to build revision-specific redirect URI
+        APP_NAME="${SERVER_NAME}"
         REVISION_NAME=$(az containerapp revision list \
-            --name "activity-ui" \
+            --name "$APP_NAME" \
             --resource-group "$RESOURCE_GROUP" \
             --query "[?properties.active].name | [0]" \
             --output tsv 2>/dev/null || true)
 
-        REDIRECT_URIS="$REDIRECT_URI"
+        REVISION_REDIRECT_URI=""
         if [[ -n "$REVISION_NAME" ]]; then
             # Revision FQDN follows pattern: <revision-name>.<env-suffix>
-            ENV_SUFFIX="${FQDN#activity-ui.}"
+            ENV_SUFFIX="${FQDN#"${APP_NAME}".}"
             REVISION_REDIRECT_URI="https://${REVISION_NAME}.${ENV_SUFFIX}/.auth/login/aad/callback"
-            REDIRECT_URIS="$REDIRECT_URI $REVISION_REDIRECT_URI"
         fi
 
         echo ""
         echo ">> Updating app registration redirect URIs..."
-        az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
-            --web-redirect-uris $REDIRECT_URIS \
-            --output none
+        if [[ -n "$REVISION_REDIRECT_URI" ]]; then
+            az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
+                --web-redirect-uris "$REDIRECT_URI" "$REVISION_REDIRECT_URI" \
+                --output none
+        else
+            az ad app update --id "$BICEP_ENTRA_CLIENT_ID" \
+                --web-redirect-uris "$REDIRECT_URI" \
+                --output none
+        fi
         echo "   Main:     $REDIRECT_URI"
-        if [[ -n "$REVISION_NAME" ]]; then
+        if [[ -n "$REVISION_REDIRECT_URI" ]]; then
             echo "   Revision: $REVISION_REDIRECT_URI"
         fi
     fi
