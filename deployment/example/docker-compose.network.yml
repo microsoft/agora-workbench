@@ -1,11 +1,12 @@
 services:
   chemistry-mcp-server:
     build:
-      context: ../../src/domain_examples/chemistry
+      context: ../..
+      dockerfile: examples/domain_examples/chemistry/Dockerfile
     image: chemistry-mcp-server:latest
     container_name: chemistry-mcp-server
     env_file:
-      - ../../sample.env
+      - ../.env.server
     environment:
       MCP_SERVER_AUTH_ENABLED: "false"
       MCP_SERVER_MODE: "development"
@@ -34,11 +35,12 @@ services:
 
   earthscience-mcp-server:
     build:
-      context: ../../src/domain_examples/earthscience
+      context: ../..
+      dockerfile: examples/domain_examples/earthscience/Dockerfile
     image: earthscience-mcp-server:latest
     container_name: earthscience-mcp-server
     env_file:
-      - ../../sample.env
+      - ../.env.server
     environment:
       MCP_SERVER_AUTH_ENABLED: "false"
       MCP_SERVER_MODE: "development"
@@ -72,7 +74,7 @@ services:
     image: science-hub-connector:latest
     container_name: science-hub-connector
     env_file:
-      - ../../sample.env
+      - ../.env.server
     environment:
       MCP_SERVER_AUTH_ENABLED: "false"
       MCP_SERVER_MODE: "development"

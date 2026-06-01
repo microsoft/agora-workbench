@@ -3,15 +3,12 @@ connector:
   server: science-hub
   params: ../parameters/connector.bicepparam
   dockerfile: ../../base.Dockerfile
-  context: ../../..
 upstreams:
   - server: chemistry
     params: ../parameters/chemistry.bicepparam
     internal: true
-    dockerfile: ../../../src/domain_examples/chemistry/Dockerfile
-    context: ../../../src/domain_examples/chemistry
+    dockerfile: ../../../examples/domain_examples/chemistry/Dockerfile
   - server: earthscience
     params: ../parameters/earthscience.bicepparam
     internal: true
-    dockerfile: ../../../src/domain_examples/earthscience/Dockerfile
-    context: ../../../src/domain_examples/earthscience
+    dockerfile: ../../../examples/domain_examples/earthscience/Dockerfile

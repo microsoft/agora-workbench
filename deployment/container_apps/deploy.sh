@@ -10,8 +10,43 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../.env.server
-[[ -f "$SCRIPT_DIR/../.env.server" ]] && source "$SCRIPT_DIR/../.env.server"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Parse .env.server safely (do NOT source it as shell code).
+# Extract ACA_*, MCP_SERVER_*, and ENTRA_* for use as shell variables.
+if [[ -f "$SCRIPT_DIR/../.env.server" ]]; then
+    while IFS='=' read -r key val; do
+        [[ -z "$key" ]] && continue
+        # Only import known prefixes needed by deploy.sh itself
+        case "$key" in
+            ACA_*|MCP_SERVER_ENTRA_*|ENTRA_CLIENT_ID|ENTRA_TENANT_ID)
+                export "$key=$val"
+                ;;
+        esac
+    done < <(
+        python - <<'PY' "$SCRIPT_DIR/../.env.server"
+import re, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+line_re = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$')
+
+for raw in path.read_text(encoding='utf-8').splitlines():
+    s = raw.strip()
+    if not s or s.startswith('#'):
+        continue
+    m = line_re.match(raw)
+    if not m:
+        continue
+    key, val = m.group(1), m.group(2).strip()
+    if val and val[0] not in ('"', "'") and ' #' in val:
+        val = val.split(' #', 1)[0].rstrip()
+    if len(val) >= 2 and val[0] == val[-1] and val[0] in ('"', "'"):
+        val = val[1:-1]
+    print(f"{key}={val}")
+PY
+    )
+fi
 
 usage() {
     cat <<EOF_USAGE
@@ -20,7 +55,7 @@ Usage: $(basename "$0") [options]
 Single-server mode (required):
   --server NAME            Server name (e.g. chemistry)
   --dockerfile PATH        Path to Dockerfile (optional; defaults by server name)
-  --context PATH           Build context directory (optional)
+  --context PATH           Build context directory (optional; defaults to repo root)
 
 Network mode (required):
   --network PATH           Network manifest YAML (e.g. networks/science-hub.yaml)
@@ -29,11 +64,14 @@ Optional:
   --tag TAG                Image tag (default: latest)
   --resource-group, -g NAME   Override ACA_RESOURCE_GROUP from .env.server
   --acr-name NAME             Override ACA_ACR_NAME from .env.server
-  --dry-run                    Show what would run; do not deploy
+  --storage-link NAME         Azure Files storage link name (overrides ACA_STORAGE_LINK)
+  --cache-mount-path PATH     Cache mount path in container (overrides ACA_CACHE_MOUNT_PATH)
+  --dry-run                    Show what would run; do not build or deploy
   --help                       Show this help
 
 Examples:
-  $(basename "$0") --server chemistry --dockerfile ../../src/domain_examples/chemistry/Dockerfile --context ../../src/domain_examples/chemistry
+  $(basename "$0") --server chemistry
+  $(basename "$0") --server chemistry --dockerfile ../../examples/domain_examples/chemistry/Dockerfile --context ../..
   $(basename "$0") --network networks/science-hub.yaml
 EOF_USAGE
 }
@@ -96,6 +134,14 @@ while [[ $# -gt 0 ]]; do
             ACR_NAME="$2"
             shift 2
             ;;
+        --storage-link)
+            STORAGE_LINK="$2"
+            shift 2
+            ;;
+        --cache-mount-path)
+            CACHE_MOUNT_PATH="$2"
+            shift 2
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -137,11 +183,11 @@ ACR_LOGIN_SERVER="$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_G
 ENV_ID="$(az containerapp env show --name "$ACA_ENV_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)"
 
 # Build passthroughEnvVars JSON object from deployment/.env.server
-# Include all MCP_SERVER_* except:
+# Forward all runtime configuration variables to the container, excluding:
+#   - ACA_*: infra-only variables consumed by deploy.sh itself
 #   - MCP_SERVER_ENTRA_CLIENT_ID / MCP_SERVER_ENTRA_TENANT_ID (mapped to top-level Bicep params)
 #   - MCP_SERVER_TRANSPORT (deployment enforces streamable HTTP)
 #   - MCP_SERVER_PORT      (controlled by bicepparam/containerPort)
-# Also exclude ACA_* infra vars.
 PASSTHROUGH_ENV_JSON='{}'
 if [[ -f "$SCRIPT_DIR/../.env.server" ]]; then
     require_python
@@ -184,8 +230,6 @@ for key in sorted(env):
         continue
     if key.startswith('ACA_'):
         continue
-    if not key.startswith('MCP_SERVER_'):
-        continue
     out[key] = env[key]
 
 print(json.dumps(out, separators=(',', ':')))
@@ -226,14 +270,18 @@ deploy_server() {
     echo "  Connector:      $is_connector"
     echo "  Dry run:        $DRY_RUN"
 
-    echo ">> Building image..."
-    docker build -f "$resolved_dockerfile" -t "$image_ref" "$resolved_context"
+    if [[ "$DRY_RUN" != true ]]; then
+        echo ">> Building image..."
+        docker build -f "$resolved_dockerfile" -t "$image_ref" "$resolved_context"
 
-    echo ">> Logging into ACR..."
-    az acr login --name "$ACR_NAME"
+        echo ">> Logging into ACR..."
+        az acr login --name "$ACR_NAME"
 
-    echo ">> Pushing image..."
-    docker push "$image_ref"
+        echo ">> Pushing image..."
+        docker push "$image_ref"
+    else
+        echo ">> Skipping build/push (dry-run)"
+    fi
 
     local -a storage_params
     storage_params=()
@@ -325,7 +373,7 @@ wait_for_upstream_health() {
 
 default_dockerfile_for_server() {
     local server_name="$1"
-    local candidate="$SCRIPT_DIR/../../src/domain_examples/${server_name}/Dockerfile"
+    local candidate="$REPO_ROOT/examples/domain_examples/${server_name}/Dockerfile"
     if [[ ! -f "$candidate" ]]; then
         echo "ERROR: No default Dockerfile found for server '$server_name' at $candidate" >&2
         echo "Provide dockerfile/context in the network manifest for this server." >&2
@@ -498,7 +546,7 @@ PY
         fi
 
         if [[ -z "$context" ]]; then
-            context="$(dirname "$dockerfile")"
+            context="$REPO_ROOT"
         elif [[ "$context" != /* ]]; then
             context="$manifest_dir/$context"
         fi
@@ -529,7 +577,7 @@ else
         DOCKERFILE_PATH="$(default_dockerfile_for_server "$SERVER_NAME")"
     fi
     if [[ -z "$CONTEXT_PATH" ]]; then
-        CONTEXT_PATH="$(dirname "$DOCKERFILE_PATH")"
+        CONTEXT_PATH="$REPO_ROOT"
     fi
     deploy_server "$SERVER_NAME" "$DOCKERFILE_PATH" "$CONTEXT_PATH" "$PARAM_FILE" "true" "false"
     echo "=== Deploy complete ==="

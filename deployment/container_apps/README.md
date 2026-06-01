@@ -85,7 +85,7 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 | `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
-| `parameters/connector.bicepparam` | Connector parameter template (`MCP_CONNECTOR_*` + trusted hosts) |
+| `parameters/connector.bicepparam` | Connector parameter template (`CONNECTOR_MODE`, `UPSTREAM_*_URL`) |
 | `networks/science-hub.yaml` | Example network manifest for ordered upstream + connector deployment |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
 | `deploy.sh` | Per-server and network orchestration with health gating |
