@@ -71,6 +71,9 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
   └──────────┬───────────┘
              │
              │  ┌───────────────────────┐
+             ├──│ activity-ui           │  ← Bicep (activity-ui.bicep)
+             │  └───────────────────────┘
+             │  ┌───────────────────────┐
              ├──│ chemistry-server app  │  ← Bicep (main.bicep)
              │  └───────────────────────┘
              │  ┌───────────────────────┐
@@ -85,10 +88,12 @@ az containerapp show -n chemistry-server -g agora-mcp-rg --query properties.late
 
 | File | Description |
 |------|-------------|
-| `main.bicep` | Deploys a single Container App into existing infrastructure |
+| `main.bicep` | Deploys a single MCP server Container App |
+| `activity-ui.bicep` | Deploys the Activity UI monitoring sidecar (EasyAuth + managed identity) |
 | `parameters/chemistry.bicepparam` | Parameter values for the chemistry example server |
 | `parameters/earthscience.bicepparam` | Parameter values for the earth science example server |
 | `parameters/energysystems.bicepparam` | Parameter values for the energy systems example server |
+| `parameters/activity-ui.bicepparam` | Parameter values for the Activity UI |
 | `setup.sh` | One-time: creates ACR, Log Analytics, ACA environment, role assignments |
 | `setup-app-registrations.sh` | One-time: creates Entra app registrations, app roles, identity grants |
 | `deploy.sh` | Per-server: builds image, pushes to ACR, deploys Container App |
@@ -105,6 +110,62 @@ The Container App receives these at runtime:
 | `ENTRA_TENANT_ID` | Bicep parameter | Entra tenant ID |
 | `AZURE_CLIENT_ID` | Bicep parameter | Managed identity client ID |
 | `OBO_SIMULATION_MODE` | hardcoded `false` | Must be false in production |
+
+## Activity UI deployment
+
+The Activity UI is a lightweight monitoring sidecar that receives events from
+MCP servers and streams them to browsers. Deploy it **before** MCP servers so
+you can wire `ACTIVITY_UI_URL` into their environment.
+
+### Prerequisites
+
+1. An **Entra ID app registration** for the Activity UI (separate from MCP servers):
+   - Redirect URI: `https://<activity-ui-fqdn>/.auth/login/aad/callback`
+   - Application ID URI: `api://<client-id>`
+   - Federated credential linking the managed identity (for secretless EasyAuth)
+   - `ActivityEventWriter` app role assigned to the MCP managed identity
+2. Use `setup-app-registrations.sh` to create all of the above automatically.
+
+### Deploy
+
+```bash
+./deploy.sh \
+  --server activity-ui \
+  --template activity-ui.bicep \
+  --dockerfile activity_ui/Dockerfile \
+  --context . \
+  --skip-base-build
+```
+
+No secrets are required — EasyAuth uses the managed identity's federated
+credential for the OAuth code exchange.
+
+### Wire MCP servers
+
+After deployment, `deploy.sh` prints the Activity UI URL. Add these to your
+`.env.server`:
+
+```bash
+# FQDN printed by deploy.sh
+ACTIVITY_UI_URL=https://<activity-ui-fqdn>
+# The Entra app registration client ID for the activity UI (audience for token acquisition)
+ACTIVITY_UI_AUDIENCE=api://<activity-ui-entra-client-id>
+```
+
+Then redeploy MCP servers — the publisher acquires a managed-identity token
+scoped to the activity UI's app registration and sends it as a Bearer token.
+EasyAuth on the activity UI validates it automatically.
+
+### How auth works
+
+| Endpoint | Protection |
+|----------|-----------|
+| `/` `/stream` `/events/recent` | EasyAuth (Entra ID browser login via cookie) |
+| `/events` | EasyAuth (Entra ID Bearer token from MCP server managed identity) |
+| `/health` `/healthz` | Excluded from EasyAuth (ACA probes) |
+
+No shared secrets are used. MCP servers authenticate using their managed
+identity to acquire a token for the activity UI's app registration audience.
 
 ## Environment caching with Azure Files
 
