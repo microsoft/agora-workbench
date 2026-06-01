@@ -2,7 +2,7 @@
 Configuration models for connector servers.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -92,6 +92,67 @@ class GatewayConfig(BaseModel):
     policy: GatewayPolicy = Field(
         default_factory=GatewayPolicy,
         description="Governance policy for the gateway.",
+    )
+    entra_client_id: Optional[str] = Field(
+        default=None,
+        description="Entra ID application client ID for this server's app registration.",
+    )
+    entra_tenant_id: Optional[str] = Field(
+        default=None,
+        description="Azure AD tenant ID for this server's app registration.",
+    )
+
+
+class WorkerConfig(BaseModel):
+    """Configuration for a single worker in a dispatcher pool."""
+
+    name: str = Field(description="Logical name for this worker (e.g., 'chem-worker-1')")
+    url: str = Field(description="Base URL of the worker server (e.g., 'http://chemistry-1:8000')")
+    weight: int = Field(
+        default=1,
+        ge=1,
+        description="Routing weight for weighted round-robin. Higher weight = more traffic.",
+    )
+
+
+class DispatcherConfig(BaseModel):
+    """Configuration for a DispatcherServer.
+
+    A dispatcher fans out a single tool interface to a pool of identical
+    worker servers, with configurable routing strategies and health checking.
+    """
+
+    name: str = Field(description="Server name (e.g., 'chem-dispatcher')")
+    description: str = Field(
+        default="",
+        description="Human-readable description (used as MCP instructions).",
+    )
+    workers: list[WorkerConfig] = Field(
+        description="Pool of identical worker servers to distribute across.",
+        min_length=1,
+    )
+    strategy: Literal["round_robin", "least_loaded", "sticky_session"] = Field(
+        default="round_robin",
+        description="Routing strategy for distributing calls across workers.",
+    )
+    session_affinity: bool = Field(
+        default=True,
+        description=(
+            "If True, once a session is assigned to a worker, subsequent calls "
+            "in that session route to the same worker."
+        ),
+    )
+    health_check_interval: float = Field(
+        default=10.0,
+        gt=0,
+        description="Seconds between health check polls to each worker.",
+    )
+    worker_failure_policy: Literal["error", "reroute"] = Field(
+        default="error",
+        description=(
+            "Behavior when an assigned worker goes unhealthy mid-session. "
+            "'error' returns an error to the caller; 'reroute' assigns a new worker."
+        ),
     )
     entra_client_id: Optional[str] = Field(
         default=None,
