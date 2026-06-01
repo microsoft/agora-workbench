@@ -18,9 +18,11 @@ Authentication:
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -243,6 +245,76 @@ class BlobPublisher(AssetPublisher):
         remote_uri = f"{self._account_url}/{self._container}/{blob_path}"
         LOGGER.info("BlobPublisher: uploaded %d bytes → %s", local_path.stat().st_size, remote_uri)
         return remote_uri
+
+
+class GuiPublisher(AssetPublisher):
+    """Publisher that exposes artifacts via the server's download endpoint.
+
+    Unlike Blob or Local publishers that transfer the file elsewhere, this
+    publisher simply returns the server's ``/artifacts/`` download URL for
+    the already-registered artifact.  The activity UI surfaces this URL so
+    the user can download the file from their browser.
+
+    This publisher is auto-registered on every ``CodeExecutionServer`` so
+    agents can always use ``<gui>filename</gui>`` to make outputs
+    downloadable without requiring operator-configured storage backends.
+
+    Handles destination tags of the form ``<gui>name</gui>``.
+    """
+
+    def __init__(self, public_url_fn: "Callable[[], str]"):
+        """
+        Initialise the GuiPublisher.
+
+        Args:
+            public_url_fn: A callable returning the server's public base URL
+                (e.g. ``server.public_url``).  Deferred so the URL reflects
+                the actual bind address after ``run_http()`` is called.
+        """
+        super().__init__(credential=None)
+        self._public_url_fn = public_url_fn
+
+    def can_handle(self, destination: str) -> bool:
+        """Return ``True`` for ``<gui>…</gui>`` destinations."""
+        parsed = parse_destination_tag(destination)
+        return parsed is not None and parsed[0] == "gui"
+
+    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+        """Return the download URL for the artifact.
+
+        The artifact must already be registered in the session manager's
+        artifact registry (populated by the snapshot-diff after execution).
+        The caller (the publish tool wrapper) is responsible for passing the
+        download token via the ``_download_token`` attribute set on this
+        instance before calling ``publish()``.
+
+        Args:
+            local_path: Absolute path to the artifact file.
+            name: Logical name / relative path for the URL's filename segment.
+            session_id: Session ID scoping the artifact.
+
+        Returns:
+            The fully-qualified download URL.
+
+        Raises:
+            FileNotFoundError: If *local_path* does not exist.
+            RuntimeError: If no download token was provided.
+        """
+        if not local_path.is_file():
+            raise FileNotFoundError(f"Artifact not found at {local_path}")
+
+        _validate_artifact_name(name)
+
+        token = getattr(self, "_download_token", None)
+        if not token:
+            raise RuntimeError(
+                "GuiPublisher requires a download token set via _download_token before publish() is called."
+            )
+
+        public_base = (os.getenv("SERVER_PUBLIC_URL") or self._public_url_fn()).rstrip("/")
+        download_url = f"{public_base}/artifacts/{session_id}/{token}/{name}"
+        LOGGER.info("GuiPublisher: exposing %s → %s", local_path, download_url)
+        return download_url
 
 
 class LocalFilePublisher(AssetPublisher):

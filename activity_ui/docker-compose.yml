@@ -22,14 +22,14 @@ services:
       dockerfile: activity_ui/Dockerfile
     ports:
       # Bind to localhost only — no auth yet, do not expose off-host.
-      - "127.0.0.1:8030:8030"
+      - "0.0.0.0:8030:8030"
     environment:
       ACTIVITY_UI_HOST: "0.0.0.0"
       ACTIVITY_UI_PORT: "8030"
     networks:
       - agora-activity
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/healthz').read()"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8030/healthz').read()"]
       interval: 30s
       timeout: 10s
       retries: 3
