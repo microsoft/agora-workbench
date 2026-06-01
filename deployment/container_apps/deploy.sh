@@ -339,6 +339,18 @@ else
             --output tsv 2>/dev/null || true)
     fi
 
+    # If deploying the Activity UI, update the app registration redirect URI
+    # so EasyAuth callbacks work without manual intervention.
+    if [[ "$TEMPLATE_FILE" == *"activity-ui"* && -n "$FQDN" && -n "$ENTRA_CLIENT_ID_VAL" ]]; then
+        REDIRECT_URI="https://${FQDN}/.auth/login/aad/callback"
+        echo ""
+        echo ">> Updating app registration redirect URI..."
+        az ad app update --id "$ENTRA_CLIENT_ID_VAL" \
+            --web-redirect-uris "$REDIRECT_URI" \
+            --output none
+        echo "   Set to: $REDIRECT_URI"
+    fi
+
     echo ""
     echo "=== Deployment complete ==="
     echo "  App URL:  https://${FQDN}"
