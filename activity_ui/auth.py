@@ -9,6 +9,10 @@ Follows the same architecture as ``code_execution.auth``:
 POST /events is excluded from EasyAuth to allow managed-identity bearer tokens.
 The validator checks signature, issuer, audience, expiry, and the ``roles``
 claim containing ``ActivityEventWriter``.
+
+GET /stream and /events/recent use a short-lived stream token (HMAC-SHA256)
+delivered as an HttpOnly cookie. The token is minted by POST /stream-token,
+which is protected by EasyAuth (not in excludedPaths).
 """
 
 from __future__ import annotations
@@ -16,10 +20,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import secrets
+import time
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 
 import jwt
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
 from jwt import PyJWKClient
 
 LOGGER = logging.getLogger(__name__)
@@ -193,5 +200,92 @@ async def require_event_writer(request: Request) -> None:
 
     try:
         await validator.validate(token)
+    except TokenValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+
+# ── Stream token (browser access to /stream and /events/recent) ──────────────
+
+# Server-generated secret for HMAC-signed stream tokens.
+# Rotates on restart — acceptable for short-lived tokens on single-replica.
+_STREAM_TOKEN_SECRET: str = os.getenv("ACTIVITY_UI_STREAM_SECRET", "") or secrets.token_hex(32)
+_STREAM_TOKEN_TTL_SECONDS = int(os.getenv("ACTIVITY_UI_STREAM_TOKEN_TTL", "300"))  # 5 min default
+_STREAM_TOKEN_COOKIE = "activity_stream_token"
+_STREAM_TOKEN_ALGORITHM = "HS256"
+
+
+def mint_stream_token(subject: str) -> str:
+    """Create a short-lived HMAC stream token for browser SSE access."""
+    now = time.time()
+    payload = {
+        "sub": subject,
+        "purpose": "stream",
+        "iat": int(now),
+        "exp": int(now) + _STREAM_TOKEN_TTL_SECONDS,
+    }
+    return jwt.encode(payload, _STREAM_TOKEN_SECRET, algorithm=_STREAM_TOKEN_ALGORITHM)
+
+
+def validate_stream_token(token: str) -> dict:
+    """Validate a stream token. Returns claims or raises TokenValidationError."""
+    try:
+        claims = jwt.decode(token, _STREAM_TOKEN_SECRET, algorithms=[_STREAM_TOKEN_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise TokenValidationError("Stream token expired", status_code=401)
+    except jwt.InvalidTokenError as exc:
+        raise TokenValidationError(f"Invalid stream token: {exc}", status_code=401)
+
+    if claims.get("purpose") != "stream":
+        raise TokenValidationError("Token not valid for stream access", status_code=403)
+
+    return claims
+
+
+def stream_token_expiry(token: str) -> datetime | None:
+    """Return the expiry time of a stream token (without full validation)."""
+    try:
+        claims = jwt.decode(
+            token, _STREAM_TOKEN_SECRET, algorithms=[_STREAM_TOKEN_ALGORITHM], options={"verify_exp": False}
+        )
+        exp = claims.get("exp")
+        return datetime.fromtimestamp(exp, tz=timezone.utc) if exp else None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def set_stream_token_cookie(response: Response, token: str) -> None:
+    """Set the stream token as an HttpOnly, Secure, SameSite=Lax cookie."""
+    response.set_cookie(
+        key=_STREAM_TOKEN_COOKIE,
+        value=token,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=_STREAM_TOKEN_TTL_SECONDS,
+        path="/",
+    )
+
+
+async def require_stream_reader(request: Request) -> dict:
+    """FastAPI dependency that validates stream tokens on /stream and /events/recent.
+
+    Checks the stream token cookie (HttpOnly, set by POST /stream-token).
+    Falls back to query param for non-browser clients (e.g. curl for debugging).
+    Returns validated claims dict.
+
+    In NoOp mode (local dev), all requests are allowed.
+    """
+    validator = _get_validator()
+    if isinstance(validator, NoOpTokenValidator):
+        return {}
+
+    # Check cookie first, then query param fallback
+    token = request.cookies.get(_STREAM_TOKEN_COOKIE) or request.query_params.get("token")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing stream token")
+
+    try:
+        return validate_stream_token(token)
     except TokenValidationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
