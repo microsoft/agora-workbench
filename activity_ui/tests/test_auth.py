@@ -5,9 +5,7 @@ from __future__ import annotations
 import time
 from unittest.mock import patch
 
-import jwt
 import pytest
-from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 
 
@@ -15,18 +13,16 @@ from fastapi.testclient import TestClient
 def _auth_disabled():
     """Disable auth for tests that don't need it."""
     with patch.dict("os.environ", {"ACTIVITY_UI_AUTH_DISABLED": "true"}):
-        # Re-import to pick up env change
-        import importlib
         import activity_ui.auth as auth_mod
 
-        importlib.reload(auth_mod)
+        auth_mod._validator = None  # Reset singleton so factory re-runs
         yield
-        importlib.reload(auth_mod)
+        auth_mod._validator = None
 
 
 @pytest.fixture
-def _auth_enabled(tmp_path):
-    """Enable auth with a test RSA key."""
+def _auth_enabled():
+    """Enable auth with test config."""
     env = {
         "ACTIVITY_UI_AUTH_DISABLED": "false",
         "ENTRA_TENANT_ID": "test-tenant-id",
@@ -34,20 +30,11 @@ def _auth_enabled(tmp_path):
         "ACTIVITY_UI_CLIENT_ID": "test-client-id",
     }
     with patch.dict("os.environ", env):
-        import importlib
         import activity_ui.auth as auth_mod
 
-        importlib.reload(auth_mod)
+        auth_mod._validator = None  # Reset singleton so factory re-runs
         yield
-        importlib.reload(auth_mod)
-
-
-@pytest.fixture
-def rsa_keypair():
-    """Generate a test RSA key pair."""
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    public_key = private_key.public_key()
-    return private_key, public_key
+        auth_mod._validator = None
 
 
 @pytest.fixture
@@ -57,11 +44,6 @@ def client():
 
     app = create_app()
     return TestClient(app)
-
-
-def _make_token(private_key, claims: dict) -> str:
-    """Create a signed JWT."""
-    return jwt.encode(claims, private_key, algorithm="RS256")
 
 
 class TestAuthDisabled:
