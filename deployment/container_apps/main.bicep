@@ -69,6 +69,9 @@ param maxReplicas int = 3
 @description('Additional environment variables as key-value pairs.')
 param extraEnvVars object = {}
 
+@description('Runtime env vars forwarded from deployment/.env.server. On key collisions, these values override extraEnvVars from .bicepparam files.')
+param passthroughEnvVars object = {}
+
 @description('Container startup command. When empty (default), the image CMD is used.')
 param command array = []
 
@@ -83,6 +86,9 @@ param storageLink string = ''
 @description('Mount path inside the container for the environment cache volume.')
 param cacheMountPath string = '/home/appuser/.cache/mcp-envs'
 
+@description('Whether ingress is externally accessible. Set false for internal-only upstreams.')
+param externalIngress bool = true
+
 // ── Environment variables ───────────────────────────────────────────────────
 
 var baseEnv = [
@@ -94,9 +100,11 @@ var baseEnv = [
   { name: 'OBO_SIMULATION_MODE', value: 'false' }
 ]
 
-var extraEnvArray = [for key in objectKeys(extraEnvVars): {
+var mergedExtraEnvVars = union(extraEnvVars, passthroughEnvVars)
+
+var extraEnvArray = [for key in objectKeys(mergedExtraEnvVars): {
   name: key
-  value: string(extraEnvVars[key])
+  value: string(mergedExtraEnvVars[key])
 }]
 
 var allEnv = concat(baseEnv, extraEnvArray)
@@ -136,7 +144,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       activeRevisionsMode: 'Single'
       ingress: {
-        external: true
+        external: externalIngress
         targetPort: containerPort
         transport: 'http'
         allowInsecure: false

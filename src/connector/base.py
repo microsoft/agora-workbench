@@ -160,9 +160,17 @@ class ConnectorServer(BaseMCPServer):
                 LOGGER.info("Fetched %d tools from upstream '%s'", len(tool_list), upstream.name)
 
     async def _fetch_catalog(self, client: httpx.AsyncClient, upstream: UpstreamConfig) -> list[ToolDefinition]:
-        """Fetch and parse the tool catalog from a single upstream."""
-        url = f"{upstream.url.rstrip('/')}/catalog"
-        response = await client.get(url)
+        """Fetch and parse the tool catalog from a single upstream.
+
+        The /catalog endpoint is at the server root (not under /mcp), so we
+        derive the base URL by stripping the trailing path segment from the
+        upstream MCP URL.
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(upstream.url)
+        base_url = urlunparse((parsed.scheme, parsed.netloc, "/catalog", "", "", ""))
+        response = await client.get(base_url)
         response.raise_for_status()
         data = response.json()
 
