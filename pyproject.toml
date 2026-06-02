@@ -96,6 +96,7 @@ docs = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
+    "griffe>=1.5.0,<2",
 ]
 
 [tool.pytest.ini_options]
