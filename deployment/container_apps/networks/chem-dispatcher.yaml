@@ -1,0 +1,30 @@
+# Dispatcher network example: worker pool behind a single endpoint.
+#
+# Topology:
+#   Client → [chem-dispatcher] → chem-worker-1, chem-worker-2
+#
+# All workers run the same chemistry server image. The dispatcher
+# provides session-aware load balancing across the pool.
+#
+# Deploy with:
+#   ./deploy-network.sh networks/chem-dispatcher.yaml
+
+name: chem-dispatcher
+
+connector:
+  server: chem-dispatcher
+  params: ../parameters/dispatcher.bicepparam
+  context: ../../..
+  dockerfile: ../../base.Dockerfile
+
+upstreams:
+  - server: chem-worker-1
+    params: ../parameters/chemistry.bicepparam
+    internal: true
+    context: ../../..
+    dockerfile: ../../../examples/domain_examples/chemistry/Dockerfile
+  - server: chem-worker-2
+    params: ../parameters/chemistry.bicepparam
+    internal: true
+    context: ../../..
+    dockerfile: ../../../examples/domain_examples/chemistry/Dockerfile
