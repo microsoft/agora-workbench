@@ -57,6 +57,7 @@ openai-agents = [
 # GitHub Copilot SDK adapter (docs/tutorials/copilot_sdk_quickstart)
 copilot-sdk = [
     "github-copilot-sdk>=0.3.0",
+    "python-dotenv>=1.1.1",
 ]
 # Domain-specific (geospatial examples)
 geo = [
