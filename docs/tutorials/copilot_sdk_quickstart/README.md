@@ -64,7 +64,7 @@ setup + how to run.
   ```
   or install it directly into your environment:
   ```bash
-  uv pip install github-copilot-sdk
+  uv pip install github-copilot-sdk python-dotenv
   ```
   The package bundles the underlying Copilot CLI binary, so no separate
   install is needed.
