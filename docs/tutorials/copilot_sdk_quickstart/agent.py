@@ -203,9 +203,11 @@ async def main() -> int:
     from copilot.session import AssistantMessageData, PermissionHandler
 
     model, provider = resolve_llm()
+    provider_kind = os.getenv("LLM_PROVIDER", "copilot")
+    provider_label = "copilot-subscription" if provider_kind == "copilot" else provider_kind
     LOGGER.info(
         "LLM configured (provider=%s)",
-        provider["type"] if provider else "copilot-subscription",
+        provider_label,
     )
 
     energy = await energy_mcp_config()
