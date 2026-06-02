@@ -464,6 +464,8 @@ class TestRouterProxyToolRegistration:
 
         # chemistry has skills → unified load_skill registered
         assert "load_multi-hub_skill" in tool_names
+        # per-upstream load_skill also registered
+        assert "load_chemistry_skill" in tool_names
 
     @pytest.mark.asyncio
     async def test_load_skill_absent_when_no_skills(self):

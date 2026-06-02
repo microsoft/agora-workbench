@@ -540,7 +540,10 @@ class ConnectorServer(BaseMCPServer):
             return
 
         backend = create_tool_search_backend(backend_type="bm25")
-        backend.index(tools=all_tool_infos, skills=all_skills, server_name=connector_name)
+        # Pass empty server_name so the backend doesn't generate misleading
+        # to_access strings like "Call via execute_{connector}_code" — the
+        # connector doesn't expose a single execute tool, each upstream has its own.
+        backend.index(tools=all_tool_infos, skills=all_skills, server_name="")
         self._tool_search_backends.append(backend)
 
         LOGGER.info(

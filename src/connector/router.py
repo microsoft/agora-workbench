@@ -52,9 +52,10 @@ class RouterServer(ConnectorServer):
     def _setup_tools(self) -> None:
         """Register execute_code and session proxies for each upstream."""
         for upstream in self._upstreams:
-            tools = self._upstream_catalogs.get(upstream.name, [])
-            skills = self._upstream_skills.get(upstream.name, [])
-            if not tools and not skills:
+            # Skip upstreams whose catalog fetch failed (key absent), but
+            # still register for upstreams that succeeded with empty results
+            # (they still support execute_code and meta-tools).
+            if upstream.name not in self._upstream_catalogs:
                 continue
             self._register_execute_code_proxy(upstream)
             self._register_session_proxies(upstream)
@@ -63,6 +64,7 @@ class RouterServer(ConnectorServer):
             self._register_publish_artifact_proxy(upstream)
             self._register_push_object_proxy(upstream)
             self._register_plan_workflow_proxy(upstream)
+            self._register_load_skill_proxy(upstream)
 
         # Unified skill loader across all upstreams
         self._register_unified_load_skill()
