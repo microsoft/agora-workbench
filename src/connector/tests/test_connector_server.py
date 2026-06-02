@@ -320,6 +320,303 @@ class TestGatewayServer:
         assert "parallel_execute" in server.config.policy.blocked_tools
 
 
+class TestRouterProxyToolRegistration:
+    """Tests for companion proxy tool registration on RouterServer."""
+
+    CATALOG_WITH_STATES = {
+        "server_name": "chemistry",
+        "tools": [
+            {
+                "name": "compute_descriptors",
+                "description": "Compute molecular descriptors.",
+                "module": "chemistry.tools",
+                "required_parameters": [
+                    {"name": "smiles", "type": "builtins.str", "description": "SMILES input"},
+                ],
+                "optional_parameters": [],
+                "return_spec": [],
+                "state_transition": {"requires": ["molecules_loaded"], "produces": ["descriptors_computed"]},
+                "affordances": ["molecular properties"],
+            },
+        ],
+        "skills": [
+            {"name": "docking_workflow", "description": "Molecular docking", "domain": "chemistry", "states": []},
+        ],
+    }
+
+    CATALOG_NO_STATES = {
+        "server_name": "gis",
+        "tools": [
+            {
+                "name": "reproject",
+                "description": "Reproject geometries.",
+                "module": "gis.tools",
+                "required_parameters": [],
+                "optional_parameters": [],
+                "return_spec": [],
+                "state_transition": {"requires": [], "produces": []},
+                "affordances": [],
+            },
+        ],
+        "skills": [],
+    }
+
+    @pytest.mark.asyncio
+    async def test_registers_companion_proxy_tools(self):
+        """Router registers check_job, parallel_execute, publish_artifact, push_object proxies."""
+        config = RouterConfig(
+            name="science-hub",
+            upstreams=[
+                UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            ],
+        )
+        server = RouterServer(config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(self.CATALOG_WITH_STATES)
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        # Companion proxy tools should all be registered
+        assert "chemistry_check_job" in tool_names
+        assert "chemistry_parallel_execute" in tool_names
+        assert "chemistry_check_batch" in tool_names
+        assert "chemistry_cancel_batch" in tool_names
+        assert "chemistry_publish_artifact" in tool_names
+        assert "chemistry_push_object" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_workflow_proxy_only_with_state_annotated_tools(self):
+        """plan_workflow proxy only registered when upstream has state-annotated tools."""
+        config = RouterConfig(
+            name="multi-hub",
+            upstreams=[
+                UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+                UpstreamConfig(name="gis", url="http://gis:8000"),
+            ],
+        )
+        server = RouterServer(config)
+
+        async def mock_get(url, **kwargs):
+            if "chemistry" in url:
+                return _mock_response(self.CATALOG_WITH_STATES)
+            elif "gis" in url:
+                return _mock_response(self.CATALOG_NO_STATES)
+            raise httpx.RequestError(f"Unknown URL: {url}")
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        # chemistry has state-annotated tools → plan_workflow registered
+        assert "plan_chemistry_workflow" in tool_names
+        # gis has no state-annotated tools → plan_workflow NOT registered
+        assert "plan_gis_workflow" not in tool_names
+
+    @pytest.mark.asyncio
+    async def test_load_skill_only_with_skills(self):
+        """Unified load_skill only registered when at least one upstream has skills."""
+        config = RouterConfig(
+            name="multi-hub",
+            upstreams=[
+                UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+                UpstreamConfig(name="gis", url="http://gis:8000"),
+            ],
+        )
+        server = RouterServer(config)
+
+        async def mock_get(url, **kwargs):
+            if "chemistry" in url:
+                return _mock_response(self.CATALOG_WITH_STATES)
+            elif "gis" in url:
+                return _mock_response(self.CATALOG_NO_STATES)
+            raise httpx.RequestError(f"Unknown URL: {url}")
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        # chemistry has skills → unified load_skill registered
+        assert "load_multi-hub_skill" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_load_skill_absent_when_no_skills(self):
+        """Unified load_skill NOT registered when no upstreams have skills."""
+        config = RouterConfig(
+            name="no-skills-hub",
+            upstreams=[
+                UpstreamConfig(name="gis", url="http://gis:8000"),
+            ],
+        )
+        server = RouterServer(config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(self.CATALOG_NO_STATES)
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "load_no-skills-hub_skill" not in tool_names
+
+
+class TestGatewayPolicyEnforcement:
+    """Tests for GatewayServer policy enforcement on companion proxy tools."""
+
+    CATALOG_WITH_STATES = TestRouterProxyToolRegistration.CATALOG_WITH_STATES
+
+    @pytest.mark.asyncio
+    async def test_blocked_tools_suppresses_proxy_registration(self):
+        """Gateway does not register proxy tools that are in blocked_tools."""
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(
+                blocked_tools=["parallel_execute", "push_object"],
+            ),
+        )
+        server = GatewayServer(config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(self.CATALOG_WITH_STATES)
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        # Blocked tools should NOT be registered
+        assert "chemistry_parallel_execute" not in tool_names
+        assert "chemistry_check_batch" not in tool_names
+        assert "chemistry_cancel_batch" not in tool_names
+        assert "chemistry_push_object" not in tool_names
+
+        # Non-blocked tools should still be registered
+        assert "chemistry_check_job" in tool_names
+        assert "chemistry_publish_artifact" in tool_names
+        assert "plan_chemistry_workflow" in tool_names
+        assert "load_chemistry_skill" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_no_blocked_tools_registers_all_proxies(self):
+        """Gateway registers all proxy tools when blocked_tools is empty."""
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(),
+        )
+        server = GatewayServer(config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(self.CATALOG_WITH_STATES)
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "chemistry_check_job" in tool_names
+        assert "chemistry_parallel_execute" in tool_names
+        assert "chemistry_check_batch" in tool_names
+        assert "chemistry_cancel_batch" in tool_names
+        assert "chemistry_publish_artifact" in tool_names
+        assert "chemistry_push_object" in tool_names
+        assert "plan_chemistry_workflow" in tool_names
+        assert "load_chemistry_skill" in tool_names
+
+    @pytest.mark.asyncio
+    async def test_gateway_workflow_proxy_conditional_on_catalog(self):
+        """Gateway does not register plan_workflow when no state-annotated tools."""
+        catalog_no_states = {
+            "server_name": "chemistry",
+            "tools": [
+                {
+                    "name": "compute_descriptors",
+                    "description": "Compute molecular descriptors.",
+                    "module": "chemistry.tools",
+                    "required_parameters": [],
+                    "optional_parameters": [],
+                    "return_spec": [],
+                    "state_transition": {"requires": [], "produces": []},
+                    "affordances": [],
+                },
+            ],
+            "skills": [],
+        }
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(),
+        )
+        server = GatewayServer(config)
+
+        async def mock_get(url, **kwargs):
+            return _mock_response(catalog_no_states)
+
+        with patch("connector.base.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._startup()
+
+        tools = await server.mcp.list_tools()
+        tool_names = [t.name for t in tools]
+
+        assert "plan_chemistry_workflow" not in tool_names
+        assert "load_chemistry_skill" not in tool_names
+
+
 class TestConnectorServerMatchesExposeFilter:
     """Tests for the expose_tools glob matching logic."""
 

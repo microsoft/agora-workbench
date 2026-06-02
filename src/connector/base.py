@@ -414,8 +414,29 @@ class ConnectorServer(BaseMCPServer):
             ),
         )(push_object_proxy)
 
+    def _has_state_annotated_tools(self, upstream_name: str) -> bool:
+        """Check if an upstream has any tools with non-empty state transitions."""
+        for tool_def in self._upstream_catalogs.get(upstream_name, []):
+            if tool_def.state_transition.requires or tool_def.state_transition.produces:
+                return True
+        return False
+
+    def _has_skills(self, upstream_name: str) -> bool:
+        """Check if an upstream has any discoverable skills."""
+        return bool(self._upstream_skills.get(upstream_name))
+
     def _register_plan_workflow_proxy(self, upstream: UpstreamConfig) -> None:
-        """Register a plan_workflow proxy tool for an upstream."""
+        """Register a plan_workflow proxy tool for an upstream.
+
+        Only registers the tool if the upstream catalog contains state-annotated
+        tools (i.e. tools with non-empty state_transition.requires or produces).
+        """
+        if not self._has_state_annotated_tools(upstream.name):
+            LOGGER.debug(
+                "Skipping plan_%s_workflow proxy: no state-annotated tools in catalog.",
+                upstream.name,
+            )
+            return
         server = self
         upstream_name = upstream.name
         plan_name = f"plan_{upstream_name}_workflow"
@@ -452,7 +473,16 @@ class ConnectorServer(BaseMCPServer):
         )(plan_workflow_proxy)
 
     def _register_load_skill_proxy(self, upstream: UpstreamConfig) -> None:
-        """Register a per-upstream load_skill proxy tool."""
+        """Register a per-upstream load_skill proxy tool.
+
+        Only registers the tool if the upstream catalog contains discoverable skills.
+        """
+        if not self._has_skills(upstream.name):
+            LOGGER.debug(
+                "Skipping load_%s_skill proxy: no skills in catalog.",
+                upstream.name,
+            )
+            return
         server = self
         upstream_name = upstream.name
         load_name = f"load_{upstream_name}_skill"
