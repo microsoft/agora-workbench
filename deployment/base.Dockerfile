@@ -83,7 +83,7 @@ RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb
 # it must be on /app (PYTHONPATH) alongside code_execution.
 COPY src/base /app/base
 COPY src/code_execution /app/code_execution
-COPY src/base /app/base
+COPY src/connector /app/connector
 
 # Set up remaining appuser directories (no large chown needed — miniforge
 # and wheelhouse were already owned correctly in their install layers)
