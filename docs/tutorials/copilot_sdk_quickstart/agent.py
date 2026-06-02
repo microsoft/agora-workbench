@@ -76,9 +76,13 @@ def resolve_llm() -> tuple[str, dict[str, Any] | None]:
     if kind == "copilot":
         return os.getenv("COPILOT_MODEL", "gpt-5.2"), None
     if kind == "azure_openai_key":
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME") or os.getenv("MODEL_DEPLOYMENT_NAME")
+        if not deployment:
+            raise ValueError(
+                "LLM_PROVIDER=azure_openai_key requires AZURE_OPENAI_DEPLOYMENT_NAME (or MODEL_DEPLOYMENT_NAME)."
+            )
         return (
-            os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME")
-            or os.environ["MODEL_DEPLOYMENT_NAME"],
+            deployment,
             {
                 "type": "azure",
                 "base_url": os.environ["AZURE_OPENAI_ENDPOINT"],
