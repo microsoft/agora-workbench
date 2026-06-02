@@ -18,13 +18,23 @@ import collections
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+from .auth import (
+    NoOpTokenValidator,
+    _get_validator,
+    mint_stream_token,
+    require_event_writer,
+    require_stream_reader,
+    set_stream_token_cookie,
+    stream_token_expiry,
+)
 from .models import ActivityEvent
 
 LOGGER = logging.getLogger(__name__)
@@ -84,23 +94,52 @@ def create_app() -> FastAPI:
     bus = EventBus()
     app.state.bus = bus
 
-    @app.post("/events")
+    @app.post("/events", dependencies=[Depends(require_event_writer)])
     async def ingest_event(event: ActivityEvent) -> dict[str, str]:
         await bus.publish(event)
         return {"status": "ok"}
 
-    @app.get("/events/recent")
+    @app.post("/stream-token")
+    async def issue_stream_token(request: Request) -> Response:
+        """Mint a short-lived stream token for browser SSE access.
+
+        This endpoint is NOT in EasyAuth excludedPaths, so the browser must
+        be logged in via EasyAuth. The token is set as an HttpOnly cookie.
+        """
+        # Extract identity from EasyAuth-injected header (trusted on protected paths)
+        subject = request.headers.get("X-MS-CLIENT-PRINCIPAL-ID")
+        if not subject:
+            # In local dev (NoOp mode), allow anonymous stream tokens
+            if isinstance(_get_validator(), NoOpTokenValidator):
+                subject = "anonymous"
+            else:
+                raise HTTPException(status_code=401, detail="Missing identity header")
+        token = mint_stream_token(subject)
+        response = Response(content='{"status":"ok"}', media_type="application/json")
+        response.headers["Cache-Control"] = "no-store"
+        set_stream_token_cookie(response, token)
+        return response
+
+    @app.get("/events/recent", dependencies=[Depends(require_stream_reader)])
     async def recent_events() -> JSONResponse:
         return JSONResponse([e.model_dump() for e in bus.snapshot()])
 
-    @app.get("/stream")
+    @app.get("/stream", dependencies=[Depends(require_stream_reader)])
     async def stream(request: Request) -> EventSourceResponse:
         q = await bus.subscribe()
+
+        # Determine when the stream token expires so we can close the connection
+        token = request.cookies.get("activity_stream_token") or request.query_params.get("token")
+        expiry = stream_token_expiry(token) if token else None
 
         async def event_generator():
             try:
                 while True:
                     if await request.is_disconnected():
+                        break
+                    # Close stream when token expires (browser will reconnect with fresh token)
+                    if expiry and datetime.now(timezone.utc) >= expiry:
+                        yield {"event": "token_expired", "data": ""}
                         break
                     try:
                         event = await asyncio.wait_for(q.get(), timeout=15.0)
@@ -111,6 +150,9 @@ def create_app() -> FastAPI:
                     except asyncio.TimeoutError:
                         # Heartbeat to keep proxies / browsers from closing the connection.
                         yield {"event": "ping", "data": ""}
+            except asyncio.CancelledError:
+                # Expected when the client disconnects or the server shuts down; cleanup runs in finally.
+                pass
             finally:
                 await bus.unsubscribe(q)
 

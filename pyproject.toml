@@ -94,7 +94,7 @@ docs = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/code_execution/tests", "src/connector/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests"]
+testpaths = ["src/code_execution/tests", "src/connector/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests", "activity_ui/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
