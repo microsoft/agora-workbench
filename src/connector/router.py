@@ -56,6 +56,11 @@ class RouterServer(ConnectorServer):
                 continue
             self._register_execute_code_proxy(upstream)
             self._register_session_proxies(upstream)
+            self._register_check_job_proxy(upstream)
+            self._register_parallel_execution_proxies(upstream)
+            self._register_publish_artifact_proxy(upstream)
+            self._register_push_object_proxy(upstream)
+            self._register_workflow_proxies(upstream)
 
     def _register_execute_code_proxy(self, upstream: UpstreamConfig) -> None:
         """Register an execute_{upstream.name}_code proxy tool."""
