@@ -62,7 +62,8 @@ class GatewayServer(ConnectorServer):
         self._register_parallel_execution_proxies(upstream)
         self._register_publish_artifact_proxy(upstream)
         self._register_push_object_proxy(upstream)
-        self._register_workflow_proxies(upstream)
+        self._register_plan_workflow_proxy(upstream)
+        self._register_load_skill_proxy(upstream)
 
     def _register_gateway_execute_code(self, upstream) -> None:
         """Register execute_code with policy checks (rate limit, allow/deny)."""

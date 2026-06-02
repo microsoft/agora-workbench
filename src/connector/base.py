@@ -59,6 +59,7 @@ class ConnectorServer(BaseMCPServer):
 
         # Upstream state
         self._upstream_catalogs: dict[str, list[ToolDefinition]] = {}
+        self._upstream_skills: dict[str, list[dict[str, Any]]] = {}
         self._upstream_sessions: dict[str, str] = {}  # upstream_name -> MCP session ID
 
         # Tool search
@@ -155,16 +156,27 @@ class ConnectorServer(BaseMCPServer):
                     result,
                 )
             else:
-                tool_list: list[ToolDefinition] = result
-                self._upstream_catalogs[upstream.name] = tool_list
-                LOGGER.info("Fetched %d tools from upstream '%s'", len(tool_list), upstream.name)
+                tools, skills = result
+                self._upstream_catalogs[upstream.name] = tools
+                self._upstream_skills[upstream.name] = skills
+                LOGGER.info(
+                    "Fetched %d tools and %d skills from upstream '%s'",
+                    len(tools),
+                    len(skills),
+                    upstream.name,
+                )
 
-    async def _fetch_catalog(self, client: httpx.AsyncClient, upstream: UpstreamConfig) -> list[ToolDefinition]:
+    async def _fetch_catalog(
+        self, client: httpx.AsyncClient, upstream: UpstreamConfig
+    ) -> tuple[list[ToolDefinition], list[dict[str, Any]]]:
         """Fetch and parse the tool catalog from a single upstream.
 
         The /catalog endpoint is at the server root (not under /mcp), so we
         derive the base URL by stripping the trailing path segment from the
         upstream MCP URL.
+
+        Returns:
+            Tuple of (tools, skills) parsed from the catalog response.
         """
         from urllib.parse import urlparse, urlunparse
 
@@ -191,7 +203,15 @@ class ConnectorServer(BaseMCPServer):
                 if tool_def.name in upstream.tool_aliases:
                     tool_def.name = upstream.tool_aliases[tool_def.name]
 
-        return tools
+        # Parse skills, tagging each with the upstream's server name
+        skills: list[dict[str, Any]] = []
+        for skill_data in data.get("skills", []):
+            if not isinstance(skill_data, dict) or not skill_data.get("name"):
+                continue
+            skill_data["server_name"] = data.get("server_name", upstream.name)
+            skills.append(skill_data)
+
+        return tools, skills
 
     @staticmethod
     def _matches_expose_filter(tool_name: str, patterns: list[str]) -> bool:
@@ -394,12 +414,11 @@ class ConnectorServer(BaseMCPServer):
             ),
         )(push_object_proxy)
 
-    def _register_workflow_proxies(self, upstream: UpstreamConfig) -> None:
-        """Register plan_workflow and load_skill proxy tools for an upstream."""
+    def _register_plan_workflow_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a plan_workflow proxy tool for an upstream."""
         server = self
         upstream_name = upstream.name
         plan_name = f"plan_{upstream_name}_workflow"
-        load_name = f"load_{upstream_name}_skill"
 
         async def plan_workflow_proxy(
             ctx: Context,
@@ -423,6 +442,21 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
+        self.mcp.tool(
+            name=plan_name,
+            description=(
+                f"Plan and navigate {upstream_name} workflow states. Use 'overview' mode to see "
+                f"the full workflow map, 'next_steps' to explore from a current state, and 'path' "
+                f"to plan a route between two states."
+            ),
+        )(plan_workflow_proxy)
+
+    def _register_load_skill_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a per-upstream load_skill proxy tool."""
+        server = self
+        upstream_name = upstream.name
+        load_name = f"load_{upstream_name}_skill"
+
         async def load_skill_proxy(ctx: Context, skill_name: str) -> str:
             """Load a skill by name from the upstream server (proxied)."""
             return await server._proxy_mcp_tool_call(
@@ -432,14 +466,6 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
-            name=plan_name,
-            description=(
-                f"Plan and navigate {upstream_name} workflow states. Use 'overview' mode to see "
-                f"the full workflow map, 'next_steps' to explore from a current state, and 'path' "
-                f"to plan a route between two states."
-            ),
-        )(plan_workflow_proxy)
         self.mcp.tool(
             name=load_name,
             description=(
@@ -475,18 +501,23 @@ class ConnectorServer(BaseMCPServer):
                     )
                 )
 
-        if not all_tool_infos:
-            LOGGER.debug("No tools to index for connector '%s'; skipping search tool.", connector_name)
+        all_skills: list[dict[str, Any]] = []
+        for skills in self._upstream_skills.values():
+            all_skills.extend(skills)
+
+        if not all_tool_infos and not all_skills:
+            LOGGER.debug("No tools or skills to index for connector '%s'; skipping search tool.", connector_name)
             return
 
         backend = create_tool_search_backend(backend_type="bm25")
-        backend.index(tools=all_tool_infos, skills=[], server_name=connector_name)
+        backend.index(tools=all_tool_infos, skills=all_skills, server_name=connector_name)
         self._tool_search_backends.append(backend)
 
         LOGGER.info(
-            "Search index built for '%s': %d tools from %d upstream(s).",
+            "Search index built for '%s': %d tools and %d skills from %d upstream(s).",
             connector_name,
             len(all_tool_infos),
+            len(all_skills),
             len(self._upstream_catalogs),
         )
 
