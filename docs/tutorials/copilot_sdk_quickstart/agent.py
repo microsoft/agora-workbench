@@ -204,8 +204,7 @@ async def main() -> int:
 
     model, provider = resolve_llm()
     LOGGER.info(
-        "LLM: model=%s, provider=%s",
-        model,
+        "LLM configured (provider=%s)",
         provider["type"] if provider else "copilot-subscription",
     )
 
