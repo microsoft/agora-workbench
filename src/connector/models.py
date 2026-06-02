@@ -4,7 +4,7 @@ Configuration models for connector servers.
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class UpstreamConfig(BaseModel):
@@ -162,6 +162,12 @@ class DispatcherConfig(BaseModel):
         default=None,
         description="Azure AD tenant ID for this server's app registration.",
     )
+
+    @model_validator(mode="after")
+    def _validate_sticky_requires_affinity(self) -> "DispatcherConfig":
+        if self.strategy == "sticky_session" and not self.session_affinity:
+            raise ValueError("strategy='sticky_session' requires session_affinity=True")
+        return self
 
 
 # Keep ConnectorConfig as a backwards-compatible alias during migration

@@ -481,6 +481,10 @@ class DispatcherServer(ConnectorServer):
                 headers=notif_headers,
             )
 
+        # Avoid overwriting if another concurrent task established a session while we were awaiting
+        if session_key in self._dispatcher_sessions:
+            return self._dispatcher_sessions[session_key]
+
         self._dispatcher_sessions[session_key] = session_id
         LOGGER.info(
             "Established MCP session with worker '%s' for connector session '%s': %s",
@@ -497,14 +501,16 @@ class DispatcherServer(ConnectorServer):
     async def _health_check_loop(self) -> None:
         """Periodically poll worker health endpoints."""
         interval = self.config.health_check_interval
+        # Poll immediately on startup, then sleep between subsequent polls
         while True:
             try:
-                await asyncio.sleep(interval)
                 await self._poll_worker_health()
+                await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 break
             except Exception:
                 LOGGER.warning("Health check loop error", exc_info=True)
+                await asyncio.sleep(interval)
 
     async def _poll_worker_health(self) -> None:
         """Check /health on all workers and update healthy set."""

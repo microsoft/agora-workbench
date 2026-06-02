@@ -96,7 +96,7 @@ def two_worker_config():
 
 
 @pytest.fixture
-def three_worker_weighted_config():
+def two_worker_weighted_config():
     return DispatcherConfig(
         name="chem-dispatcher",
         workers=[
@@ -129,6 +129,16 @@ class TestDispatcherConfig:
     def test_worker_weight_default(self):
         w = WorkerConfig(name="w1", url="http://w1:8000")
         assert w.weight == 1
+
+    def test_sticky_session_requires_affinity(self):
+        """sticky_session strategy with session_affinity=False raises ValueError."""
+        with pytest.raises(ValueError, match="requires session_affinity=True"):
+            DispatcherConfig(
+                name="test",
+                workers=[WorkerConfig(name="w1", url="http://w1:8000")],
+                strategy="sticky_session",
+                session_affinity=False,
+            )
 
 
 class TestDispatcherCatalogSync:
@@ -223,10 +233,10 @@ class TestDispatcherRouting:
         assert selections.count("worker-2") == 3
 
     @pytest.mark.asyncio
-    async def test_weighted_round_robin(self, three_worker_weighted_config):
+    async def test_weighted_round_robin(self, two_worker_weighted_config):
         """Weighted round robin respects worker weights."""
-        three_worker_weighted_config.session_affinity = False
-        server = DispatcherServer(three_worker_weighted_config)
+        two_worker_weighted_config.session_affinity = False
+        server = DispatcherServer(two_worker_weighted_config)
 
         selections = []
         for _ in range(6):
