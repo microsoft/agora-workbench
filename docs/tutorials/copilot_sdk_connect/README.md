@@ -76,13 +76,13 @@ mcp_servers = {
 }
 
 async with CopilotClient() as client:
-    session = await client.create_session(
+    async with await client.create_session(
         on_permission_request=PermissionHandler.approve_all,
         model="gpt-5",
         mcp_servers=mcp_servers,
         system_message={"mode": "append", "content": "..."},
-    )
-    reply = await session.send_and_wait("What does aspirin look like?")
+    ) as session:
+        reply = await session.send_and_wait("What does aspirin look like?")
 ```
 
 Key fields of each `mcp_servers` entry (`MCPHTTPServerConfig`):
