@@ -11,7 +11,7 @@ without a prefix — three servers connected together produced three
 
 from __future__ import annotations
 
-import asyncio
+import pytest
 
 from .. import CodeExecutionServer, ServerConfig
 from ..auth import create_noop_auth_config
@@ -30,23 +30,25 @@ def _make_server(name: str) -> CodeExecutionServer:
     )
 
 
-def _list_tool_names(server: CodeExecutionServer) -> list[str]:
-    tools = asyncio.get_event_loop().run_until_complete(server.mcp.list_tools())
+async def _list_tool_names(server: CodeExecutionServer) -> list[str]:
+    tools = await server.mcp.list_tools()
     return [t.name for t in tools]
 
 
 class TestMetaToolPrefixing:
-    def test_check_job_carries_server_prefix(self):
-        names = _list_tool_names(_make_server("alpha"))
+    @pytest.mark.asyncio
+    async def test_check_job_carries_server_prefix(self):
+        names = await _list_tool_names(_make_server("alpha"))
         assert "alpha_check_job" in names, f"check_job must be prefixed with server name; got: {sorted(names)}"
         assert "check_job" not in names, (
             "bare 'check_job' (no prefix) leaks across servers and breaks multi-server agent assembly"
         )
 
-    def test_no_name_collisions_between_two_servers(self):
+    @pytest.mark.asyncio
+    async def test_no_name_collisions_between_two_servers(self):
         """The tool lists of two servers must be disjoint after prefixing."""
-        a = set(_list_tool_names(_make_server("alpha")))
-        b = set(_list_tool_names(_make_server("beta")))
+        a = set(await _list_tool_names(_make_server("alpha")))
+        b = set(await _list_tool_names(_make_server("beta")))
         overlap = a & b
         assert overlap == set(), (
             f"Tool names overlap between servers — would cause duplicate-tool errors in multi-server agents: {overlap}"

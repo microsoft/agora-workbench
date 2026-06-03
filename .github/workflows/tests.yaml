@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests auth, code_execution, domain examples, and llm packages
+# Tests code_execution, connector, domain examples, agent_helpers (llm + mcp), and activity_ui
 
 name: Tests
 
@@ -42,12 +42,6 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync
-      
-      - name: Run auth tests
-        id: auth_tests
-        continue-on-error: true
-        run: |
-          uv run pytest src/code_execution/tests/test_azure_credentials.py -m "not live" -v --json-report --json-report-file=auth-report.json
 
       - name: Run code execution tests
         id: code_execution_tests
@@ -55,18 +49,24 @@ jobs:
         run: |
           uv run pytest src/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
+      - name: Run connector tests
+        id: connector_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
+
       - name: Run domain examples tests
         id: domain_examples_tests
         continue-on-error: true
         run: |
           uv run pytest examples/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
 
-      - name: Run llm tests
-        id: llm_tests
+      - name: Run agent helpers tests
+        id: agent_helpers_tests
         continue-on-error: true
         run: |
           uv sync --extra agent
-          uv run pytest agent_helpers/llm/tests/ -m "not live" -v --json-report --json-report-file=llm-report.json
+          uv run pytest agent_helpers/ -m "not live" -v --json-report --json-report-file=agent-helpers-report.json
 
       - name: Run activity UI tests
         id: activity_ui_tests
@@ -77,23 +77,23 @@ jobs:
       - name: Test Summary
         if: always()
         run: |
-          auth_status="${{ steps.auth_tests.outcome }}"
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
+          connector_status="${{ steps.connector_tests.outcome }}"
           domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
-          llm_status="${{ steps.llm_tests.outcome }}"
+          agent_helpers_status="${{ steps.agent_helpers_tests.outcome }}"
           activity_ui_status="${{ steps.activity_ui_tests.outcome }}"
           
           echo "## Test Results"
-          if [ "$auth_status" == "success" ]; then
-            echo "✅ Auth tests passed"
-          else
-            echo "❌ Auth tests failed"
-          fi
-          
           if [ "$code_execution_status" == "success" ]; then
             echo "✅ Code execution tests passed"
           else
             echo "❌ Code execution tests failed"
+          fi
+
+          if [ "$connector_status" == "success" ]; then
+            echo "✅ Connector tests passed"
+          else
+            echo "❌ Connector tests failed"
           fi
 
           if [ "$domain_examples_status" == "success" ]; then
@@ -102,10 +102,10 @@ jobs:
             echo "❌ Domain examples tests failed"
           fi
 
-          if [ "$llm_status" == "success" ]; then
-            echo "✅ LLM tests passed"
+          if [ "$agent_helpers_status" == "success" ]; then
+            echo "✅ Agent helpers tests passed"
           else
-            echo "❌ LLM tests failed"
+            echo "❌ Agent helpers tests failed"
           fi
 
           if [ "$activity_ui_status" == "success" ]; then
@@ -114,7 +114,7 @@ jobs:
             echo "❌ Activity UI tests failed"
           fi
           
-          if [ "$auth_status" == "success" ] && [ "$code_execution_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$llm_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
+          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$agent_helpers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1

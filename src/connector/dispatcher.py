@@ -145,7 +145,7 @@ class DispatcherServer(ConnectorServer):
             for worker in self.config.workers:
                 upstream = UpstreamConfig(name=worker.name, url=worker.url)
                 try:
-                    tools = await self._fetch_catalog(client, upstream)
+                    tools, _skills = await self._fetch_catalog(client, upstream)
                     # Store catalog under all worker names (same tools)
                     for w in self.config.workers:
                         self._upstream_catalogs[w.name] = tools
