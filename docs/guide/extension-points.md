@@ -205,7 +205,7 @@ class ConnectorServer(BaseMCPServer):
         ...
 ```
 
-Built-in implementations: `RouterServer`, `GatewayServer`
+Built-in implementations: `RouterServer`, `GatewayServer`, `DispatcherServer`
 
 ## CodeExecutionServer hooks
 
