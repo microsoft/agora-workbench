@@ -26,13 +26,14 @@ reference before using it in code.
 ## Fetching Data Assets
 
 Asset references use a **type-tagged format** where the tag indicates the storage
-backend and the inner value identifies the file:
+backend and the inner value is the artifact identifier to resolve:
 
 | Tag format | Storage location | Example |
-|------------|-----------------|---------|
-| `<blob>container/path/file.csv</blob>` | Azure Blob Storage | `<blob>weather/daily_obs.csv</blob>` |
+|------------|------------------|---------|
+| `<blob>{artifact_id}</blob>` | Azure Blob Storage (resolved server-side from the artifact ID) | `<blob>abc123</blob>` |
 | `<local>/data/grid/lines.geojson</local>` | Server local filesystem | `<local>/data/grid/lines.geojson</local>` |
 
+For blob assets, use the artifact `id` returned by `search_data` / `get_artifact` inside the `<blob>…</blob>` tag (not a blob path).
 Embed these tagged references as string literals in your code — the server
 automatically detects them, downloads the file to a local cache, and replaces
 the literal with a `Path` variable:
