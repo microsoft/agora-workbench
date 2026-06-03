@@ -96,7 +96,7 @@ Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not l
 
 **Extras** (for optional feature dependencies):
 ```bash
-uv sync --extra agent          # LLM factories, openai, tenacity (needed for agent_helpers/llm/)
+uv sync --extra agent          # Microsoft Agent Framework (MAF) + LLM factories (agent_helpers/llm/)
 uv sync --extra openai-agents  # OpenAI Agents SDK adapter
 uv sync --extra copilot-sdk    # GitHub Copilot SDK adapter
 uv sync --extra geo            # Geospatial (rasterio, titiler)

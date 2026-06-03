@@ -33,14 +33,14 @@ Key capabilities:
 
 ## Tutorials
 
-Three SDKs, the same end-to-end energy systems scenario, so you can compare
-the wiring code side-by-side:
+Minimal connection walkthroughs for each supported SDK — wire your
+existing agent to a running Workbench MCP server in a few lines:
 
 | SDK | Tutorial |
 | --- | --- |
-| Microsoft Agent Framework (MAF) | [maf_quickstart](tutorials/maf_quickstart/README.md) |
-| OpenAI Agents SDK | [openai_agents_quickstart](tutorials/openai_agents_quickstart/README.md) |
-| GitHub Copilot SDK | [copilot_sdk_quickstart](tutorials/copilot_sdk_quickstart/README.md) |
+| Microsoft Agent Framework (MAF) | [maf_connect](tutorials/maf_connect/README.md) |
+| OpenAI Agents SDK | [openai_agents_connect](tutorials/openai_agents_connect/README.md) |
+| GitHub Copilot SDK | [copilot_sdk_connect](tutorials/copilot_sdk_connect/README.md) |
 
 ## Source
 
