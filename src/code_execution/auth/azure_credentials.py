@@ -18,8 +18,6 @@ Usage:
 Environment Variables:
     AZURE_SEARCH_API_KEY: API key for Azure AI Search (query or admin key).
         When set, key-based auth is used instead of Entra ID.
-    AZURE_STORAGE_CONNECTION_STRING: Connection string for Azure Storage.
-        When set, returns this directly for storage clients that accept it.
     DEFAULT_IDENTITY_CLIENT_ID: Client ID for managed identity (Entra mode only).
 """
 
@@ -50,7 +48,6 @@ AsyncSearchCredential = Union[AsyncTokenCredential, AzureKeyCredential]
 
 # Environment variable names
 AZURE_SEARCH_API_KEY_ENV = "AZURE_SEARCH_API_KEY"
-AZURE_STORAGE_CONNECTION_STRING_ENV = "AZURE_STORAGE_CONNECTION_STRING"
 
 
 # =============================================================================
@@ -185,22 +182,6 @@ def get_token_provider(scope: str) -> Callable[[], str]:
     token_provider = get_bearer_token_provider(credential, scope)
     LOGGER.debug(f"Created Entra ID token provider for scope: {scope}")
     return token_provider
-
-
-# =============================================================================
-# Storage helpers
-# =============================================================================
-
-
-def get_storage_connection_string() -> str | None:
-    """
-    Get an Azure Storage connection string if configured.
-
-    Returns:
-        The connection string if AZURE_STORAGE_CONNECTION_STRING is set,
-        otherwise None (caller should fall back to Entra credential).
-    """
-    return os.getenv(AZURE_STORAGE_CONNECTION_STRING_ENV) or None
 
 
 # =============================================================================

@@ -5,7 +5,7 @@ IdentityExtractor, CredentialProvider) with concrete implementations for
 Azure Entra ID and a no-op/development mode.
 
 Also provides service-specific Azure credential factories (for Search,
-Storage, Purview, etc.) that support both API key and Entra ID auth modes.
+Purview, etc.) that support both API key and Entra ID auth modes.
 """
 
 from .base import (
@@ -36,7 +36,6 @@ from .azure_credentials import (
     get_search_auth_headers_async,
     get_search_credential,
     get_search_credential_async,
-    get_storage_connection_string,
     get_token_provider,
     is_key_based_auth,
 )
@@ -68,7 +67,6 @@ __all__ = [
     "get_search_auth_headers_async",
     "get_search_credential",
     "get_search_credential_async",
-    "get_storage_connection_string",
     "get_token_provider",
     "is_key_based_auth",
 ]
