@@ -66,10 +66,17 @@ pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/a
 
 ### Configuration
 
-- **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server` and fill in your Azure credentials.
-- **Running a tutorial agent locally** — copy the `.env.agent.example` from the relevant tutorial directory (e.g., `docs/tutorials/maf_quickstart/`) to `.env.agent` at the repo root.
+For local testing, no external credentials are required. Use the no-op auth config to skip authentication entirely:
 
-For a minimal, agent-free MCP flow (standalone `CodeExecutionServer` + direct MCP client), see [`examples/agent_examples/agent_free_getting_started/`](examples/agent_examples/agent_free_getting_started/README.md).
+```python
+from code_execution.auth import create_noop_auth_config
+
+server = MyCodeExecutionServer(
+    server_config=config,
+    auth_config=create_noop_auth_config(),
+)
+```
+For Docker-based local deployment and Azure Container Apps, see the [deployment guide](https://microsoft.github.io/agora-workbench/guide/deploying/). For Entra ID authentication setup, see the [authentication guide](https://microsoft.github.io/agora-workbench/guide/authentication/).
 
 ## Development
 
