@@ -29,3 +29,18 @@ Key capabilities:
 | Monitor in production | [Monitoring your servers](guide/monitoring.md) |
 | Configure authentication | [Authentication options](guide/authentication.md) |
 | Extend with custom interfaces | [Extension points](guide/extension-points.md) |
+
+## Tutorials
+
+Three SDKs, the same end-to-end energy systems scenario, so you can compare
+the wiring code side-by-side:
+
+| SDK | Tutorial |
+| --- | --- |
+| Microsoft Agent Framework (MAF) | [maf_quickstart](tutorials/maf_quickstart/README.md) |
+| OpenAI Agents SDK | [openai_agents_quickstart](tutorials/openai_agents_quickstart/README.md) |
+| GitHub Copilot SDK | [copilot_sdk_quickstart](tutorials/copilot_sdk_quickstart/README.md) |
+
+## Source
+
+Code, issues, and contributions: <https://github.com/microsoft/agora-workbench>.
