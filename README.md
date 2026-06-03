@@ -2,7 +2,10 @@
   <img src="logo.png" alt="Agora Workbench logo" width="200">
 </p>
 
-# Agora Agent
+# Agora Workbench
+
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
+[![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 📖 **[Documentation](https://microsoft.github.io/agora-workbench)**
 
@@ -23,21 +26,21 @@ Key capabilities:
 ## Structure
 
 ```
-src/
-├── auth/               # Agent-side credentials (ChainedTokenCredential)
-├── tools/              # Tool search, MCP server registry, tool catalog
-│   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
-│   ├── search/                 # search_tools backends (BM25, Azure AI Search)
-│   │   ├── core.py             # create_search_tools_descriptor (no framework dep)
-│   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
-│   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
-│   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
-├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
-│   ├── data_access/catalog/  # Server-side file catalog (SQLite + FTS5 + sqlite-vec)
-│   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
-├── gui/                # GIS map GUI (FastAPI backend + React/Vite frontend)
-├── server_registry.yaml    # MCP server configurations
-└── pyproject.toml
+├── pyproject.toml          # Project configuration and dependencies
+├── src/
+│   ├── auth/               # Agent-side credentials (ChainedTokenCredential)
+│   ├── tools/              # Tool search, MCP server registry, tool catalog
+│   │   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
+│   │   ├── search/                 # search_tools backends (BM25, Azure AI Search)
+│   │   │   ├── core.py             # create_search_tools_descriptor (no framework dep)
+│   │   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
+│   │   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
+│   │   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
+│   ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
+│   │   ├── data_access/catalog/  # Server-side file catalog (SQLite + FTS5 + sqlite-vec)
+│   │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
+│   └── gui/                # GIS map GUI (FastAPI backend + React/Vite frontend)
+└── server_registry.yaml    # MCP server configurations
 ```
 
 All `*/adapters/` directories contain framework-specific bridges.  They are the **only** source files that import `agent_framework` and they are isolated behind the `[maf]` optional extra.  The rest of the codebase is framework-agnostic.
@@ -235,36 +238,23 @@ This repository uses [GitHub Copilot agentic workflows](https://github.com/githu
 | **Update Docs** (`update-docs.md`) | Runs on schedule and on manual `workflow_dispatch` | Scans for documentation gaps and opens issues describing areas that need updates. |
 | **Agent Divergence Report** (`agent-divergence-report.md`) | Runs weekly on Tuesday and on manual `workflow_dispatch` | Compares agent implementations and opens an issue highlighting improvements. Issues are labeled `agent-divergence`. |
 
-## Access
-
-This repository is internal to Microsoft. For access and permissions:
-- Read access requires membership in the appropriate Microsoft organization
-- For role-based permissions (write, admin), contact the repository maintainers
-- If the repository is set to internal visibility, ensure you have the 1ES-Enterprise-Visibility MyAccess group access
-
 ## Contributing
 
-This repository welcomes contributions from Microsoft researchers and engineers.
-
-**Contribution Guidelines:**
-- Outside contributors should start with forks rather than branches
-- For changes more complex than typos, please submit an issue first to discuss the proposed changes
-- Follow the development practices outlined in the project documentation
-
-For new collaborators, these [tips & tricks on InnerSource Communication](https://aka.ms/StartRight/README-Template/innerSource/2021_02_TipsAndTricksForCollaboration) may be helpful.
-
-### Contact
-
-For questions or feedback, contact: agora@microsoft.com
-
-
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit [Contributor License Agreements](https://cla.opensource.microsoft.com).
 
 When you submit a pull request, a CLA bot will automatically determine whether you need to provide
 a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
 provided by the bot. You will only need to do this once across all repos using our CLA.
+
+**Guidelines:**
+- For changes more complex than typos, please submit an issue first to discuss the proposed changes
+- Follow the development practices outlined in the project documentation
+
+### Contact
+
+For questions or feedback, contact: agora@microsoft.com
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
