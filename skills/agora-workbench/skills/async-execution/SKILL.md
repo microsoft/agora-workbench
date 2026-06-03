@@ -27,7 +27,7 @@ Then poll for completion:
 ```
 {server}_check_job(job_id="...")
 # Returns status: "running", "completed", or "failed"
-# When completed, includes stdout, stderr, and result
+# When completed, includes stdout, stderr, success, and error (if any)
 ```
 
 ### Rules for background jobs
