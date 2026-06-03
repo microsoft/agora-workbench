@@ -23,7 +23,7 @@ Run from the repo root:
 
 Prerequisites:
   1. ``github-copilot-sdk`` installed (via the ``copilot-sdk`` extra or directly):
-       uv add 'agora-agent[copilot-sdk]'   # or: uv pip install github-copilot-sdk
+       uv sync --extra copilot-sdk   # or: uv pip install github-copilot-sdk
   2. Default ``copilot`` provider: ``copilot auth login`` once.
      BYOK: populate ``.env.agent`` (see .env.agent.example).
   3. Energy systems MCP server running locally:
@@ -56,9 +56,7 @@ logging.basicConfig(
 LOGGER = logging.getLogger("copilot_sdk_quickstart")
 
 ENERGY_MCP_URL = os.getenv("ENERGYSYSTEMS_MCP_URL", "http://localhost:8022/mcp")
-ENERGY_SKILL_PATH = (
-    REPO_ROOT / "examples" / "domain_examples" / "energysystems" / "skills" / "SKILL.md"
-)
+ENERGY_SKILL_PATH = REPO_ROOT / "examples" / "domain_examples" / "energysystems" / "skills" / "SKILL.md"
 
 
 # ---------------------------------------------------------------------------
@@ -99,10 +97,7 @@ def resolve_llm() -> tuple[str, dict[str, Any] | None]:
                 "api_key": os.environ["OPENAI_API_KEY"],
             },
         )
-    raise ValueError(
-        f"Unknown LLM_PROVIDER={kind!r}. "
-        "Supported: copilot, azure_openai_key, openai."
-    )
+    raise ValueError(f"Unknown LLM_PROVIDER={kind!r}. Supported: copilot, azure_openai_key, openai.")
 
 
 # ---------------------------------------------------------------------------

@@ -1,8 +1,9 @@
 [project]
-name = "agora-agent"
+name = "agora-workbench"
 version = "0.1.0"
-description = "A multi-domain AI agent system that combines LLM-driven workflows with isolated code execution environments."
+description = "A toolkit for building MCP servers that provide sandboxed Python execution with domain-specific packages."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     # Azure SDKs
@@ -66,7 +67,7 @@ geo = [
 ]
 
 [project.urls]
-homepage = "https://github.com/msr-central/agora-agent"
+homepage = "https://github.com/microsoft/agora-workbench"
 
 [project.scripts]
 mcp-connector-server = "connector.cli:main"
