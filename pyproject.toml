@@ -3,6 +3,7 @@ name = "agora-workbench"
 version = "0.1.0"
 description = "A multi-domain AI agent system that combines LLM-driven workflows with isolated code execution environments."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     # Azure SDKs
