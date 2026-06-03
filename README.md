@@ -1,16 +1,10 @@
-# Project
-
-<!-- > This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
-
-As the maintainer of this project, please make a few updates:
-
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README -->
+<p align="center">
+  <img src="logo.png" alt="Agora Workbench logo" width="200">
+</p>
 
 # Agora Agent
+
+📖 **[Documentation](https://microsoft.github.io/agora-workbench)**
 
 A multi-domain AI agent system that combines LLM-driven workflows with isolated code execution environments.
 
