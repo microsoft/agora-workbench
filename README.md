@@ -102,7 +102,7 @@ provided by the bot. You will only need to do this once across all repos using o
 
 ### Contact
 
-For questions or feedback, contact: agora@microsoft.com
+For questions or feedback, please [open an issue](https://github.com/microsoft/agora-workbench/issues).
 
 This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
 For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or

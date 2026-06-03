@@ -101,7 +101,7 @@ class McpServerConfig:
         McpServerConfig(
             name="chemistry-prod",
             url="https://chemistry.example.com/mcp",
-            scope="api://12c90937-013c-468e-93cf-eb8083d69ca7/.default",
+            scope="api://<your-entra-client-id>/.default",
         )
     """
 
@@ -147,7 +147,7 @@ def load_server_registry(path: Union[str, Path]) -> list[McpServerConfig]:
     Expected file format::
 
         # default scope used when an entry omits its own (non-localhost only)
-        scope: api://12c90937-013c-468e-93cf-eb8083d69ca7/.default
+        scope: api://<your-entra-client-id>/.default
 
         servers:
           - name: earthscience
