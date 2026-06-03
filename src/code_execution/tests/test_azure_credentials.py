@@ -8,10 +8,8 @@ from azure.core.credentials import AzureKeyCredential
 from code_execution.auth.azure_credentials import (
     get_search_credential,
     get_search_credential_async,
-    get_storage_connection_string,
     is_key_based_auth,
     AZURE_SEARCH_API_KEY_ENV,
-    AZURE_STORAGE_CONNECTION_STRING_ENV,
 )
 
 
@@ -99,34 +97,6 @@ class TestGetSearchCredentialAsync:
 
         assert result == mock_credential
         mock_chained.assert_called_once()
-
-
-class TestGetStorageConnectionString:
-    """Tests for get_storage_connection_string."""
-
-    @pytest.mark.unit
-    @patch.dict(
-        "os.environ",
-        {AZURE_STORAGE_CONNECTION_STRING_ENV: "DefaultEndpointsProtocol=https;AccountName=test;"},
-    )
-    def test_returns_connection_string_when_set(self):
-        """Returns the connection string value when env var is set."""
-        result = get_storage_connection_string()
-        assert result == "DefaultEndpointsProtocol=https;AccountName=test;"
-
-    @pytest.mark.unit
-    @patch.dict("os.environ", {}, clear=True)
-    def test_returns_none_when_not_set(self):
-        """Returns None when env var is not set."""
-        result = get_storage_connection_string()
-        assert result is None
-
-    @pytest.mark.unit
-    @patch.dict("os.environ", {AZURE_STORAGE_CONNECTION_STRING_ENV: ""})
-    def test_returns_none_when_empty(self):
-        """Returns None when env var is empty string."""
-        result = get_storage_connection_string()
-        assert result is None
 
 
 class TestIsKeyBasedAuth:

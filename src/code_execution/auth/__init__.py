@@ -35,7 +35,6 @@ from .azure_credentials import (
     get_search_auth_headers_async,
     get_search_credential,
     get_search_credential_async,
-    get_storage_connection_string,
     get_token_provider,
     is_key_based_auth,
 )
@@ -66,7 +65,6 @@ __all__ = [
     "get_search_auth_headers_async",
     "get_search_credential",
     "get_search_credential_async",
-    "get_storage_connection_string",
     "get_token_provider",
     "is_key_based_auth",
 ]
