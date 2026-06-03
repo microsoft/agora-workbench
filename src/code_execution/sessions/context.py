@@ -142,7 +142,7 @@ def set_current_user_identity(user_identity: Optional[str]):
     """
     _current_user_identity.set(user_identity)
     if user_identity:
-        LOGGER.debug(f"Set user identity in context: {user_identity}")
+        LOGGER.debug("Set user identity in context")
     else:
         LOGGER.debug("Cleared user identity from context")
 
@@ -171,6 +171,6 @@ def set_current_token_claims(claims: Optional[dict]):
     """
     _current_token_claims.set(claims)
     if claims:
-        LOGGER.debug(f"Set token claims in context (oid: {claims.get('oid')})")
+        LOGGER.debug("Set token claims in context")
     else:
         LOGGER.debug("Cleared token claims from context")

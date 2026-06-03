@@ -149,7 +149,7 @@ class DataLakeDataManager:
             if not blob_url.startswith(("https://", "http://", "abfss://")):
                 raise ValueError(f"Retrieved storage path is not a valid URL: {blob_url!r}")
 
-            LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}... -> {blob_url}")
+            LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}...")
             self._url_cache[artifact_id] = blob_url
             return blob_url
 
@@ -205,7 +205,7 @@ class DataLakeDataManager:
             raise ValueError(f"Unsupported artifact type: {artifact_type}.")
 
         # Fetch and cache the asset
-        LOGGER.info(f"Fetching and caching {artifact_type} asset: {resource_url}")
+        LOGGER.debug(f"Fetching and caching {artifact_type} asset")
         cache_path = self._get_cache_file_path(resource_url)
 
         # Stream asset directly to file to avoid loading into memory
@@ -214,7 +214,7 @@ class DataLakeDataManager:
         # Update index (use artifact_id as key)
         self._cache_index[artifact_id] = cache_path
 
-        LOGGER.info(f"Cached asset: {cache_path} ({bytes_written} bytes)")
+        LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
         return cache_path
 
     async def _fetch_asset_to_file(self, qualified_name: str, dest_path: Path) -> int:

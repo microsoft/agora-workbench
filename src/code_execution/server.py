@@ -2447,11 +2447,8 @@ else:
 
     async def _health_payload(self) -> dict[str, Any]:
         """Return health check payload."""
-        python_exe = await self.get_python_executable() if self._environment_ready else "not built"
         return {
             "status": "healthy",
-            "environment": self.server_config.name,
-            "python": python_exe,
             "environment_ready": self._environment_ready,
         }
 
