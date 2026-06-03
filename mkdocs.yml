@@ -65,9 +65,9 @@ nav:
       - Authentication options: guide/authentication.md
       - Extension points: guide/extension-points.md
   - Tutorials:
-      - Microsoft Agent Framework: tutorials/maf_quickstart/README.md
-      - OpenAI Agents SDK: tutorials/openai_agents_quickstart/README.md
-      - GitHub Copilot SDK: tutorials/copilot_sdk_quickstart/README.md
+      - Microsoft Agent Framework: tutorials/maf_connect/README.md
+      - OpenAI Agents SDK: tutorials/openai_agents_connect/README.md
+      - GitHub Copilot SDK: tutorials/copilot_sdk_connect/README.md
   - API Reference:
       - Server: api/server.md
       - Models: api/models.md

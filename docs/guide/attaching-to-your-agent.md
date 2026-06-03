@@ -4,11 +4,13 @@ Agora Workbench servers are framework-agnostic MCP servers — any agent framewo
 
 ## Supported frameworks
 
-| Framework | Tutorial | Description |
-|-----------|----------|-------------|
-| **Microsoft Agent Framework (MAF)** | [MAF Quickstart](../tutorials/maf_quickstart/README.md) | Wire a MAF agent to two domain MCP servers (chemistry + energy systems) using `MCPStreamableHTTPTool` |
-| **OpenAI Agents SDK** | [OpenAI Agents Quickstart](../tutorials/openai_agents_quickstart/README.md) | Wire an OpenAI Agents SDK agent to the chemistry MCP server using `MCPServerStreamableHttp` |
-| **GitHub Copilot SDK** | [Copilot SDK Quickstart](../tutorials/copilot_sdk_quickstart/README.md) | Connect a `CopilotClient` session to the energy systems MCP server |
+Each tutorial below is a minimal walkthrough of the connection plumbing — wire your existing agent to a running Workbench MCP server. Build the agent itself by following your framework's own docs.
+
+| Framework | Tutorial |
+|-----------|----------|
+| **Microsoft Agent Framework (MAF)** | [MAF Connect](../tutorials/maf_connect/README.md) |
+| **OpenAI Agents SDK** | [OpenAI Agents Connect](../tutorials/openai_agents_connect/README.md) |
+| **GitHub Copilot SDK** | [Copilot SDK Connect](../tutorials/copilot_sdk_connect/README.md) |
 
 ## How it works
 

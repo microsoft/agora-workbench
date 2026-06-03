@@ -52,9 +52,9 @@ pip install git+https://github.com/microsoft/agora-workbench.git
 
 | Extra | Example integration |
 |-------|---------------------|
-| `agent` | MAF (Microsoft Agent Framework) quickstart |
-| `openai-agents` | OpenAI Agents SDK quickstart |
-| `copilot-sdk` | GitHub Copilot SDK quickstart |
+| `agent` | Microsoft Agent Framework (MAF) adapter |
+| `openai-agents` | OpenAI Agents SDK adapter |
+| `copilot-sdk` | GitHub Copilot SDK adapter |
 | `geo` | Geospatial domain examples (rasterio, etc.) |
 
 ```bash
