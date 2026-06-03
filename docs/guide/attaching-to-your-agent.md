@@ -2,7 +2,7 @@
 
 Agora Workbench servers are framework-agnostic MCP servers — any agent framework that supports MCP's Streamable HTTP transport can connect to them. This page points you to the tutorials that demonstrate the integration for each supported framework.
 
-## Supported frameworks
+## Connection tutorials
 
 Each tutorial below is a minimal walkthrough of the connection plumbing — wire your existing agent to a running Workbench MCP server. Build the agent itself by following your framework's own docs.
 
