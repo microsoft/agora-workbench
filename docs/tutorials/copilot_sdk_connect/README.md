@@ -4,7 +4,7 @@ A minimal walkthrough of **just the connection plumbing** between a
 [`github-copilot-sdk`](https://pypi.org/project/github-copilot-sdk/)
 session and a running Agora Workbench MCP server. The focus is where
 the workbench slots into the Copilot session config; build the session
-itself by following the [Copilot SDK docs](https://github.com/github/copilot-cli).
+itself by following the [Copilot SDK docs](https://github.com/github/copilot-sdk/blob/main/python/README.md).
 
 > **Why this looks different from the MAF / OpenAI Agents versions.**
 > With the Copilot SDK there is no client-side agent object and no MCP
