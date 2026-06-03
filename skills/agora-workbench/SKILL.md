@@ -97,7 +97,7 @@ See the [async-execution sub-skill](skills/async-execution/SKILL.md) for submitt
 - Do not call domain functions as MCP tools — they only exist inside the kernel.
 - Do not guess tool names — always search first.
 - Do not write output files outside `AGORA_OUTPUT_DIR`.
-- Do not paste large data into chat when `push_object` can transfer it server-to-server.
+- Do not paste large data into chat when `{server}_push_object` can transfer it server-to-server.
 - Do not run long jobs synchronously — use `background=True` and poll.
 - Do not create new sessions unnecessarily — reuse the existing one.
 - Do not publish artifacts unless the user explicitly asks for a download or export.
