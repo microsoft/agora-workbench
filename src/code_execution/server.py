@@ -861,7 +861,6 @@ class CodeExecutionServer(BaseMCPServer):
         if kernel_dir.exists():
             kernel_json = kernel_dir / "kernel.json"
             if kernel_json.exists():
-                import json
                 import shutil
 
                 try:
