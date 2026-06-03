@@ -1,15 +1,15 @@
-<p align="center">
-  <img src="logo.png" alt="Agora Workbench logo" width="200">
+# Agora Workbench
+<p align="left">
+  <img src="logo.png" alt="Agora Workbench logo" width="250">
 </p>
 
-# Agora Workbench
 
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)
 [![MIT License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-📖 **[Documentation](https://microsoft.github.io/agora-workbench)**
+A workbench for wrapping your tooling with MCP
 
-A multi-domain AI agent system that combines LLM-driven workflows with isolated code execution environments.
+<h2><a href="https://microsoft.github.io/agora-workbench">📖 Documentation</a></h2>
 
 ## Overview
 
