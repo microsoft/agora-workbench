@@ -17,67 +17,45 @@ Agora Workbench is a toolkit for building MCP (Model Context Protocol) servers t
 
 Use Agora Workbench to:
 
-- **Wrap domain-specific Python tooling as MCP servers** — expose any Python package through isolated, session-aware execution environments that any MCP client can call
-- **Aggregate multiple tool servers behind a single endpoint** — the Router and Gateway connectors present a unified MCP surface with rate limiting and access control
-- **Make tools discoverable** — register tools in a searchable catalog so agents can find what they need by natural-language query
-- **Serve data alongside code** — attach a file catalog with hybrid keyword + vector search so agents can locate and load datasets without hardcoded paths
+- **Wrap domain-specific Python tooling as MCP servers** — expose Python environments through isolated, session-aware execution environments that any MCP client can call
+- **Make tools discoverable** — register tools and skills in a searchable catalog so agents can find what they need by natural-language query
+- **Serve data alongside code** — attach a file catalog can locate and load datasets without hardcoded paths
 - **Deploy to Azure Container Apps** — use the included Bicep templates and CLI to ship your servers with Entra ID auth and managed identity
-
-## Structure
-
-```
-├── pyproject.toml          # Project configuration and dependencies
-├── src/
-│   ├── auth/               # Agent-side credentials (ChainedTokenCredential)
-│   ├── tools/              # Tool search, MCP server registry, tool catalog
-│   │   ├── tool_descriptor.py      # ToolDescriptor — framework-agnostic callable + JSON Schema
-│   │   ├── search/                 # search_tools backends (BM25, Azure AI Search)
-│   │   │   ├── core.py             # create_search_tools_descriptor (no framework dep)
-│   │   │   ├── state_graph_tools.py# create_query_state_graph_descriptor (no framework dep)
-│   │   │   └── adapters/           # MAF FunctionTool wrappers (requires [maf] extra)
-│   │   └── mcp/adapters/           # MAF MCPStreamableHTTPTool wrappers (requires [maf] extra)
-│   ├── code_execution/     # CodeExecutionServer base class, sessions, Docker config
-│   │   ├── data_access/catalog/  # Server-side file catalog (SQLite + FTS5 + sqlite-vec)
-│   │   └── deploy/         # Azure Container Apps deployment (Bicep + deploy script)
-│   └── gui/                # GIS map GUI (FastAPI backend + React/Vite frontend)
-└── server_registry.yaml    # MCP server configurations
-```
-
-All `*/adapters/` directories contain framework-specific bridges.  They are the **only** source files that import `agent_framework` and they are isolated behind the `[maf]` optional extra.  The rest of the codebase is framework-agnostic.
 
 ## Getting Started
 
 ### Prerequisites
 
 - **Python 3.11+**
-- **uv** package manager for dependency management
-- **Git** with submodule support
+- **[uv](https://docs.astral.sh/uv/)** for dependency management
+- **Docker** (required for running code execution servers locally)
 
 ### Installation
 
 ```bash
-uv sync            # install base dependencies (framework-agnostic)
-uv sync --group dev  # include dev tools (pytest, pre-commit, jupyter)
+git clone https://github.com/microsoft/agora-workbench.git
+cd agora-workbench
+uv sync                # install base dependencies
+uv sync --group dev    # include dev tools (pytest, pre-commit, ruff, jupyter)
 ```
 
 **Optional extras** — install only what you need:
 
 | Extra | Command | What it adds |
 |-------|---------|--------------|
-| `maf` | `uv sync --extra maf` | `agent-framework` — required only to use the MAF adapters (`*/adapters/maf*.py`) that wrap tool descriptors in `FunctionTool` / `MCPStreamableHTTPTool` |
+| `agent` | `uv sync --extra agent` | Agent-framework helpers (MAF adapters, LLM factories, MCP clients) |
+| `openai-agents` | `uv sync --extra openai-agents` | OpenAI Agents SDK adapter |
+| `copilot-sdk` | `uv sync --extra copilot-sdk` | GitHub Copilot SDK adapter |
+| `geo` | `uv sync --extra geo` | Geospatial domain packages (rasterio, etc.) |
 
-The base package ships the full framework-agnostic layer:
-- `tools.tool_descriptor.ToolDescriptor` — callable + JSON Schema, usable with any agent framework
-- `tools.search.core` / `tools.search.state_graph_tools` — descriptor factories for search and state-graph tools
+The base install is framework-agnostic. You only need an extra if you are using that specific agent SDK or domain.
 
-If you are **not** using MAF, you never need `agent-framework`.  Write a one-liner adapter that converts a `ToolDescriptor` to whatever your framework accepts (callable + JSON Schema is the typical input).
+### Configuration
 
-Configure credentials for your use case:
+- **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server` and fill in your Azure credentials.
+- **Running a tutorial agent locally** — copy the `.env.agent.example` from the relevant tutorial directory (e.g., `docs/tutorials/maf_quickstart/`) to `.env.agent` at the repo root.
 
-- **Running the tutorial agent locally** — copy `docs/tutorials/maf_quickstart/.env.agent.example` to `.env.agent` at the repo root.
-- **Deploying MCP servers** — copy `deployment/.env.server.example` to `deployment/.env.server`.
-
-For a minimal, **agent-free** MCP flow (standalone `CodeExecutionServer` + direct MCP client / `curl` calls), see [`examples/agent_examples/agent_free_getting_started/README.md`](examples/agent_examples/agent_free_getting_started/README.md).
+For a minimal, agent-free MCP flow (standalone `CodeExecutionServer` + direct MCP client), see [`examples/agent_examples/agent_free_getting_started/`](examples/agent_examples/agent_free_getting_started/README.md).
 
 ## Development
 
