@@ -75,19 +75,6 @@ execute_{server}_code(
 
 ## Artifacts and Publishing
 
-Write user-facing files to `AGORA_OUTPUT_DIR` (pre-injected as a variable in the kernel).
-Always reference it by name — never hardcode the resolved absolute path:
-
-```python
-df.to_csv(f"{AGORA_OUTPUT_DIR}/results.csv", index=False)
-```
-
-Publish only when the user requests a download:
-
-```
-{server}_publish_artifact(artifact_name="results.csv", destination="<gui>results.csv</gui>")
-```
-
 See the [artifacts sub-skill](skills/artifacts/SKILL.md) for data fetching, cross-server transfer, and destination tag details.
 
 ## Workflow Planning
@@ -101,13 +88,9 @@ plan_{server}_workflow(mode="path", current_state="...", target_state="...")  # 
 
 See the [workflow-planning sub-skill](skills/workflow-planning/SKILL.md) for full mode details and skill loading patterns.
 
-## Sub-Skills
+## Parallel Tool Execution
 
-For deeper guidance, activate these nested skills as needed:
-
-- **[artifacts](skills/artifacts/SKILL.md)** — Fetching data assets, transferring objects between servers, and publishing files for the user.
-- **[workflow-planning](skills/workflow-planning/SKILL.md)** — Navigating state graphs, planning multi-step tool sequences, and loading domain skills.
-- **[async-execution](skills/async-execution/SKILL.md)** — Background jobs for long-running code and parallel execution across multiple inputs.
+See the [async-execution sub-skill](skills/async-execution/SKILL.md) for submitting background jobs for long-running code and parallel execution across multiple inputs.
 
 ## Do Not
 

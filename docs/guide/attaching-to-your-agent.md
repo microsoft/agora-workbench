@@ -30,14 +30,6 @@ If your framework isn't listed above, you can connect any MCP client that suppor
 
 For a minimal example without any agent framework (raw MCP client or `curl`), see [`examples/agent_examples/agent_free_getting_started/README.md`](https://github.com/microsoft/agora-workbench/tree/main/examples/agent_examples/agent_free_getting_started).
 
-## What's next
-
-Once your agent is connected:
-
-- [Writing effective tools and skills](writing-effective-tools.md) — best practices for the tools your agent will call
-- [Working with data](working-with-data.md) — how your agent discovers and accesses data files
-- [Monitoring your servers](monitoring.md) — watch what your agent is doing via the activity UI
-
 ## Workbench skill
 
 The repo includes a ready-made **[workbench runtime skill](../../skills/agora-workbench/SKILL.md)** that you can inject into your agent's system prompt (or load via the [Agent Skills](https://agentskills.io) standard). It teaches your agent:
@@ -47,3 +39,11 @@ The repo includes a ready-made **[workbench runtime skill](../../skills/agora-wo
 - How to handle sessions, artifacts, workflow planning, and async execution
 
 Include the skill in your agent's context to significantly improve its first-attempt success rate with Agora Workbench servers. The skill follows the [Agent Skills format](https://agentskills.io/specification) and includes nested sub-skills for advanced topics (artifacts, workflow planning, async execution) that load on demand.
+
+## What's next
+
+Once your agent is connected:
+
+- [Writing effective tools and skills](writing-effective-tools.md) — best practices for the tools your agent will call
+- [Working with data](working-with-data.md) — how your agent discovers and accesses data files
+- [Monitoring your servers](monitoring.md) — watch what your agent is doing via the activity UI
