@@ -38,8 +38,8 @@ automatically detects them, downloads the file to a local cache, and replaces
 the literal with a `Path` variable:
 
 ```python
-# The tag tells the server WHERE to fetch from; it is replaced with a local path at runtime
-df = pd.read_csv("<blob>weather/daily_obs.csv</blob>")
+# The tag tells the server which asset to resolve; it is replaced with a local Path at runtime
+df = pd.read_csv("<blob>abc123</blob>")
 network = load_network("<local>/data/grid/texas_grid.nc</local>")
 ```
 
