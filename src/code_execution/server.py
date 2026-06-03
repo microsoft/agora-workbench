@@ -2443,9 +2443,27 @@ else:
         tools_data = []
         if self.tool_registry:
             tools_data = [t.model_dump(mode="json") for t in self.tool_registry.tools]
+
+        skills_data: list[dict[str, Any]] = []
+        domains_dir = self.server_config.domains_dir
+        if domains_dir:
+            from code_execution.tools.search.state_graph import _discover_skills
+
+            skills = _discover_skills(domains_dir, domain_name=self.server_config.name)
+            skills_data = [
+                {
+                    "name": s["name"],
+                    "description": s.get("description", ""),
+                    "domain": s.get("domain", ""),
+                    "states": s.get("states", []),
+                }
+                for s in skills
+            ]
+
         return {
             "server_name": self.server_config.name,
             "tools": tools_data,
+            "skills": skills_data,
         }
 
     # ========================================================================

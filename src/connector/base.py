@@ -59,6 +59,7 @@ class ConnectorServer(BaseMCPServer):
 
         # Upstream state
         self._upstream_catalogs: dict[str, list[ToolDefinition]] = {}
+        self._upstream_skills: dict[str, list[dict[str, Any]]] = {}
         self._upstream_sessions: dict[str, str] = {}  # upstream_name -> MCP session ID
 
         # Tool search
@@ -155,16 +156,27 @@ class ConnectorServer(BaseMCPServer):
                     result,
                 )
             else:
-                tool_list: list[ToolDefinition] = result
-                self._upstream_catalogs[upstream.name] = tool_list
-                LOGGER.info("Fetched %d tools from upstream '%s'", len(tool_list), upstream.name)
+                tools, skills = result
+                self._upstream_catalogs[upstream.name] = tools
+                self._upstream_skills[upstream.name] = skills
+                LOGGER.info(
+                    "Fetched %d tools and %d skills from upstream '%s'",
+                    len(tools),
+                    len(skills),
+                    upstream.name,
+                )
 
-    async def _fetch_catalog(self, client: httpx.AsyncClient, upstream: UpstreamConfig) -> list[ToolDefinition]:
+    async def _fetch_catalog(
+        self, client: httpx.AsyncClient, upstream: UpstreamConfig
+    ) -> tuple[list[ToolDefinition], list[dict[str, Any]]]:
         """Fetch and parse the tool catalog from a single upstream.
 
         The /catalog endpoint is at the server root (not under /mcp), so we
         derive the base URL by stripping the trailing path segment from the
         upstream MCP URL.
+
+        Returns:
+            Tuple of (tools, skills) parsed from the catalog response.
         """
         from urllib.parse import urlparse, urlunparse
 
@@ -191,7 +203,15 @@ class ConnectorServer(BaseMCPServer):
                 if tool_def.name in upstream.tool_aliases:
                     tool_def.name = upstream.tool_aliases[tool_def.name]
 
-        return tools
+        # Parse skills, tagging each with the upstream's server name
+        skills: list[dict[str, Any]] = []
+        for skill_data in data.get("skills", []):
+            if not isinstance(skill_data, dict) or not skill_data.get("name"):
+                continue
+            skill_data["server_name"] = data.get("server_name", upstream.name)
+            skills.append(skill_data)
+
+        return tools, skills
 
     @staticmethod
     def _matches_expose_filter(tool_name: str, patterns: list[str]) -> bool:
@@ -250,6 +270,241 @@ class ConnectorServer(BaseMCPServer):
             description=f"Close a session on the {upstream_name} server.",
         )(close_session_proxy)
 
+    def _register_check_job_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a check_job proxy tool for an upstream's background jobs."""
+        server = self
+        upstream_name = upstream.name
+        tool_name = f"{upstream_name}_check_job"
+
+        async def check_job_proxy(ctx: Context, job_id: str) -> str:
+            """Check the status/output of a background code execution job."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=tool_name,
+                arguments={"job_id": job_id},
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                f"Check status/output for a background code execution job started with "
+                f"execute_{upstream_name}_code(background=True)."
+            ),
+        )(check_job_proxy)
+
+    def _register_parallel_execution_proxies(self, upstream: UpstreamConfig) -> None:
+        """Register parallel execution proxy tools for an upstream."""
+        server = self
+        upstream_name = upstream.name
+        execute_name = f"{upstream_name}_parallel_execute"
+        check_name = f"{upstream_name}_check_batch"
+        cancel_name = f"{upstream_name}_cancel_batch"
+
+        async def parallel_execute_proxy(
+            ctx: Context,
+            code: str,
+            inputs: list[dict[str, Any]],
+            timeout: int = 3600,
+            result_variable: str = "result",
+        ) -> str:
+            """Execute the same code template across multiple inputs in parallel (proxied)."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=execute_name,
+                arguments={
+                    "code": code,
+                    "inputs": inputs,
+                    "timeout": timeout,
+                    "result_variable": result_variable,
+                },
+                ctx=ctx,
+            )
+
+        async def check_batch_proxy(ctx: Context, batch_id: str) -> str:
+            """Check aggregate status and available results for a parallel batch."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=check_name,
+                arguments={"batch_id": batch_id},
+                ctx=ctx,
+            )
+
+        async def cancel_batch_proxy(ctx: Context, batch_id: str) -> str:
+            """Cancel all running jobs in a parallel batch and clean up child sessions."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=cancel_name,
+                arguments={"batch_id": batch_id},
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=execute_name,
+            description=(
+                f"Execute the same code template across multiple input dictionaries in parallel on "
+                f"{upstream_name}. A dedicated child session/kernel is created per input."
+            ),
+        )(parallel_execute_proxy)
+        self.mcp.tool(
+            name=check_name,
+            description=f"Check aggregate status and available results for a parallel batch on {upstream_name}.",
+        )(check_batch_proxy)
+        self.mcp.tool(
+            name=cancel_name,
+            description=f"Cancel all running jobs in a parallel batch and clean up child sessions on {upstream_name}.",
+        )(cancel_batch_proxy)
+
+    def _register_publish_artifact_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a publish_artifact proxy tool for an upstream."""
+        server = self
+        upstream_name = upstream.name
+        tool_name = f"{upstream_name}_publish_artifact"
+
+        async def publish_artifact_proxy(ctx: Context, artifact_name: str, destination: str) -> str:
+            """Push an artifact from the session output directory to remote storage (proxied)."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=tool_name,
+                arguments={"artifact_name": artifact_name, "destination": destination},
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                f"Publish an artifact from a session on {upstream_name} to remote storage. "
+                f"The artifact must have been written to AGORA_OUTPUT_DIR during a previous execute call."
+            ),
+        )(publish_artifact_proxy)
+
+    def _register_push_object_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a push_object proxy tool for an upstream."""
+        server = self
+        upstream_name = upstream.name
+        tool_name = f"{upstream_name}_push_object"
+
+        async def push_object_proxy(
+            ctx: Context,
+            target_server_url: str,
+            variable_name: str,
+            target_variable_name: str = "",
+            target_session_id: str = "",
+        ) -> str:
+            """Push a Python variable from this upstream's session to another server (proxied)."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=tool_name,
+                arguments={
+                    "target_server_url": target_server_url,
+                    "variable_name": variable_name,
+                    "target_variable_name": target_variable_name,
+                    "target_session_id": target_session_id,
+                },
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=tool_name,
+            description=(
+                f"Push a Python variable from a {upstream_name} session to another MCP server. "
+                f"The variable is serialized and transferred directly between servers without "
+                f"passing through the agent context. Use a bare server name (e.g. 'gis') or a "
+                f"full URL as target_server_url."
+            ),
+        )(push_object_proxy)
+
+    def _has_state_annotated_tools(self, upstream_name: str) -> bool:
+        """Check if an upstream has any tools with non-empty state transitions."""
+        for tool_def in self._upstream_catalogs.get(upstream_name, []):
+            if tool_def.state_transition.requires or tool_def.state_transition.produces:
+                return True
+        return False
+
+    def _has_skills(self, upstream_name: str) -> bool:
+        """Check if an upstream has any discoverable skills."""
+        return bool(self._upstream_skills.get(upstream_name))
+
+    def _register_plan_workflow_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a plan_workflow proxy tool for an upstream.
+
+        Only registers the tool if the upstream catalog contains state-annotated
+        tools (i.e. tools with non-empty state_transition.requires or produces).
+        """
+        if not self._has_state_annotated_tools(upstream.name):
+            LOGGER.debug(
+                "Skipping plan_%s_workflow proxy: no state-annotated tools in catalog.",
+                upstream.name,
+            )
+            return
+        server = self
+        upstream_name = upstream.name
+        plan_name = f"plan_{upstream_name}_workflow"
+
+        async def plan_workflow_proxy(
+            ctx: Context,
+            domain: str = "",
+            mode: str = "overview",
+            current_state: str = "",
+            target_state: str = "",
+            tool_name: str = "",
+        ) -> str:
+            """Plan and navigate domain workflow states (proxied)."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=plan_name,
+                arguments={
+                    "domain": domain,
+                    "mode": mode,
+                    "current_state": current_state,
+                    "target_state": target_state,
+                    "tool_name": tool_name,
+                },
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=plan_name,
+            description=(
+                f"Plan and navigate {upstream_name} workflow states. Use 'overview' mode to see "
+                f"the full workflow map, 'next_steps' to explore from a current state, and 'path' "
+                f"to plan a route between two states."
+            ),
+        )(plan_workflow_proxy)
+
+    def _register_load_skill_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a per-upstream load_skill proxy tool.
+
+        Only registers the tool if the upstream catalog contains discoverable skills.
+        """
+        if not self._has_skills(upstream.name):
+            LOGGER.debug(
+                "Skipping load_%s_skill proxy: no skills in catalog.",
+                upstream.name,
+            )
+            return
+        server = self
+        upstream_name = upstream.name
+        load_name = f"load_{upstream_name}_skill"
+
+        async def load_skill_proxy(ctx: Context, skill_name: str) -> str:
+            """Load a skill by name from the upstream server (proxied)."""
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream,
+                tool_name=load_name,
+                arguments={"skill_name": skill_name},
+                ctx=ctx,
+            )
+
+        self.mcp.tool(
+            name=load_name,
+            description=(
+                f"Load the full content of a {upstream_name} skill by name. Skills contain "
+                f"step-by-step instructions for domain workflows. Discover skill names via "
+                f"search tools or plan_{upstream_name}_workflow."
+            ),
+        )(load_skill_proxy)
+
     # ========================================================================
     # Search Tool
     # ========================================================================
@@ -276,18 +531,26 @@ class ConnectorServer(BaseMCPServer):
                     )
                 )
 
-        if not all_tool_infos:
-            LOGGER.debug("No tools to index for connector '%s'; skipping search tool.", connector_name)
+        all_skills: list[dict[str, Any]] = []
+        for skills in self._upstream_skills.values():
+            all_skills.extend(skills)
+
+        if not all_tool_infos and not all_skills:
+            LOGGER.debug("No tools or skills to index for connector '%s'; skipping search tool.", connector_name)
             return
 
         backend = create_tool_search_backend(backend_type="bm25")
-        backend.index(tools=all_tool_infos, skills=[], server_name=connector_name)
+        # Pass empty server_name so the backend doesn't generate misleading
+        # to_access strings like "Call via execute_{connector}_code" — the
+        # connector doesn't expose a single execute tool, each upstream has its own.
+        backend.index(tools=all_tool_infos, skills=all_skills, server_name="")
         self._tool_search_backends.append(backend)
 
         LOGGER.info(
-            "Search index built for '%s': %d tools from %d upstream(s).",
+            "Search index built for '%s': %d tools and %d skills from %d upstream(s).",
             connector_name,
             len(all_tool_infos),
+            len(all_skills),
             len(self._upstream_catalogs),
         )
 

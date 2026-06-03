@@ -59,6 +59,29 @@ class GatewayServer(ConnectorServer):
         self._register_gateway_execute_code(upstream)
         self._register_session_proxies(upstream)
 
+        # Register companion proxy tools, respecting blocked_tools policy.
+        # Blocking "parallel_execute" also suppresses check_batch/cancel_batch
+        # since those are only meaningful alongside parallel execution.
+        blocked = set(self.config.policy.blocked_tools)
+
+        if "check_job" not in blocked:
+            self._register_check_job_proxy(upstream)
+
+        if "parallel_execute" not in blocked:
+            self._register_parallel_execution_proxies(upstream)
+
+        if "publish_artifact" not in blocked:
+            self._register_publish_artifact_proxy(upstream)
+
+        if "push_object" not in blocked:
+            self._register_push_object_proxy(upstream)
+
+        if "plan_workflow" not in blocked:
+            self._register_plan_workflow_proxy(upstream)
+
+        if "load_skill" not in blocked:
+            self._register_load_skill_proxy(upstream)
+
     def _register_gateway_execute_code(self, upstream) -> None:
         """Register execute_code with policy checks (rate limit, allow/deny)."""
         server = self
