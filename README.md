@@ -47,24 +47,22 @@ uv sync --group dev    # include dev tools (pytest, pre-commit, ruff, jupyter)
 pip install git+https://github.com/microsoft/agora-workbench.git
 ```
 
-**Optional extras** — install only what you need:
+**Optional extras for examples** — the base package is all you need to build and run MCP servers. Extras pull in dependencies used by the example integrations:
 
-| Extra | What it adds |
-|-------|--------------|
-| `agent` | Agent-framework helpers (MAF adapters, LLM factories, MCP clients) |
-| `openai-agents` | OpenAI Agents SDK adapter |
-| `copilot-sdk` | GitHub Copilot SDK adapter |
-| `geo` | Geospatial domain packages (rasterio, etc.) |
+| Extra | Example integration |
+|-------|---------------------|
+| `agent` | MAF (Microsoft Agent Framework) quickstart |
+| `openai-agents` | OpenAI Agents SDK quickstart |
+| `copilot-sdk` | GitHub Copilot SDK quickstart |
+| `geo` | Geospatial domain examples (rasterio, etc.) |
 
 ```bash
 # uv
-uv sync --extra agent
+uv sync --extra openai-agents
 
 # pip
-pip install "agora-workbench[agent] @ git+https://github.com/microsoft/agora-workbench.git"
+pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/agora-workbench.git"
 ```
-
-The base install is framework-agnostic. You only need an extra if you are using that specific agent SDK or domain.
 
 ### Configuration
 
