@@ -57,11 +57,13 @@ pip install git+https://github.com/microsoft/agora-workbench.git
 | `copilot-sdk` | GitHub Copilot SDK adapter |
 | `geo` | Geospatial domain examples (rasterio, etc.) |
 
+Pick one (not both):
+
 ```bash
-# uv
+# uv (inside the cloned repo)
 uv sync --extra openai-agents
 
-# pip
+# pip (consuming as a library)
 pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/agora-workbench.git"
 ```
 
