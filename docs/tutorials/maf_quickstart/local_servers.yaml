@@ -15,7 +15,7 @@
 
 # Optional default scope, used for any non-localhost entry that omits its own.
 # All entries here are localhost, so this is illustrative.
-scope: api://<your-entra-client-id>/.default
+scope: api://12c90937-013c-468e-93cf-eb8083d69ca7/.default
 
 servers:
   - name: chemistry
