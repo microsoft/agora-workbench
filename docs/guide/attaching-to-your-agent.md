@@ -30,6 +30,16 @@ If your framework isn't listed above, you can connect any MCP client that suppor
 
 For a minimal example without any agent framework (raw MCP client or `curl`), see [`examples/agent_examples/agent_free_getting_started/README.md`](https://github.com/microsoft/agora-workbench/tree/main/examples/agent_examples/agent_free_getting_started).
 
+## Workbench skill
+
+The repo includes a ready-made **[workbench runtime skill](../../skills/agora-workbench/SKILL.md)** that you can inject into your agent's system prompt (or load via the [Agent Skills](https://agentskills.io) standard). It teaches your agent:
+
+- How to discover tools and skills before using them
+- That domain tools are Python functions called inside `execute_{server}_code`, not standalone MCP tools
+- How to handle sessions, artifacts, workflow planning, and async execution
+
+Include the skill in your agent's context to significantly improve its first-attempt success rate with Agora Workbench servers. The skill follows the [Agent Skills format](https://agentskills.io/specification) and includes nested sub-skills for advanced topics (artifacts, workflow planning, async execution) that load on demand.
+
 ## What's next
 
 Once your agent is connected:

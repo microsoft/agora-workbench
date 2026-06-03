@@ -22,6 +22,7 @@ Key capabilities:
 | Build my first server | [Options for making a CodeExecutionServer](guide/server-options.md) |
 | Add domain tools | [Tool pattern](guide/tool-pattern.md) |
 | Add multi-step skills | [Skill pattern](guide/skill-pattern.md) |
+| Teach my agent how to use the servers | [Attaching to your agent](guide/attaching-to-your-agent.md#workbench-skill) |
 | Write effective tools and skills | [Writing effective tools and skills](guide/writing-effective-tools.md) |
 | Work with data files | [Working with data](guide/working-with-data.md) |
 | Connect multiple servers | [Server networks](guide/server-networks.md) |
