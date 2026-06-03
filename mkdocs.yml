@@ -50,7 +50,20 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
+  - Home:
+      - index.md
+      - Options for making a CodeExecutionServer: guide/server-options.md
+      - CodeExecutionServer tool pattern: guide/tool-pattern.md
+      - CodeExecutionServer skill pattern: guide/skill-pattern.md
+      - Writing effective tools and skills: guide/writing-effective-tools.md
+  - Other options:
+      - Attaching to your agent: guide/attaching-to-your-agent.md
+      - Working with data: guide/working-with-data.md
+      - Server networks with ConnectorServer: guide/server-networks.md
+      - Deploying your server: guide/deploying.md
+      - Monitoring your servers: guide/monitoring.md
+      - Authentication options: guide/authentication.md
+      - Extension points: guide/extension-points.md
   - API Reference:
       - Server: api/server.md
       - Models: api/models.md
