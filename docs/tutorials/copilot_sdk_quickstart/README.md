@@ -78,7 +78,7 @@ setup + how to run.
 ### 1. (Optional) Configure BYOK
 
 Skip this if you're using the default `copilot` provider. For BYOK, copy
-[https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/copilot_sdk_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/copilot_sdk_quickstart/.env.agent.example) to `.env.agent` at the repo
+[.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/copilot_sdk_quickstart/.env.agent.example) to `.env.agent` at the repo
 root and fill in the section for your provider:
 
 | `LLM_PROVIDER` | What you need | Notes |
@@ -100,7 +100,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the energy systems MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/auth),
+> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/auth/__init__.py),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8022`.
 > **Do not deploy this configuration to a publicly reachable server.**

@@ -68,14 +68,16 @@ recommended order.
   [chat_client.py](chat_client.py) also supports Azure OpenAI API keys,
   OpenAI, and Ollama — see Step A.
 - `.env.agent` populated at the repo root. Copy entries from
-  [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example) as needed.
+  [.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example)
+  as needed.
 - **Docker** — both MCP servers run as local containers.
 
 ## Setup
 
 ### 1. Configure environment
 
-Copy [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example) to `.env.agent` at the repo root
+Copy [.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example)
+to `.env.agent` at the repo root
 and fill in values. The default and tested LLM path is **Azure OpenAI
 via Entra ID**.
 
@@ -90,7 +92,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the chemistry MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/auth),
+> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/auth/__init__.py),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8020` so it's
 > not reachable from outside the host. **Do not deploy this configuration
@@ -159,7 +161,7 @@ factory is a thin wrapper around the framework-agnostic
 > kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to
-[`get_token_provider()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/authazure_credentials.py),
+[`get_token_provider()`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/auth/azure_credentials.py),
 which returns a callable backed by the same
 `AzureCliCredential → ManagedIdentityCredential` chain used everywhere
 else in the repo. No new credentials are needed.

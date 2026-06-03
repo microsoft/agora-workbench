@@ -66,14 +66,15 @@ order.
   `az login` first). See [Step A](#step-a-build-the-model-byo-llm) for the
   full provider table.
 - `.env.agent` populated at the repo root. Copy entries from
-  [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example) as needed.
+  [.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example)
+  as needed.
 - **Docker** — the chemistry MCP server runs as a local container.
 
 ## Setup
 
 ### 1. Configure environment
 
-Copy [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example) to `.env.agent` at the repo
+Copy [.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/openai_agents_quickstart/.env.agent.example) to `.env.agent` at the repo
 root and fill in values. The default and tested LLM path is **Azure OpenAI
 via Entra ID**.
 
@@ -86,7 +87,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the chemistry MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/auth),
+> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/auth/__init__.py),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8020` so it's
 > not reachable from outside the host. **Do not deploy this configuration
@@ -117,7 +118,7 @@ Lipinski pass/fail + MW + LogP for each of the four test molecules.
 
 The runnable script is [agent.py](agent.py); each integration point is its
 own function. Compare side-by-side with
-[`docs/tutorials/maf_quickstart/agent.py`](../maf_quickstart/README.mdagent.py) — the
+[`docs/tutorials/maf_quickstart/agent.py`](../maf_quickstart/agent.py) — the
 step boundaries line up.
 
 ### Step A — Build the model (BYO LLM)
@@ -129,11 +130,11 @@ openai-agents SDK accepts several different things for `Agent(model=...)`:
 
 | `LLM_PROVIDER` | Returns | Notes |
 | --- | --- | --- |
-| `azure_openai_entra` *(default)* | `OpenAIResponsesModel` wrapping `openai.AsyncAzureOpenAI(azure_ad_token_provider=...)` | Auth via the same `get_token_provider` chain (AzureCli → ManagedIdentity) — see [`src/code_execution/auth/azure_credentials.py`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/authazure_credentials.py). Calls `/responses`. Set `AZURE_OPENAI_API_KIND=chat_completions` to fall back to `/chat/completions`. |
+| `azure_openai_entra` *(default)* | `OpenAIResponsesModel` wrapping `openai.AsyncAzureOpenAI(azure_ad_token_provider=...)` | Auth via the same `get_token_provider` chain (AzureCli → ManagedIdentity) — see [`src/code_execution/auth/azure_credentials.py`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/auth/azure_credentials.py). Calls `/responses`. Set `AZURE_OPENAI_API_KIND=chat_completions` to fall back to `/chat/completions`. |
 | `openai` | bare model id string (e.g. `"gpt-4o"`) | The SDK picks up `OPENAI_API_KEY` from the env. |
 
 For Azure-API-key, Ollama, or LiteLLM, see the
-[MAF quickstart](../maf_quickstart/README.mdchat_client.py) — `agent_helpers.llm`
+[MAF quickstart](../maf_quickstart/chat_client.py) — `agent_helpers.llm`
 already supports them; the openai-agents factory keeps the surface small
 and only exercises the tested Azure-Entra and public-OpenAI paths.
 
@@ -289,13 +290,13 @@ cd examples/domain_examples/chemistry && docker compose down
 ## Next steps
 
 - **Compare with MAF** — diff [agent.py](agent.py) against
-  [`docs/tutorials/maf_quickstart/agent.py`](../maf_quickstart/README.mdagent.py) to
+  [`docs/tutorials/maf_quickstart/agent.py`](../maf_quickstart/agent.py) to
   see exactly where the two frameworks differ. The setup functions are
   intentionally parallel.
 - **Add a second MCP server** — wire the energy systems server (`:8022`)
   by appending a second `MCPServerStreamableHttp` to `mcp_servers`. The
   OAI SDK does not have the
-  [parallel-tool-call streaming bug](../maf_quickstart/README.mdREADME.md#step-e--run-a-single-turn)
+  [parallel-tool-call streaming bug](../maf_quickstart/README.md#step-e-run-a-single-turn)
   that the MAF quickstart documents.
 - **Sessions / threads** — switch from `previous_response_id=...` to
   `agents.SQLiteSession(...)` (or any of the other built-in session
