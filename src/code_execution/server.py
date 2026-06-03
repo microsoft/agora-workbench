@@ -856,11 +856,28 @@ class CodeExecutionServer(BaseMCPServer):
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
 
-        # Skip if kernel is already registered (e.g., pre-registered during warm build)
+        # Check if kernel is already registered with the correct Python executable
         kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
         if kernel_dir.exists():
-            LOGGER.info(f"Kernel '{kernel_name}' already registered at {kernel_dir}")
-            return
+            kernel_json = kernel_dir / "kernel.json"
+            if kernel_json.exists():
+                import shutil
+
+                try:
+                    spec = json.loads(kernel_json.read_text())
+                    existing_python = spec.get("argv", [None])[0]
+                    if existing_python == str(self._python_executable):
+                        LOGGER.info(f"Kernel '{kernel_name}' already registered at {kernel_dir}")
+                        return
+                    LOGGER.info(
+                        f"Kernel '{kernel_name}' exists but points to stale path "
+                        f"({existing_python}); re-registering with {self._python_executable}"
+                    )
+                except (json.JSONDecodeError, IndexError):
+                    LOGGER.warning(f"Kernel '{kernel_name}' has invalid spec; re-registering")
+
+                # Remove stale spec so ipykernel install can write a fresh one
+                shutil.rmtree(kernel_dir)
 
         LOGGER.info(f"Registering Jupyter kernel '{kernel_name}' with Python: {self._python_executable}")
 

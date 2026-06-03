@@ -1,6 +1,5 @@
 """Tests for the server-side search tool registered by CodeExecutionServer."""
 
-import asyncio
 import json
 from unittest.mock import AsyncMock
 
@@ -48,9 +47,9 @@ def _tool(name: str, description: str = "", **kwargs) -> ToolDefinition:
     )
 
 
-def _registered_tool_names(server: CodeExecutionServer) -> set[str]:
+async def _registered_tool_names(server: CodeExecutionServer) -> set[str]:
     """Return the names of all registered MCP tools on the server."""
-    return {t.name for t in asyncio.get_event_loop().run_until_complete(server.mcp.list_tools())}
+    return {t.name for t in await server.mcp.list_tools()}
 
 
 async def _get_mcp_tool(server: CodeExecutionServer, name: str):
