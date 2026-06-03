@@ -32,6 +32,8 @@ Use Agora Workbench to:
 
 ### Installation
 
+**With uv (recommended for development):**
+
 ```bash
 git clone https://github.com/microsoft/agora-workbench.git
 cd agora-workbench
@@ -39,14 +41,28 @@ uv sync                # install base dependencies
 uv sync --group dev    # include dev tools (pytest, pre-commit, ruff, jupyter)
 ```
 
+**With pip (for using as a library):**
+
+```bash
+pip install git+https://github.com/microsoft/agora-workbench.git
+```
+
 **Optional extras** — install only what you need:
 
-| Extra | Command | What it adds |
-|-------|---------|--------------|
-| `agent` | `uv sync --extra agent` | Agent-framework helpers (MAF adapters, LLM factories, MCP clients) |
-| `openai-agents` | `uv sync --extra openai-agents` | OpenAI Agents SDK adapter |
-| `copilot-sdk` | `uv sync --extra copilot-sdk` | GitHub Copilot SDK adapter |
-| `geo` | `uv sync --extra geo` | Geospatial domain packages (rasterio, etc.) |
+| Extra | What it adds |
+|-------|--------------|
+| `agent` | Agent-framework helpers (MAF adapters, LLM factories, MCP clients) |
+| `openai-agents` | OpenAI Agents SDK adapter |
+| `copilot-sdk` | GitHub Copilot SDK adapter |
+| `geo` | Geospatial domain packages (rasterio, etc.) |
+
+```bash
+# uv
+uv sync --extra agent
+
+# pip
+pip install "agora-workbench[agent] @ git+https://github.com/microsoft/agora-workbench.git"
+```
 
 The base install is framework-agnostic. You only need an extra if you are using that specific agent SDK or domain.
 
