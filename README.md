@@ -19,7 +19,7 @@ Use Agora Workbench to:
 
 - **Wrap domain-specific Python tooling as MCP servers** — expose Python environments through isolated, session-aware execution environments that any MCP client can call
 - **Make tools discoverable** — register tools and skills in a searchable catalog so agents can find what they need by natural-language query
-- **Serve data alongside code** — attach a file catalog can locate and load datasets without hardcoded paths
+- **Serve data alongside code** — attach a file catalog so agents can locate and load datasets without hardcoded paths
 - **Deploy to Azure Container Apps** — use the included Bicep templates and CLI to ship your servers with Entra ID auth and managed identity
 
 ## Getting Started
@@ -27,6 +27,7 @@ Use Agora Workbench to:
 ### Prerequisites
 
 - **Python 3.11+**
+- **Git**
 - **[uv](https://docs.astral.sh/uv/)** for dependency management
 - **Docker** (required for running code execution servers locally)
 
@@ -70,7 +71,14 @@ For local testing, no external credentials are required. Use the no-op auth conf
 
 ```python
 from code_execution.auth import create_noop_auth_config
+from code_execution.code_execution_models import ServerConfig
 
+config = ServerConfig(
+    name="my-server",
+    description="My local test server",
+    type="uv",
+    dependency_file="pyproject.toml",
+)
 server = MyCodeExecutionServer(
     server_config=config,
     auth_config=create_noop_auth_config(),

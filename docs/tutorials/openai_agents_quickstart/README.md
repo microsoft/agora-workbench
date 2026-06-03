@@ -56,7 +56,7 @@ order.
 - [`uv`](https://github.com/astral-sh/uv) installed.
 - `openai-agents` available. Either install the optional extra:
   ```bash
-  uv add 'agora-workbench[openai-agents]'
+  uv sync --extra openai-agents
   ```
   or install it directly into your environment:
   ```bash
@@ -269,7 +269,7 @@ uv run python docs/tutorials/openai_agents_quickstart/chat.py
 
 | Symptom | Likely cause |
 | --- | --- |
-| `ModuleNotFoundError: No module named 'agents'` | `openai-agents` not installed in this env. `uv add 'agora-workbench[openai-agents]'` or `uv pip install openai-agents`. |
+| `ModuleNotFoundError: No module named 'agents'` | `openai-agents` not installed in this env. `uv sync --extra openai-agents` or `uv pip install openai-agents`. |
 | `ValueError: Environment variable 'AZURE_OPENAI_ENDPOINT' is required` | `.env` not loaded or missing the key. Check the repo-root `.env`. |
 | `BadRequestError: Invalid value for 'model'` / `model_not_found` | The deployment id doesn't exist on your endpoint. Internal gateways often require dated ids like `gpt-5.2-codex_2026-01-14`. |
 | `NotFoundError` on `/responses` | The endpoint doesn't support the Responses API. Set `AZURE_OPENAI_API_KIND=chat_completions` in `.env.agent` to switch to `OpenAIChatCompletionsModel`. |

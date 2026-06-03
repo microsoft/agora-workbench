@@ -60,7 +60,7 @@ setup + how to run.
 - [`uv`](https://github.com/astral-sh/uv) installed.
 - `github-copilot-sdk` available. Either install the optional extra:
   ```bash
-  uv add 'agora-workbench[copilot-sdk]'
+  uv sync --extra copilot-sdk
   ```
   or install it directly into your environment:
   ```bash
@@ -218,7 +218,7 @@ uv run python docs/tutorials/copilot_sdk_quickstart/chat.py
 
 | Symptom | Likely cause |
 | --- | --- |
-| `ModuleNotFoundError: No module named 'copilot'` / `ModuleNotFoundError: No module named 'dotenv'` | `github-copilot-sdk` (and `python-dotenv`) not installed. `uv add 'agora-workbench[copilot-sdk]'` or `uv pip install github-copilot-sdk python-dotenv`. |
+| `ModuleNotFoundError: No module named 'copilot'` / `ModuleNotFoundError: No module named 'dotenv'` | `github-copilot-sdk` (and `python-dotenv`) not installed. `uv sync --extra copilot-sdk` or `uv pip install github-copilot-sdk python-dotenv`. |
 | CLI launch hangs / auth errors with `LLM_PROVIDER=copilot` | Logged-in Copilot subscription required. Run `copilot auth login` once. |
 | `KeyError: 'AZURE_OPENAI_ENDPOINT'` | Switched to `LLM_PROVIDER=azure_openai_key` but `.env.agent` is missing the Azure keys. |
 | `Bad Request` from Azure with the right key | `AZURE_OPENAI_ENDPOINT` must be the **host only** (e.g. `https://my-resource.openai.azure.com`) — do not include `/openai/v1`. |
