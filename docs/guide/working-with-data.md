@@ -87,6 +87,7 @@ data = pd.read_parquet("<blob>abc123</blob>")
 Tools and code execution can produce output files. Configure publishers to make these available:
 
 ```python
+from code_execution.auth import create_noop_auth_config
 from code_execution.data_access import LocalFilePublisher, BlobPublisher
 
 publishers = [
@@ -98,7 +99,11 @@ publishers = [
     ),
 ]
 
-server = CodeExecutionServer(server_config=config, publishers=publishers)
+server = CodeExecutionServer(
+    server_config=config,
+    auth_config=create_noop_auth_config(),
+    publishers=publishers,
+)
 ```
 
 The agent publishes artifacts using `<gui>name</gui>` destinations for interactive display, or blob destinations for persistent storage. To minimize unexpected data egress, the publisher tools instruct the agent not to publish files unless instructed by the user.

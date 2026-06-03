@@ -6,7 +6,7 @@ Domain tools are typed Python functions that run inside the server's execution e
 
 1. You define a `ToolDefinition` — schema, parameters, return spec, and module path
 2. The server registers it in a `ToolRegistry`
-3. At runtime, the agent discovers tools via `search_tools` and calls them from within `execute_{name}_code` blocks
+3. At runtime, the agent discovers tools via `search_{name}_tools` and calls them from within `execute_{name}_code` blocks
 4. The server injects proxy wrappers so tool calls are traced and validated
 
 Tools are **not** exposed as individual MCP tools. Instead, the agent writes Python code that imports and calls them. This gives the agent full programmatic flexibility — it can compose tools, loop over inputs, and handle errors in code.
@@ -96,7 +96,13 @@ registry.register_tool(compute_descriptors)
 Then pass the registry to your server:
 
 ```python
-server = CodeExecutionServer(server_config=config, tool_registry=registry)
+from code_execution.auth import create_noop_auth_config
+
+server = CodeExecutionServer(
+    server_config=config,
+    tool_registry=registry,
+    auth_config=create_noop_auth_config(),
+)
 ```
 
 ## State transitions

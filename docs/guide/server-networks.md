@@ -46,7 +46,7 @@ The agent sees:
 - `execute_chemistry_code`
 - `execute_gis_code`
 - `execute_energy_code`
-- A unified `search_tools` that covers all upstreams
+- A unified `search_science-hub_tools` that covers all upstreams
 
 ## GatewayServer
 

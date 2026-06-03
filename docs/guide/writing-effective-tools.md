@@ -128,13 +128,13 @@ or finding structurally related molecules.
 
 ASCII art helps the agent understand flow:
 
-```markdown
+````markdown
 ## State Graph
 ```
 parse_molecule → compute_fingerprints → compute_similarity
                                       → cluster_molecules
 ```
-```
+````
 
 ### 3. Give concrete instructions per step
 

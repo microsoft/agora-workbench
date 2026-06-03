@@ -18,7 +18,7 @@ class TokenValidator(ABC):
         ...
 ```
 
-Built-in implementations: `EntraTokenValidator`, `NoopTokenValidator`
+Built-in implementations: `EntraTokenValidator`, `NoOpTokenValidator`
 
 ### IdentityExtractor
 
@@ -27,12 +27,12 @@ Derives a unique user identity string from token claims:
 ```python
 class IdentityExtractor(ABC):
     @abstractmethod
-    def extract(self, claims: dict) -> str:
+    def extract(self, claims: dict) -> str | None:
         """Return a unique user identifier from decoded claims."""
         ...
 ```
 
-Built-in implementations: `EntraIdentityExtractor`, `NoopIdentityExtractor`
+Built-in implementations: `EntraIdentityExtractor`, `NoOpIdentityExtractor`
 
 ### CredentialProvider
 
@@ -41,12 +41,15 @@ Provides credentials for accessing downstream Azure resources:
 ```python
 class CredentialProvider(ABC):
     @abstractmethod
-    async def get_credential(self, token: str, scopes: list[str]):
-        """Return a credential for downstream resource access."""
+    async def get_token(self, scope: str) -> AccessToken:
+        """Obtain an access token for the given resource scope."""
         ...
+
+    async def close(self) -> None:
+        """Release any held resources."""
 ```
 
-Built-in implementations: `OBOCredentialProvider`, `NoopCredentialProvider`
+Built-in implementations: `EntraCredentialProvider`, `NoOpCredentialProvider`
 
 ## Tool search backends
 
@@ -54,18 +57,17 @@ Defined in `code_execution.tools.tool_search`:
 
 ### ToolSearchBackend
 
-Pluggable backend for the `search_tools` MCP tool:
+Pluggable backend for the `search_{name}_tools` MCP tool:
 
 ```python
 class ToolSearchBackend(ABC):
-    @abstractmethod
-    async def search(self, query: str, top_k: int = 5) -> list[ToolInfo]:
-        """Search tools by natural-language query."""
+    def index(self, tools: list[ToolInfo], skills: list[dict] | None = None, server_name: str = "") -> None:
+        """Receive the tool catalog and skill metadata to index."""
         ...
 
     @abstractmethod
-    async def index(self, tools: list[ToolInfo]) -> None:
-        """Index tools for search."""
+    async def search(self, query: str, top: int = 5, category: SearchCategory = "all") -> list[ToolSearchResult]:
+        """Search tools by natural-language query."""
         ...
 ```
 
@@ -79,31 +81,47 @@ Built-in implementations:
 ### Custom search backend example
 
 ```python
-from code_execution.tools.tool_search import ToolSearchBackend, ToolInfo
+from code_execution.tools.tool_search import ToolSearchBackend, ToolInfo, ToolSearchResult, SearchCategory
 
 class ElasticsearchToolSearch(ToolSearchBackend):
     def __init__(self, es_client, index_name: str):
         self._client = es_client
         self._index = index_name
 
-    async def search(self, query: str, top_k: int = 5) -> list[ToolInfo]:
-        results = await self._client.search(
+    def index(self, tools: list[ToolInfo], skills: list[dict] | None = None, server_name: str = "") -> None:
+        for tool in tools:
+            self._client.index(index=self._index, body={
+                "name": tool.name,
+                "description": tool.description,
+                "server_name": tool.server_name,
+            })
+
+    async def search(self, query: str, top: int = 5, category: SearchCategory = "all") -> list[ToolSearchResult]:
+        results = self._client.search(
             index=self._index,
             body={"query": {"match": {"description": query}}},
-            size=top_k,
+            size=top,
         )
-        return [ToolInfo(...) for hit in results["hits"]["hits"]]
-
-    async def index(self, tools: list[ToolInfo]) -> None:
-        for tool in tools:
-            await self._client.index(index=self._index, body=tool.dict())
+        return [
+            ToolSearchResult(
+                name=hit["_source"]["name"],
+                server_name=hit["_source"]["server_name"],
+                description=hit["_source"]["description"],
+                execution_type="mcp",
+                score=hit["_score"],
+            )
+            for hit in results["hits"]["hits"]
+        ]
 ```
 
 Pass to the server:
 
 ```python
+from code_execution.auth import create_noop_auth_config
+
 server = CodeExecutionServer(
     server_config=config,
+    auth_config=create_noop_auth_config(),
     tool_search_backend=ElasticsearchToolSearch(es, "tools"),
 )
 ```

@@ -9,6 +9,7 @@ The simplest server needs only a `ServerConfig` with a name, description, enviro
 ```python
 import asyncio
 from code_execution import CodeExecutionServer, ServerConfig
+from code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myserver",
@@ -17,7 +18,7 @@ config = ServerConfig(
     dependency_file="numpy\npandas\n",
 )
 
-server = CodeExecutionServer(server_config=config)
+server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 
 if __name__ == "__main__":
     asyncio.run(server.run_http(host="0.0.0.0", port=8000))
@@ -57,17 +58,22 @@ dependencies:
 
 ## Adding domain tools
 
-Pass a `ToolRegistry` to expose typed domain tools that are discoverable via `search_tools` and callable through code execution:
+Pass a `ToolRegistry` to expose typed domain tools that are discoverable via `search_{name}_tools` and callable through code execution:
 
 ```python
 from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
+from code_execution.auth import create_noop_auth_config
 from my_domain.tools import MY_TOOLS  # list of ToolDefinition objects
 
 registry = ToolRegistry()
 for tool in MY_TOOLS:
     registry.register_tool(tool)
 
-server = CodeExecutionServer(server_config=config, tool_registry=registry)
+server = CodeExecutionServer(
+    server_config=config,
+    tool_registry=registry,
+    auth_config=create_noop_auth_config(),
+)
 ```
 
 See [Tool pattern](tool-pattern.md) for how to define `ToolDefinition` objects.
@@ -146,6 +152,7 @@ See [Authentication options](authentication.md) for the full auth guide.
 Configure publishers to allow the agent to publish artifacts (files, plots) from code execution:
 
 ```python
+from code_execution.auth import create_noop_auth_config
 from code_execution.data_access import LocalFilePublisher, BlobPublisher
 
 publishers = [
@@ -153,7 +160,11 @@ publishers = [
     BlobPublisher(account_url="https://myaccount.blob.core.windows.net", container="outputs"),
 ]
 
-server = CodeExecutionServer(server_config=config, publishers=publishers)
+server = CodeExecutionServer(
+    server_config=config,
+    auth_config=create_noop_auth_config(),
+    publishers=publishers,
+)
 ```
 
 ## Running the server
@@ -172,4 +183,4 @@ The server exposes:
 
 - `/mcp` — MCP endpoint (SSE/streamable HTTP)
 - `/health` — health check
-- `/.well-known/oauth-authorization-server` — OAuth discovery (when auth is enabled)
+- `/.well-known/oauth-protected-resource` — RFC 9728 OAuth protected resource metadata (when auth is enabled)

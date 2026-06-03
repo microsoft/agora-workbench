@@ -11,7 +11,8 @@ Authentication is configured via an `AuthConfig` dataclass that bundles three pr
 class AuthConfig:
     token_validator: TokenValidator
     identity_extractor: IdentityExtractor
-    credential_provider: CredentialProvider
+    credential_provider_factory: Optional[Callable[[str], CredentialProvider]] = None
+    www_authenticate_value: str = ""
 ```
 
 | Interface | Responsibility |
@@ -19,6 +20,7 @@ class AuthConfig:
 | `TokenValidator` | Validates bearer tokens, returns decoded claims |
 | `IdentityExtractor` | Derives a unique user identity string from claims |
 | `CredentialProvider` | Provides credentials for downstream resource access |
+| `credential_provider_factory` | Optional callable `(user_token) → CredentialProvider` for per-session credentials |
 
 ## Built-in configurations
 
@@ -58,43 +60,22 @@ Required environment variables:
 | `ENTRA_CLIENT_ID` | App registration client ID |
 | `ENTRA_TENANT_ID` | Azure AD tenant ID |
 
-## Credential modes for downstream access
+## Downstream credential provisioning
 
-MCP servers often need to access downstream Azure resources (Storage, AI Search, etc.) on behalf of the user. The `CredentialProvider` supports three modes, chosen by priority:
+MCP servers often need to access downstream Azure resources (Storage, AI Search, etc.). The built-in `EntraCredentialProvider` uses Azure Managed Identity:
 
-| Priority | Mode | When active | Use case |
-|:---:|------|-------------|----------|
-| 1 | **Simulation** | `OBO_SIMULATION_MODE=true` | Local dev — uses `az login` credentials |
-| 2 | **Managed Identity** | `AZURE_CLIENT_ID` is set | Container with managed identity |
-| 3 | **Federated Token (OBO)** | Fallback | Exchange user token via workload identity |
+- **User-assigned identity** — set `AZURE_CLIENT_ID` to the managed identity client ID
+- **System-assigned identity** — leave `AZURE_CLIENT_ID` unset
 
-### Simulation mode
+```python
+from code_execution.auth.entra import EntraCredentialProvider
 
-For local development, uses the developer's Azure CLI credentials:
-
-```bash
-export OBO_SIMULATION_MODE=true
-az login
-python -m my_server
+# Tokens for downstream access (e.g., Azure Storage)
+provider = EntraCredentialProvider()  # uses AZURE_CLIENT_ID if set
+token = await provider.get_token("https://storage.azure.com/.default")
 ```
 
-### Managed Identity
-
-For deployed containers with a user-assigned managed identity:
-
-```bash
-export AZURE_CLIENT_ID=<your-managed-identity-client-id>
-```
-
-### Federated Token (OBO)
-
-For Kubernetes/AKS with workload identity federation:
-
-```bash
-export ENTRA_CLIENT_ID=<app-client-id>
-export ENTRA_TENANT_ID=<tenant-id>
-export AZURE_FEDERATED_TOKEN_FILE=/var/run/secrets/tokens/azure-identity
-```
+For local development without managed identity, use `create_noop_auth_config()` which provides a `NoOpCredentialProvider` that returns synthetic tokens.
 
 ## Middleware behavior
 
@@ -111,10 +92,11 @@ Implement the three interfaces to integrate with any identity provider:
 
 ```python
 from code_execution.auth.base import (
-    TokenValidator,
-    IdentityExtractor,
-    CredentialProvider,
+    AccessToken,
     AuthConfig,
+    CredentialProvider,
+    IdentityExtractor,
+    TokenValidator,
 )
 
 class MyTokenValidator(TokenValidator):
@@ -124,19 +106,20 @@ class MyTokenValidator(TokenValidator):
         return claims
 
 class MyIdentityExtractor(IdentityExtractor):
-    def extract(self, claims: dict) -> str:
+    def extract(self, claims: dict) -> str | None:
         # Return a unique user identifier
-        return claims["sub"]
+        return claims.get("sub")
 
 class MyCredentialProvider(CredentialProvider):
-    async def get_credential(self, token: str, scopes: list[str]):
-        # Return credentials for downstream access
-        ...
+    async def get_token(self, scope: str) -> AccessToken:
+        # Acquire token for downstream resource
+        token = await my_token_source(scope)
+        return AccessToken(token=token.value, expires_on=token.expires)
 
 my_auth = AuthConfig(
     token_validator=MyTokenValidator(),
     identity_extractor=MyIdentityExtractor(),
-    credential_provider=MyCredentialProvider(),
+    credential_provider_factory=lambda user_token: MyCredentialProvider(),
 )
 
 server = CodeExecutionServer(server_config=config, auth_config=my_auth)
