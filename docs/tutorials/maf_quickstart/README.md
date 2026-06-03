@@ -33,9 +33,9 @@ library for Lipinski drug-likeness, then build and dispatch a tiny 2-bus
 power grid. It chains the typed helpers in each domain (auto-injected into
 the kernel namespace) and reports the results. Each domain server ships a
 workflow guide —
-[`chemistry/skills/SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md)
+[`chemistry/skills/SKILL.md`](https://github.com/microsoft/agora-workbench/blob/main/examples/domain_examples/chemistry/skills/SKILL.md)
 and
-[`energysystems/skills/SKILL.md`](../../../examples/domain_examples/energysystems/skills/SKILL.md)
+[`energysystems/skills/SKILL.md`](https://github.com/microsoft/agora-workbench/blob/main/examples/domain_examples/energysystems/skills/SKILL.md)
 — which is injected into the system prompt so the agent uses tools in the
 recommended order.
 
@@ -46,10 +46,10 @@ recommended order.
 
 > **Data catalog — currently a placeholder.** The repo includes a
 > server-side catalog package
-> ([`catalog_tools.py`](../../../src/code_execution/catalog_tools.py))
+> ([`catalog_tools.py`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog_tools.py))
 > that can register `search_data`, `get_artifact`, `list_domains`, and
 > `query_catalog` MCP tools from a catalog configuration such as
-> [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)).
+> [`src/code_execution/catalog.example.yaml`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog.example.yaml)).
 > This is not wired in automatically by `CodeExecutionServer` or the
 > bundled domain example servers: to expose these tools, a server must
 > explicitly load `catalog.yaml`, run any catalog indexing/setup, and call
@@ -68,14 +68,14 @@ recommended order.
   [chat_client.py](chat_client.py) also supports Azure OpenAI API keys,
   OpenAI, and Ollama — see Step A.
 - `.env.agent` populated at the repo root. Copy entries from
-  [.env.agent.example](.env.agent.example) as needed.
+  [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example) as needed.
 - **Docker** — both MCP servers run as local containers.
 
 ## Setup
 
 ### 1. Configure environment
 
-Copy [.env.agent.example](.env.agent.example) to `.env.agent` at the repo root
+Copy [https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/maf_quickstart/.env.agent.example) to `.env.agent` at the repo root
 and fill in values. The default and tested LLM path is **Azure OpenAI
 via Entra ID**.
 
@@ -90,7 +90,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the chemistry MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](../../../src/code_execution/auth/),
+> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/auth),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8020` so it's
 > not reachable from outside the host. **Do not deploy this configuration
@@ -141,8 +141,8 @@ own function so you can map README sections to code.
 [chat_client.py](chat_client.py). agora-workbench is **BYO LLM**: any
 object that satisfies MAF's `ChatClient` protocol works. The tutorial
 factory is a thin wrapper around the framework-agnostic
-[`ModelSpec`](../../../agent_helpers/llm/spec.py) +
-[`make_maf_client`](../../../agent_helpers/llm/factories/maf.py) abstraction in
+[`ModelSpec`](https://github.com/microsoft/agora-workbench/blob/main/agent_helpers/llm/spec.py) +
+[`make_maf_client`](https://github.com/microsoft/agora-workbench/blob/main/agent_helpers/llm/factories/maf.py) abstraction in
 `agent_helpers/llm/`, and dispatches on `$LLM_PROVIDER`:
 
 | `LLM_PROVIDER` | Backing class | Auth | Required env |
@@ -159,7 +159,7 @@ factory is a thin wrapper around the framework-agnostic
 > kwarg to switch into Azure mode. The factory uses the new API.
 
 The Entra path delegates to
-[`get_token_provider()`](../../../src/code_execution/auth/azure_credentials.py),
+[`get_token_provider()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/authazure_credentials.py),
 which returns a callable backed by the same
 `AzureCliCredential → ManagedIdentityCredential` chain used everywhere
 else in the repo. No new credentials are needed.
@@ -181,8 +181,8 @@ else in the repo. No new credentials are needed.
 [`step_b_data_lake_tool`](agent.py) is intentionally a no-op log. Data
 catalog search has moved into the MCP server itself: when a server is
 launched with a `catalog.yaml` (see
-[`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml)),
-[`register_catalog_tools`](../../../src/code_execution/catalog_tools.py)
+[`src/code_execution/catalog.example.yaml`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog.example.yaml)),
+[`register_catalog_tools`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog_tools.py)
 indexes the declared sources on startup and exposes `search_data`,
 `get_artifact`, and `list_domains` as MCP tools. The agent discovers them
 automatically through the `MCPStreamableHTTPTool` connection — no
@@ -198,7 +198,7 @@ configure a catalog on one of your servers.
 [`step_c_chemistry_tool`](agent.py) instantiates
 `MCPStreamableHTTPTool(name="chemistry", url=..., tool_name_prefix="chem_", approval_mode="never_require")`
 pointing at `http://localhost:8020/mcp`. The chemistry server (see
-[chemistry_server.py](../../../examples/domain_examples/chemistry/server/chemistry_server.py))
+[chemistry_server.py](https://github.com/microsoft/agora-workbench/blob/main/examples/domain_examples/chemistry/server/chemistry_server.py))
 exposes:
 
 - `execute_chemistry_code` — run Python in a long-lived Jupyter kernel
@@ -219,11 +219,11 @@ domain servers without name collisions — every tool the chemistry server
 exposes appears to the LLM as `chem_<original_name>`.
 
 **Typed domain helpers** are *not* separate MCP tools. They live in the
-[`chemistry_tools`](../../../examples/domain_examples/chemistry/chemistry_tools/)
+[`chemistry_tools`](https://github.com/microsoft/agora-workbench/tree/main/examples/domain_examples/chemistry/chemistry_tools)
 pip package, which is installed into the kernel's conda env at server
 build time. The server then auto-injects an instrumented Python proxy
 for each helper into the kernel namespace via
-[`tool_proxy.py`](../../../src/code_execution/tool_proxy.py),
+[`tool_proxy.py`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/tool_proxy.py),
 so inside `execute_chemistry_code` the agent can simply call them as
 plain Python functions — no imports required:
 
@@ -280,7 +280,7 @@ backed by [PyPSA](https://pypsa.org/):
 ### Step D — Build the agent
 
 [`step_d_build_agent`](agent.py) reads each domain's
-[`SKILL.md`](../../../examples/domain_examples/chemistry/skills/SKILL.md) — a
+[`SKILL.md`](https://github.com/microsoft/agora-workbench/blob/main/examples/domain_examples/chemistry/skills/SKILL.md) — a
 portable workflow guide that documents the tool state-graph, default
 parameters, and common pitfalls — and appends both to the system prompt.
 This is the simplest version of the agora-workbench *skills* pattern:
@@ -373,9 +373,9 @@ working, layer in:
 
 - **Server-side data catalog** — write a `catalog.yaml` for one of your
   servers (template:
-  [`src/code_execution/catalog.example.yaml`](../../../src/code_execution/catalog.example.yaml))
+  [`src/code_execution/catalog.example.yaml`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog.example.yaml))
   and wire it into the server entry point via
-  [`register_catalog_tools`](../../../src/code_execution/catalog_tools.py).
+  [`register_catalog_tools`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/catalog_tools.py).
   Once registered, the agent automatically picks up `search_data`,
   `get_artifact`, and `list_domains` — no changes to `agent.py` required.
 - **Workflow planning** — servers with state-annotated tools also expose

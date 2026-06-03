@@ -5,8 +5,8 @@ session to the agora-workbench energy systems MCP server and watch it
 solve a small economic-dispatch problem end-to-end.
 
 This is the Copilot SDK counterpart to
-[`docs/tutorials/maf_quickstart/`](../maf_quickstart/) and
-[`docs/tutorials/openai_agents_quickstart/`](../openai_agents_quickstart/),
+[`docs/tutorials/maf_quickstart/`](../maf_quickstart/README.md) and
+[`docs/tutorials/openai_agents_quickstart/`](../openai_agents_quickstart/README.md),
 but it deliberately does **not** mirror their file layout. The Copilot
 CLI *is* the agent — there is no chat client, no `Agent` object, no
 `Runner` — so the tutorial collapses to a single short
@@ -35,7 +35,7 @@ energysystems helpers
 (`define_network`, `add_components`, `run_optimal_power_flow`,
 `analyze_costs`, …) auto-injected
 into the MCP server's Python kernel. The energy systems domain's
-[`SKILL.md`](../../../examples/domain_examples/energysystems/skills/SKILL.md)
+[`SKILL.md`](https://github.com/microsoft/agora-workbench/blob/main/examples/domain_examples/energysystems/skills/SKILL.md)
 is appended to the SDK's default system prompt so the agent uses tools in
 the recommended order.
 
@@ -78,7 +78,7 @@ setup + how to run.
 ### 1. (Optional) Configure BYOK
 
 Skip this if you're using the default `copilot` provider. For BYOK, copy
-[.env.agent.example](.env.agent.example) to `.env.agent` at the repo
+[https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/copilot_sdk_quickstart/.env.agent.example](https://github.com/microsoft/agora-workbench/blob/main/docs/tutorials/copilot_sdk_quickstart/.env.agent.example) to `.env.agent` at the repo
 root and fill in the section for your provider:
 
 | `LLM_PROVIDER` | What you need | Notes |
@@ -100,7 +100,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 ### 3. Start the energy systems MCP server
 
 > **⚠️ Local-dev auth only** — the bundled server uses
-> [`create_noop_auth_config()`](../../../src/code_execution/auth/),
+> [`create_noop_auth_config()`](https://github.com/microsoft/agora-workbench/tree/main/src/code_execution/auth),
 > which accepts any bearer token (the tutorial sends a dummy
 > `Authorization: Bearer dev-token`). It binds to `127.0.0.1:8022`.
 > **Do not deploy this configuration to a publicly reachable server.**
@@ -169,7 +169,7 @@ Notes:
 - **Typed domain helpers** (`define_network`, `add_components`,
   `run_optimal_power_flow`, `analyze_costs`, …) are *not* separate MCP
   tools — they're auto-injected into the kernel by
-  [`tool_proxy.py`](../../../src/code_execution/tool_proxy.py) and
+  [`tool_proxy.py`](https://github.com/microsoft/agora-workbench/blob/main/src/code_execution/tool_proxy.py) and
   called as plain Python inside `execute_energysystems_code`.
 
 ## Expected output
