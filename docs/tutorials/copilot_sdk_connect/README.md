@@ -106,7 +106,7 @@ Other notes:
 ## Where to go next
 
 - **Build the session itself**: follow the
-  [Copilot SDK docs](https://github.com/github/copilot-cli) for model
+  [Copilot SDK docs](https://github.com/github/copilot-sdk/blob/main/python/README.md) for model
   selection, BYOK providers, streaming, and multi-turn chat. The
   `mcp_servers` block is exactly the one shown above.
 - **Inject the workbench skill**: the
