@@ -139,26 +139,6 @@ async def get_search_auth_headers_async() -> dict[str, str]:
 
 
 # =============================================================================
-# Purview credential factory
-# =============================================================================
-
-
-def get_purview_credential() -> ChainedTokenCredential:
-    """
-    Get a credential for Microsoft Purview clients.
-
-    Uses a credential chain that tries Azure CLI first, then Managed Identity.
-    This allows the same code to work in local development (CLI) and deployed
-    environments (Managed Identity).
-
-    Returns:
-        ChainedTokenCredential (AzureCLI -> ManagedIdentity).
-    """
-    LOGGER.debug("Using Entra ID credential chain for Microsoft Purview")
-    return _create_sync_credential_chain()
-
-
-# =============================================================================
 # Token provider (Entra-only)
 # =============================================================================
 
