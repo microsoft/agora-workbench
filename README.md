@@ -9,19 +9,19 @@
 
 A workbench for wrapping your tooling with MCP
 
-<h2><a href="https://microsoft.github.io/agora-workbench">📖 Documentation</a></h2>
+<h2><a href="https://microsoft.github.io/agora-workbench">Documentation</a></h2>
 
 ## Overview
 
-Agora Agent uses MAF workflows with explicit executors, Pydantic-based structured outputs, and MCP (Model Context Protocol) servers that provide sandboxed Python execution with domain-specific packages.
+Agora Workbench is a toolkit for building MCP (Model Context Protocol) servers that provide sandboxed Python execution with domain-specific packages. It is agent-framework agnostic — any MCP-compatible client can take advantage of the servers created by Agora Workbench.
 
-Key capabilities:
+Use Agora Workbench to:
 
-- **MAF Workflows** — state graph with executors that maintain conversation history, iteration count, and other state internally
-- **MCP Code Execution** — domain-specific Python environments served over MCP, each running in Docker with its own dependencies
-- **Tool Discovery** — `search_tools` for natural-language catalog search; MCP server tools (`execute_code`, session management) are auto-discovered from `server_registry.yaml` at agent startup and available from the first turn
-- **Context Management** — MAF-native compaction via `CompactionProvider` with token-budget-aware strategies (tool-result compaction, LLM summarization, sliding window)
-- **Data Lake Integration** — server-side file catalog with hybrid keyword + vector search over local and blob storage artifacts
+- **Wrap domain-specific Python tooling as MCP servers** — expose any Python package through isolated, session-aware execution environments that any MCP client can call
+- **Aggregate multiple tool servers behind a single endpoint** — the Router and Gateway connectors present a unified MCP surface with rate limiting and access control
+- **Make tools discoverable** — register tools in a searchable catalog so agents can find what they need by natural-language query
+- **Serve data alongside code** — attach a file catalog with hybrid keyword + vector search so agents can locate and load datasets without hardcoded paths
+- **Deploy to Azure Container Apps** — use the included Bicep templates and CLI to ship your servers with Entra ID auth and managed identity
 
 ## Structure
 
