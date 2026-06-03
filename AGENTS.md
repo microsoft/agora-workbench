@@ -1,0 +1,116 @@
+# Agora Workbench — Development Instructions
+
+## Environment & Commands
+
+The project uses **`uv`** for dependency management with `pyproject.toml` at the repo root. Python ≥3.11 is required. Always run commands from the repo root.
+
+```bash
+uv sync                          # Install/update dependencies
+uv run pytest -m "not live"      # Run tests (excludes live/credential tests)
+uv run ruff check --fix .        # Lint (auto-fix)
+uv run ruff format .             # Format
+uv run pyright --level error src # Type check (only src/ is checked in CI)
+```
+
+Use `uv run` to run any script (e.g. `uv run python src/script.py`) and `uv add` to add packages. The virtual environment is managed automatically — do not manually activate `.venv`.
+
+## Repo Layout
+
+```
+src/
+  base/              # BaseMCPServer ABC — shared HTTP hosting, auth middleware
+  code_execution/    # CodeExecutionServer — kernel-backed code execution
+  connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
+  utilities/         # Shared utility modules
+agent_helpers/       # Agent-side helpers (LLM factories, MCP clients)
+activity_ui/         # Real-time activity monitoring UI
+examples/
+  domain_examples/   # Reference domain server implementations (chemistry, gis, energy)
+  agent_examples/    # Reference agent configurations
+docs/               # MkDocs documentation site
+deployment/         # Deployment configs
+```
+
+## Import Conventions
+
+`src/` and the repo root (`.`) are both on the Python path. Imports use **bare package names**:
+
+```python
+from base import BaseMCPServer
+from code_execution import CodeExecutionServer, ToolDefinition, ToolRegistry
+from connector import RouterServer, GatewayServer
+from agent_helpers.llm import ModelSpec
+```
+
+Do **not** prefix with `src.` — `from src.code_execution import ...` is wrong.
+
+## Architecture
+
+`BaseMCPServer` (in `src/base/`) is the shared abstract base class. Two concrete server types inherit from it:
+
+- **`CodeExecutionServer`** — runs a Python kernel, executes user code, manages sessions and tool registries.
+- **`ConnectorServer`** — stateless proxy that aggregates/routes/gates tool calls to upstream servers without its own kernel.
+
+Both expose tools via **FastMCP** over Streamable HTTP with Bearer token auth middleware.
+
+## Adding Domain Tools
+
+Follow the pattern in `examples/domain_examples/`. A domain server:
+
+1. Subclasses `CodeExecutionServer`
+2. Defines tools as `ToolDefinition` objects registered with a `ToolRegistry`
+3. Provides a `catalog.yaml` describing available tools, data assets, and libraries
+4. Tool implementations live in packages installed into the execution kernel environment
+
+## Testing
+
+Tests live in `tests/` subdirectories alongside the code they test. Configured test paths:
+
+- `src/code_execution/tests/`
+- `src/connector/tests/`
+- `examples/domain_examples/tests/`
+- `agent_helpers/llm/tests/`
+- `agent_helpers/tests/`
+- `activity_ui/tests/`
+
+Markers: `unit`, `integration`, `live`, `asyncio`. Live tests are excluded by default (they require real credentials/network). `pytest-asyncio` runs in `auto` mode — async test functions are detected automatically.
+
+```bash
+uv run pytest -m "not live"              # All non-live tests
+uv run pytest src/connector/tests/ -v    # Target a specific package
+```
+
+## Linting & Type Checking
+
+- **Ruff**: line-length 120, `ruff check` + `ruff format`. Pre-commit auto-fixes.
+- **Pyright**: basic mode, `--level error`. The config is intentionally permissive — focus on `reportUndefinedVariable` and `reportUnboundVariable` errors. Do not spend time on suppressed warning categories.
+
+## CI
+
+- **Linting** (`linting.yaml`): triggers on PRs changing `src/**`. Runs `ruff check` and `pyright --level error` on `src/`.
+- **Tests** (`tests.yaml`): triggers on PRs changing `src/`, `activity_ui/`, `agent_helpers/`, `examples/`. Runs `pytest -m "not live"` across all test paths.
+
+Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not live"` pass for any changed areas.
+
+## Optional Extras & Dependency Groups
+
+**Extras** (for optional feature dependencies):
+```bash
+uv sync --extra agent          # LLM factories, openai, tenacity (needed for agent_helpers/llm/)
+uv sync --extra openai-agents  # OpenAI Agents SDK adapter
+uv sync --extra copilot-sdk    # GitHub Copilot SDK adapter
+uv sync --extra geo            # Geospatial (rasterio, titiler)
+```
+
+**Dependency groups** (for dev tooling):
+```bash
+uv sync --group dev    # pytest, ruff, pre-commit, jupyter (default for development)
+uv sync --group docs   # mkdocs, mkdocs-material, mkdocstrings
+```
+
+## Do Not
+
+- Do not import packages as `src.<package>` — use bare names (`code_execution`, `connector`, `base`).
+- Do not bypass `uv` or manually activate `.venv`.
+- Do not run live-marked tests unless explicitly requested and credentials are available.
+- Do not add strict type annotations or fix pyright warnings that the config intentionally suppresses.
