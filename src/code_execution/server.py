@@ -208,7 +208,12 @@ class CodeExecutionServer(BaseMCPServer):
 
         # Auto-create session manager with defaults if not provided
         if session_manager is None:
-            _session_manager = SessionManager(SessionConfig())
+            _session_manager = SessionManager(
+                SessionConfig(
+                    kernel_name=server_config.get_kernel_name(),
+                    language=server_config.language,
+                )
+            )
             LOGGER.info("Created default SessionManager.")
         else:
             _session_manager = session_manager
@@ -364,7 +369,7 @@ class CodeExecutionServer(BaseMCPServer):
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
-        await self._register_kernel(kernel_name="tools-py")
+        await self._register_kernel()
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
     # ========================================================================
@@ -846,15 +851,29 @@ class CodeExecutionServer(BaseMCPServer):
 
         return str(self._python_executable)
 
-    async def _register_kernel(self, kernel_name: str = "tools-py"):
+    async def _register_kernel(self, kernel_name: "Optional[str]" = None):
         """
-        Register the Python environment as a Jupyter kernel.
+        Register the environment as a Jupyter kernel.
+
+        Registers an ipykernel-backed Python kernel, or — when
+        ``server_config.language == "r"`` — an IRkernel-backed R kernel from
+        the same conda environment. The kernelspec name defaults to
+        ``server_config.get_kernel_name()`` so it matches what the
+        SessionManager launches per session.
 
         Args:
-            kernel_name: Name to register the kernel under
+            kernel_name: Override the kernelspec name (defaults to the
+                language-derived name).
         """
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
+
+        kernel_name = kernel_name or self.server_config.get_kernel_name()
+        env_bin = Path(self._python_executable).parent
+
+        if self.server_config.language == "r":
+            await self._register_r_kernel(kernel_name, env_bin)
+            return
 
         # Check if kernel is already registered with the correct Python executable
         kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
@@ -904,6 +923,39 @@ class CodeExecutionServer(BaseMCPServer):
 
         LOGGER.info(f"Kernel '{kernel_name}' registered successfully")
         LOGGER.debug(f"Kernel install output: {result.stdout}")
+
+    async def _register_r_kernel(self, kernel_name: str, env_bin: "Path") -> None:
+        """Register an IRkernel-backed R kernel from the conda environment.
+
+        Runs ``IRkernel::installspec`` inside the environment's R so the
+        kernelspec's ``argv`` points at the right interpreter. Writes a user
+        kernelspec under ``~/.local/share/jupyter/kernels/<kernel_name>``.
+        """
+        r_exe = env_bin / "R"
+        if not r_exe.exists():
+            raise RuntimeError(
+                f"R executable not found at {r_exe}. For language='r' the conda "
+                f"environment must include r-base and r-irkernel."
+            )
+
+        kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
+        if (kernel_dir / "kernel.json").exists():
+            LOGGER.info(f"R kernel '{kernel_name}' already registered at {kernel_dir}")
+            return
+
+        display_name = f"R ({self.server_config.name})"
+        r_expr = f'IRkernel::installspec(name = "{kernel_name}", displayname = "{display_name}", user = TRUE)'
+        LOGGER.info(f"Registering Jupyter R kernel '{kernel_name}' with R: {r_exe}")
+        result = subprocess.run(
+            [str(r_exe), "--quiet", "--no-save", "-e", r_expr],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            LOGGER.error(f"Failed to register R kernel: {result.stdout}\n{result.stderr}")
+            raise RuntimeError(f"R kernel registration failed: {result.stderr or result.stdout}")
+        LOGGER.info(f"R kernel '{kernel_name}' registered successfully")
+        LOGGER.debug(f"IRkernel installspec output: {result.stdout}")
 
     async def _inject_tool_proxies(self, session_id: str) -> None:
         """
@@ -2516,7 +2568,7 @@ else:
         os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
 
         # Register the environment as a Jupyter kernel
-        await self._register_kernel(kernel_name="tools-py")
+        await self._register_kernel()
 
         await self._initialize_tool_search_backends()
 

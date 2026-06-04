@@ -45,6 +45,12 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_SGR_RE.sub("", text)
 
 
+def _r_string_literal(value: str) -> str:
+    """Render a Python string as a double-quoted R string literal."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
 def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
     """Pick the richest renderable representation from a Jupyter display payload.
 
@@ -62,6 +68,7 @@ def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
         if mime in data:
             return {"mime_type": mime, "data": data[mime], "metadata": metadata or {}}
     return None
+
 
 if TYPE_CHECKING:
     from jupyter_client.asynchronous.client import AsyncKernelClient
@@ -150,11 +157,17 @@ class SessionConfig:
         timeout_minutes: int = 30,
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
+        kernel_name: str = "tools-py",
+        language: str = "python",
     ):
         self.max_sessions = max_sessions
         self.timeout = timedelta(minutes=timeout_minutes)
         self.cleanup_interval = timedelta(seconds=cleanup_interval_seconds)
         self.storage_backend = storage_backend or InMemoryStorage()
+        # Jupyter kernelspec to launch per session, and the language it runs.
+        # Defaults preserve the original Python/ipykernel behavior.
+        self.kernel_name = kernel_name
+        self.language = language
 
 
 class SessionManager:
@@ -397,7 +410,7 @@ class SessionManager:
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
-        kernel_manager = AsyncKernelManager(kernel_name="tools-py")
+        kernel_manager = AsyncKernelManager(kernel_name=self.config.kernel_name)
 
         # Ensure executables from the selected Python environment are on PATH.
         # The kernelspec argv points at the environment's python, but PATH is
@@ -492,25 +505,35 @@ class SessionManager:
         """Inject or clear USER_ASSERTION_TOKEN preamble when session token changes."""
         last_token = self._kernel_tokens.get(session_id)
         if user_token and user_token != last_token:
-            token_preamble = (
-                "import os as __agora_os__\n"
-                f"__agora_os__.environ['USER_ASSERTION_TOKEN'] = {user_token!r}\n"
-                "del __agora_os__\n"
-            )
             self._kernel_tokens[session_id] = user_token
-            return token_preamble + code
+            return self._token_set_preamble(user_token) + code
 
         if last_token is not None and not user_token:
-            token_preamble = (
-                "import os as __agora_os__\n"
-                "if 'USER_ASSERTION_TOKEN' in __agora_os__.environ:\n"
-                "    del __agora_os__.environ['USER_ASSERTION_TOKEN']\n"
-                "del __agora_os__\n"
-            )
             self._kernel_tokens.pop(session_id, None)
-            return token_preamble + code
+            return self._token_clear_preamble() + code
 
         return code
+
+    def _token_set_preamble(self, user_token: str) -> str:
+        """Code that sets USER_ASSERTION_TOKEN in the kernel's environment."""
+        if self.config.language == "r":
+            return f"Sys.setenv(USER_ASSERTION_TOKEN = {_r_string_literal(user_token)})\n"
+        return (
+            "import os as __agora_os__\n"
+            f"__agora_os__.environ['USER_ASSERTION_TOKEN'] = {user_token!r}\n"
+            "del __agora_os__\n"
+        )
+
+    def _token_clear_preamble(self) -> str:
+        """Code that removes USER_ASSERTION_TOKEN from the kernel's environment."""
+        if self.config.language == "r":
+            return 'Sys.unsetenv("USER_ASSERTION_TOKEN")\n'
+        return (
+            "import os as __agora_os__\n"
+            "if 'USER_ASSERTION_TOKEN' in __agora_os__.environ:\n"
+            "    del __agora_os__.environ['USER_ASSERTION_TOKEN']\n"
+            "del __agora_os__\n"
+        )
 
     # ------------------------------------------------------------------
     # Artifact pipeline
@@ -533,6 +556,11 @@ class SessionManager:
             return ""
         outputs_dir = str(self._get_outputs_dir(session_id))
         self._kernel_outputs_initialized.add(session_id)
+        if self.config.language == "r":
+            # R equivalent: set the env var (so library/subprocess code sees it)
+            # and a bare AGORA_OUTPUT_DIR binding for ergonomic file writes.
+            r_path = _r_string_literal(outputs_dir)
+            return f"Sys.setenv(AGORA_OUTPUT_DIR = {r_path})\nAGORA_OUTPUT_DIR <- {r_path}\n"
         return (
             "import os as __agora_os__\n"
             f"__agora_os__.environ['AGORA_OUTPUT_DIR'] = {outputs_dir!r}\n"
@@ -687,9 +715,7 @@ class SessionManager:
         """
         try:
             outputs_after = self._snapshot_outputs_dir(job.session_id)
-            job.artifacts = self._register_artifacts_from_diff(
-                job.session_id, job.outputs_before, outputs_after
-            )
+            job.artifacts = self._register_artifacts_from_diff(job.session_id, job.outputs_before, outputs_after)
         except Exception:
             LOGGER.warning(
                 "Background artifact discovery failed for session %s job %s",
@@ -823,9 +849,8 @@ class SessionManager:
         # populated even when this background call is the kernel's
         # first execute.  Snapshot before kc.execute so the terminal
         # handler can diff for artifacts.
-        code = (
-            self._prepare_outputs_preamble(session_id)
-            + self._prepare_code_with_token_preamble(session_id, code, user_token)
+        code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
+            session_id, code, user_token
         )
         outputs_before = self._snapshot_outputs_dir(session_id)
         msg_id = kc.execute(code)

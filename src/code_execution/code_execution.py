@@ -115,6 +115,13 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     if not code or not code.strip():
         return False, "Code cannot be empty"
 
+    # The screening below is Python-AST-based. For non-Python kernels (e.g. R
+    # via IRkernel) it would mis-parse or raise false positives on valid syntax
+    # (R's ``remove()``, ``system()``, ``<-`` assignment, etc.), so skip it.
+    # Language-appropriate sandboxing for those kernels is a separate concern.
+    if getattr(getattr(server, "server_config", None), "language", "python") != "python":
+        return True, None
+
     # --- AST-based analysis ---
     try:
         tree = ast.parse(code)

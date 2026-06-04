@@ -186,6 +186,16 @@ class ServerConfig(BaseModel):
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
     )
+    language: Literal["python", "r"] = Field(
+        default="python",
+        description=(
+            "Execution language for the kernel. 'python' (default) launches an "
+            "ipykernel-backed Python kernel; 'r' launches an IRkernel-backed R "
+            "kernel. The conda environment in dependency_file must ship the "
+            "matching runtime (e.g. r-base + r-irkernel for 'r'). The agent is "
+            "told which language to write via the per-tool description."
+        ),
+    )
 
     # --- Assets ---
 
@@ -276,3 +286,12 @@ class ServerConfig(BaseModel):
             return build_dir / "bin" / "python"
         else:
             raise ValueError(f"Unknown environment type: {self.type}")
+
+    def get_kernel_name(self) -> str:
+        """Jupyter kernelspec name to register and launch for this server.
+
+        Derived from ``language`` so each language gets a distinct kernelspec
+        and single-language servers can coexist on one host without clobbering
+        each other's kernel registration.
+        """
+        return {"python": "tools-py", "r": "tools-r"}.get(self.language, "tools-py")
