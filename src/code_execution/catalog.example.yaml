@@ -30,16 +30,18 @@ sources:
   #       description: "US high-voltage transmission lines with voltage and owner metadata"
 
 search:
-  # Embedding model for vector search
-  # Options:
-  #   - Any sentence-transformers model ID (runs locally on CPU)
-  #   - "azure-openai" (requires endpoint/deployment below)
-  embedding_model: nomic-ai/nomic-embed-text-v1.5
+  # Embedding model for vector search. Supported values:
+  #   - "none"          keyword-only (SQLite FTS5 / BM25). No embedding model,
+  #                     no Azure, no extra dependencies. This is the default —
+  #                     the catalog works fully offline out of the box.
+  #   - "azure-openai"  semantic vector search via Azure OpenAI (requires the
+  #                     endpoint + deployment below and Entra credentials).
+  embedding_model: none
 
   # Required only when embedding_model is "azure-openai":
   # azure_openai_endpoint: https://your-resource.cognitiveservices.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15
   # azure_openai_deployment: text-embedding-3-large
 
-  # Weight for keyword (FTS5) score in hybrid ranking.
-  # 0.0 = pure vector search, 1.0 = pure keyword search
+  # Weight for keyword (FTS5) score in hybrid ranking (only used with vectors).
+  # 0.0 = pure vector search, 1.0 = pure keyword search.
   hybrid_alpha: 0.5

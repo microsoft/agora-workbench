@@ -111,8 +111,12 @@ class CatalogIndexer:
         self._embedding_provider: Optional[EmbeddingProvider] = embedding_provider
 
     @property
-    def embedding_provider(self) -> EmbeddingProvider:
-        """Lazy-initialize the embedding provider."""
+    def embedding_provider(self) -> Optional[EmbeddingProvider]:
+        """Resolve the embedding provider from config (``None`` = keyword-only).
+
+        Re-resolves while unset; a ``None`` result (keyword-only / BM25) is cheap
+        to recompute, and tests may inject ``_embedding_provider`` directly.
+        """
         if self._embedding_provider is None:
             search_cfg = self._config.search
             self._embedding_provider = create_embedding_provider(
@@ -343,15 +347,16 @@ class CatalogIndexer:
 
     async def _compute_and_store(self, artifacts: list[dict]) -> None:
         """Compute embeddings and upsert artifacts into the database in a transaction."""
-        # Build texts for embedding
-        texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in artifacts]
-
-        # Compute embeddings in batches
-        all_embeddings: list[list[float]] = []
-        for i in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
-            batch = texts[i : i + _EMBEDDING_BATCH_SIZE]
-            batch_embeddings = await self.embedding_provider.embed(batch)
-            all_embeddings.extend(batch_embeddings)
+        provider = self.embedding_provider
+        if provider is None:
+            # Keyword-only (BM25) catalog — no vector embeddings.
+            all_embeddings: list[Optional[list[float]]] = [None] * len(artifacts)
+        else:
+            texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in artifacts]
+            all_embeddings = []
+            for i in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
+                batch = texts[i : i + _EMBEDDING_BATCH_SIZE]
+                all_embeddings.extend(await provider.embed(batch))
 
         # Upsert all artifacts within a single transaction for efficiency
         with self._db.conn:

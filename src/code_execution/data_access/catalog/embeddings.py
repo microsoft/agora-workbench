@@ -88,16 +88,19 @@ def create_embedding_provider(
     azure_openai_endpoint: str | None = None,
     azure_openai_deployment: str | None = None,
     credential_provider: CredentialProvider | None = None,
-) -> EmbeddingProvider:
-    """Factory to create the appropriate embedding provider from config.
+) -> EmbeddingProvider | None:
+    """Factory to create an embedding provider from config.
 
-    Only Azure OpenAI embeddings are supported. For local-only setups
-    without an embedding endpoint, use BM25 search instead.
+    Returns ``None`` for a keyword-only (SQLite FTS5 / BM25) catalog — when
+    ``model_name`` is ``"none"`` or empty. Returns an Azure OpenAI provider for
+    ``"azure-openai"``. The indexer and search skip vector embedding when this
+    is ``None``.
     """
+    if not model_name or model_name.lower() in ("none", "bm25", "keyword"):
+        return None
     if model_name != "azure-openai":
         raise ValueError(
-            f"Unsupported embedding model '{model_name}'. "
-            "Only 'azure-openai' is supported. For local-only setups, use BM25 search."
+            f"Unsupported embedding model '{model_name}'. Use 'none' (keyword/BM25 only) or 'azure-openai'."
         )
     if not azure_openai_endpoint or not azure_openai_deployment:
         raise ValueError(

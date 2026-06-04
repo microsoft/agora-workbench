@@ -20,10 +20,12 @@ from pathlib import Path
 from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
 from code_execution.auth import create_noop_auth_config
 from domain_examples.energysystems.tools import ENERGYSYSTEMS_TOOLS
+from domain_examples.energysystems.server.catalog_setup import setup_catalog
 
 # Path to the energysystems_tools package (relative to this file so it works
 # both inside Docker and when running locally from the repo root).
 _ENERGYSYSTEMS_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "energysystems_tools")
+_ENERGYSYSTEMS_DIR = Path(__file__).resolve().parents[1]
 
 ENVIRONMENT_YML = """\
 name: energysystems
@@ -53,6 +55,10 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import matplotlib.pyplot as plt
+
+# Networks loaded from NetCDF can carry pyarrow-backed string columns that
+# break linopy's optimizer; force classic object strings for compatibility.
+pd.set_option("future.infer_string", False)
 """
 
 config = ServerConfig(
@@ -124,6 +130,9 @@ if __name__ == "__main__":
     if "--warm" in sys.argv:
         asyncio.run(server.warm())
     else:
+        # Index the local data catalog and register search_data / query_catalog /
+        # get_artifact / list_domains before serving.
+        setup_catalog(server, _ENERGYSYSTEMS_DIR)
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
         asyncio.run(server.run_http(host=host, port=port))

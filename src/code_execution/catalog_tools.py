@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -20,12 +20,16 @@ class CatalogToolsContext:
     """Holds the initialized catalog state for tool handlers."""
 
     db: CatalogDB
-    embedding_provider: EmbeddingProvider
+    embedding_provider: Optional[EmbeddingProvider]
     config: CatalogConfig
 
 
-def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
-    """Register catalog search tools on a FastMCP server instance."""
+def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_publisher: Any = None) -> None:
+    """Register catalog search tools on a FastMCP server instance.
+
+    When *activity_publisher* is provided, ``search_data`` emits a
+    ``data_searched`` activity event so the search step shows up in the GUI.
+    """
 
     async def search_data(
         query: str,
@@ -46,9 +50,9 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
         Returns:
             List of matching artifacts with metadata and relevance scores.
         """
-        # Compute query embedding
+        # Compute query embedding (skipped for keyword-only / BM25 catalogs)
         query_embedding: Optional[list[float]] = None
-        if query.strip():
+        if query.strip() and ctx.embedding_provider is not None:
             embeddings = await ctx.embedding_provider.embed([query])
             query_embedding = embeddings[0]
 
@@ -60,7 +64,19 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
             top=top,
             hybrid_alpha=ctx.config.search.hybrid_alpha,
         )
-        return [r.to_dict() for r in results]
+        hits = [r.to_dict() for r in results]
+        if activity_publisher is not None:
+            query_label = repr(query) if query else "'' (all)"
+            activity_publisher.publish_nowait(
+                {
+                    "type": "data_searched",
+                    "description": f"search data {query_label} → {len(hits)} dataset(s)",
+                    "query": query,
+                    "matched_artifacts": [h.get("name", "") for h in hits],
+                    "success": True,
+                }
+            )
+        return hits
 
     async def get_artifact(artifact_id: str) -> dict:
         """Get detailed metadata for a specific artifact by ID.
@@ -111,8 +127,10 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
     mcp.tool(
         name="search_data",
         description=(
-            "Search the data catalog for files and datasets matching a natural language query. "
-            "Supports filtering by domain and storage type. Returns ranked results with metadata."
+            "Search the data catalog for files and datasets matching a natural-language query. "
+            "Returns ranked results, each with a `storage_uri` (for local datasets, a file path "
+            "you can open/load directly inside the code-execution tool) and a description. "
+            "Supports filtering by domain and storage type."
         ),
     )(search_data)
 
