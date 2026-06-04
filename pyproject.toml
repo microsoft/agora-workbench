@@ -16,7 +16,7 @@ dependencies = [
     "fastapi>=0.115",
     "fastmcp>=2.14.2",
     "mcp>=1.26.0",
-    "starlette>=0.41.0",
+    "starlette>=1.0.1",
     "uvicorn>=0.34",
     "wsproto>=1.3.2",
     # Auth
