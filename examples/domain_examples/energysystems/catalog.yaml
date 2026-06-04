@@ -1,0 +1,30 @@
+# Data catalog for the energysystems domain.
+#
+# The energysystems server indexes these sources at startup and exposes
+# search_data / query_catalog / get_artifact / list_domains to the agent.
+# Paths are relative to this file (the energysystems domain directory).
+
+sources:
+  - path: data
+    domain: energysystems
+    description: "Synthetic PyPSA power-grid datasets (NetCDF) for power flow, optimal dispatch, and capacity studies."
+    files:
+      grid_50bus.nc:
+        description: >-
+          Synthetic 50-bus regional power grid. 50 buses, 71 transmission
+          lines, 101 generators (nuclear, coal, gas, wind, solar), 35
+          time-varying loads over 24 hourly snapshots. PyPSA NetCDF — load
+          with pypsa.Network(path).
+      grid_100bus.nc:
+        description: >-
+          Synthetic 100-bus interconnection. 100 buses, 144 transmission
+          lines, 191 generators (nuclear, coal, gas, wind, solar), 70
+          time-varying loads over 24 hourly snapshots. PyPSA NetCDF — load
+          with pypsa.Network(path).
+
+search:
+  # Keyword-only catalog: SQLite FTS5 / BM25, no embedding model, no Azure,
+  # no extra dependencies. Set embedding_model to "azure-openai" (with the
+  # endpoint/deployment) to add semantic vector search later.
+  embedding_model: none
+  hybrid_alpha: 1.0

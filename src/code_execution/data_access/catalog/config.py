@@ -50,8 +50,12 @@ class SearchConfig(BaseModel):
     """Search/embedding configuration."""
 
     embedding_model: str = Field(
-        default="azure-openai",
-        description="Embedding model: 'azure-openai' (requires endpoint configuration)",
+        default="none",
+        description=(
+            "Embedding model for vector search: 'none' (keyword/BM25 only — the "
+            "default, no extra setup) or 'azure-openai' (requires the endpoint / "
+            "deployment below)."
+        ),
     )
     azure_openai_endpoint: Optional[str] = Field(
         None, description="Azure OpenAI endpoint (required if embedding_model is 'azure-openai')"

@@ -29,6 +29,11 @@ define_network
 The tools are plain Python functions inside `execute_energysystems_code`.
 Write PyPSA directly when a task falls outside them.
 
+## Local Data Catalog
+
+This server ships ready-made power-grid datasets. Search for one with
+`search_data` instead of building a network from scratch.
+
 ## Auto-Imported Modules
 
 Available without explicit imports:

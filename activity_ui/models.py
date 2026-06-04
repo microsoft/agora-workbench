@@ -15,6 +15,7 @@ EventType = Literal[
     "push_object_sent",
     "push_object_received",
     "tool_search",
+    "data_searched",
     "skill_loaded",
     "workflow_planned",
     "batch_cancelled",
@@ -74,6 +75,9 @@ class ActivityEvent(BaseModel):
     category: Optional[str] = None
     matched_tools: Optional[list[str]] = None
     matched_skills: Optional[list[str]] = None
+
+    # data_searched: catalog data-search hits (dataset / file names)
+    matched_artifacts: Optional[list[str]] = None
 
     # skill_loaded
     skill_name: Optional[str] = None
