@@ -2,7 +2,7 @@
 Tool definitions (metadata) for the energy systems domain.
 
 This module contains only ``ToolDefinition`` objects — the server-side
-schemas, state transitions, and affordances. The actual implementations
+schemas and affordances. The actual implementations
 live in the ``energysystems_tools`` pip package, which is installed into the
 execution environment at build time.
 
@@ -11,7 +11,7 @@ The ``module`` field on each definition points to the installed package
 ``from {module} import {name}`` import resolves correctly.
 """
 
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from code_execution import ReturnSpec, ToolDefinition, ToolParameter
 
 # ============================================================================
 # Low complexity: Network Setup
@@ -54,9 +54,6 @@ define_network = ToolDefinition(
         ReturnSpec(name="end", type=str, description="Last snapshot timestamp"),
     ],
     module="energysystems_tools.define_network",
-    state_transition=StateTransition(
-        produces=frozenset({"energysystems.network_defined"}),
-    ),
     affordances=[
         "create a power network",
         "set up a PyPSA model",
@@ -119,10 +116,6 @@ add_components = ToolDefinition(
         ReturnSpec(name="summary", type=str, description="Human-readable summary of components"),
     ],
     module="energysystems_tools.add_components",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.network_defined"}),
-        produces=frozenset({"energysystems.components_added"}),
-    ),
     affordances=[
         "add buses to a network",
         "add generators with costs",
@@ -166,10 +159,6 @@ add_time_series = ToolDefinition(
         ReturnSpec(name="components", type=list, description="List of component names updated"),
     ],
     module="energysystems_tools.add_time_series",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.components_added"}),
-        produces=frozenset({"energysystems.time_series_attached"}),
-    ),
     affordances=[
         "attach load profiles",
         "set renewable capacity factors over time",
@@ -208,10 +197,6 @@ run_power_flow = ToolDefinition(
         ReturnSpec(name="line_loading", type=list, description="Per-line loading percentage and power flow"),
     ],
     module="energysystems_tools.run_power_flow",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.components_added"}),
-        produces=frozenset({"energysystems.power_flow_solved"}),
-    ),
     affordances=[
         "run power flow analysis",
         "compute bus voltages and angles",
@@ -241,10 +226,6 @@ run_optimal_power_flow = ToolDefinition(
         ReturnSpec(name="marginal_prices", type=list, description="Per-bus marginal price (currency/MWh)"),
     ],
     module="energysystems_tools.run_optimal_power_flow",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.components_added"}),
-        produces=frozenset({"energysystems.opf_solved"}),
-    ),
     affordances=[
         "minimize generation cost",
         "run optimal power flow",
@@ -278,10 +259,6 @@ run_capacity_expansion = ToolDefinition(
         ReturnSpec(name="investment_by_type", type=dict, description="Investment cost breakdown by carrier/technology"),
     ],
     module="energysystems_tools.run_capacity_expansion",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.time_series_attached"}),
-        produces=frozenset({"energysystems.capacity_expansion_solved"}),
-    ),
     affordances=[
         "optimize generation investment",
         "plan capacity expansion",
@@ -312,10 +289,6 @@ analyze_costs = ToolDefinition(
         ReturnSpec(name="most_expensive_bus", type=str, description="Bus with highest average marginal price"),
     ],
     module="energysystems_tools.analyze_costs",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.opf_solved"}),
-        produces=frozenset({"energysystems.costs_analyzed"}),
-    ),
     affordances=[
         "break down system costs by technology",
         "analyze marginal pricing across buses",
@@ -346,10 +319,6 @@ analyze_topology = ToolDefinition(
         ReturnSpec(name="bottleneck_lines", type=list, description="Lines with highest betweenness centrality"),
     ],
     module="energysystems_tools.analyze_topology",
-    state_transition=StateTransition(
-        requires=frozenset({"energysystems.components_added"}),
-        produces=frozenset({"energysystems.topology_analyzed"}),
-    ),
     affordances=[
         "check network connectivity",
         "find electrical islands",
