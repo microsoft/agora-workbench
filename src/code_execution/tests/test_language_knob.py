@@ -5,13 +5,15 @@ the kernel-name derivation, the output/token preambles, and the validator
 short-circuit. They are pure unit tests — no kernel is launched.
 """
 
+from typing import Literal
+
 from .. import CodeExecutionServer
 from ..auth import create_noop_auth_config
 from ..code_execution_models import ServerConfig
 from ..sessions.manager import SessionConfig, SessionManager
 
 
-def _server(language: str) -> CodeExecutionServer:
+def _server(language: Literal["python", "r"]) -> CodeExecutionServer:
     """A minimal server (no env build) for validator tests."""
     config = ServerConfig(
         name="test",
