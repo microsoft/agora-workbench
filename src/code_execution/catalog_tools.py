@@ -65,6 +65,14 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
             hybrid_alpha=ctx.config.search.hybrid_alpha,
         )
         hits = [r.to_dict() for r in results]
+        for hit in hits:
+            uri = hit.get("storage_uri")
+            if uri:
+                # Ready-to-use reference: paste this into execute_*_code to load the
+                # file. The platform fetches it into the sandbox and substitutes a
+                # local Path. The raw storage_uri is server-side and not readable
+                # from the sandbox (only /tmp is).
+                hit["load_path"] = f"<local>{uri}</local>"
         if activity_publisher is not None:
             query_label = repr(query) if query else "'' (all)"
             activity_publisher.publish_nowait(
@@ -90,7 +98,11 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
         record = ctx.db.get_artifact(artifact_id)
         if record is None:
             return {"error": f"Artifact not found: {artifact_id}"}
-        return record.to_dict()
+        data = record.to_dict()
+        uri = data.get("storage_uri")
+        if uri:
+            data["load_path"] = f"<local>{uri}</local>"
+        return data
 
     async def list_domains() -> list[str]:
         """List all available data domains in the catalog.
@@ -128,9 +140,11 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
         name="search_data",
         description=(
             "Search the data catalog for files and datasets matching a natural-language query. "
-            "Returns ranked results, each with a `storage_uri` (for local datasets, a file path "
-            "you can open/load directly inside the code-execution tool) and a description. "
-            "Supports filtering by domain and storage type."
+            "Each result includes a `load_path` — paste that exact string into your "
+            "execute_*_code (e.g. `pypsa.Network(load_path)` or `pd.read_csv(load_path)`) to load "
+            "the file: the platform fetches it into the sandbox and substitutes a local Path. "
+            "Do NOT pass the raw `storage_uri` or the artifact `id` to open the file — they are "
+            "server-side and not readable from the sandbox. Supports filtering by domain and storage type."
         ),
     )(search_data)
 
@@ -148,7 +162,10 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
 
     mcp.tool(
         name="get_artifact",
-        description="Get detailed metadata for a specific data artifact by its ID.",
+        description=(
+            "Get detailed metadata for a specific data artifact by its ID, including a "
+            "`load_path` you paste into execute_*_code to load the file."
+        ),
     )(get_artifact)
 
     mcp.tool(
