@@ -1,62 +1,37 @@
 ---
 name: energysystems-pypsa
-description: Power system modeling and analysis using PyPSA — network definition, component management, power flow, optimal dispatch, capacity expansion, cost analysis, and topology via domain tools and the execute_energysystems_code tool.
-states:
-  - energysystems.network_defined
-  - energysystems.components_added
-  - energysystems.time_series_attached
-  - energysystems.power_flow_solved
-  - energysystems.opf_solved
-  - energysystems.capacity_expansion_solved
-  - energysystems.costs_analyzed
-  - energysystems.topology_analyzed
+description: Power system modeling and analysis with PyPSA inside execute_energysystems_code — network setup, components, power flow, optimal dispatch, capacity expansion, cost and topology analysis. Covers PyPSA conventions and the gotchas that cause silently wrong results.
 ---
 
 # Energy Systems / PyPSA
 
 Use this skill when the user asks about power systems, electrical networks,
-generators, transmission lines, optimal power flow, capacity planning,
-renewable integration, or any power system analysis task. Code runs in the
+generators, transmission lines, power flow, optimal dispatch, capacity
+planning, or renewable integration. Code runs in the
 `execute_energysystems_code` tool with PyPSA auto-imported.
 
-## State Graph Overview
+The domain ships eight tools whose parameters and return values are
+described in their own schemas (visible through the tool interface). This
+skill covers what the schemas don't: PyPSA conventions, the non-obvious
+setup patterns, and the gotchas that produce silently wrong results.
 
-The domain tools form a directed graph of workflows. `define_network` is the
-entry point; downstream tools have prerequisite states that guide workflow
-planning.
+## Domain Tools
 
 ```
 define_network
-  → energysystems.network_defined
-        │
-        └── add_components → energysystems.components_added
-                │
-                ├── run_power_flow → energysystems.power_flow_solved
-                │
-                ├── run_optimal_power_flow → energysystems.opf_solved
-                │       │
-                │       ├── analyze_costs → energysystems.costs_analyzed
-                │       │
-                │       └── (also feeds run_capacity_expansion if extendable)
-                │
-                ├── analyze_topology → energysystems.topology_analyzed
-                │
-                └── add_time_series → energysystems.time_series_attached
-                        │
-                        └── run_capacity_expansion → energysystems.capacity_expansion_solved
+  └── add_components
+        ├── run_power_flow
+        ├── run_optimal_power_flow ──► analyze_costs
+        ├── analyze_topology
+        └── add_time_series ──► run_capacity_expansion
 ```
 
-## Workflow Skills
-
-| Skill | Tools | Description |
-|-------|-------|-------------|
-| [network-modeling](network-modeling.md) | `define_network` → `add_components` | Build power system models |
-| [power-flow-analysis](power-flow-analysis.md) | `run_power_flow` → `run_optimal_power_flow` → `analyze_costs` | Dispatch and pricing |
-| [capacity-planning](capacity-planning.md) | `add_time_series` → `run_capacity_expansion` | Investment optimization |
+The tools are plain Python functions inside `execute_energysystems_code`.
+Write PyPSA directly when a task falls outside them.
 
 ## Auto-Imported Modules
 
-These are available without explicit imports:
+Available without explicit imports:
 
 ```python
 import pypsa
@@ -68,26 +43,21 @@ import matplotlib.pyplot as plt
 
 ## Critical: PyPSA Conventions
 
-**Bus-based topology** — All components (generators, loads, storage) connect
-to buses. Lines connect bus pairs. Always define buses first.
+**Bus-based topology** — every component (generator, load, storage) attaches
+to a bus; lines connect bus pairs. Define buses before anything that
+references them, or the add silently fails.
 
-```python
-# CORRECT order
-n.add("Bus", "Bus0", v_nom=110)
-n.add("Generator", "Gen0", bus="Bus0", p_nom=100)
-
-# WRONG — generator references non-existent bus
-n.add("Generator", "Gen0", bus="Bus0", p_nom=100)  # Bus0 not defined yet
-```
-
-**Snapshots** — Time-series data must match the network's snapshot index
-length. Always check `len(n.snapshots)` before attaching profiles.
+**Snapshots** — time-series data must match the network's snapshot index
+length. Check `len(n.snapshots)` before attaching a profile; a length
+mismatch is the most common error.
 
 **Per-unit system** — PyPSA uses per-unit for voltages (`v_mag_pu`),
 capacity factors (`p_max_pu`), and state of charge (`state_of_charge`).
 Physical units (MW, MVAr) are used for `p_nom`, `p_set`, `s_nom`.
 
-## Component Parameters Quick Reference
+## Component Parameters
+
+`add_components` takes lists of dicts. The keys that matter per component:
 
 | Component | Key Parameters |
 |-----------|---------------|
@@ -97,11 +67,79 @@ Physical units (MW, MVAr) are used for `p_nom`, `p_set`, `s_nom`.
 | Line | `bus0`, `bus1`, `s_nom` (MVA), `x` (pu), `r` (pu) |
 | StorageUnit | `bus`, `p_nom` (MW), `max_hours`, `marginal_cost`, `capital_cost`, `p_nom_extendable` |
 
+Tag generators with `carrier` (`"coal"`, `"gas"`, `"wind"`, `"solar"`) so
+`analyze_costs` can break costs down by technology.
+
+## Capacity Expansion: Extendable Components
+
+To let the optimizer size a component, start it at zero capacity and mark it
+extendable with an annualized capital cost:
+
+```python
+add_components(
+    network_name="grid",
+    generators=[{
+        "name": "Wind", "bus": "Bus0", "carrier": "wind",
+        "p_nom": 0,                # start with no capacity
+        "p_nom_extendable": True,  # let the optimizer size it
+        "capital_cost": 1000,      # €/MW/year annualized
+        "marginal_cost": 0,
+    }],
+)
+```
+
+Then attach time-varying profiles with `add_time_series` (each profile dict:
+`component_type`, `component_name`, `attribute`, `values`) before
+`run_capacity_expansion`. Common time-varying attributes:
+
+| Component | Attribute | Meaning |
+|-----------|-----------|---------|
+| Generator | `p_max_pu` | Capacity factor 0–1 (wind/solar profiles) |
+| Load | `p_set` | Absolute demand (MW) per snapshot |
+| StorageUnit | `inflow` | Natural inflow (MW), e.g. hydro |
+
+## Power Flow: AC vs DC
+
+| Method | Use Case | Speed | Accuracy |
+|--------|----------|-------|----------|
+| `"ac"` | Voltage / reactive-power analysis | Slower | Full non-linear |
+| `"dc"` | Quick feasibility, large networks | Fast | Linear approximation |
+
 ## Solver
 
-The HiGHS solver is pre-installed and used by default for optimization
-(OPF and capacity expansion). No license required.
+HiGHS is pre-installed and the default for optimization (OPF and capacity
+expansion) — no license required:
 
 ```python
 status, _ = n.optimize(solver_name="highs")
+```
+
+## Gotchas
+
+- Generators need `marginal_cost` for OPF to be meaningful — one without it
+  is treated as free and dispatched first.
+- Lines need `s_nom` > 0 for line-loading calculations.
+- Profile `values` length must exactly equal `num_snapshots` from
+  `define_network`.
+- Use a full year of snapshots (8760) for realistic capacity-expansion
+  results; a 24-hour horizon is fine for quick checks.
+
+## End-to-End Example
+
+```python
+# Build a 2-bus network, solve OPF, break down costs by carrier
+define_network(name="grid", snapshots=24)
+add_components(
+    network_name="grid",
+    buses=[{"name": "North"}, {"name": "South"}],
+    generators=[
+        {"name": "Gas", "bus": "North", "p_nom": 500, "marginal_cost": 50, "carrier": "gas"},
+        {"name": "Wind", "bus": "South", "p_nom": 300, "marginal_cost": 0, "carrier": "wind"},
+    ],
+    loads=[{"name": "City", "bus": "South", "p_set": 400}],
+    lines=[{"name": "N-S", "bus0": "North", "bus1": "South", "s_nom": 500, "x": 0.01}],
+)
+opf = run_optimal_power_flow(network_name="grid")
+costs = analyze_costs(network_name="grid")
+print(opf["status"], costs["total_cost"], costs["cost_by_carrier"])
 ```
