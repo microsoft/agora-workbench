@@ -34,7 +34,7 @@ services:
       # Trust sibling domain-example servers as plain-HTTP push_object targets on
       # the shared docker network.  Bearer tokens still traverse HTTP, so this
       # is only safe because all peers are on a private docker network.
-      OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-server,earthscience-server,energysystems-server"
+      OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-server,earthscience-server,energysystems-server,rstats-server"
     networks:
       - agora-activity
     healthcheck:

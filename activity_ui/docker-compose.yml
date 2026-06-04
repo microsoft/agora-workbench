@@ -26,6 +26,10 @@ services:
     environment:
       ACTIVITY_UI_HOST: "0.0.0.0"
       ACTIVITY_UI_PORT: "8030"
+      # The UI's app-layer auth is ON by default and needs Entra config; for
+      # local/loopback use, disable it. To enable, drop this and set
+      # ENTRA_TENANT_ID + ACTIVITY_UI_AUDIENCE/ACTIVITY_UI_CLIENT_ID instead.
+      ACTIVITY_UI_AUTH_DISABLED: "true"
     networks:
       - agora-activity
     healthcheck:
