@@ -1,0 +1,49 @@
+# R Statistics MCP Server — local development
+#
+# Prerequisites — build the base image first:
+#   # From the repository root:
+#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+#
+# To see activity events in the shared Activity UI (optional but recommended):
+#   1) docker network create agora-activity     # once per host
+#   2) cd activity_ui && docker compose up -d
+# Then from this directory:
+#   docker compose up --build
+#
+# If the activity-ui is not running, the publisher silently no-ops.
+
+services:
+  rstats-server:
+    build:
+      context: ../../..
+      dockerfile: examples/domain_examples/rstats/Dockerfile
+    ports:
+      # Bind to loopback only — the server uses create_noop_auth_config()
+      # which accepts any bearer token, so it must not be reachable off-host.
+      - "127.0.0.1:8023:8000"
+    env_file:
+      - ../../../deployment/.env.server
+    environment:
+      PORT: "8000"
+      HOST: "0.0.0.0"
+      # Reach the shared activity-ui by its service name on the agora-activity network.
+      # If activity-ui isn't up, the publisher fails open (no impact on tool execution).
+      ACTIVITY_UI_URL: "http://activity-ui:8030"
+      # Externally-visible URL for this server, used in artifact download links.
+      SERVER_PUBLIC_URL: "http://localhost:8023"
+      # Trust sibling domain-example servers as plain-HTTP push_object targets on
+      # the shared docker network. Bearer tokens still traverse HTTP, so this is
+      # only safe because all peers are on a private docker network.
+      OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-server,earthscience-server,energysystems-server,rstats-server"
+    networks:
+      - agora-activity
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+networks:
+  agora-activity:
+    external: true
