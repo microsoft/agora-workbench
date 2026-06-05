@@ -72,11 +72,15 @@ homepage = "https://github.com/microsoft/agora-workbench"
 
 [project.scripts]
 mcp-connector-server = "agora_workbench.connector.cli:main"
+agora-workbench-deploy = "agora_workbench.scaffold.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["agora_workbench*"]
 exclude = ["tests*", "scripts*", "examples*", "deployment*"]
+
+[tool.setuptools.package-data]
+"agora_workbench.scaffold.templates" = ["**/*"]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]

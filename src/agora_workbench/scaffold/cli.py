@@ -1,0 +1,154 @@
+"""CLI entrypoint for deployment scaffolding.
+
+Usage:
+    agora-workbench-deploy init [--target docker|azure|all] [--output-dir DIR]
+
+Copies deployment templates into the specified directory so they can be
+customized for the user's server.
+"""
+
+import argparse
+import sys
+from importlib.resources import files
+from pathlib import Path
+
+
+TEMPLATES = files("agora_workbench.scaffold.templates")
+
+# Template sets mapped to subdirectories within the templates package
+TEMPLATE_SETS = {
+    "docker": [
+        "Dockerfile",
+        "docker-compose.yml",
+        ".env.server.example",
+    ],
+    "azure": [
+        "container_apps/main.bicep",
+        "container_apps/activity-ui.bicep",
+        "container_apps/deploy.sh",
+        "container_apps/deploy-server.sh",
+        "container_apps/deploy-network.sh",
+        "container_apps/_deploy-common.sh",
+        "container_apps/setup.sh",
+        "container_apps/setup-app-registrations.sh",
+        "container_apps/parameters/server.bicepparam",
+        "container_apps/networks/router.yaml",
+    ],
+}
+
+
+def _copy_template(name: str, dest_dir: Path) -> Path:
+    """Copy a single template file to the destination, preserving subdirectories."""
+    source = TEMPLATES.joinpath(name)
+    target = dest_dir / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    content = source.read_text()
+    target.write_text(content)
+
+    # Preserve executable bit for shell scripts
+    if name.endswith(".sh"):
+        target.chmod(target.stat().st_mode | 0o755)
+
+    return target
+
+
+def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
+    """Copy deployment templates into the target directory.
+
+    Args:
+        target: Which template set to scaffold — "docker", "azure", or "all".
+        output_dir: Destination directory (created if needed).
+
+    Returns:
+        List of created file paths (relative to output_dir).
+    """
+    dest = Path(output_dir)
+
+    if target == "all":
+        sets_to_copy = list(TEMPLATE_SETS.keys())
+    elif target in TEMPLATE_SETS:
+        sets_to_copy = [target]
+    else:
+        raise ValueError(f"Unknown target: {target!r}. Choose from: docker, azure, all")
+
+    created = []
+    for set_name in sets_to_copy:
+        for template_name in TEMPLATE_SETS[set_name]:
+            path = _copy_template(template_name, dest)
+            created.append(str(path))
+
+    return created
+
+
+def main() -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        prog="agora-workbench-deploy",
+        description="Scaffold deployment files for an agora-workbench server.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Copy deployment templates into your project.",
+    )
+    init_parser.add_argument(
+        "--target",
+        choices=["docker", "azure", "all"],
+        default="all",
+        help="Which deployment templates to scaffold (default: all).",
+    )
+    init_parser.add_argument(
+        "--output-dir",
+        "-o",
+        default="deployment",
+        help="Destination directory (default: ./deployment).",
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing files without prompting.",
+    )
+
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    if args.command == "init":
+        dest = Path(args.output_dir)
+
+        # Check for existing files unless --force
+        if dest.exists() and not args.force:
+            existing = [
+                f
+                for set_name in (list(TEMPLATE_SETS.keys()) if args.target == "all" else [args.target])
+                for f in TEMPLATE_SETS[set_name]
+                if (dest / f).exists()
+            ]
+            if existing:
+                print(f"⚠️  The following files already exist in {dest}/:", file=sys.stderr)
+                for f in existing:
+                    print(f"   {f}", file=sys.stderr)
+                print("\nUse --force to overwrite.", file=sys.stderr)
+                sys.exit(1)
+
+        created = init(target=args.target, output_dir=args.output_dir)
+        print(f"✓ Scaffolded {len(created)} deployment file(s) into {dest}/:")
+        for path in sorted(created):
+            print(f"  {path}")
+        print("\nNext steps:")
+        if args.target in ("docker", "all"):
+            print("  1. Edit Dockerfile to COPY your server code")
+            print("  2. Copy .env.server.example → .env.server and fill in values")
+            print("  3. docker compose up --build")
+        if args.target in ("azure", "all"):
+            print("  4. Edit container_apps/parameters/server.bicepparam for your server")
+            print("  5. Run container_apps/setup.sh to provision Azure infrastructure")
+            print("  6. Run container_apps/deploy-server.sh --server <name> to deploy")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,20 @@
+# Network deployment descriptor.
+#
+# Defines a connector (router/gateway) and its upstream servers for
+# multi-server deployment via deploy-network.sh.
+#
+# Usage:
+#   ./deploy-network.sh --network networks/router.yaml
+
+name: my-network
+connector:
+  server: my-router
+  params: ../parameters/server.bicepparam
+  context: ../../..
+  dockerfile: ../../base.Dockerfile
+upstreams:
+  - server: my-domain-server
+    params: ../parameters/server.bicepparam
+    internal: true
+    context: ../../..
+    dockerfile: ../../../path/to/your/Dockerfile
