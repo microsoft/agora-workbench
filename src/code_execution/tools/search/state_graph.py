@@ -152,10 +152,13 @@ class StateGraph:
         extra_skill_dirs: list[Path] | None = None,
         domain_name: str | None = None,
         skills: list[dict[str, Any]] | None = None,
+        state_descriptions: dict[str, str] | None = None,
     ) -> None:
         self._domains_dir = domains_dir
         self._extra_skill_dirs = extra_skill_dirs
         self._domain_name = domain_name
+        # {state_token: human-readable description} from State objects
+        self._state_descriptions: dict[str, str] = state_descriptions or {}
 
         # {domain_name: {enum_member.value: enum_member.name, ...}}
         self._domain_states: dict[str, dict[str, str]] = {}
@@ -230,6 +233,7 @@ class StateGraph:
 
         Groups state tokens by domain prefix (e.g. 'chemistry.molecule_parsed'
         → domain 'chemistry') and creates readable labels from tokens.
+        Uses State descriptions when available for richer labels.
         """
         all_tokens: set[str] = set()
         for tool in self._tools:
@@ -244,9 +248,12 @@ class StateGraph:
         by_domain: dict[str, dict[str, str]] = defaultdict(dict)
         for token in sorted(all_tokens):
             domain = self._domain_for_state(token)
-            # Generate a readable label: "chemistry.molecule_parsed" → "MOLECULE_PARSED"
-            suffix = token.split(".", 1)[1] if "." in token else token
-            label = suffix.upper()
+            # Use the State description if provided, otherwise generate a label
+            if token in self._state_descriptions:
+                label = self._state_descriptions[token]
+            else:
+                suffix = token.split(".", 1)[1] if "." in token else token
+                label = suffix.upper()
             by_domain[domain or self._domain_name or "default"][token] = label
 
         for domain, states in by_domain.items():

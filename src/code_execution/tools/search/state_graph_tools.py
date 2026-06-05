@@ -88,6 +88,7 @@ def create_plan_workflow_descriptor(
     extra_skill_dirs: list[Path] | None = None,
     domain_name: str | None = None,
     skills: list[dict[str, Any]] | None = None,
+    state_descriptions: dict[str, str] | None = None,
 ) -> ToolDescriptor:
     """Create a ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
@@ -108,6 +109,9 @@ def create_plan_workflow_descriptor(
     skills : list[dict] | None
         Pre-built skill dicts (keys: name, description, domain, states, abs_path).
         When provided, filesystem-based skill discovery is skipped.
+    state_descriptions : dict[str, str] | None
+        Mapping of state token → human-readable description. Used to
+        enrich the state vocabulary shown in overview mode.
 
     Returns
     -------
@@ -116,7 +120,14 @@ def create_plan_workflow_descriptor(
     """
     if tools is None:
         tools = []
-    graph = StateGraph(tools, domains_dir, extra_skill_dirs, domain_name=domain_name, skills=skills)
+    graph = StateGraph(
+        tools,
+        domains_dir,
+        extra_skill_dirs,
+        domain_name=domain_name,
+        skills=skills,
+        state_descriptions=state_descriptions,
+    )
 
     async def plan_workflow(
         domain: str = "",

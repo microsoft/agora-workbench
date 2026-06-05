@@ -1347,6 +1347,7 @@ class CodeExecutionServer(BaseMCPServer):
                 tools=tool_infos,
                 domain_name=server_name,
                 skills=skills_dicts,
+                state_descriptions={s.token: s.description for s in self.states if s.description},
             )
             _pw_func = pw_descriptor.func
 
