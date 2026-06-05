@@ -37,7 +37,7 @@ class TestServerMain:
         server = _make_server()
         server.run_http = AsyncMock()
 
-        with patch("sys.argv", ["server"]), patch.dict("os.environ", {}, clear=False):
+        with patch("sys.argv", ["server"]), patch.dict("os.environ", {"HOST": "", "PORT": ""}, clear=False):
             server.main()
 
         server.run_http.assert_awaited_once_with(host="0.0.0.0", port=8000)

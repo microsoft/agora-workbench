@@ -364,13 +364,13 @@ class CodeExecutionServer(BaseMCPServer):
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
 
-    async def warm(self):
-        """Build environment and provision assets without starting the server.
+    async def warm(self) -> None:
+        """Pre-initialize the execution environment without serving requests.
 
-        Use this during Docker builds to pre-build the environment so it's
-        ready at runtime without needing network access or ephemeral storage.
-        At runtime, _ensure_environment() detects the pre-built env and skips
-        the build step.
+        Call this during Docker builds or process startup to avoid cold-start
+        latency. It prepares the Python environment, provisions assets according
+        to the ServerConfig (e.g. when auto_provision is enabled), and registers
+        the execution kernel.
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
@@ -388,8 +388,8 @@ class CodeExecutionServer(BaseMCPServer):
 
         Flags:
             --warm          Pre-initialize the environment and exit (no HTTP server).
-            --host HOST     Bind address (default: 0.0.0.0, or HOST env var).
-            --port PORT     Bind port (default: 8000, or PORT env var).
+            --host HOST     Bind address (default: default_host, or HOST env var).
+            --port PORT     Bind port (default: default_port, or PORT env var).
         """
         import argparse
 
@@ -401,15 +401,22 @@ class CodeExecutionServer(BaseMCPServer):
             action="store_true",
             help="Pre-initialize the environment and exit without starting the server.",
         )
+        env_host = os.getenv("HOST")
+        env_port = os.getenv("PORT")
+        try:
+            port_default = int(env_port) if env_port else default_port
+        except ValueError:
+            parser.error(f"Invalid PORT env var: {env_port!r} (must be an integer).")
+
         parser.add_argument(
             "--host",
-            default=os.getenv("HOST", default_host),
+            default=env_host or default_host,
             help=f"Bind address (default: {default_host}, or HOST env var).",
         )
         parser.add_argument(
             "--port",
             type=int,
-            default=int(os.getenv("PORT", str(default_port))),
+            default=port_default,
             help=f"Bind port (default: {default_port}, or PORT env var).",
         )
         args = parser.parse_args()

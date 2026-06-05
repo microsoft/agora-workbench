@@ -230,3 +230,23 @@ class TestProtectedResourceMetadataWithAuthConfig:
         data = response.json()
         assert data["resource"] == "api://my-client-id"
         assert "my-tenant-id" in data["authorization_servers"][0]
+
+    def test_noop_auth_allows_missing_authorization_header(self):
+        """No-op auth mode should allow requests without Authorization header."""
+        server = _create_server_with_noop_auth()
+        client = TestClient(_create_test_app_with_auth(server))
+
+        response = client.post("/object-transfer/receive")
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "error": "Invalid JSON body"}
+        assert "www-authenticate" not in response.headers
+
+    def test_noop_auth_allows_invalid_bearer_token(self):
+        """No-op auth mode should also allow malformed or opaque bearer tokens."""
+        server = _create_server_with_noop_auth()
+        client = TestClient(_create_test_app_with_auth(server))
+
+        response = client.post("/object-transfer/receive", headers={"Authorization": "Bearer " + "opaque-token"})
+        assert response.status_code == 400
+        assert response.json() == {"success": False, "error": "Invalid JSON body"}
+        assert "www-authenticate" not in response.headers
