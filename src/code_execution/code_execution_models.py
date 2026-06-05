@@ -133,7 +133,7 @@ class ServerConfig(BaseModel):
         max_timeout, default_timeout, output_truncation_threshold, parallel_max_concurrency
 
     **Features** — optional server capabilities:
-        domains_dir, tool_search_backend
+        tool_search_backend
 
     For fields that also have an environment variable counterpart (e.g.,
     output_truncation_threshold / CODE_OUTPUT_TRUNCATION_THRESHOLD), the
@@ -237,14 +237,6 @@ class ServerConfig(BaseModel):
 
     # --- Features ---
 
-    domains_dir: Optional[Path] = Field(
-        default=None,
-        description=(
-            "Deprecated: Use the ``skills`` and ``states`` parameters on "
-            "``CodeExecutionServer`` instead. This field is retained for backward "
-            "compatibility but is no longer used by the server internals."
-        ),
-    )
     tool_search_backend: Literal["bm25", "azure_ai_search"] = Field(
         default="bm25",
         description=(

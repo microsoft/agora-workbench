@@ -180,20 +180,6 @@ class CodeExecutionServer(BaseMCPServer):
         self.server_config = server_config
         self.tool_registry = tool_registry
 
-        # Backward compat: if no explicit skills provided but domains_dir is set,
-        # auto-discover skills from the legacy filesystem layout.
-        if not skills and server_config.domains_dir:
-            from code_execution.skills import discover_skills as _discover
-
-            _legacy_skills_dir = server_config.domains_dir / server_config.name / "skills"
-            if _legacy_skills_dir.is_dir():
-                skills = _discover(_legacy_skills_dir, domain=server_config.name)
-                LOGGER.info(
-                    "Auto-discovered %d skills from domains_dir (deprecated); "
-                    "pass skills= explicitly to silence this message.",
-                    len(skills),
-                )
-
         self.skills: list["Skill"] = list(skills or [])
         self.states: list["State"] = list(states or [])
         self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
