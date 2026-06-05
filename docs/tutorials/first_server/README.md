@@ -5,9 +5,9 @@ This tutorial walks you through building a working Agora Workbench MCP server fr
 By the end you will have:
 
 - A `ServerConfig` (uv environment — no conda needed)
-- One `ToolDefinition` with a `module` field pointing to a separate implementation package
+- One `ToolDefinition` with its implementation in a separate kernel-safe package
+- A `ToolRegistry` with `package=` that automatically resolves kernel import paths
 - A separate implementation file that is safe to run in the kernel
-- Registration via `ToolRegistry`
 - A `--warm` flag for Docker pre-build
 
 To see a version of this pattern that leverages the more advanced feature of Agora Workbench, jump to the
@@ -71,19 +71,15 @@ Before adding a tool, it is important to understand the two separate Python proc
 └──────────────────────────────────────────┘
 ```
 
-The `module` field in a `ToolDefinition` is an import path that the **kernel** resolves at runtime:
+The `ToolRegistry(package=...)` setting tells the server how to resolve kernel imports. When you register a tool named `"summarize_numbers"` with `package="myserver_tools"`, the kernel will execute:
 
 ```python
-ToolDefinition(
-    name="summarize_numbers",
-    module="myserver_tools.summarize",   # resolved inside the kernel
-    ...
-)
+from myserver_tools.summarize_numbers import summarize_numbers
 ```
 
-This means the implementation module (`myserver_tools/summarize.py`) must:
+This means the implementation module (`myserver_tools/summarize_numbers.py`) must:
 
-- Be installable into the kernel environment (as a pip package or via `additional_commands`)
+- Be installable into the kernel environment (as a pip package via `additional_commands`)
 - **Not** import anything from `code_execution` — those packages are only in the server environment
 
 The `ToolDefinition` (the metadata object) lives in your server code. The function implementation lives in a pip-installable package that is installed into the kernel environment.
@@ -102,7 +98,7 @@ myserver/
     └── src/
         └── myserver_tools/
             ├── __init__.py
-            └── summarize.py
+            └── summarize_numbers.py
 ```
 
 **`myserver_tools/pyproject.toml`**
@@ -124,7 +120,7 @@ requires-python = ">=3.11"
 # intentionally empty
 ```
 
-**`myserver_tools/src/myserver_tools/summarize.py`**
+**`myserver_tools/src/myserver_tools/summarize_numbers.py`**
 
 ```python
 def summarize_numbers(numbers: list[float]) -> dict:
@@ -199,13 +195,12 @@ summarize_numbers = ToolDefinition(
         ReturnSpec(name="min", type=float, description="Minimum value"),
         ReturnSpec(name="max", type=float, description="Maximum value"),
     ],
-    module="myserver_tools.summarize",
 )
 
 MYSERVER_TOOLS = [summarize_numbers]
 ```
 
-The `module` field (`"myserver_tools.summarize"`) is the dotted import path the kernel will use to find the function. It must match the package you installed into the kernel environment.
+Notice that there is no `module` field here — the kernel import path will be resolved automatically when the tool is registered with a `ToolRegistry` that has a `package` configured (next step).
 
 ---
 
@@ -238,7 +233,7 @@ config = ServerConfig(
     ],
 )
 
-registry = ToolRegistry()
+registry = ToolRegistry(package="myserver_tools")
 for tool_def in MYSERVER_TOOLS:
     registry.register_tool(tool_def)
 
@@ -269,7 +264,7 @@ myserver/
     └── src/
         └── myserver_tools/
             ├── __init__.py
-            └── summarize.py      ← pure implementation, no server deps
+            └── summarize_numbers.py  ← pure implementation, no server deps
 ```
 
 ---
@@ -317,9 +312,9 @@ Pre-building the environment in the image layer means the container is ready to 
 | Component | File | Purpose |
 |-----------|------|---------|
 | `ServerConfig` | `server.py` | uv environment, dependency spec, install commands |
-| `ToolDefinition` | `tools/definitions.py` | Schema + `module` pointer for the kernel |
-| `ToolRegistry` | `server.py` | Registers tools with the server |
-| Implementation | `myserver_tools/summarize.py` | Pure function — no server deps |
+| `ToolDefinition` | `tools/definitions.py` | Schema metadata (params, returns, affordances) |
+| `ToolRegistry` | `server.py` | Registers tools, resolves kernel import paths via `package=` |
+| Implementation | `myserver_tools/summarize_numbers.py` | Pure function — no server deps |
 | Entry point | `server.py` | `--warm` vs HTTP serve |
 
 ---
