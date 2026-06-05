@@ -358,8 +358,9 @@ class CodeExecutionServer(BaseMCPServer):
         """Pre-initialize the execution environment without serving requests.
 
         Call this during Docker builds or process startup to avoid cold-start
-        latency. It prepares the Python environment, provisions any configured
-        assets, and registers the execution kernel.
+        latency. It prepares the Python environment, provisions assets according
+        to the ServerConfig (e.g. when auto_provision is enabled), and registers
+        the execution kernel.
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
@@ -377,8 +378,8 @@ class CodeExecutionServer(BaseMCPServer):
 
         Flags:
             --warm          Pre-initialize the environment and exit (no HTTP server).
-            --host HOST     Bind address (default: 0.0.0.0, or HOST env var).
-            --port PORT     Bind port (default: 8000, or PORT env var).
+            --host HOST     Bind address (default: default_host, or HOST env var).
+            --port PORT     Bind port (default: default_port, or PORT env var).
         """
         import argparse
 
