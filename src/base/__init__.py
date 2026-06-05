@@ -272,7 +272,7 @@ class BaseMCPServer(ABC):
                     await send(
                         {
                             "type": "http.response.body",
-                            "body": b"Missing or invalid Authorization header. Please provide a valid auth token.",
+                            "body": b"Missing or invalid Authorization header. Please provide a valid Bearer token.",
                         }
                     )
                     return
@@ -326,7 +326,12 @@ class BaseMCPServer(ABC):
         middleware.append((MCPSessionMiddleware, {}))
 
         # Resolve WWW-Authenticate value
-        if server.auth_config.www_authenticate_value:
+        # When require_authorization_header is disabled (noop/open mode), skip
+        # the WWW-Authenticate header entirely to avoid triggering OAuth discovery
+        # flows in MCP clients.
+        if not server.auth_config.require_authorization_header:
+            www_authenticate = ""
+        elif server.auth_config.www_authenticate_value:
             www_authenticate = server.auth_config.www_authenticate_value
         else:
             public_base_url = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
