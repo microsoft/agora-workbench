@@ -391,15 +391,22 @@ class CodeExecutionServer(BaseMCPServer):
             action="store_true",
             help="Pre-initialize the environment and exit without starting the server.",
         )
+        env_host = os.getenv("HOST")
+        env_port = os.getenv("PORT")
+        try:
+            port_default = int(env_port) if env_port else default_port
+        except ValueError:
+            parser.error(f"Invalid PORT env var: {env_port!r} (must be an integer).")
+
         parser.add_argument(
             "--host",
-            default=os.getenv("HOST") or default_host,
+            default=env_host or default_host,
             help=f"Bind address (default: {default_host}, or HOST env var).",
         )
         parser.add_argument(
             "--port",
             type=int,
-            default=int(os.getenv("PORT") or default_port),
+            default=port_default,
             help=f"Bind port (default: {default_port}, or PORT env var).",
         )
         args = parser.parse_args()
