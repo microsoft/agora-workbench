@@ -177,6 +177,11 @@ class StateGraph:
         else:
             self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
 
+        # If no domain states were loaded from filesystem, infer a minimal
+        # vocabulary from tool state annotations so overview() still works.
+        if not self._domain_states and self._tools:
+            self._infer_states_from_tools()
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
@@ -219,6 +224,34 @@ class StateGraph:
                 self._from_state[st].append(tool)
             for st in tool.state_produces:
                 self._to_state[st].append(tool)
+
+    def _infer_states_from_tools(self) -> None:
+        """Build a minimal state vocabulary from tool state annotations.
+
+        Groups state tokens by domain prefix (e.g. 'chemistry.molecule_parsed'
+        → domain 'chemistry') and creates readable labels from tokens.
+        """
+        all_tokens: set[str] = set()
+        for tool in self._tools:
+            all_tokens.update(tool.state_requires)
+            all_tokens.update(tool.state_produces)
+
+        # Also include skill state tokens
+        for skill in self._skills:
+            all_tokens.update(skill.get("states", []))
+
+        # Group by domain prefix
+        by_domain: dict[str, dict[str, str]] = defaultdict(dict)
+        for token in sorted(all_tokens):
+            domain = self._domain_for_state(token)
+            # Generate a readable label: "chemistry.molecule_parsed" → "MOLECULE_PARSED"
+            suffix = token.split(".", 1)[1] if "." in token else token
+            label = suffix.upper()
+            by_domain[domain or self._domain_name or "default"][token] = label
+
+        for domain, states in by_domain.items():
+            if domain not in self._domain_states:
+                self._domain_states[domain] = states
 
     def _domain_for_state(self, state_token: str) -> str:
         """Extract domain prefix from a state token like 'powergrid.network_loaded'."""

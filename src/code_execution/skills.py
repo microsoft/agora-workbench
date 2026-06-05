@@ -104,12 +104,19 @@ def discover_skills(skills_dir: Path, domain: str = "") -> list[Skill]:
             LOGGER.warning("Failed to read skill file: %s", skill_md)
             continue
 
+        # Normalize states to always be a list (YAML may produce a scalar string)
+        raw_states = fm.get("states", [])
+        if isinstance(raw_states, str):
+            raw_states = [raw_states]
+        elif not isinstance(raw_states, list):
+            raw_states = list(raw_states) if raw_states else []
+
         skills.append(
             Skill(
                 name=fm["name"],
                 description=fm.get("description", ""),
                 domain=domain_name,
-                states=fm.get("states", []),
+                states=raw_states,
                 content=content,
                 path=str(skill_md),
             )

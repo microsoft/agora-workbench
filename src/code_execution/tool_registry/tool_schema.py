@@ -8,6 +8,7 @@ MCP code execution servers.
 
 import importlib
 import inspect
+from enum import Enum
 from typing import Any, FrozenSet, List, Optional, Type
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
@@ -203,11 +204,18 @@ class StateTransition(BaseModel):
     @field_validator("requires", "produces", mode="before")
     @classmethod
     def normalize_state_tokens(cls, v: Any) -> frozenset[str]:
-        """Accept State objects or strings and normalize to a frozenset of token strings."""
-        if isinstance(v, (frozenset, set)):
-            return frozenset(item.token if isinstance(item, State) else str(item) for item in v)
-        if isinstance(v, (list, tuple)):
-            return frozenset(item.token if isinstance(item, State) else str(item) for item in v)
+        """Accept State objects, strings, or Enums and normalize to a frozenset of token strings."""
+
+        def _to_token(item: Any) -> str:
+            if isinstance(item, State):
+                return item.token
+            # Support str-Enums (e.g. class MyState(str, Enum)) — use .value
+            if isinstance(item, Enum):
+                return str(item.value)
+            return str(item)
+
+        if isinstance(v, (frozenset, set, list, tuple)):
+            return frozenset(_to_token(item) for item in v)
         return v
 
     @field_serializer("requires", "produces")

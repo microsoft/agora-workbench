@@ -179,6 +179,21 @@ class CodeExecutionServer(BaseMCPServer):
         super().__init__()
         self.server_config = server_config
         self.tool_registry = tool_registry
+
+        # Backward compat: if no explicit skills provided but domains_dir is set,
+        # auto-discover skills from the legacy filesystem layout.
+        if not skills and server_config.domains_dir:
+            from code_execution.skills import discover_skills as _discover
+
+            _legacy_skills_dir = server_config.domains_dir / server_config.name / "skills"
+            if _legacy_skills_dir.is_dir():
+                skills = _discover(_legacy_skills_dir, domain=server_config.name)
+                LOGGER.info(
+                    "Auto-discovered %d skills from domains_dir (deprecated); "
+                    "pass skills= explicitly to silence this message.",
+                    len(skills),
+                )
+
         self.skills: list["Skill"] = list(skills or [])
         self.states: list["State"] = list(states or [])
         self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
@@ -375,6 +390,48 @@ class CodeExecutionServer(BaseMCPServer):
         await self._ensure_environment()
         await self._register_kernel(kernel_name="tools-py")
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
+
+    def main(self, *, default_host: str = "0.0.0.0", default_port: int = 8000) -> None:
+        """CLI entrypoint that handles ``--warm``, ``--host``, and ``--port``.
+
+        Call this from your server's ``if __name__ == "__main__"`` block to get
+        standard flag handling without manual ``sys.argv`` parsing::
+
+            server = MyDomainServer(...)
+            server.main()
+
+        Flags:
+            --warm          Pre-initialize the environment and exit (no HTTP server).
+            --host HOST     Bind address (default: 0.0.0.0, or HOST env var).
+            --port PORT     Bind port (default: 8000, or PORT env var).
+        """
+        import argparse
+
+        parser = argparse.ArgumentParser(
+            description=f"{self.server_config.name} — CodeExecutionServer",
+        )
+        parser.add_argument(
+            "--warm",
+            action="store_true",
+            help="Pre-initialize the environment and exit without starting the server.",
+        )
+        parser.add_argument(
+            "--host",
+            default=os.getenv("HOST", default_host),
+            help=f"Bind address (default: {default_host}, or HOST env var).",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=int(os.getenv("PORT", str(default_port))),
+            help=f"Bind port (default: {default_port}, or PORT env var).",
+        )
+        args = parser.parse_args()
+
+        if args.warm:
+            asyncio.run(self.warm())
+        else:
+            asyncio.run(self.run_http(host=args.host, port=args.port))
 
     # ========================================================================
     # Optional hooks - can be overridden by subclasses
