@@ -704,6 +704,23 @@
         meta.textContent = parts.length ? " · " + parts.join(" · ") : "";
         row.appendChild(meta);
 
+        // Inline preview for published image artifacts served over http(s), so a
+        // published plot is visible without downloading.  <img> keeps the browser
+        // in secure static mode — same posture as the display-figure path.
+        if (isHttp && (e.mime_type === "image/png" || e.mime_type === "image/svg+xml")) {
+          const wrap = document.createElement("div");
+          wrap.appendChild(row);
+          const fig = document.createElement("div");
+          fig.className = "display-figure";
+          const img = document.createElement("img");
+          img.alt = `published artifact preview (${e.mime_type})`;
+          img.loading = "lazy";
+          img.src = e.remote_uri;
+          fig.appendChild(img);
+          wrap.appendChild(fig);
+          return wrap;
+        }
+
         return row;
       }
 
