@@ -72,7 +72,7 @@ homepage = "https://github.com/microsoft/agora-workbench"
 
 [project.scripts]
 mcp-connector-server = "agora_workbench.connector.cli:main"
-agora-workbench-deploy = "agora_workbench.scaffold.cli:main"
+agora-workbench-deploy = "agora_workbench.deployment.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -80,7 +80,7 @@ include = ["agora_workbench*"]
 exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [tool.setuptools.package-data]
-"agora_workbench.scaffold.templates" = ["**/*"]
+"agora_workbench.deployment.templates" = ["**/*"]
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]
@@ -107,7 +107,7 @@ docs = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["src/agora_workbench/code_execution/tests", "src/agora_workbench/connector/tests", "examples/domain_examples/tests", "activity_ui/tests"]
+testpaths = ["src/agora_workbench/code_execution/tests", "src/agora_workbench/connector/tests", "src/agora_workbench/deployment/tests", "examples/domain_examples/tests", "activity_ui/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

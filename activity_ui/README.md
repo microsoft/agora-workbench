@@ -150,7 +150,7 @@ baked into the base image `mcp-server-base:local`. After editing, rebuild
 the base, then the domain server:
 
 ```bash
-docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
 cd examples/domain_examples/chemistry
 docker compose up -d --build --force-recreate
 ```

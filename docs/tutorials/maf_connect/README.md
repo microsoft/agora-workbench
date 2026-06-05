@@ -33,7 +33,7 @@ between MAF and the workbench; build the agent itself by following the
 ### 1. Build the shared MCP base image (once)
 
 ```bash
-docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Bring the server up

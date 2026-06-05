@@ -13,26 +13,27 @@ from importlib.resources import files
 from pathlib import Path
 
 
-TEMPLATES = files("agora_workbench.scaffold.templates")
+TEMPLATES = files("agora_workbench.deployment.templates")
 
-# Template sets mapped to subdirectories within the templates package
 TEMPLATE_SETS = {
     "docker": [
-        "Dockerfile",
-        "docker-compose.yml",
-        ".env.server.example",
+        "docker/base.Dockerfile",
+        "docker/Dockerfile",
+        "docker/docker-compose.yml",
+        "docker/.env.server.example",
     ],
     "azure": [
-        "container_apps/main.bicep",
-        "container_apps/activity-ui.bicep",
-        "container_apps/deploy.sh",
-        "container_apps/deploy-server.sh",
-        "container_apps/deploy-network.sh",
-        "container_apps/_deploy-common.sh",
-        "container_apps/setup.sh",
-        "container_apps/setup-app-registrations.sh",
-        "container_apps/parameters/server.bicepparam",
-        "container_apps/networks/router.yaml",
+        "azure/main.bicep",
+        "azure/activity-ui.bicep",
+        "azure/deploy.sh",
+        "azure/deploy-server.sh",
+        "azure/deploy-network.sh",
+        "azure/_deploy-common.sh",
+        "azure/setup.sh",
+        "azure/setup-app-registrations.sh",
+        "azure/README.md",
+        "azure/parameters/server.bicepparam",
+        "azure/networks/router.yaml",
     ],
 }
 
@@ -141,13 +142,14 @@ def main() -> None:
             print(f"  {path}")
         print("\nNext steps:")
         if args.target in ("docker", "all"):
-            print("  1. Edit Dockerfile to COPY your server code")
-            print("  2. Copy .env.server.example → .env.server and fill in values")
-            print("  3. docker compose up --build")
+            print("  1. Edit docker/Dockerfile to COPY your server code")
+            print("  2. Build the base image: docker build -f docker/base.Dockerfile -t mcp-server-base:local .")
+            print("  3. Copy docker/.env.server.example → docker/.env.server and fill in values")
+            print("  4. docker compose -f docker/docker-compose.yml up --build")
         if args.target in ("azure", "all"):
-            print("  4. Edit container_apps/parameters/server.bicepparam for your server")
-            print("  5. Run container_apps/setup.sh to provision Azure infrastructure")
-            print("  6. Run container_apps/deploy-server.sh --server <name> to deploy")
+            print("  5. Edit azure/parameters/server.bicepparam for your server")
+            print("  6. Run azure/setup.sh to provision Azure infrastructure")
+            print("  7. Run azure/deploy-server.sh --server <name> to deploy")
 
 
 if __name__ == "__main__":
