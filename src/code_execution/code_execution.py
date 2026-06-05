@@ -4,6 +4,7 @@ import ast
 import asyncio
 import json
 import logging
+import os
 from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -86,6 +87,25 @@ _BLOCKED_MODULES: set[str] = {
 # Allowed absolute-path prefixes.  Paths outside these are rejected.
 # /tmp covers the data-lake temp directories
 _ALLOWED_PATH_PREFIXES: tuple[str, ...] = ("/tmp",)
+
+
+def _saved_files_for_event(server: "CodeExecutionServer", session_id: str, artifacts: list[dict]) -> list[dict]:
+    """Build saved-file metadata (name, mime, direct download URL) for the activity event.
+
+    ``download_url`` points at the server's token-capability ``/artifacts``
+    endpoint so the user can download a saved file straight from the feed,
+    without the agent publishing it.  Composed the same way the GUI publisher
+    builds reachable links (SERVER_PUBLIC_URL wins over the bind host/port).
+    """
+    public_base = (os.getenv("SERVER_PUBLIC_URL") or server.public_url()).rstrip("/")
+    return [
+        {
+            "name": a["name"],
+            "mime_type": a.get("mime_type"),
+            "download_url": f"{public_base}/artifacts/{session_id}/{a['download_token']}/{a['name']}",
+        }
+        for a in artifacts
+    ]
 
 
 def _absolute_path_error(val: str, allowed_prefixes: "tuple[str, ...]") -> str:
@@ -687,6 +707,9 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                     "error": result.error,
                     "session_id": session.session_id,
                     "displays": result.displays,
+                    # Saved files surfaced as a reminder + direct download button
+                    # in the feed (download_url is a token capability link).
+                    "saved_files": _saved_files_for_event(server, session.session_id, result.artifacts),
                 }
             )
 
@@ -701,6 +724,18 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                 {"name": a["name"], "size_bytes": a["size_bytes"], "mime_type": a["mime_type"]}
                 for a in result.artifacts
             ]
+            # Nudge the agent to surface saved files to the user.  A save is an
+            # intentional act, so default to offering a download rather than
+            # staying silent — but publishing still waits for the user's OK
+            # (the file is otherwise invisible to them).
+            if result.success and result_dict["artifacts"]:
+                names = ", ".join(a["name"] for a in result_dict["artifacts"])
+                publish_tool = f"{server.server_config.name}_publish_artifact"
+                result_dict["note"] = (
+                    f"Saved {len(result_dict['artifacts'])} file(s) to AGORA_OUTPUT_DIR: {names}. "
+                    "The user can download these directly from the activity feed. Mention them, and "
+                    f"if a shareable link is wanted, publish with {publish_tool} using <gui>filename</gui>."
+                )
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)
         except HTTPException as e:
