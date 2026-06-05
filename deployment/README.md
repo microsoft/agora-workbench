@@ -26,20 +26,16 @@ COPY --chown=appuser:appuser my_server/ /app/my_server/
 CMD ["python", "-m", "my_server.server"]
 ```
 
-See [`example/Dockerfile`](example/Dockerfile) for a full example with comments on adding pip dependencies and system packages.
+Use the scaffold CLI to generate a ready-to-use Dockerfile and docker-compose setup:
+
+```bash
+agora-workbench-deploy init --target docker
+```
 
 ### 3. Run locally with Docker Compose
 
-See [`example/docker-compose.yml`](example/docker-compose.yml) for a ready-to-use compose file:
-
 ```bash
 docker compose up --build
-```
-
-Connector network example (connector + two upstream domain servers):
-
-```bash
-docker compose -f deployment/example/docker-compose.network.yml up --build
 ```
 
 ### 4. Deploy to Azure Container Apps
@@ -83,19 +79,21 @@ See `.env.example` at the repo root for the full list.
 
 ```
 deployment/
-├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, code_execution)
+├── base.Dockerfile          # Shared base image (system deps, uv, miniforge, agora_workbench)
 ├── README.md                # This file
-├── example/
-│   ├── Dockerfile           # Example server Dockerfile
-│   ├── docker-compose.yml   # Example local compose setup
-│   └── docker-compose.network.yml  # Connector + upstream network example
 └── container_apps/
     ├── deploy.sh            # Build, push, and deploy to Azure Container Apps
     ├── main.bicep           # ARM template for the Container App
-    ├── README.md            # Container Apps setup guide
-    ├── networks/            # Network manifest examples for ordered deployment
-    └── parameters/          # Per-server Bicep parameter files (includes connector template)
+    └── README.md            # Container Apps setup guide
+
+# Domain-specific deployment configs live with the examples:
+examples/domain_examples/deployment/
+├── parameters/              # Per-server Bicep parameter files
+└── networks/                # Network manifests for ordered deployment
 ```
+
+> **Tip:** Run `agora-workbench-deploy init` to scaffold Docker and Azure deployment
+> files into your own project.
 
 ## Build Context
 
