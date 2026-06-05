@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry, discover_skills
+from code_execution import CodeExecutionServer, ServerConfig, Skill, ToolRegistry
 from code_execution.auth import create_noop_auth_config
 from domain_examples.energysystems.tools import ENERGYSYSTEMS_TOOLS
 from domain_examples.energysystems.server.catalog_setup import setup_catalog
@@ -26,7 +26,7 @@ from domain_examples.energysystems.server.catalog_setup import setup_catalog
 # both inside Docker and when running locally from the repo root).
 _ENERGYSYSTEMS_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "energysystems_tools")
 _ENERGYSYSTEMS_DIR = Path(__file__).resolve().parents[1]
-_SKILLS_DIR = _ENERGYSYSTEMS_DIR / "skills"
+_SKILL_PATH = _ENERGYSYSTEMS_DIR / "skills" / "SKILL.md"
 
 ENVIRONMENT_YML = """\
 name: energysystems
@@ -118,14 +118,29 @@ tool_registry = ToolRegistry(package="energysystems_tools")
 for tool_def in ENERGYSYSTEMS_TOOLS:
     tool_registry.register_tool(tool_def)
 
-# Discover skills from the skills/ directory
-_skills = discover_skills(_SKILLS_DIR, domain="energysystems")
+# ---------------------------------------------------------------------------
+# Skills — explicit definition with content loaded from markdown.
+# ---------------------------------------------------------------------------
+
+ENERGYSYSTEMS_SKILLS = [
+    Skill(
+        name="energysystems-pypsa",
+        description=(
+            "Power system modeling and analysis with PyPSA inside "
+            "execute_energysystems_code — network setup, components, power flow, "
+            "optimal dispatch, capacity expansion, cost and topology analysis."
+        ),
+        domain="energysystems",
+        content=_SKILL_PATH.read_text(encoding="utf-8"),
+        path=str(_SKILL_PATH),
+    ),
+]
 
 server = EnergySystemsServer(
     server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
-    skills=_skills,
+    skills=ENERGYSYSTEMS_SKILLS,
 )
 
 if __name__ == "__main__":
