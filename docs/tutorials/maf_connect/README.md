@@ -30,23 +30,8 @@ between MAF and the workbench; build the agent itself by following the
 
 ## Start the chemistry MCP server
 
-### 1. Build the shared MCP base image (once)
-
-```bash
-docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
-```
-
-### 2. Bring the server up
-
-> **⚠️ Local-dev auth only** — the bundled server accepts any bearer
-> token and binds to `127.0.0.1` only. Do not deploy this configuration.
-
-```bash
-cd examples/domain_examples/chemistry
-docker compose up -d --build
-curl http://localhost:8020/health
-# => {"status":"healthy", ...}
-```
+Follow the steps in [Start the chemistry MCP server](../start-chemistry-server.md)
+to build the base image and bring the server up at `http://localhost:8020/mcp`.
 
 ## The MAF integration point
 
@@ -103,6 +88,4 @@ the entire agent run and closes it on exit.
 
 ## Cleanup
 
-```bash
-cd examples/domain_examples/chemistry && docker compose down
-```
+See [Cleanup](../start-chemistry-server.md#cleanup) in the shared server guide.
