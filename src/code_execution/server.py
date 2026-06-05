@@ -354,13 +354,12 @@ class CodeExecutionServer(BaseMCPServer):
         """Build environment using Python venv + pip."""
         await environment_builders.build_pip_environment(config)
 
-    async def warm(self):
-        """Build environment and provision assets without starting the server.
+    async def warm(self) -> None:
+        """Pre-initialize the execution environment without serving requests.
 
-        Use this during Docker builds to pre-build the environment so it's
-        ready at runtime without needing network access or ephemeral storage.
-        At runtime, _ensure_environment() detects the pre-built env and skips
-        the build step.
+        Call this during Docker builds or process startup to avoid cold-start
+        latency. It prepares the Python environment, provisions any configured
+        assets, and registers the execution kernel.
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
