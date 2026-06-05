@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
 
+from fastmcp import Context
+
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
@@ -36,6 +38,7 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
         domain: Optional[str] = None,
         source_type: Optional[str] = None,
         top: int = 10,
+        mcp_ctx: Optional[Context] = None,
     ) -> list[dict]:
         """Search the data catalog for artifacts matching a query.
 
@@ -74,6 +77,16 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
                 # from the sandbox (only /tmp is).
                 hit["load_path"] = f"<local>{uri}</local>"
         if activity_publisher is not None:
+            # Tag the event with the calling MCP session so the UI groups the
+            # search under the same lane as that conversation's other events.
+            # Mirrors the tool_search handler; ctx.session_id equals the kernel
+            # session id (the transport session_id seeds both).
+            session_id = None
+            if mcp_ctx is not None:
+                try:
+                    session_id = mcp_ctx.session_id
+                except (RuntimeError, AttributeError):
+                    LOGGER.debug("Unable to resolve session_id from context", exc_info=True)
             query_label = repr(query) if query else "'' (all)"
             activity_publisher.publish_nowait(
                 {
@@ -81,6 +94,7 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
                     "description": f"search data {query_label} → {len(hits)} dataset(s)",
                     "query": query,
                     "matched_artifacts": [h.get("name", "") for h in hits],
+                    "session_id": session_id,
                     "success": True,
                 }
             )
