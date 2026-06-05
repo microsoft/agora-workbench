@@ -160,3 +160,6 @@ class AuthConfig:
     # Additional metadata for WWW-Authenticate headers, OAuth discovery, etc.
     www_authenticate_value: str = ""
     """Value for the WWW-Authenticate response header on 401."""
+
+    require_authorization_header: bool = True
+    """Whether protected endpoints require an Authorization header."""
