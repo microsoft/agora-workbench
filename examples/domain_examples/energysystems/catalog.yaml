@@ -14,13 +14,13 @@ sources:
           Synthetic 50-bus regional power grid. 50 buses, 71 transmission
           lines, 101 generators (nuclear, coal, gas, wind, solar), 35
           time-varying loads over 24 hourly snapshots. PyPSA NetCDF — load
-          with pypsa.Network(path).
+          with pypsa.Network(load_path).
       grid_100bus.nc:
         description: >-
           Synthetic 100-bus interconnection. 100 buses, 144 transmission
           lines, 191 generators (nuclear, coal, gas, wind, solar), 70
           time-varying loads over 24 hourly snapshots. PyPSA NetCDF — load
-          with pypsa.Network(path).
+          with pypsa.Network(load_path).
 
 search:
   # Keyword-only catalog: SQLite FTS5 / BM25, no embedding model, no Azure,
