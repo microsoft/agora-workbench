@@ -2,6 +2,9 @@
 
 `CodeExecutionServer` is the base class for all MCP code execution servers in Agora Workbench. This guide covers the different ways to configure and instantiate one.
 
+#### New to Agora Workbench?
+The [Your First Server](../tutorials/first_server/README.md) tutorial walks you through building a server with a real tool step-by-step before diving into the full reference below.
+
 ## Minimal server
 
 The simplest server needs only a `ServerConfig` with a name, description, environment type, and dependency specification:
