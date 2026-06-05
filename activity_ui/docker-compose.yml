@@ -26,6 +26,7 @@ services:
     environment:
       ACTIVITY_UI_HOST: "0.0.0.0"
       ACTIVITY_UI_PORT: "8030"
+      ACTIVITY_UI_AUTH_DISABLED: "true"
     networks:
       - agora-activity
     healthcheck:
