@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from typing import Any, Literal, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,9 @@ class ActivityEvent(BaseModel):
     + the populated optional fields.
     """
 
+    # Stable per-event id, assigned on ingest. The UI dedupes on this so buffer
+    # replays / SSE reconnects don't re-append the same events to the feed.
+    id: str = Field(default_factory=lambda: uuid4().hex)
     type: EventType
     server: str = Field(description="MCP server name (e.g. 'chemistry', 'gis')")
     timestamp: float = Field(default_factory=time.time, description="Unix timestamp")

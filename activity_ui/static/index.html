@@ -267,6 +267,9 @@
       const filterTypeGroups = new Set();
       const collapsedSessions = new Set();
       const seenServers = new Set();
+      // Event ids already rendered, so buffer replays / SSE reconnects don't
+      // re-append the same events (see ingest() and the /events/recent loop).
+      const seenIds = new Set();
 
       const feed = document.getElementById("feed");
       const conn = document.getElementById("conn");
@@ -725,6 +728,10 @@
       }
 
       function ingest(e) {
+        if (e.id !== undefined && e.id !== null) {
+          if (seenIds.has(e.id)) return;
+          seenIds.add(e.id);
+        }
         events.push(e);
         if (e.server && !seenServers.has(e.server)) {
           seenServers.add(e.server);
@@ -770,6 +777,10 @@
           if (r.ok) {
             const batch = await r.json();
             batch.forEach((e) => {
+              if (e.id !== undefined && e.id !== null) {
+                if (seenIds.has(e.id)) return;
+                seenIds.add(e.id);
+              }
               events.push(e);
               if (e.server) seenServers.add(e.server);
             });
