@@ -43,6 +43,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Microsoft Agent Framework (MAF) adapter + agent-side helpers
+# (LLM factories, MCP clients) — see docs/tutorials/maf_connect
+agent = [
+    "agent-framework>=1.2.0",
+    "openai>=1.107.3",
+    "python-dotenv>=1.1.1",
+    "tenacity>=9.1.2",
+    "tiktoken>=0.11.0",
+]
 # OpenAI Agents SDK adapter (docs/tutorials/openai_agents_connect)
 openai-agents = [
     "openai-agents>=0.15.0",
@@ -94,7 +103,7 @@ docs = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-testpaths = ["src/agora_workbench/code_execution/tests", "src/agora_workbench/connector/tests", "examples/domain_examples/tests", "activity_ui/tests"]
+testpaths = ["src/agora_workbench/code_execution/tests", "src/agora_workbench/connector/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests", "activity_ui/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
