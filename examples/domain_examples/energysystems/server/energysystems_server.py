@@ -17,8 +17,8 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, Skill, ToolRegistry
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, Skill, ToolRegistry
+from agora_workbench.code_execution.auth import create_noop_auth_config
 from domain_examples.energysystems.tools import ENERGYSYSTEMS_TOOLS
 from domain_examples.energysystems.server.catalog_setup import setup_catalog
 

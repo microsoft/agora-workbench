@@ -87,7 +87,7 @@ Define `Skill` objects directly in your server module. This gives you full contr
 
 ```python
 from pathlib import Path
-from code_execution import CodeExecutionServer, Skill
+from agora_workbench.code_execution import CodeExecutionServer, Skill
 
 _SKILL_PATH = Path(__file__).parent / "skills" / "SKILL.md"
 
@@ -119,7 +119,7 @@ Use `discover_skills()` to scan a directory for all `*.md` files with valid YAML
 
 ```python
 from pathlib import Path
-from code_execution import CodeExecutionServer, discover_skills
+from agora_workbench.code_execution import CodeExecutionServer, discover_skills
 
 skills = discover_skills(Path(__file__).parent / "skills", domain="chemistry")
 

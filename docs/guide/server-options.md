@@ -11,8 +11,8 @@ The simplest server needs only a `ServerConfig` with a name, description, enviro
 
 ```python
 import asyncio
-from code_execution import CodeExecutionServer, ServerConfig
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myserver",
@@ -64,8 +64,8 @@ dependencies:
 Pass a `ToolRegistry` to expose typed domain tools that are discoverable via `search_{name}_tools` and callable through code execution:
 
 ```python
-from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
+from agora_workbench.code_execution.auth import create_noop_auth_config
 from my_domain.tools import MY_TOOLS  # list of ToolDefinition objects
 
 registry = ToolRegistry()
@@ -137,8 +137,8 @@ class ChemistryServer(CodeExecutionServer):
 Pass an `AuthConfig` to control how requests are authenticated:
 
 ```python
-from code_execution.auth import create_noop_auth_config
-from code_execution.auth.entra import create_entra_auth_config
+from agora_workbench.code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.auth.entra import create_entra_auth_config
 
 # For local development (no auth):
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
@@ -154,8 +154,8 @@ See [Authentication options](authentication.md) for the full auth guide.
 Configure publishers to allow the agent to publish artifacts (files, plots) from code execution:
 
 ```python
-from code_execution.auth import create_noop_auth_config
-from code_execution.data_access import LocalFilePublisher, BlobPublisher
+from agora_workbench.code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.data_access import LocalFilePublisher, BlobPublisher
 
 publishers = [
     LocalFilePublisher(base_dir="/tmp/artifacts"),

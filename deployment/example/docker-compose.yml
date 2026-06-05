@@ -64,7 +64,7 @@ services:
       - ../.env.server
     volumes:
       - env-cache:/home/appuser/.cache/mcp-envs
-    command: ["python", "-m", "code_execution.cli", "warm", "--config", "/app/my_server/config.yaml", "-v"]
+    command: ["python", "-m", "agora_workbench.code_execution.cli", "warm", "--config", "/app/my_server/config.yaml", "-v"]
 
 volumes:
   env-cache:

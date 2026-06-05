@@ -11,7 +11,7 @@ The ``module`` field on each definition points to the installed package
 ``from {module} import {name}`` import resolves correctly.
 """
 
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from agora_workbench.code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
 
 # ============================================================================
 # Low complexity: Molecular Analysis chain
