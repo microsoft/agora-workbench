@@ -39,23 +39,8 @@ itself by following the [Copilot SDK docs](https://github.com/github/copilot-sdk
 
 ## Start the chemistry MCP server
 
-### 1. Build the shared MCP base image (once)
-
-```bash
-docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
-```
-
-### 2. Bring the server up
-
-> **⚠️ Local-dev auth only** — the bundled server accepts any bearer
-> token and binds to `127.0.0.1` only. Do not deploy this configuration.
-
-```bash
-cd examples/domain_examples/chemistry
-docker compose up -d --build
-curl http://localhost:8020/health
-# => {"status":"healthy", ...}
-```
+Follow the steps in [Start the chemistry MCP server](../start-chemistry-server.md)
+to build the base image and bring the server up at `http://localhost:8020/mcp`.
 
 ## The Copilot SDK integration point
 
@@ -107,7 +92,9 @@ Other notes:
 
 - **Build the session itself**: follow the
   [Copilot SDK docs](https://github.com/github/copilot-sdk/blob/main/python/README.md) for model
-  selection, BYOK providers, streaming, and multi-turn chat. The
+  selection, BYOK (Bring Your Own Key — supply a third-party LLM API key so the Copilot SDK routes
+  requests through your own provider instead of the default Copilot backend) providers, streaming,
+  and multi-turn chat. The
   `mcp_servers` block is exactly the one shown above.
 - **Inject the workbench skill**: the
   [workbench runtime skill](../../../skills/agora-workbench/SKILL.md)
@@ -119,6 +106,4 @@ Other notes:
 
 ## Cleanup
 
-```bash
-cd examples/domain_examples/chemistry && docker compose down
-```
+See [Cleanup](../start-chemistry-server.md#cleanup) in the shared server guide.
