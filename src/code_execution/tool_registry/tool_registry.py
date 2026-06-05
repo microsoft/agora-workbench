@@ -19,9 +19,16 @@ class ToolRegistry:
     Each registered tool receives a unique integer ID (assigned sequentially
     starting from ``0``).  Tools can be retrieved by ID or by name in O(1) time
     via internal dictionaries.
+
+    Args:
+        package: Default Python package for tool imports. When set, the kernel
+            proxy generates ``from {package}.{tool_name} import {tool_name}``
+            for each registered tool that does not set ``module_override`` or
+            an explicit ``module``.
     """
 
-    def __init__(self):
+    def __init__(self, package: str | None = None):
+        self.package = package
         self.tools: list[ToolDefinition] = []
         self.next_id = 0
         self._name_index: dict[str, ToolDefinition] = {}
@@ -34,11 +41,35 @@ class ToolRegistry:
         cannot be mutated through the caller's reference.  The copy is
         assigned a unique integer ``id`` before being stored.
 
+        Module resolution order:
+            1. ``tool.module_override`` (explicit full module path on the tool)
+            2. ``tool.module`` (already resolved, e.g. from catalog deserialization)
+            3. ``{registry.package}.{tool.name}`` (default convention)
+
+        If none of these yield a module path, a :class:`ValueError` is raised.
+
         Args:
             tool: The :class:`~code_execution.tool_registry.ToolDefinition` to register.
+
+        Raises:
+            ValueError: If the tool's module cannot be resolved.
         """
         _tool = copy(tool)
         _tool.id = self.next_id
+
+        # Resolve the kernel import module path
+        if _tool.module_override:
+            _tool.module = _tool.module_override
+        elif not _tool.module:
+            if self.package:
+                _tool.module = f"{self.package}.{_tool.name}"
+            else:
+                raise ValueError(
+                    f"Tool '{_tool.name}' has no module_override and no explicit module set, "
+                    f"and the registry has no default package. Either set "
+                    f"ToolRegistry(package='my_package'), or set module_override on the tool."
+                )
+
         self.tools.append(_tool)
         self._name_index[_tool.name] = _tool
         self._id_index[self.next_id] = _tool

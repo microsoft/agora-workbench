@@ -116,7 +116,7 @@ class EnergySystemsServer(CodeExecutionServer):
 
 
 # Build the tool registry from domain tool definitions
-tool_registry = ToolRegistry()
+tool_registry = ToolRegistry(package="energysystems_tools")
 for tool_def in ENERGYSYSTEMS_TOOLS:
     tool_registry.register_tool(tool_def)
 

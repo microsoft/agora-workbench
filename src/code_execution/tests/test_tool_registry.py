@@ -306,6 +306,100 @@ class TestToolDefinitionSerialization:
             assert rest_param.description == orig_param.description
 
 
+class TestToolRegistryPackageResolution:
+    """Test cases for ToolRegistry package-based module resolution."""
+
+    def test_package_resolves_module_from_name(self):
+        """Registry with package set should resolve module as {package}.{name}."""
+        registry = ToolRegistry(package="my_tools")
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+        )
+        registry.register_tool(tool)
+
+        registered = registry.get_tool_by_name("parse_data")
+        assert registered.module == "my_tools.parse_data"
+
+    def test_module_override_takes_precedence(self):
+        """module_override should take precedence over registry package."""
+        registry = ToolRegistry(package="my_tools")
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+            module_override="my_tools.shared_module",
+        )
+        registry.register_tool(tool)
+
+        registered = registry.get_tool_by_name("parse_data")
+        assert registered.module == "my_tools.shared_module"
+
+    def test_explicit_module_accepted_as_is(self):
+        """Explicit module set on ToolDefinition should be used without modification."""
+        registry = ToolRegistry(package="my_tools")
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+            module="legacy.package.parse_data",
+        )
+        registry.register_tool(tool)
+
+        registered = registry.get_tool_by_name("parse_data")
+        assert registered.module == "legacy.package.parse_data"
+
+    def test_no_package_no_module_raises(self):
+        """Registry without package should raise when tool has no module."""
+        registry = ToolRegistry()
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+        )
+
+        with pytest.raises(ValueError, match="no module_override and no explicit module"):
+            registry.register_tool(tool)
+
+    def test_no_package_with_explicit_module_works(self):
+        """Registry without package should accept tools that have explicit module."""
+        registry = ToolRegistry()
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+            module="some.module",
+        )
+        registry.register_tool(tool)
+
+        registered = registry.get_tool_by_name("parse_data")
+        assert registered.module == "some.module"
+
+    def test_module_override_excluded_from_serialization(self):
+        """module_override should not appear in serialized output (catalog JSON)."""
+        tool = ToolDefinition(
+            name="parse_data",
+            description="Parse input data",
+            module="resolved.path",
+            module_override="my_tools.shared",
+        )
+        serialized = tool.model_dump()
+        assert "module_override" not in serialized
+        assert serialized["module"] == "resolved.path"
+
+    def test_catalog_roundtrip_with_module(self):
+        """ToolDefinition with module should round-trip through JSON correctly."""
+        registry = ToolRegistry(package="chemistry_tools")
+        tool = ToolDefinition(
+            name="parse_molecule",
+            description="Parse a SMILES string",
+        )
+        registry.register_tool(tool)
+
+        registered = registry.get_tool_by_name("parse_molecule")
+        serialized = registered.model_dump()
+        restored = ToolDefinition(**serialized)
+
+        assert restored.module == "chemistry_tools.parse_molecule"
+        assert restored.name == "parse_molecule"
+
+
 class TestToolRegistrySerialization:
     """Test cases for ToolRegistry serialization/deserialization with ToolDefinition."""
 

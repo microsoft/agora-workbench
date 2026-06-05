@@ -87,7 +87,7 @@ class ChemistryServer(CodeExecutionServer):
 
 
 # Build the tool registry from domain tool definitions
-tool_registry = ToolRegistry()
+tool_registry = ToolRegistry(package="chemistry_tools")
 for tool_def in CHEMISTRY_TOOLS:
     tool_registry.register_tool(tool_def)
 
