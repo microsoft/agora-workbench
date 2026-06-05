@@ -26,8 +26,8 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, discover_skills
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, discover_skills
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 

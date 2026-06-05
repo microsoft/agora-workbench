@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from code_execution import ToolDefinition, ToolParameter
+from agora_workbench.code_execution import ToolDefinition, ToolParameter
 
 
 @pytest.fixture
@@ -87,7 +87,7 @@ def another_tool():
 @pytest.fixture
 def empty_registry():
     """Empty tool registry for testing."""
-    from code_execution import ToolRegistry
+    from agora_workbench.code_execution import ToolRegistry
 
     return ToolRegistry()
 
@@ -95,7 +95,7 @@ def empty_registry():
 @pytest.fixture
 def sample_tool_registry(sample_tool, another_tool):
     """Sample tool registry with pre-registered tools."""
-    from code_execution import ToolRegistry
+    from agora_workbench.code_execution import ToolRegistry
 
     registry = ToolRegistry()
     registry.register_tool(sample_tool)

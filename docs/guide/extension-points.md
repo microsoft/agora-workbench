@@ -81,7 +81,7 @@ Built-in implementations:
 ### Custom search backend example
 
 ```python
-from code_execution.tools.tool_search import ToolSearchBackend, ToolInfo, ToolSearchResult, SearchCategory
+from agora_workbench.code_execution.tools.tool_search import ToolSearchBackend, ToolInfo, ToolSearchResult, SearchCategory
 
 class ElasticsearchToolSearch(ToolSearchBackend):
     def __init__(self, es_client, index_name: str):
@@ -117,7 +117,7 @@ class ElasticsearchToolSearch(ToolSearchBackend):
 Pass to the server:
 
 ```python
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 server = CodeExecutionServer(
     server_config=config,
@@ -152,7 +152,7 @@ Built-in implementations: `BlobFetcher` (Azure Blob), `LocalFileFetcher`
 ### Custom fetcher example
 
 ```python
-from code_execution.data_access.fetchers import AssetFetcher
+from agora_workbench.code_execution.data_access.fetchers import AssetFetcher
 
 class S3Fetcher(AssetFetcher):
     def can_handle(self, uri: str) -> bool:

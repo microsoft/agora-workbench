@@ -10,8 +10,8 @@ Create `server.py`:
 import asyncio
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="starter",

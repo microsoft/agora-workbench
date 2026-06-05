@@ -194,6 +194,24 @@
       .artifact-link { color: #79c0ff; text-decoration: none; }
       .artifact-link:hover { text-decoration: underline; }
       .artifact-meta { color: #6e7681; font-size: 10px; }
+      .save-hint {
+        margin-top: 4px;
+        padding: 3px 8px;
+        font-size: 11px;
+        color: #d29922;
+        background: #d2992216;
+        border-left: 2px solid #d29922;
+        border-radius: 2px;
+      }
+      .save-dl {
+        color: #d29922;
+        font-weight: 600;
+        text-decoration: none;
+        border: 1px solid #d29922;
+        border-radius: 3px;
+        padding: 0 5px;
+      }
+      .save-dl:hover { background: #d2992233; }
       .server { color: #d2a8ff; font-size: 11px; }
       .ts { color: #6e7681; font-size: 11px; margin-left: auto; }
       .desc { margin-top: 3px; color: #c9d1d9; }
@@ -546,6 +564,29 @@
           wrap.appendChild(det);
         }
 
+        // saved_files: files written to the outputs dir this run.  Each gets a
+        // reminder line with a direct download button (token capability URL) and
+        // a pointer to ask the agent to publish for a shareable link.  Names via
+        // textContent and the URL via .href — neither parses HTML.
+        if (Array.isArray(e.saved_files) && e.saved_files.length) {
+          for (const f of e.saved_files) {
+            const hint = document.createElement("div");
+            hint.className = "save-hint";
+            hint.appendChild(document.createTextNode(`💾 saved ${f.name || "(unnamed)"} — `));
+            if (f.download_url) {
+              const dl = document.createElement("a");
+              dl.className = "save-dl";
+              dl.href = f.download_url;
+              dl.setAttribute("download", f.name || "");
+              dl.setAttribute("rel", "noopener noreferrer");
+              dl.textContent = "⬇ download";
+              hint.appendChild(dl);
+            }
+            hint.appendChild(document.createTextNode(" · or ask the agent to publish it to share"));
+            wrap.appendChild(hint);
+          }
+        }
+
         return wrap;
       }
 
@@ -662,6 +703,23 @@
         if (e.mime_type) parts.push(e.mime_type);
         meta.textContent = parts.length ? " · " + parts.join(" · ") : "";
         row.appendChild(meta);
+
+        // Inline preview for published image artifacts served over http(s), so a
+        // published plot is visible without downloading.  <img> keeps the browser
+        // in secure static mode — same posture as the display-figure path.
+        if (isHttp && (e.mime_type === "image/png" || e.mime_type === "image/svg+xml")) {
+          const wrap = document.createElement("div");
+          wrap.appendChild(row);
+          const fig = document.createElement("div");
+          fig.className = "display-figure";
+          const img = document.createElement("img");
+          img.alt = `published artifact preview (${e.mime_type})`;
+          img.loading = "lazy";
+          img.src = e.remote_uri;
+          fig.appendChild(img);
+          wrap.appendChild(fig);
+          return wrap;
+        }
 
         return row;
       }

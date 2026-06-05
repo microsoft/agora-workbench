@@ -14,7 +14,7 @@ Tools are **not** exposed as individual MCP tools. Instead, the agent writes Pyt
 ## Defining a tool
 
 ```python
-from code_execution import ToolDefinition, ToolParameter, ReturnSpec, StateTransition
+from agora_workbench.code_execution import ToolDefinition, ToolParameter, ReturnSpec, StateTransition
 
 parse_molecule = ToolDefinition(
     name="parse_molecule",
@@ -142,7 +142,7 @@ The `--no-deps` flag is intentional — domain dependencies (RDKit, numpy, etc.)
 ## Registering tools
 
 ```python
-from code_execution import ToolRegistry
+from agora_workbench.code_execution import ToolRegistry
 
 from my_domain.tools import parse_molecule, compute_descriptors
 
@@ -167,7 +167,7 @@ helper_func = ToolDefinition(
 Then pass the registry to your server:
 
 ```python
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 server = CodeExecutionServer(
     server_config=config,
