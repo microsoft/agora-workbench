@@ -10,7 +10,7 @@ By the end you will have:
 - Registration via `ToolRegistry`
 - A `--warm` flag for Docker pre-build
 
-If you want the production version of this pattern, jump to the
+To see a version of this pattern that leverages the more advanced feature of Agora Workbench, jump to the
 [chemistry example](https://github.com/microsoft/agora-workbench/tree/main/examples/domain_examples/chemistry).
 For advanced tool features (state transitions, skills, affordances) see the
 [Tool pattern](../../guide/tool-pattern.md) and [Skill pattern](../../guide/skill-pattern.md) guides.
@@ -144,11 +144,10 @@ def summarize_numbers(numbers: list[float]) -> dict:
     }
 ```
 
-!!! note
-    The implementation imports `statistics` lazily (inside the function body).
-    This works fine in the kernel environment but keeps the module importable
-    even if `statistics` is not installed at import time. It is also a pattern
-    you will see throughout the domain examples.
+Note: The implementation imports `statistics` lazily (inside the function body).
+This works fine in the kernel environment but keeps the module importable
+even if `statistics` is not installed at import time. It is also a pattern
+you will see throughout the domain examples.
 
 ---
 
