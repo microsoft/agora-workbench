@@ -88,6 +88,32 @@ _BLOCKED_MODULES: set[str] = {
 _ALLOWED_PATH_PREFIXES: tuple[str, ...] = ("/tmp",)
 
 
+def _absolute_path_error(val: str, allowed_prefixes: "tuple[str, ...]") -> str:
+    """Error for an absolute-path literal outside the allowed prefixes.
+
+    The guard fires on any absolute-path-looking string literal regardless of
+    intent (saving, loading, or a non-path string that merely starts with '/'),
+    so the message covers all three actionable cases instead of presuming the
+    model is saving a file:
+
+    * save  -> ``AGORA_OUTPUT_DIR`` (the per-session output variable);
+    * load  -> reference the data by its catalog/asset id, which auto-resolves
+      to a local path;
+    * scratch -> the listed prefixes, which are internal only (not visible to
+      the user).
+    """
+    return (
+        f"Absolute path '{val}' is outside the allowed directories. Depending on what "
+        "you are doing:\n"
+        "- To SAVE a file for the user: write under AGORA_OUTPUT_DIR (a variable and env "
+        "var already set in the kernel), e.g. os.path.join(AGORA_OUTPUT_DIR, 'name.ext').\n"
+        "- To LOAD a dataset/asset: reference it by its catalog/asset id (e.g. the "
+        "<local>...</local> returned by search_data), which auto-resolves to a local path.\n"
+        f"- Internal scratch only (not visible to the user): {', '.join(allowed_prefixes)}.\n"
+        "Do not hardcode any other absolute path."
+    )
+
+
 def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optional[str]]:
     """
     Validate code before execution.
@@ -203,10 +229,7 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
             if val.startswith("/") and not val.startswith("//") and id(node) not in safe_slash_ids:
                 # Looks like an absolute POSIX path; check prefixes.
                 if not any(val == prefix or val.startswith(prefix + "/") for prefix in allowed_prefixes):
-                    return False, (
-                        f"Absolute path '{val}' is outside the allowed directories. "
-                        f"Permitted prefixes: {', '.join(allowed_prefixes)}"
-                    )
+                    return False, _absolute_path_error(val, allowed_prefixes)
 
         elif isinstance(node, (ast.BinOp, ast.JoinedStr, ast.Call)):
             for candidate in _extract_dynamic_path_candidates(node, module_aliases):
@@ -216,10 +239,7 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
                 if val.startswith("/") and not val.startswith("//"):
                     if not any(val == prefix or val.startswith(prefix + "/") for prefix in allowed_prefixes):
-                        return False, (
-                            f"Absolute path '{val}' is outside the allowed directories. "
-                            f"Permitted prefixes: {', '.join(allowed_prefixes)}"
-                        )
+                        return False, _absolute_path_error(val, allowed_prefixes)
 
     return True, None
 
@@ -456,8 +476,10 @@ def _build_disallowed_actions_description(server: "CodeExecutionServer") -> str:
         f"- Blocked calls: {calls_text}\n"
         f"- Blocked dangerous calls: {dangerous_calls_text}\n"
         "- Relative path traversal using '..' segments is blocked.\n"
-        "- Absolute paths are restricted to allowed prefixes only. "
-        f"Allowed prefixes: {allowed_paths_text}\n\n"
+        "- Absolute path literals are restricted. To save files for the user, write under "
+        "AGORA_OUTPUT_DIR (a kernel variable); to load data, reference it by catalog/asset "
+        "id (e.g. <local>...</local>) rather than a filesystem path. Hardcoded absolute "
+        f"paths are allowed only under (internal scratch): {allowed_paths_text}\n\n"
         "Auto-resolution of handles and assets:\n"
         "Handle IDs (h_xxxxxxxxxxxx) and asset tags (<type>id</type>) embedded as "
         "string literals in code are automatically detected and resolved. "
