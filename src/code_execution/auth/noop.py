@@ -161,5 +161,6 @@ def create_noop_auth_config(
         token_validator=token_validator,
         identity_extractor=identity_extractor,
         credential_provider_factory=credential_factory,
-        www_authenticate_value='Bearer realm="development"',
+        www_authenticate_value="",
+        require_authorization_header=False,
     )

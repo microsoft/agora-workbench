@@ -230,10 +230,11 @@ class BaseMCPServer(ABC):
         class AuthMiddleware:
             """Bearer token auth middleware with RFC 9728 WWW-Authenticate."""
 
-            def __init__(self, app, server_instance, www_authenticate):
+            def __init__(self, app, server_instance, www_authenticate, require_authorization_header):
                 self.app = app
                 self.server_instance = server_instance
                 self.www_authenticate = www_authenticate.encode("utf-8") if www_authenticate else b""
+                self.require_authorization_header = require_authorization_header
 
             async def __call__(self, scope, receive, send):
                 if scope["type"] != "http":
@@ -264,17 +265,19 @@ class BaseMCPServer(ABC):
                 if self.www_authenticate:
                     resp_401_headers.append((b"www-authenticate", self.www_authenticate))
 
-                if not auth_header or not auth_header.startswith("Bearer "):
+                if auth_header.startswith("Bearer "):
+                    token = auth_header.removeprefix("Bearer ")
+                elif self.require_authorization_header:
                     await send({"type": "http.response.start", "status": 401, "headers": resp_401_headers})
                     await send(
                         {
                             "type": "http.response.body",
-                            "body": b"Missing or invalid Authorization header. Please provide a Bearer token.",
+                            "body": b"Missing or invalid Authorization header.",
                         }
                     )
                     return
-
-                token = auth_header.removeprefix("Bearer ")
+                else:
+                    token = ""
 
                 try:
                     request_method = scope.get("method", "POST")
@@ -333,6 +336,15 @@ class BaseMCPServer(ABC):
                 metadata_url = "/.well-known/oauth-protected-resource"
             www_authenticate = f'Bearer resource_metadata="{metadata_url}"'
 
-        middleware.append((AuthMiddleware, {"server_instance": server, "www_authenticate": www_authenticate}))
+        middleware.append(
+            (
+                AuthMiddleware,
+                {
+                    "server_instance": server,
+                    "www_authenticate": www_authenticate,
+                    "require_authorization_header": server.auth_config.require_authorization_header,
+                },
+            )
+        )
 
         return middleware
