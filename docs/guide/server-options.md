@@ -127,7 +127,6 @@ class ChemistryServer(CodeExecutionServer):
 
 | Field | Description |
 |-------|-------------|
-| `domains_dir` | Path to domain state definitions and skills |
 | `tool_search_backend` | `"bm25"` (default) or `"azure_ai_search"` |
 
 ## Authentication
