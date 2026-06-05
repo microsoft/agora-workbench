@@ -59,10 +59,44 @@ Note that `module` is not set here — it will be resolved automatically when th
 
 ## Implementing the tool function
 
-The actual implementation lives in a separate package that is installed into the execution environment:
+Tool implementations live in a **pip-installable package** that is installed into the kernel environment at build time. This is the recommended pattern because:
+
+1. The kernel and server are **separate Python processes** — the kernel cannot import server-side packages like `code_execution`, and the server shouldn't need heavy domain dependencies like RDKit or PyPSA.
+2. A pip-installable package can be tested independently of the server framework.
+3. The `additional_commands` in `ServerConfig` installs it into the kernel automatically.
+
+### Implementation package structure
+
+```
+my_domain_tools/
+├── pyproject.toml
+└── src/
+    └── my_domain_tools/
+        ├── __init__.py           ← empty
+        ├── parse_molecule.py     ← one module per tool (matches tool name)
+        └── compute_descriptors.py
+```
+
+**`pyproject.toml`** (minimal):
+
+```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "my-domain-tools"
+version = "0.1.0"
+requires-python = ">=3.11"
+# No dependencies — domain libraries come from the kernel environment (conda/uv)
+```
+
+### Writing a tool function
+
+Each tool is a regular Python function that returns a dict:
 
 ```python
-# chemistry_tools/parse_molecule.py
+# my_domain_tools/parse_molecule.py
 
 def parse_molecule(smiles: str) -> dict:
     """Parse a SMILES string and return molecular properties."""
@@ -80,8 +114,30 @@ def parse_molecule(smiles: str) -> dict:
     }
 ```
 
-!!! note "Separation of definition and implementation"
-    The `ToolDefinition` (metadata) lives in your server code. The implementation lives in a pip-installable package that is installed into the execution environment via `additional_commands` in `ServerConfig`. This separation ensures the server process doesn't need domain-heavy dependencies.
+!!! warning "Kernel import boundary"
+    Implementation modules must **not** import from `code_execution`, `base`, `connector`, or any server-side package. These are only available in the server process. The kernel environment has only the packages listed in your `ServerConfig.dependency_file` plus whatever you install via `additional_commands`.
+
+### Installing the package into the kernel
+
+Use `additional_commands` in your `ServerConfig` to pip-install the tools package into the kernel environment:
+
+```python
+from pathlib import Path
+
+_TOOLS_PKG = str(Path(__file__).resolve().parent / "my_domain_tools")
+
+config = ServerConfig(
+    name="myserver",
+    description="...",
+    type="uv",
+    dependency_file="numpy\npandas\n",
+    additional_commands=[
+        f"pip install --no-deps {_TOOLS_PKG}",
+    ],
+)
+```
+
+The `--no-deps` flag is intentional — domain dependencies (RDKit, numpy, etc.) are already declared in `dependency_file` and managed by the environment. The tools package only provides the function code.
 
 ## Registering tools
 
@@ -132,7 +188,6 @@ compute_descriptors = ToolDefinition(
         ToolParameter(name="smiles", type=str, description="Canonical SMILES"),
     ],
     return_spec=[...],
-    module="chemistry_tools.compute_descriptors",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.molecule_parsed"}),
         produces=frozenset({"chemistry.descriptors_computed"}),
