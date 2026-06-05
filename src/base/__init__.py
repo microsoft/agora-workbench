@@ -265,14 +265,14 @@ class BaseMCPServer(ABC):
                 if self.www_authenticate:
                     resp_401_headers.append((b"www-authenticate", self.www_authenticate))
 
-                if auth_header.startswith("Bearer "):
+                if auth_header and auth_header.startswith("Bearer "):
                     token = auth_header.removeprefix("Bearer ")
                 elif self.require_authorization_header:
                     await send({"type": "http.response.start", "status": 401, "headers": resp_401_headers})
                     await send(
                         {
                             "type": "http.response.body",
-                            "body": b"Missing or invalid Authorization header.",
+                            "body": b"Missing or invalid Authorization header. Please provide a valid auth token.",
                         }
                     )
                     return
