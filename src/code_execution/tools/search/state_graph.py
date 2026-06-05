@@ -151,10 +151,14 @@ class StateGraph:
         domains_dir: Path | None = None,
         extra_skill_dirs: list[Path] | None = None,
         domain_name: str | None = None,
+        skills: list[dict[str, Any]] | None = None,
+        state_descriptions: dict[str, str] | None = None,
     ) -> None:
         self._domains_dir = domains_dir
         self._extra_skill_dirs = extra_skill_dirs
         self._domain_name = domain_name
+        # {state_token: human-readable description} from State objects
+        self._state_descriptions: dict[str, str] = state_descriptions or {}
 
         # {domain_name: {enum_member.value: enum_member.name, ...}}
         self._domain_states: dict[str, dict[str, str]] = {}
@@ -170,8 +174,16 @@ class StateGraph:
         self._to_state: dict[str, list[ToolInfo]] = defaultdict(list)
         self._build_adjacency()
 
-        # Skills with state annotations
-        self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
+        # Skills: use explicitly provided skills or discover from filesystem
+        if skills is not None:
+            self._skills = skills
+        else:
+            self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
+
+        # If no domain states were loaded from filesystem, infer a minimal
+        # vocabulary from tool state annotations so overview() still works.
+        if not self._domain_states and self._tools:
+            self._infer_states_from_tools()
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -215,6 +227,38 @@ class StateGraph:
                 self._from_state[st].append(tool)
             for st in tool.state_produces:
                 self._to_state[st].append(tool)
+
+    def _infer_states_from_tools(self) -> None:
+        """Build a minimal state vocabulary from tool state annotations.
+
+        Groups state tokens by domain prefix (e.g. 'chemistry.molecule_parsed'
+        → domain 'chemistry') and creates readable labels from tokens.
+        Uses State descriptions when available for richer labels.
+        """
+        all_tokens: set[str] = set()
+        for tool in self._tools:
+            all_tokens.update(tool.state_requires)
+            all_tokens.update(tool.state_produces)
+
+        # Also include skill state tokens
+        for skill in self._skills:
+            all_tokens.update(skill.get("states", []))
+
+        # Group by domain prefix
+        by_domain: dict[str, dict[str, str]] = defaultdict(dict)
+        for token in sorted(all_tokens):
+            domain = self._domain_for_state(token)
+            # Use the State description if provided, otherwise generate a label
+            if token in self._state_descriptions:
+                label = self._state_descriptions[token]
+            else:
+                suffix = token.split(".", 1)[1] if "." in token else token
+                label = suffix.upper()
+            by_domain[domain or self._domain_name or "default"][token] = label
+
+        for domain, states in by_domain.items():
+            if domain not in self._domain_states:
+                self._domain_states[domain] = states
 
     def _domain_for_state(self, state_token: str) -> str:
         """Extract domain prefix from a state token like 'powergrid.network_loaded'."""

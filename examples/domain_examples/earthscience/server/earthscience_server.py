@@ -26,8 +26,10 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig
+from code_execution import CodeExecutionServer, ServerConfig, discover_skills
 from code_execution.auth import create_noop_auth_config
+
+_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
 ENVIRONMENT_YML = """\
 name: earthscience
@@ -74,9 +76,6 @@ config = ServerConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
-    # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
-    # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.
-    domains_dir=Path(__file__).resolve().parents[2],
 )
 
 
@@ -88,9 +87,12 @@ class EarthScienceServer(CodeExecutionServer):
         return EARTHSCIENCE_PRELUDE + code
 
 
+_skills = discover_skills(_SKILLS_DIR, domain="earthscience")
+
 server = EarthScienceServer(
     server_config=config,
     auth_config=create_noop_auth_config(),
+    skills=_skills,
 )
 
 if __name__ == "__main__":

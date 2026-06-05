@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
+from code_execution import CodeExecutionServer, ServerConfig, Skill, State, ToolRegistry
 from code_execution.auth import create_noop_auth_config
 from code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
 from code_execution.data_access.credentials import create_storage_credential
@@ -31,6 +31,102 @@ from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 # Path to the chemistry_tools package (relative to this file so it works
 # both inside Docker and when running locally from the repo root).
 _CHEMISTRY_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "chemistry_tools")
+_SKILL_PATH = Path(__file__).resolve().parent.parent / "skills" / "SKILL.md"
+
+# ---------------------------------------------------------------------------
+# Skills — explicit definition with content loaded from the markdown file.
+# This pattern gives full control over skill metadata and is preferred when
+# you have a small number of well-known skills.
+# ---------------------------------------------------------------------------
+
+CHEMISTRY_SKILLS = [
+    Skill(
+        name="chemistry-rdkit",
+        description=(
+            "Molecular analysis and cheminformatics using RDKit — SMILES handling, "
+            "descriptor calculation, fingerprints, substructure search, similarity, "
+            "clustering, and drug-likeness screening via domain tools and the "
+            "execute_chemistry_code tool."
+        ),
+        domain="chemistry",
+        states=[
+            "chemistry.molecule_parsed",
+            "chemistry.groups_identified",
+            "chemistry.descriptors_computed",
+            "chemistry.candidates_filtered",
+            "chemistry.fingerprints_computed",
+            "chemistry.similarity_computed",
+            "chemistry.molecules_clustered",
+        ],
+        content=_SKILL_PATH.read_text(encoding="utf-8"),
+        path=str(_SKILL_PATH),
+    ),
+]
+
+CHEMISTRY_STATES = [
+    State(
+        "chemistry.molecule_parsed",
+        description="A SMILES molecule has been parsed and validated",
+        affordances=[
+            "validate a SMILES string",
+            "get the canonical form of a molecule",
+            "identify a molecule from SMILES",
+        ],
+    ),
+    State(
+        "chemistry.groups_identified",
+        description="Functional groups have been enumerated",
+        affordances=[
+            "identify functional groups in a molecule",
+            "find hydroxyl, carboxyl, amine, or other groups",
+        ],
+    ),
+    State(
+        "chemistry.descriptors_computed",
+        description="Molecular descriptors have been calculated",
+        affordances=[
+            "compute molecular properties",
+            "calculate LogP, TPSA, or molecular weight",
+            "evaluate drug-likeness",
+        ],
+    ),
+    State(
+        "chemistry.candidates_filtered",
+        description="Compounds filtered by drug-likeness rules",
+        affordances=[
+            "screen compounds for drug-likeness",
+            "filter molecules by Lipinski or Veber rules",
+            "identify drug candidates",
+        ],
+    ),
+    State(
+        "chemistry.fingerprints_computed",
+        description="Molecular fingerprints have been generated",
+        affordances=[
+            "generate molecular fingerprints",
+            "compute Morgan or MACCS fingerprints",
+            "prepare molecules for similarity or clustering",
+        ],
+    ),
+    State(
+        "chemistry.similarity_computed",
+        description="Pairwise molecular similarity has been computed",
+        affordances=[
+            "compare molecular similarity",
+            "rank molecules by Tanimoto similarity",
+            "virtual screening by similarity",
+        ],
+    ),
+    State(
+        "chemistry.molecules_clustered",
+        description="Molecules have been grouped into clusters",
+        affordances=[
+            "cluster a molecular library",
+            "group similar molecules together",
+            "chemical series analysis",
+        ],
+    ),
+]
 
 ENVIRONMENT_YML = """\
 name: chemistry
@@ -72,9 +168,6 @@ config = ServerConfig(
         # import parse_molecule``) resolve correctly inside the kernel.
         f"python -m pip install --no-deps {_CHEMISTRY_TOOLS_PKG}",
     ],
-    # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
-    # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.
-    domains_dir=Path(__file__).resolve().parents[2],
 )
 
 
@@ -114,6 +207,8 @@ server = ChemistryServer(
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
     publishers=_publishers,
+    skills=CHEMISTRY_SKILLS,
+    states=CHEMISTRY_STATES,
 )
 
 if __name__ == "__main__":

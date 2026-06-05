@@ -10,7 +10,7 @@ A skill is a `SKILL.md` file that:
 2. Provides natural-language instructions the agent follows
 3. Describes the state graph — which tools to call in what order
 
-Skills are discovered automatically when you set `domains_dir` on your `ServerConfig`.
+Skills are passed explicitly to `CodeExecutionServer` via the `skills=` parameter.
 
 ## File structure
 
@@ -77,23 +77,60 @@ Each tool's `StateTransition` annotation declares:
 
 The skill's `states` list in the front matter enumerates all states in the workflow. The agent uses this to plan which tools to call and in what order.
 
-## Enabling skill discovery
+## Registering skills with the server
 
-Set `domains_dir` on your `ServerConfig` to point to the directory containing your domain subdirectories:
+Pass `Skill` objects to `CodeExecutionServer` at construction time. There are two patterns:
+
+### Option A: Explicit definition (recommended for small skill sets)
+
+Define `Skill` objects directly in your server module. This gives you full control over metadata and makes the server self-contained:
 
 ```python
 from pathlib import Path
+from code_execution import CodeExecutionServer, Skill
 
-config = ServerConfig(
-    name="chemistry",
-    description="...",
-    type="conda",
-    dependency_file="...",
-    domains_dir=Path(__file__).parent / "domains",
+_SKILL_PATH = Path(__file__).parent / "skills" / "SKILL.md"
+
+SKILLS = [
+    Skill(
+        name="chemistry-rdkit",
+        description="Molecular analysis and cheminformatics using RDKit...",
+        domain="chemistry",
+        states=[
+            "chemistry.molecule_parsed",
+            "chemistry.descriptors_computed",
+            "chemistry.fingerprints_computed",
+        ],
+        content=_SKILL_PATH.read_text(encoding="utf-8"),
+        path=str(_SKILL_PATH),
+    ),
+]
+
+server = CodeExecutionServer(
+    server_config=config,
+    tool_registry=tool_registry,
+    skills=SKILLS,
 )
 ```
 
-The server scans `<domains_dir>/<name>/skills/SKILL.md` at startup and makes skills available to the agent.
+### Option B: Filesystem discovery (convenient for many skills)
+
+Use `discover_skills()` to scan a directory for all `*.md` files with valid YAML frontmatter:
+
+```python
+from pathlib import Path
+from code_execution import CodeExecutionServer, discover_skills
+
+skills = discover_skills(Path(__file__).parent / "skills", domain="chemistry")
+
+server = CodeExecutionServer(
+    server_config=config,
+    tool_registry=tool_registry,
+    skills=skills,
+)
+```
+
+The function recursively scans for `.md` files with a `name:` field in their frontmatter and returns `Skill` objects with their full content loaded.
 
 ## Writing workflow documents
 

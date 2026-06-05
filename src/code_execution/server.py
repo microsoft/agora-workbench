@@ -6,7 +6,6 @@ Python code in isolated environments with domain-specific packages.
 """
 
 import asyncio
-import importlib
 import inspect
 import json
 import keyword
@@ -60,7 +59,8 @@ from .tool_proxy import (
 if TYPE_CHECKING:
     from .data_access.publishers import AssetPublisher
     from .sessions import Session
-    from .tool_registry import ToolRegistry
+    from .skills import Skill
+    from .tool_registry import State, ToolRegistry
     from .tools.tool_search import ToolSearchBackend
 
 # Configure logging
@@ -148,6 +148,8 @@ class CodeExecutionServer(BaseMCPServer):
         working_dir: Optional[Path] = None,
         tool_search_backend: Optional["ToolSearchBackend"] = None,
         publishers: "Optional[list[AssetPublisher]]" = None,
+        skills: "Optional[list[Skill]]" = None,
+        states: "Optional[list[State]]" = None,
     ):
         """
         Initialize the code execution server.
@@ -169,10 +171,18 @@ class CodeExecutionServer(BaseMCPServer):
                 A :class:`~.data_access.GuiPublisher` is always prepended (see
                 ``__init__``) so the publish tool is registered unconditionally and
                 ``<gui>name</gui>`` destinations work even when this list is ``None``.
+            skills: Optional list of :class:`~.skills.Skill` objects for workflow planning
+                and skill loading. Use :func:`~.skills.discover_skills` to scan a directory.
+            states: Optional list of :class:`~.tool_registry.State` objects defining the
+                domain's state vocabulary with descriptions and affordances.
         """
         super().__init__()
         self.server_config = server_config
         self.tool_registry = tool_registry
+
+        self.skills: list["Skill"] = list(skills or [])
+        self.states: list["State"] = list(states or [])
+        self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
         self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
         self._custom_tool_search_backend = tool_search_backend
@@ -1135,29 +1145,8 @@ class CodeExecutionServer(BaseMCPServer):
 
         server_name = self.server_config.name
 
-        # Load state→affordance phrases from the domain's states module (if present).
-        state_aff_lookup: dict[str, list[str]] = {}
-        domains_dir = self.server_config.domains_dir
-        try:
-            if domains_dir is not None:
-                # Load states.py from the configured domains directory
-                import importlib.util as _importlib_util
-
-                states_path = domains_dir / server_name / "states.py"
-                if states_path.is_file():
-                    spec = _importlib_util.spec_from_file_location(f"domains.{server_name}.states", states_path)
-                    if spec and spec.loader:
-                        mod = _importlib_util.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        raw = getattr(mod, "STATE_AFFORDANCES", {})
-                        state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
-            else:
-                # Fallback: try importing from the Python path
-                mod = importlib.import_module(f"domains.{server_name}.states")
-                raw = getattr(mod, "STATE_AFFORDANCES", {})
-                state_aff_lookup = {enum_val.value: phrases for enum_val, phrases in raw.items()}
-        except (ImportError, AttributeError, OSError):
-            LOGGER.debug("No states module found for domain '%s'; skipping affordance lookup", server_name)
+        # Load state→affordance phrases from the states passed to the server.
+        state_aff_lookup: dict[str, list[str]] = dict(self._state_affordances)
 
         infos: list[ToolInfo] = []
         for td in self.tool_registry.tools:
@@ -1200,20 +1189,18 @@ class CodeExecutionServer(BaseMCPServer):
         """
         from code_execution.tools.tool_search import ToolSearchResult
         from code_execution.tools import create_tool_search_backend
-        from code_execution.tools.search.state_graph import _discover_skills
 
         server_name = self.server_config.name
         tool_name = f"search_{server_name}_tools"
 
         tool_infos = self._build_tool_infos()
 
-        # Discover skills from the domains directory, restricted to this
-        # server's own domain so a shared-source dev layout doesn't leak
-        # skills across servers.
-        domains_dir = self.server_config.domains_dir
-        skills = _discover_skills(domains_dir, domain_name=server_name) if domains_dir else []
+        # Use skills passed to the server constructor.
+        skills_dicts = [
+            {"name": s.name, "description": s.description, "domain": s.domain, "states": s.states} for s in self.skills
+        ]
 
-        if not tool_infos and not skills:
+        if not tool_infos and not skills_dicts:
             LOGGER.debug(
                 "No tools or skills to index for '%s'; skipping search_%s_tools registration.",
                 server_name,
@@ -1227,14 +1214,14 @@ class CodeExecutionServer(BaseMCPServer):
             backend = create_tool_search_backend(
                 backend_type=self.server_config.tool_search_backend,
             )
-        backend.index(tools=tool_infos, skills=skills, server_name=server_name)
+        backend.index(tools=tool_infos, skills=skills_dicts, server_name=server_name)
         self._tool_search_backends.append(backend)
 
         LOGGER.info(
             "Server-side tool search index built for '%s' with %d tools and %d skills",
             server_name,
             len(tool_infos),
-            len(skills),
+            len(skills_dicts),
         )
 
         async def search_server_tools(
@@ -1342,26 +1329,33 @@ class CodeExecutionServer(BaseMCPServer):
         """
         from code_execution.tools import (
             create_plan_workflow_descriptor,
-            create_load_skill_descriptor,
         )
-        from code_execution.tools.search.state_graph import _discover_skills
 
         server_name = self.server_config.name
         tool_infos = self._build_tool_infos()
-        domains_dir = self.server_config.domains_dir
 
         has_state_tools = any(t.state_requires or t.state_produces for t in tool_infos)
 
         # Register plan_{name}_workflow only when state-annotated tools exist.
         if has_state_tools:
-            pw_kwargs: dict = {
-                "server_name": server_name,
-                "tools": tool_infos,
-                "domain_name": server_name,
-            }
-            if domains_dir is not None:
-                pw_kwargs["domains_dir"] = domains_dir
-            pw_descriptor = create_plan_workflow_descriptor(**pw_kwargs)
+            # Convert Skill objects to the dict format StateGraph expects
+            skills_dicts = [
+                {
+                    "name": s.name,
+                    "description": s.description,
+                    "domain": s.domain,
+                    "states": s.states,
+                    "abs_path": s.path,
+                }
+                for s in self.skills
+            ]
+            pw_descriptor = create_plan_workflow_descriptor(
+                server_name=server_name,
+                tools=tool_infos,
+                domain_name=server_name,
+                skills=skills_dicts,
+                state_descriptions={s.token: s.description for s in self.states if s.description},
+            )
             _pw_func = pw_descriptor.func
 
             async def _plan_workflow(
@@ -1420,14 +1414,10 @@ class CodeExecutionServer(BaseMCPServer):
                 len([t for t in tool_infos if t.state_requires or t.state_produces]),
             )
 
-        # Register load_{name}_skill whenever discoverable skills exist.
-        skills = _discover_skills(domains_dir, domain_name=server_name) if domains_dir else []
-        if skills:
-            ls_kwargs: dict = {"server_name": server_name, "domain_name": server_name}
-            if domains_dir is not None:
-                ls_kwargs["domains_dir"] = domains_dir
-            ls_descriptor = create_load_skill_descriptor(**ls_kwargs)
-            _ls_func = ls_descriptor.func
+        # Register load_{name}_skill whenever skills are available.
+        if self.skills:
+            # Build a name→content index from the Skill objects
+            _skill_index = {s.name: s.content for s in self.skills}
 
             async def _load_skill(skill_name: str, ctx: Optional[Context] = None) -> str:
                 """Load a skill by name."""
@@ -1436,26 +1426,36 @@ class CodeExecutionServer(BaseMCPServer):
                     try:
                         session_id = ctx.session_id
                     except (RuntimeError, AttributeError):
-                        # Session context may be unavailable in some call paths; continue without session_id.
                         pass
-                result = await _ls_func(skill_name=skill_name)
+
+                content = _skill_index.get(skill_name)
+                if content is None:
+                    available = sorted(_skill_index.keys())
+                    result = json.dumps({"error": f"Skill '{skill_name}' not found.", "available_skills": available})
+                else:
+                    result = content
+
                 self.activity_publisher.publish_nowait(
                     {
                         "type": "skill_loaded",
                         "description": f"load_skill {skill_name}",
                         "skill_name": skill_name,
                         "session_id": session_id,
-                        "success": True,
+                        "success": content is not None,
                     }
                 )
                 return result
 
-            self.mcp.tool(
-                name=ls_descriptor.name,
-                description=ls_descriptor.description,
-            )(_load_skill)
+            ls_tool_name = f"load_{server_name}_skill"
+            ls_description = (
+                f"Load a {server_name} skill by name. Returns the full skill "
+                f"markdown so you can follow its instructions. Use "
+                f"plan_{server_name}_workflow or search_{server_name}_tools to "
+                f"discover available skill names."
+            )
+            self.mcp.tool(name=ls_tool_name, description=ls_description)(_load_skill)
 
-            LOGGER.info("Registered load_%s_skill (%d skills available)", server_name, len(skills))
+            LOGGER.info("Registered load_%s_skill (%d skills available)", server_name, len(self.skills))
         elif not has_state_tools:
             LOGGER.debug(
                 "No state-annotated tools or skills found for '%s'; skipping workflow planning registration.",
@@ -2507,21 +2507,15 @@ else:
         if self.tool_registry:
             tools_data = [t.model_dump(mode="json") for t in self.tool_registry.tools]
 
-        skills_data: list[dict[str, Any]] = []
-        domains_dir = self.server_config.domains_dir
-        if domains_dir:
-            from code_execution.tools.search.state_graph import _discover_skills
-
-            skills = _discover_skills(domains_dir, domain_name=self.server_config.name)
-            skills_data = [
-                {
-                    "name": s["name"],
-                    "description": s.get("description", ""),
-                    "domain": s.get("domain", ""),
-                    "states": s.get("states", []),
-                }
-                for s in skills
-            ]
+        skills_data: list[dict[str, Any]] = [
+            {
+                "name": s.name,
+                "description": s.description,
+                "domain": s.domain,
+                "states": s.states,
+            }
+            for s in self.skills
+        ]
 
         return {
             "server_name": self.server_config.name,
