@@ -22,7 +22,6 @@ src/
   code_execution/    # CodeExecutionServer — kernel-backed code execution
   connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
   utilities/         # Shared utility modules
-agent_helpers/       # Agent-side helpers (LLM factories, MCP clients)
 activity_ui/         # Real-time activity monitoring UI
 examples/
   domain_examples/   # Reference domain server implementations (chemistry, gis, energy)
@@ -39,7 +38,6 @@ deployment/         # Deployment configs
 from base import BaseMCPServer
 from code_execution import CodeExecutionServer, ToolDefinition, ToolRegistry
 from connector import RouterServer, GatewayServer
-from agent_helpers.llm import ModelSpec
 ```
 
 Do **not** prefix with `src.` — `from src.code_execution import ...` is wrong.
@@ -69,8 +67,6 @@ Tests live in `tests/` subdirectories alongside the code they test. Configured t
 - `src/code_execution/tests/`
 - `src/connector/tests/`
 - `examples/domain_examples/tests/`
-- `agent_helpers/llm/tests/`
-- `agent_helpers/tests/`
 - `activity_ui/tests/`
 
 Markers: `unit`, `integration`, `live`, `asyncio`. Live tests are excluded by default (they require real credentials/network). `pytest-asyncio` runs in `auto` mode — async test functions are detected automatically.
@@ -88,7 +84,7 @@ uv run pytest src/connector/tests/ -v    # Target a specific package
 ## CI
 
 - **Linting** (`linting.yaml`): triggers on PRs changing `src/**`. Runs `ruff check` and `pyright --level error` on `src/`.
-- **Tests** (`tests.yaml`): triggers on PRs changing `src/`, `activity_ui/`, `agent_helpers/`, `examples/`. Runs `pytest -m "not live"` across all test paths.
+- **Tests** (`tests.yaml`): triggers on PRs changing `src/`, `activity_ui/`, `examples/`. Runs `pytest -m "not live"` across all test paths.
 
 Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not live"` pass for any changed areas.
 
@@ -96,7 +92,6 @@ Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not l
 
 **Extras** (for optional feature dependencies):
 ```bash
-uv sync --extra agent          # Microsoft Agent Framework (MAF) + LLM factories (agent_helpers/llm/)
 uv sync --extra openai-agents  # OpenAI Agents SDK adapter
 uv sync --extra copilot-sdk    # GitHub Copilot SDK adapter
 uv sync --extra geo            # Geospatial (rasterio, titiler)

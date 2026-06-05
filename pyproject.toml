@@ -43,15 +43,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Microsoft Agent Framework (MAF) adapter + agent-side helpers
-# (LLM factories, MCP clients) — see docs/tutorials/maf_connect
-agent = [
-    "agent-framework>=1.2.0",
-    "openai>=1.107.3",
-    "python-dotenv>=1.1.1",
-    "tenacity>=9.1.2",
-    "tiktoken>=0.11.0",
-]
 # OpenAI Agents SDK adapter (docs/tutorials/openai_agents_connect)
 openai-agents = [
     "openai-agents>=0.15.0",
@@ -81,7 +72,7 @@ where = ["src", "."]
 # trips setuptools 82's package discovery -- it resolves activity_ui's dirs under
 # src/ (e.g. src/activity_ui/static), failing the build. Leaving it out of the
 # wheel unblocks `uv sync`. Proper fix: move activity_ui under src/.
-include = ["base*", "code_execution*", "connector*", "agent_helpers*"]
+include = ["base*", "code_execution*", "connector*"]
 exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [build-system]
@@ -108,7 +99,7 @@ docs = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/code_execution/tests", "src/connector/tests", "examples/domain_examples/tests", "agent_helpers/llm/tests", "agent_helpers/tests", "activity_ui/tests"]
+testpaths = ["src/code_execution/tests", "src/connector/tests", "examples/domain_examples/tests", "activity_ui/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

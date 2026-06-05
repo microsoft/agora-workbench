@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests code_execution, connector, domain examples, agent_helpers (llm + mcp), and activity_ui
+# Tests code_execution, connector, domain examples, and activity_ui
 
 name: Tests
 
@@ -14,7 +14,6 @@ on:
     paths:
       - 'src/**'
       - 'activity_ui/**'
-      - 'agent_helpers/**'
       - 'examples/**'
       - '.github/workflows/tests.yaml'
     
@@ -61,13 +60,6 @@ jobs:
         run: |
           uv run pytest examples/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
 
-      - name: Run agent helpers tests
-        id: agent_helpers_tests
-        continue-on-error: true
-        run: |
-          uv sync --extra agent
-          uv run pytest agent_helpers/ -m "not live" -v --json-report --json-report-file=agent-helpers-report.json
-
       - name: Run activity UI tests
         id: activity_ui_tests
         continue-on-error: true
@@ -80,7 +72,6 @@ jobs:
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           connector_status="${{ steps.connector_tests.outcome }}"
           domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
-          agent_helpers_status="${{ steps.agent_helpers_tests.outcome }}"
           activity_ui_status="${{ steps.activity_ui_tests.outcome }}"
           
           echo "## Test Results"
@@ -102,19 +93,13 @@ jobs:
             echo "❌ Domain examples tests failed"
           fi
 
-          if [ "$agent_helpers_status" == "success" ]; then
-            echo "✅ Agent helpers tests passed"
-          else
-            echo "❌ Agent helpers tests failed"
-          fi
-
           if [ "$activity_ui_status" == "success" ]; then
             echo "✅ Activity UI tests passed"
           else
             echo "❌ Activity UI tests failed"
           fi
           
-          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$agent_helpers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
+          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1
