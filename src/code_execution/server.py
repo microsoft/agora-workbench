@@ -366,6 +366,48 @@ class CodeExecutionServer(BaseMCPServer):
         await self._register_kernel(kernel_name="tools-py")
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
+    def main(self, *, default_host: str = "0.0.0.0", default_port: int = 8000) -> None:
+        """CLI entrypoint that handles ``--warm``, ``--host``, and ``--port``.
+
+        Call this from your server's ``if __name__ == "__main__"`` block to get
+        standard flag handling without manual ``sys.argv`` parsing::
+
+            server = MyDomainServer(...)
+            server.main()
+
+        Flags:
+            --warm          Pre-initialize the environment and exit (no HTTP server).
+            --host HOST     Bind address (default: 0.0.0.0, or HOST env var).
+            --port PORT     Bind port (default: 8000, or PORT env var).
+        """
+        import argparse
+
+        parser = argparse.ArgumentParser(
+            description=f"{self.server_config.name} — CodeExecutionServer",
+        )
+        parser.add_argument(
+            "--warm",
+            action="store_true",
+            help="Pre-initialize the environment and exit without starting the server.",
+        )
+        parser.add_argument(
+            "--host",
+            default=os.getenv("HOST") or default_host,
+            help=f"Bind address (default: {default_host}, or HOST env var).",
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=int(os.getenv("PORT") or default_port),
+            help=f"Bind port (default: {default_port}, or PORT env var).",
+        )
+        args = parser.parse_args()
+
+        if args.warm:
+            asyncio.run(self.warm())
+        else:
+            asyncio.run(self.run_http(host=args.host, port=args.port))
+
     # ========================================================================
     # Optional hooks - can be overridden by subclasses
     # ========================================================================
