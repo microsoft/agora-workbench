@@ -164,7 +164,26 @@ class ToolDefinition(BaseModel):
     return_spec: List[ReturnSpec] = Field(
         default_factory=list, description="List of return value specifications. Each defines a value the tool returns."
     )
-    module: str = Field(..., description="Python module path where tool is implemented")
+    module: Optional[str] = Field(
+        default=None,
+        description=(
+            "Resolved Python module path for kernel-side import. The tool proxy "
+            "generates `from {module} import {name}` inside the execution kernel. "
+            "Typically populated automatically by ToolRegistry from the registry's "
+            "`package` setting. Can also be set directly for explicit control or "
+            "when constructing ToolDefinitions from catalog data."
+        ),
+    )
+    module_override: Optional[str] = Field(
+        default=None,
+        exclude=True,
+        description=(
+            "Full module path override for kernel-side import, taking precedence "
+            "over the registry's default `package` resolution. Use when a tool's "
+            "implementation does not follow the `{package}.{name}` convention — "
+            "e.g. multiple tools in a shared module like `mypackage.tools`."
+        ),
+    )
     server_name: Optional[str] = Field(default=None, description="MCP server this tool belongs to")
     state_transition: StateTransition = Field(
         default_factory=StateTransition, description="State preconditions and postconditions"

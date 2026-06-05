@@ -30,7 +30,6 @@ parse_molecule = ToolDefinition(
         ReturnSpec(name="molecular_formula", type=str, description="Molecular formula"),
         ReturnSpec(name="molecular_weight", type=float, description="Molecular weight in Da"),
     ],
-    module="chemistry_tools.parse_molecule",
     state_transition=StateTransition(
         produces=frozenset({"chemistry.molecule_parsed"}),
     ),
@@ -42,6 +41,8 @@ parse_molecule = ToolDefinition(
 )
 ```
 
+Note that `module` is not set here — it will be resolved automatically when the tool is registered with a `ToolRegistry` that has a `package` configured (see [Registering tools](#registering-tools) below).
+
 ## ToolDefinition fields
 
 | Field | Required | Description |
@@ -51,7 +52,8 @@ parse_molecule = ToolDefinition(
 | `required_parameters` | ✓ | List of `ToolParameter` objects |
 | `optional_parameters` | | Optional parameters with defaults |
 | `return_spec` | | List of `ReturnSpec` objects describing the return dict |
-| `module` | ✓ | Dotted import path to the module containing the function |
+| `module` | | Resolved import path (usually set automatically by `ToolRegistry`) |
+| `module_override` | | Full module path override when the tool doesn't follow `{package}.{name}` convention |
 | `state_transition` | | States this tool requires and produces (for skill workflows) |
 | `affordances` | | Natural-language phrases describing what this tool can do (improves search) |
 
@@ -88,9 +90,22 @@ from code_execution import ToolRegistry
 
 from my_domain.tools import parse_molecule, compute_descriptors
 
-registry = ToolRegistry()
+registry = ToolRegistry(package="my_domain_tools")
 registry.register_tool(parse_molecule)
 registry.register_tool(compute_descriptors)
+```
+
+The `package` parameter tells the registry how to resolve kernel imports. For each tool, the proxy will generate `from {package}.{tool_name} import {tool_name}` inside the execution kernel. This means your implementation package should have one module per tool (e.g. `my_domain_tools/parse_molecule.py` containing a `parse_molecule()` function).
+
+If a tool lives in a non-standard location (e.g. multiple tools in a shared module), use `module_override`:
+
+```python
+# Tool implementation lives in my_domain_tools/utils.py, not my_domain_tools/helper_func.py
+helper_func = ToolDefinition(
+    name="helper_func",
+    description="...",
+    module_override="my_domain_tools.utils",  # from my_domain_tools.utils import helper_func
+)
 ```
 
 Then pass the registry to your server:
