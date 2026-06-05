@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
+from code_execution import CodeExecutionServer, ServerConfig, State, ToolRegistry, discover_skills
 from code_execution.auth import create_noop_auth_config
 from code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
 from code_execution.data_access.credentials import create_storage_credential
@@ -31,6 +31,77 @@ from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 # Path to the chemistry_tools package (relative to this file so it works
 # both inside Docker and when running locally from the repo root).
 _CHEMISTRY_TOOLS_PKG = str(Path(__file__).resolve().parent.parent / "chemistry_tools")
+_SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+
+# ---------------------------------------------------------------------------
+# State vocabulary — describes the domain's intermediate artifacts and how
+# agents should interpret them for natural-language search matching.
+# ---------------------------------------------------------------------------
+
+CHEMISTRY_STATES = [
+    State(
+        "chemistry.molecule_parsed",
+        description="A SMILES molecule has been parsed and validated",
+        affordances=[
+            "validate a SMILES string",
+            "get the canonical form of a molecule",
+            "identify a molecule from SMILES",
+        ],
+    ),
+    State(
+        "chemistry.groups_identified",
+        description="Functional groups have been enumerated",
+        affordances=[
+            "identify functional groups in a molecule",
+            "find hydroxyl, carboxyl, amine, or other groups",
+        ],
+    ),
+    State(
+        "chemistry.descriptors_computed",
+        description="Molecular descriptors have been calculated",
+        affordances=[
+            "compute molecular properties",
+            "calculate LogP, TPSA, or molecular weight",
+            "evaluate drug-likeness",
+        ],
+    ),
+    State(
+        "chemistry.candidates_filtered",
+        description="Compounds filtered by drug-likeness rules",
+        affordances=[
+            "screen compounds for drug-likeness",
+            "filter molecules by Lipinski or Veber rules",
+            "identify drug candidates",
+        ],
+    ),
+    State(
+        "chemistry.fingerprints_computed",
+        description="Molecular fingerprints have been generated",
+        affordances=[
+            "generate molecular fingerprints",
+            "compute Morgan or MACCS fingerprints",
+            "prepare molecules for similarity or clustering",
+        ],
+    ),
+    State(
+        "chemistry.similarity_computed",
+        description="Pairwise molecular similarity has been computed",
+        affordances=[
+            "compare molecular similarity",
+            "rank molecules by Tanimoto similarity",
+            "virtual screening by similarity",
+        ],
+    ),
+    State(
+        "chemistry.molecules_clustered",
+        description="Molecules have been grouped into clusters",
+        affordances=[
+            "cluster a molecular library",
+            "group similar molecules together",
+            "chemical series analysis",
+        ],
+    ),
+]
 
 ENVIRONMENT_YML = """\
 name: chemistry
@@ -72,9 +143,6 @@ config = ServerConfig(
         # import parse_molecule``) resolve correctly inside the kernel.
         f"python -m pip install --no-deps {_CHEMISTRY_TOOLS_PKG}",
     ],
-    # Enable skill discovery: scans <domains_dir>/<name>/skills/SKILL.md.
-    # parents[2] resolves to /app/domain_examples in container and src/domain_examples in dev.
-    domains_dir=Path(__file__).resolve().parents[2],
 )
 
 
@@ -109,11 +177,16 @@ if _blob_account_url:
         )
     )
 
+# Discover skills from the skills/ directory
+_skills = discover_skills(_SKILLS_DIR, domain="chemistry")
+
 server = ChemistryServer(
     server_config=config,
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
     publishers=_publishers,
+    skills=_skills,
+    states=CHEMISTRY_STATES,
 )
 
 if __name__ == "__main__":

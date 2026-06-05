@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -87,6 +87,7 @@ def create_plan_workflow_descriptor(
     domains_dir: Path | None = None,
     extra_skill_dirs: list[Path] | None = None,
     domain_name: str | None = None,
+    skills: list[dict[str, Any]] | None = None,
 ) -> ToolDescriptor:
     """Create a ``plan_{name}_workflow`` :class:`~code_execution.tools.tool_descriptor.ToolDescriptor`.
 
@@ -104,6 +105,9 @@ def create_plan_workflow_descriptor(
         state discovery is skipped (only tool state annotations are used).
     extra_skill_dirs : list[Path] | None
         Additional top-level skill directories (e.g. ``planning/skills``).
+    skills : list[dict] | None
+        Pre-built skill dicts (keys: name, description, domain, states, abs_path).
+        When provided, filesystem-based skill discovery is skipped.
 
     Returns
     -------
@@ -112,7 +116,7 @@ def create_plan_workflow_descriptor(
     """
     if tools is None:
         tools = []
-    graph = StateGraph(tools, domains_dir, extra_skill_dirs, domain_name=domain_name)
+    graph = StateGraph(tools, domains_dir, extra_skill_dirs, domain_name=domain_name, skills=skills)
 
     async def plan_workflow(
         domain: str = "",

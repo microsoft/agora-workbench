@@ -240,9 +240,9 @@ class ServerConfig(BaseModel):
     domains_dir: Optional[Path] = Field(
         default=None,
         description=(
-            "Path to the domains/ directory containing domain state definitions and skills. "
-            "Used by workflow planning and skill loading tools. "
-            "When None, these features are disabled unless tools carry state annotations directly."
+            "Deprecated: Use the ``skills`` and ``states`` parameters on "
+            "``CodeExecutionServer`` instead. This field is retained for backward "
+            "compatibility but is no longer used by the server internals."
         ),
     )
     tool_search_backend: Literal["bm25", "azure_ai_search"] = Field(

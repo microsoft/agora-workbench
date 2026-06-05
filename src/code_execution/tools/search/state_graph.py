@@ -151,6 +151,7 @@ class StateGraph:
         domains_dir: Path | None = None,
         extra_skill_dirs: list[Path] | None = None,
         domain_name: str | None = None,
+        skills: list[dict[str, Any]] | None = None,
     ) -> None:
         self._domains_dir = domains_dir
         self._extra_skill_dirs = extra_skill_dirs
@@ -170,8 +171,11 @@ class StateGraph:
         self._to_state: dict[str, list[ToolInfo]] = defaultdict(list)
         self._build_adjacency()
 
-        # Skills with state annotations
-        self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
+        # Skills: use explicitly provided skills or discover from filesystem
+        if skills is not None:
+            self._skills = skills
+        else:
+            self._skills = _discover_skills(domains_dir, extra_skill_dirs, domain_name)
 
     # ------------------------------------------------------------------
     # Private helpers

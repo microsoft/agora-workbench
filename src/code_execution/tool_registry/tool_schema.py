@@ -129,13 +129,68 @@ class ReturnSpec(BaseModel):
         return f"ReturnSpec({self.name}: {_class_to_string(self.type)})"
 
 
+class State:
+    """A named state in a domain's tool workflow graph.
+
+    States represent meaningful intermediate artifacts that tools produce
+    and consume. They form the nodes in the state-transition graph that
+    powers workflow planning and skill discovery.
+
+    Can be used directly in ``StateTransition.requires`` and
+    ``StateTransition.produces`` alongside plain strings::
+
+        MOLECULE_PARSED = State(
+            token="chemistry.molecule_parsed",
+            description="A SMILES string has been validated and canonicalized",
+            affordances=["validate a SMILES string", "identify a molecule from SMILES"],
+        )
+
+        parse_molecule = ToolDefinition(
+            ...,
+            state_transition=StateTransition(produces=frozenset({MOLECULE_PARSED})),
+        )
+
+    Attributes:
+        token: Canonical string identifier (e.g. ``"chemistry.molecule_parsed"``).
+        description: Human-readable explanation of what this state represents.
+        affordances: Search phrases describing what achieving this state enables.
+    """
+
+    __slots__ = ("token", "description", "affordances")
+
+    def __init__(self, token: str, description: str = "", affordances: list[str] | None = None):
+        object.__setattr__(self, "token", token)
+        object.__setattr__(self, "description", description)
+        object.__setattr__(self, "affordances", affordances or [])
+
+    def __setattr__(self, name, value):
+        raise AttributeError("State objects are immutable")
+
+    def __hash__(self) -> int:
+        return hash(self.token)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, State):
+            return self.token == other.token
+        if isinstance(other, str):
+            return self.token == other
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return f"State({self.token!r})"
+
+    def __str__(self) -> str:
+        return self.token
+
+
 class StateTransition(BaseModel):
     """Preconditions and postconditions for a tool expressed as state tokens.
 
-    State tokens should reference values from a domain's state vocabulary
-    enum (e.g., ``DwsimState``).  The ``requires`` set lists states that
-    must hold *before* the tool can run; ``produces`` lists states that
-    will hold *after* a successful invocation.
+    State tokens can be plain strings or :class:`State` objects.  When
+    ``State`` objects are used, the token string is extracted for storage
+    and serialization.  The ``requires`` set lists states that must hold
+    *before* the tool can run; ``produces`` lists states that will hold
+    *after* a successful invocation.
     """
 
     requires: FrozenSet[str] = Field(
@@ -144,6 +199,16 @@ class StateTransition(BaseModel):
     produces: FrozenSet[str] = Field(
         default_factory=frozenset, description="State tokens that hold after a successful run"
     )
+
+    @field_validator("requires", "produces", mode="before")
+    @classmethod
+    def normalize_state_tokens(cls, v: Any) -> frozenset[str]:
+        """Accept State objects or strings and normalize to a frozenset of token strings."""
+        if isinstance(v, (frozenset, set)):
+            return frozenset(item.token if isinstance(item, State) else str(item) for item in v)
+        if isinstance(v, (list, tuple)):
+            return frozenset(item.token if isinstance(item, State) else str(item) for item in v)
+        return v
 
     @field_serializer("requires", "produces")
     def serialize_frozenset(self, v: FrozenSet[str]) -> list[str]:
