@@ -18,10 +18,10 @@ Use `uv run` to run any script (e.g. `uv run python src/script.py`) and `uv add`
 
 ```
 src/
-  base/              # BaseMCPServer ABC — shared HTTP hosting, auth middleware
-  code_execution/    # CodeExecutionServer — kernel-backed code execution
-  connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
-  utilities/         # Shared utility modules
+  agora_workbench/
+    base/              # BaseMCPServer ABC — shared HTTP hosting, auth middleware
+    code_execution/    # CodeExecutionServer — kernel-backed code execution
+    connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
 agent_helpers/       # Agent-side helpers (LLM factories, MCP clients)
 activity_ui/         # Real-time activity monitoring UI
 examples/
@@ -33,20 +33,19 @@ deployment/         # Deployment configs
 
 ## Import Conventions
 
-`src/` and the repo root (`.`) are both on the Python path. Imports use **bare package names**:
+`src/` is on the Python path. All imports use the `agora_workbench` namespace:
 
 ```python
-from base import BaseMCPServer
-from code_execution import CodeExecutionServer, ToolDefinition, ToolRegistry
-from connector import RouterServer, GatewayServer
-from agent_helpers.llm import ModelSpec
+from agora_workbench.base import BaseMCPServer
+from agora_workbench.code_execution import CodeExecutionServer, ToolDefinition, ToolRegistry
+from agora_workbench.connector import RouterServer, GatewayServer
 ```
 
-Do **not** prefix with `src.` — `from src.code_execution import ...` is wrong.
+Do **not** use bare package names — `from code_execution import ...` is wrong.
 
 ## Architecture
 
-`BaseMCPServer` (in `src/base/`) is the shared abstract base class. Two concrete server types inherit from it:
+`BaseMCPServer` (in `src/agora_workbench/base/`) is the shared abstract base class. Two concrete server types inherit from it:
 
 - **`CodeExecutionServer`** — runs a Python kernel, executes user code, manages sessions and tool registries.
 - **`ConnectorServer`** — stateless proxy that aggregates/routes/gates tool calls to upstream servers without its own kernel.
@@ -66,8 +65,8 @@ Follow the pattern in `examples/domain_examples/`. A domain server:
 
 Tests live in `tests/` subdirectories alongside the code they test. Configured test paths:
 
-- `src/code_execution/tests/`
-- `src/connector/tests/`
+- `src/agora_workbench/code_execution/tests/`
+- `src/agora_workbench/connector/tests/`
 - `examples/domain_examples/tests/`
 - `agent_helpers/llm/tests/`
 - `agent_helpers/tests/`
@@ -76,8 +75,8 @@ Tests live in `tests/` subdirectories alongside the code they test. Configured t
 Markers: `unit`, `integration`, `live`, `asyncio`. Live tests are excluded by default (they require real credentials/network). `pytest-asyncio` runs in `auto` mode — async test functions are detected automatically.
 
 ```bash
-uv run pytest -m "not live"              # All non-live tests
-uv run pytest src/connector/tests/ -v    # Target a specific package
+uv run pytest -m "not live"                            # All non-live tests
+uv run pytest src/agora_workbench/connector/tests/ -v  # Target a specific package
 ```
 
 ## Linting & Type Checking
@@ -110,7 +109,7 @@ uv sync --group docs   # mkdocs, mkdocs-material, mkdocstrings
 
 ## Do Not
 
-- Do not import packages as `src.<package>` — use bare names (`code_execution`, `connector`, `base`).
+- Do not use bare package names — always import via `agora_workbench.*` (e.g., `from agora_workbench.code_execution import ...`).
 - Do not bypass `uv` or manually activate `.venv`.
 - Do not run live-marked tests unless explicitly requested and credentials are available.
 - Do not add strict type annotations or fix pyright warnings that the config intentionally suppresses.

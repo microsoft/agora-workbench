@@ -11,7 +11,7 @@ The ``module`` field on each definition points to the installed package
 ``from {module} import {name}`` import resolves correctly.
 """
 
-from code_execution import ReturnSpec, ToolDefinition, ToolParameter
+from agora_workbench.code_execution import ReturnSpec, ToolDefinition, ToolParameter
 
 # ============================================================================
 # Low complexity: Network Setup
@@ -53,7 +53,6 @@ define_network = ToolDefinition(
         ReturnSpec(name="start", type=str, description="First snapshot timestamp"),
         ReturnSpec(name="end", type=str, description="Last snapshot timestamp"),
     ],
-    module="energysystems_tools.define_network",
     affordances=[
         "create a power network",
         "set up a PyPSA model",
@@ -115,7 +114,6 @@ add_components = ToolDefinition(
         ReturnSpec(name="num_storage_units", type=int, description="Number of storage units added"),
         ReturnSpec(name="summary", type=str, description="Human-readable summary of components"),
     ],
-    module="energysystems_tools.add_components",
     affordances=[
         "add buses to a network",
         "add generators with costs",
@@ -158,7 +156,6 @@ add_time_series = ToolDefinition(
         ReturnSpec(name="snapshot_count", type=int, description="Number of snapshots in network"),
         ReturnSpec(name="components", type=list, description="List of component names updated"),
     ],
-    module="energysystems_tools.add_time_series",
     affordances=[
         "attach load profiles",
         "set renewable capacity factors over time",
@@ -196,7 +193,6 @@ run_power_flow = ToolDefinition(
         ),
         ReturnSpec(name="line_loading", type=list, description="Per-line loading percentage and power flow"),
     ],
-    module="energysystems_tools.run_power_flow",
     affordances=[
         "run power flow analysis",
         "compute bus voltages and angles",
@@ -225,7 +221,6 @@ run_optimal_power_flow = ToolDefinition(
         ReturnSpec(name="line_flows", type=list, description="Per-line optimal power flows (MW)"),
         ReturnSpec(name="marginal_prices", type=list, description="Per-bus marginal price (currency/MWh)"),
     ],
-    module="energysystems_tools.run_optimal_power_flow",
     affordances=[
         "minimize generation cost",
         "run optimal power flow",
@@ -258,7 +253,6 @@ run_capacity_expansion = ToolDefinition(
         ReturnSpec(name="optimal_capacities", type=list, description="Per-component optimal capacity (MW)"),
         ReturnSpec(name="investment_by_type", type=dict, description="Investment cost breakdown by carrier/technology"),
     ],
-    module="energysystems_tools.run_capacity_expansion",
     affordances=[
         "optimize generation investment",
         "plan capacity expansion",
@@ -288,7 +282,6 @@ analyze_costs = ToolDefinition(
         ),
         ReturnSpec(name="most_expensive_bus", type=str, description="Bus with highest average marginal price"),
     ],
-    module="energysystems_tools.analyze_costs",
     affordances=[
         "break down system costs by technology",
         "analyze marginal pricing across buses",
@@ -318,7 +311,6 @@ analyze_topology = ToolDefinition(
         ReturnSpec(name="degree_distribution", type=dict, description="Bus degree distribution"),
         ReturnSpec(name="bottleneck_lines", type=list, description="Lines with highest betweenness centrality"),
     ],
-    module="energysystems_tools.analyze_topology",
     affordances=[
         "check network connectivity",
         "find electrical islands",

@@ -19,7 +19,7 @@ Key capabilities:
 
 | I want to… | Go to… |
 |---|---|
-| Build my first server | [Options for making a CodeExecutionServer](guide/server-options.md) |
+| Build my first server | [Your First Server tutorial](tutorials/first_server/README.md) · [All server options](guide/server-options.md) |
 | Add domain tools | [Tool pattern](guide/tool-pattern.md) |
 | Add multi-step skills | [Skill pattern](guide/skill-pattern.md) |
 | Teach my agent how to use the servers | [Attaching to your agent](guide/attaching-to-your-agent.md#workbench-skill) |
@@ -40,11 +40,12 @@ existing agent to a running Workbench MCP server in a few lines.
 [Start the chemistry MCP server](tutorials/start-chemistry-server.md) guide to
 build the base image and start the local server.
 
-| SDK | Tutorial |
+| Tutorial | What you'll learn |
 | --- | --- |
-| Microsoft Agent Framework (MAF) | [maf_connect](tutorials/maf_connect/README.md) |
-| OpenAI Agents SDK | [openai_agents_connect](tutorials/openai_agents_connect/README.md) |
-| GitHub Copilot SDK | [copilot_sdk_connect](tutorials/copilot_sdk_connect/README.md) |
+| [Your First Server](tutorials/first_server/README.md) | Build a server with a real domain tool, end-to-end |
+| [Microsoft Agent Framework (MAF)](tutorials/maf_connect/README.md) | Connect a MAF agent to a running Workbench server |
+| [OpenAI Agents SDK](tutorials/openai_agents_connect/README.md) | Connect an OpenAI agent to a running Workbench server |
+| [GitHub Copilot SDK](tutorials/copilot_sdk_connect/README.md) | Connect a Copilot agent to a running Workbench server |
 
 ## Source
 

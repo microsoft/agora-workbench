@@ -72,8 +72,8 @@ pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/a
 For local testing, no external credentials are required. Use the no-op auth config to skip authentication entirely:
 
 ```python
-from code_execution.auth import create_noop_auth_config
-from code_execution.code_execution_models import ServerConfig
+from agora_workbench.code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.code_execution_models import ServerConfig
 
 config = ServerConfig(
     name="my-server",

@@ -58,6 +58,12 @@ class ActivityEvent(BaseModel):
     # UI renders a collapsed "artifacts (N)" disclosure with a download link
     # per entry; payload never contains the file bytes themselves.
     artifacts: Optional[list[dict[str, Any]]] = None
+    # Files written to the outputs dir during this execute, surfaced as a
+    # reminder + direct download button in the feed.  Each entry:
+    # {name, mime_type, download_url}.  download_url is a token capability link
+    # to the server's /artifacts endpoint (no auth on that route), so the user
+    # can download a saved file directly without the agent publishing it.
+    saved_files: Optional[list[dict[str, Any]]] = None
 
     # set on most events so the UI can group by session
     session_id: Optional[str] = None

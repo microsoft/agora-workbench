@@ -66,6 +66,7 @@ nav:
       - Extension points: guide/extension-points.md
   - Tutorials:
       - Start the chemistry MCP server: tutorials/start-chemistry-server.md
+      - Your First Server: tutorials/first_server/README.md
       - Microsoft Agent Framework: tutorials/maf_connect/README.md
       - OpenAI Agents SDK: tutorials/openai_agents_connect/README.md
       - GitHub Copilot SDK: tutorials/copilot_sdk_connect/README.md

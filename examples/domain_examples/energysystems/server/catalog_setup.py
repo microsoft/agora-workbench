@@ -17,9 +17,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
-from code_execution.data_access.catalog import CatalogConfig, CatalogDB
-from code_execution.data_access.catalog.indexer import CatalogIndexer
+from agora_workbench.code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
+from agora_workbench.code_execution.data_access.catalog import CatalogConfig, CatalogDB
+from agora_workbench.code_execution.data_access.catalog.indexer import CatalogIndexer
 
 LOGGER = logging.getLogger(__name__)
 

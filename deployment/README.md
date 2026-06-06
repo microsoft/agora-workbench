@@ -118,12 +118,12 @@ also declare **assets** that are provisioned into the cache directory.
 
 ### Pre-warm CLI
 
-The `code_execution.cli warm` command builds the environment and provisions
+The `agora_workbench.code_execution.cli warm` command builds the environment and provisions
 assets without starting the HTTP server:
 
 ```bash
 # Locally
-python -m code_execution.cli warm --config config.yaml -v
+python -m agora_workbench.code_execution.cli warm --config config.yaml -v
 
 # In Docker (via compose profile)
 docker compose --profile setup run --rm warm-cache

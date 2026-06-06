@@ -11,7 +11,7 @@ The ``module`` field on each definition points to the installed package
 ``from {module} import {name}`` import resolves correctly.
 """
 
-from code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
+from agora_workbench.code_execution import ReturnSpec, StateTransition, ToolDefinition, ToolParameter
 
 # ============================================================================
 # Low complexity: Molecular Analysis chain
@@ -33,7 +33,6 @@ parse_molecule = ToolDefinition(
         ReturnSpec(name="num_atoms", type=int, description="Number of heavy (non-hydrogen) atoms"),
         ReturnSpec(name="num_bonds", type=int, description="Number of bonds"),
     ],
-    module="chemistry_tools.parse_molecule",
     state_transition=StateTransition(
         produces=frozenset({"chemistry.molecule_parsed"}),
     ),
@@ -64,7 +63,6 @@ enumerate_functional_groups = ToolDefinition(
         ),
         ReturnSpec(name="num_groups_found", type=int, description="Number of distinct functional group types found"),
     ],
-    module="chemistry_tools.enumerate_functional_groups",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.molecule_parsed"}),
         produces=frozenset({"chemistry.groups_identified"}),
@@ -108,7 +106,6 @@ compute_descriptors = ToolDefinition(
         ReturnSpec(name="descriptors", type=dict, description="Mapping of descriptor name to computed value"),
         ReturnSpec(name="lipinski_pass", type=bool, description="Whether the molecule passes Lipinski's Rule of Five"),
     ],
-    module="chemistry_tools.compute_descriptors",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.molecule_parsed"}),
         produces=frozenset({"chemistry.descriptors_computed"}),
@@ -153,7 +150,6 @@ filter_drug_candidates = ToolDefinition(
         ReturnSpec(name="passed", type=list, description="Molecules that passed with properties"),
         ReturnSpec(name="failed", type=list, description="Molecules that failed with reasons"),
     ],
-    module="chemistry_tools.filter_drug_candidates",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.descriptors_computed"}),
         produces=frozenset({"chemistry.candidates_filtered"}),
@@ -212,7 +208,6 @@ compute_fingerprints = ToolDefinition(
         ReturnSpec(name="num_invalid", type=int, description="Skipped (invalid SMILES)"),
         ReturnSpec(name="fingerprints", type=list, description="Per-molecule fingerprint data"),
     ],
-    module="chemistry_tools.compute_fingerprints",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.molecule_parsed"}),
         produces=frozenset({"chemistry.fingerprints_computed"}),
@@ -274,7 +269,6 @@ find_similar_molecules = ToolDefinition(
         ReturnSpec(name="num_matches", type=int, description="Number of matches above threshold"),
         ReturnSpec(name="matches", type=list, description="Ranked list of matching molecules with similarity scores"),
     ],
-    module="chemistry_tools.find_similar_molecules",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.fingerprints_computed"}),
         produces=frozenset({"chemistry.similarity_computed"}),
@@ -336,7 +330,6 @@ cluster_molecules = ToolDefinition(
         ReturnSpec(name="fingerprint_type", type=str, description="Fingerprint algorithm used"),
         ReturnSpec(name="clusters", type=list, description="Cluster assignments with centroids and members"),
     ],
-    module="chemistry_tools.cluster_molecules",
     state_transition=StateTransition(
         requires=frozenset({"chemistry.fingerprints_computed"}),
         produces=frozenset({"chemistry.molecules_clustered"}),
