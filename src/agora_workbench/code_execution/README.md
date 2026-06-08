@@ -37,10 +37,11 @@ See `domains/example/server/example_server.py` for a complete reference implemen
 
 ## Environment Model
 
-When `ServerConfig.type="conda"`, code runs in an isolated conda kernel environment created from `ServerConfig.dependency_file`.
+`CodeExecutionServer` always runs code in an isolated kernel environment created from `ServerConfig.dependency_file`, for all environment types (`uv`, `conda`, and `pip`).
 
-- `dependency_file` must be `environment.yml` content
-- Install native/compiled dependencies from `conda-forge` (for example `ngspice`, `gdal`, `netcdf4`)
+- For `type="uv"` and `type="pip"`, `dependency_file` is `requirements.txt` content
+- For `type="conda"`, `dependency_file` is `environment.yml` content
+- For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), install from `conda-forge`
 - Avoid relying on system package managers like `apt-get` for kernel dependencies
 
 Minimal conda example with native dependencies:
