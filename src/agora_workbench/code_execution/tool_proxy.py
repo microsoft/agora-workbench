@@ -160,7 +160,12 @@ def _build_proxy_source(tool_def: "ToolDefinition") -> str:  # noqa: C901 – ge
     body_lines: list[str] = []
 
     # lazy import of the real implementation
-    module_path = tool_def.module or ""
+    module_path = tool_def.module
+    if not module_path:
+        raise ValueError(
+            f"Tool '{name}' has no resolved module path. "
+            "Register it with ToolRegistry(package='...') or set module/module_override."
+        )
     module_file = f"{module_path.replace('.', '/')}.py"
     body_lines.append("try:")
     body_lines.append(f"    from {module_path} import {name} as _impl")

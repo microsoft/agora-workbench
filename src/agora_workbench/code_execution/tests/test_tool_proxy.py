@@ -232,6 +232,16 @@ def test_generate_tool_proxies_import_error_message_includes_resolution_hint():
 
 
 @pytest.mark.unit
+def test_generate_tool_proxies_requires_resolved_module_path():
+    """Proxy generation should fail fast when a tool has no resolved module path."""
+    reg = ToolRegistry()
+    reg.tools.append(ToolDefinition(name="simulate", description="Simulate a circuit"))
+
+    with pytest.raises(ValueError, match="has no resolved module path"):
+        generate_tool_proxies(reg)
+
+
+@pytest.mark.unit
 def test_generate_tool_proxies_with_handle_params():
     """Handle parameters should use the actual Python type name as forward ref."""
     tool = _make_handle_tool()
