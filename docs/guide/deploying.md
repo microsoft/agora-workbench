@@ -6,11 +6,17 @@ Agora Workbench servers are deployed as Docker containers. The repository provid
 
 ### 1. Build the base image
 
-The base image includes the Agora Workbench runtime and common dependencies:
+The base image includes the Agora Workbench runtime and common dependencies.
+First, scaffold the deployment files:
 
 ```bash
-cd deployment/
-docker build -f base.Dockerfile -t mcp-server-base:local ..
+agora-workbench-deploy init --target docker
+```
+
+Then build the base image:
+
+```bash
+docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
 ```
 
 ### 2. Create your server's Dockerfile
@@ -65,21 +71,21 @@ This pre-builds the conda/uv/pip environment so it's ready when the container st
 
 ## Azure Container Apps deployment
 
-The `deployment/container_apps/` directory contains Bicep templates and a deploy script for Azure Container Apps.
+Run `agora-workbench-deploy init --target azure` to scaffold the Bicep templates and deploy scripts.
 
 ### Prerequisites
 
 - Azure CLI (`az`) authenticated
 - A container registry (ACR) for pushing images
-- Environment variables in `deployment/.env.server`
+- Environment variables in `docker/.env.server`
 
 ### Deploy steps
 
 ```bash
-cd deployment/container_apps/
+cd deployment/azure/
 
 # Configure your deployment
-cp ../.env.server.example ../.env.server
+cp ../docker/.env.server.example ../docker/.env.server
 # Edit .env.server with your Azure resource details
 
 # Build and push

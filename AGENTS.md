@@ -22,12 +22,12 @@ src/
     base/              # BaseMCPServer ABC — shared HTTP hosting, auth middleware
     code_execution/    # CodeExecutionServer — kernel-backed code execution
     connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
+    deployment/        # Deployment scaffold CLI and templates
 activity_ui/         # Real-time activity monitoring UI
 examples/
   domain_examples/   # Reference domain server implementations (chemistry, gis, energy)
   agent_examples/    # Reference agent configurations
 docs/               # MkDocs documentation site
-deployment/         # Deployment configs
 ```
 
 ## Import Conventions
