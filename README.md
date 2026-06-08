@@ -88,8 +88,6 @@ server = MyCodeExecutionServer(
 ```
 For Docker-based local deployment and Azure Container Apps, see the [deployment guide](https://microsoft.github.io/agora-workbench/guide/deploying/). For Entra ID authentication setup, see the [authentication guide](https://microsoft.github.io/agora-workbench/guide/authentication/).
 
-Tool import resolution convention: by default, tool `X` is imported as `from {package}.{X} import {X}` when using `ToolRegistry(package="...")`. Override with `ToolDefinition.module` or `ToolDefinition.module_override` for custom paths.
-
 ## Contributing
 
 This project welcomes contributions and suggestions. Most contributions require you to agree to a
