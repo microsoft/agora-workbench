@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import pypsa
 
+
 def add_components(
     network: pypsa.Network,
     buses: list[dict] | None = None,
