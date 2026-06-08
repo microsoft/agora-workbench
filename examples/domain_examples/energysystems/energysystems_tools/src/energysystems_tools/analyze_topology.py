@@ -2,33 +2,28 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
 
 import networkx as nx
 
-
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
+if TYPE_CHECKING:
+    import pypsa
 
 
-def analyze_topology(network_name: str) -> dict:
+def analyze_topology(network: pypsa.Network) -> dict:
     """Analyze the network graph: connectivity, islands, bottlenecks.
 
     Args:
-        network_name: Name of a previously defined network with components.
+        network: Live PyPSA network object returned by ``define_network``, with components.
 
     Returns:
         Dictionary with ``num_buses``, ``num_lines``, ``is_connected``,
         ``num_islands``, ``degree_distribution``, and ``bottleneck_lines``.
 
     Raises:
-        ValueError: If the network is not found.
+        ValueError: If topology analysis cannot run on the provided network.
     """
-    n = _get_network(network_name)
+    n = network
 
     # Build networkx graph from lines
     G = nx.Graph()

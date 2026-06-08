@@ -2,27 +2,22 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
-
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
+if TYPE_CHECKING:
+    import pypsa
 
 
 def add_time_series(
-    network_name: str,
+    network: pypsa.Network,
     profiles: list[dict],
 ) -> dict:
     """Attach time-varying profiles to existing network components.
 
     Args:
-        network_name: Name of a previously defined network.
+        network: Live PyPSA network object returned by ``define_network``.
         profiles: List of profile dicts, each with:
             - ``component_type``: PyPSA component type (e.g. "generators", "loads")
             - ``component_name``: Name of the component
@@ -34,10 +29,9 @@ def add_time_series(
         and ``components`` (list of updated component names).
 
     Raises:
-        ValueError: If the network is not found or values length mismatches
-            snapshot count.
+        ValueError: If values length mismatches snapshot count.
     """
-    n = _get_network(network_name)
+    n = network
     snapshot_count = len(n.snapshots)
     updated_components = []
 

@@ -51,6 +51,19 @@ curl http://localhost:8022/health
 
 The `execute_energysystems_code` tool accepts Python code. Common modules are auto-imported (`pypsa`, `numpy as np`, `pandas as pd`, `networkx as nx`, `matplotlib.pyplot as plt`).
 
+The energy-systems domain tools follow a live-object pattern: `define_network`
+returns a live `pypsa.Network`, and subsequent tools accept that same object.
+
+```python
+network = define_network(name="grid1", snapshots=48)
+add_components(
+    network=network,
+    buses=[{"name": "North"}, {"name": "South"}],
+    lines=[{"name": "N-S", "bus0": "North", "bus1": "South", "s_nom": 500, "x": 0.01}],
+)
+opf = run_optimal_power_flow(network=network)
+```
+
 ### Create a simple 3-bus network
 
 ```python
