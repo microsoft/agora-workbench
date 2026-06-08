@@ -44,6 +44,20 @@ def _type_annotation(param_type: type) -> str:
     return _BUILTIN_TYPE_NAMES[name]
 
 
+def _single_object_return_type(return_spec: list) -> type | None:
+    """Return concrete return type when return_spec describes a single non-dict value."""
+    if len(return_spec) != 1:
+        return None
+    rs = return_spec[0]
+    try:
+        if issubclass(rs.type, dict):
+            return None
+    except TypeError:
+        if rs.type is dict:
+            return None
+    return rs.type
+
+
 # ---------------------------------------------------------------------------
 # 1. Tracing infrastructure
 # ---------------------------------------------------------------------------
@@ -146,14 +160,21 @@ def _build_proxy_source(tool_def: "ToolDefinition") -> str:  # noqa: C901 – ge
             ann = _type_annotation(p.type)
             desc = p.description or "No description."
             doc_lines.append(f"    {p.name} ({ann}): {desc}")
+    single_return_type = _single_object_return_type(tool_def.return_spec)
     if tool_def.return_spec:
         doc_lines.append("")
         doc_lines.append("Returns:")
-        doc_lines.append("    dict with keys:")
-        for rs in tool_def.return_spec:
+        if single_return_type is not None:
+            rs = tool_def.return_spec[0]
             ann = _type_annotation(rs.type)
             desc = rs.description or "No description."
-            doc_lines.append(f"        {rs.name} ({ann}): {desc}")
+            doc_lines.append(f"    {ann}: {desc}")
+        else:
+            doc_lines.append("    dict with keys:")
+            for rs in tool_def.return_spec:
+                ann = _type_annotation(rs.type)
+                desc = rs.description or "No description."
+                doc_lines.append(f"        {rs.name} ({ann}): {desc}")
     docstring = "\n    ".join(doc_lines)
 
     # --- build body ---
@@ -227,7 +248,10 @@ def generate_list_tools_code(tool_registry: "ToolRegistry") -> str:
         sig = ", ".join(sig_parts)
 
         # Return type hint
-        if td.return_spec:
+        single_return_type = _single_object_return_type(td.return_spec)
+        if single_return_type is not None:
+            ret = _type_annotation(single_return_type)
+        elif td.return_spec:
             ret = "dict"
         else:
             ret = "None"

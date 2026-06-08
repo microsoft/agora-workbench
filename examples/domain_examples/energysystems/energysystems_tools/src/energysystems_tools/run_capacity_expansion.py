@@ -23,7 +23,7 @@ def run_capacity_expansion(network: pypsa.Network) -> dict:
         ``optimal_capacities``, and ``investment_by_type``.
 
     Raises:
-        ValueError: If optimization cannot run on the provided network.
+        Exception: Propagates errors raised by ``pypsa.Network.optimize``.
     """
     n = network
 

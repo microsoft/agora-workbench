@@ -20,7 +20,7 @@ def run_optimal_power_flow(network: pypsa.Network) -> dict:
         ``generator_dispatch``, ``line_flows``, and ``marginal_prices``.
 
     Raises:
-        ValueError: If optimization cannot run on the provided network.
+        Exception: Propagates errors raised by ``pypsa.Network.optimize``.
     """
     n = network
 

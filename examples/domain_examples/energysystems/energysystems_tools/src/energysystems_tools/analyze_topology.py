@@ -21,7 +21,7 @@ def analyze_topology(network: pypsa.Network) -> dict:
         ``num_islands``, ``degree_distribution``, and ``bottleneck_lines``.
 
     Raises:
-        ValueError: If topology analysis cannot run on the provided network.
+        Exception: Propagates unexpected errors from underlying graph operations.
     """
     n = network
 

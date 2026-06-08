@@ -33,7 +33,7 @@ def add_components(
         Dictionary with counts per component type and a summary string.
 
     Raises:
-        ValueError: If component parameter dictionaries are missing required keys.
+        KeyError: If component parameter dictionaries are missing required keys.
     """
     n = network
 
