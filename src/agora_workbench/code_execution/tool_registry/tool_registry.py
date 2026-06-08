@@ -20,6 +20,10 @@ class ToolRegistry:
     starting from ``0``).  Tools can be retrieved by ID or by name in O(1) time
     via internal dictionaries.
 
+    By default, tool ``X`` is imported as ``from {package}.{X} import {X}``.
+    Override with ``ToolDefinition.module`` or ``ToolDefinition.module_override``
+    to use a custom import path.
+
     Args:
         package: Default Python package for tool imports. When set, the kernel
             proxy generates ``from {package}.{tool_name} import {tool_name}``

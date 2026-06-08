@@ -212,6 +212,26 @@ def test_generate_tool_proxies_function_names():
 
 
 @pytest.mark.unit
+def test_generate_tool_proxies_import_error_message_includes_resolution_hint():
+    """Import failures should include resolved module/function details and override hint."""
+    tool = _make_simple_tool(name="simulate", module="pyspice_tools.simulate")
+    reg = _registry_with(tool)
+    proxy_code = generate_tool_proxies(reg)
+
+    ns = {"__builtins__": __builtins__}
+    exec(generate_tracing_infrastructure_code(), ns)
+    exec(proxy_code, ns)
+
+    with pytest.raises(ImportError) as exc_info:
+        ns["simulate"](x="input", y=1)
+
+    message = str(exc_info.value)
+    assert "Could not import tool 'simulate' from 'pyspice_tools.simulate'." in message
+    assert "Expected: function 'simulate' in module 'pyspice_tools/simulate.py'." in message
+    assert "Hint: set module or module_override on the ToolDefinition to use a custom path." in message
+
+
+@pytest.mark.unit
 def test_generate_tool_proxies_with_handle_params():
     """Handle parameters should use the actual Python type name as forward ref."""
     tool = _make_handle_tool()
