@@ -40,7 +40,7 @@ existing agent to a running Workbench MCP server in a few lines.
 [Start the chemistry MCP server](tutorials/start-chemistry-server.md) guide to
 build the base image and start the local server.
 
-| SDK | Tutorial |
+| Tutorial | What you'll learn |
 | --- | --- |
 | [Your First Server](tutorials/first_server/README.md) | Build a server with a real domain tool, end-to-end |
 | [Microsoft Agent Framework (MAF)](tutorials/maf_connect/README.md) | Connect a MAF agent to a running Workbench server |
