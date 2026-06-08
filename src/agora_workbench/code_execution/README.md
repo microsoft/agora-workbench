@@ -35,6 +35,33 @@ await server.run_http(host="0.0.0.0", port=8000)
 
 See `domains/example/server/example_server.py` for a complete reference implementation.
 
+## Environment Model
+
+When `ServerConfig.type="conda"`, code runs in an isolated conda kernel environment created from `ServerConfig.dependency_file`.
+
+- `dependency_file` must be `environment.yml` content
+- Install native/compiled dependencies from `conda-forge` (for example `ngspice`, `gdal`, `netcdf4`)
+- Avoid relying on system package managers like `apt-get` for kernel dependencies
+
+Minimal conda example with native dependencies:
+
+```python
+config = ServerConfig(
+    name="circuits",
+    description="Conda environment with native dependencies",
+    type="conda",
+    dependency_file="""\
+name: circuits
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - ngspice
+  - gdal
+""",
+)
+```
+
 ## Execution Modes and Session Meta Tools
 
 ### Background execution (`execute_<server>_code(background=True)`)
