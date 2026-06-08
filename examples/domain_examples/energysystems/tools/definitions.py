@@ -19,7 +19,11 @@ try:
     PYPSA_NETWORK_TYPE = pypsa.Network
 except ModuleNotFoundError:
     class Network:  # pragma: no cover - fallback for environments without pypsa installed
-        """Fallback placeholder so metadata can still serialize as pypsa.Network."""
+        """Placeholder used only so metadata serializes as ``pypsa.Network``.
+
+        This fallback is not a functional network implementation; it only lets
+        tool definitions load/serialize in environments where PyPSA is absent.
+        """
         pass
 
     Network.__module__ = "pypsa"

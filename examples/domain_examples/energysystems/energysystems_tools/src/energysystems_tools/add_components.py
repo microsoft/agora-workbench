@@ -87,5 +87,6 @@ def add_components(
     if counts["num_storage_units"]:
         parts.append(f"{counts['num_storage_units']} storage unit(s)")
 
-    counts["summary"] = f"Added {', '.join(parts)} to network {n.name!r}."
+    network_label = n.name if n.name else "<unnamed>"
+    counts["summary"] = f"Added {', '.join(parts)} to network {network_label!r}."
     return counts
