@@ -23,6 +23,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
+from . import agent_guidance
 from . import environment_builders
 from . import asset_provisioner
 from . import code_execution as execution_defaults
@@ -1284,7 +1285,10 @@ class CodeExecutionServer(BaseMCPServer):
                         "success": True,
                     }
                 )
-                return json.dumps({"tools": tools_list, "skills": skills_list})
+                payload: dict[str, Any] = {"tools": tools_list, "skills": skills_list}
+                if not tools_list and not skills_list:
+                    payload["hint"] = agent_guidance.no_results_hint("tools", query)
+                return json.dumps(payload)
             except Exception as exc:
                 LOGGER.error(
                     "search_%s_tools failed for query %r: %s",
@@ -1615,9 +1619,10 @@ class CodeExecutionServer(BaseMCPServer):
                     return _json.dumps(
                         {
                             "success": False,
-                            "error": (
+                            "error": agent_guidance.operator_gate(
                                 f"Serialized object size ({file_size:,} bytes) exceeds "
-                                f"limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes)."
+                                f"limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes).",
+                                tell_user="reduce the object size or split the transfer into smaller pieces.",
                             ),
                         },
                         indent=2,

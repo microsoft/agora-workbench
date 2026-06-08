@@ -11,6 +11,7 @@ from fastmcp import Context
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
+from . import agent_guidance
 from .data_access.catalog import CatalogConfig, CatalogDB
 from .data_access.catalog.embeddings import EmbeddingProvider
 
@@ -42,7 +43,14 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
     ) -> list[dict]:
         """Search the data catalog for artifacts matching a query.
 
-        Uses hybrid keyword + vector search to find relevant data files.
+        Uses hybrid keyword + vector search to find relevant data files. To load
+        a hit, paste its ``load_path`` (``<local>...</local>``) into
+        ``execute_*_code``; the platform fetches it and substitutes a local path.
+
+        If the result list is empty, no data matched — broaden or rephrase the
+        query, drop the ``domain`` / ``source_type`` filter, or call
+        ``list_domains`` to see what is available. Do not fall back to reading
+        files by hardcoded path.
 
         Args:
             query: Natural language search query.
@@ -51,7 +59,8 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
             top: Maximum number of results to return (default 10).
 
         Returns:
-            List of matching artifacts with metadata and relevance scores.
+            List of matching artifacts with metadata and relevance scores
+            (empty when nothing matched).
         """
         # Compute query embedding (skipped for keyword-only / BM25 catalogs)
         query_embedding: Optional[list[float]] = None
@@ -111,7 +120,10 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
         """
         record = ctx.db.get_artifact(artifact_id)
         if record is None:
-            return {"error": f"Artifact not found: {artifact_id}"}
+            return {
+                "error": f"Artifact not found: {artifact_id}. {agent_guidance.DISCOVER_DATA} "
+                "and use the 'id' from a search_data hit."
+            }
         data = record.to_dict()
         uri = data.get("storage_uri")
         if uri:

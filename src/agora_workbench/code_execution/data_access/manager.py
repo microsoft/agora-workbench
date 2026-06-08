@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 from azure.search.documents.aio import SearchClient
 
+from .. import agent_guidance
 from ..auth import CredentialProviderTokenCredential, EntraCredentialProvider
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ..types import AssetId
@@ -181,7 +182,10 @@ class DataLakeDataManager:
             # Fallback: accept unclosed tags like "<blob>id" (LLM sometimes omits closing tag)
             artifact_match = re.match(r"^<(\w+)>([^<>]+)$", qualified_name.strip())
         if not artifact_match:
-            raise ValueError(f"Invalid artifact format - expected <type>id</type>, got: {qualified_name}")
+            raise ValueError(
+                f"Invalid artifact format - expected <type>id</type>, got: {qualified_name}. "
+                f"{agent_guidance.ASSET_TAG_FORMAT} {agent_guidance.DISCOVER_DATA}"
+            )
 
         artifact_type = artifact_match.group(1)
         artifact_id = artifact_match.group(2)
@@ -202,7 +206,7 @@ class DataLakeDataManager:
             # Local artifacts: the artifact_id is the file path itself
             resource_url = artifact_id
         else:
-            raise ValueError(f"Unsupported artifact type: {artifact_type}.")
+            raise ValueError(f"Unsupported artifact type: {artifact_type}. {agent_guidance.ASSET_TAG_FORMAT}")
 
         # Fetch and cache the asset
         LOGGER.debug(f"Fetching and caching {artifact_type} asset")
@@ -236,7 +240,8 @@ class DataLakeDataManager:
 
         raise ValueError(
             f"No fetcher available for asset: {qualified_name}. "
-            f"Supported formats: local paths, file:// URIs, Azure Blob/ADLS (abfss://, https://)"
+            f"Supported formats: local paths, file:// URIs, Azure Blob/ADLS (abfss://, https://). "
+            f"{agent_guidance.DISCOVER_DATA}"
         )
 
     def _get_cache_file_path(self, qualified_name: str) -> Path:
