@@ -29,7 +29,7 @@ class AuthConfig:
 Disables authentication entirely — all requests are accepted with a synthetic identity:
 
 ```python
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 server = CodeExecutionServer(
     server_config=config,
@@ -45,7 +45,7 @@ server = CodeExecutionServer(
 Full production auth with JWT validation, user identity extraction, and downstream credential provisioning:
 
 ```python
-from code_execution.auth.entra import create_entra_auth_config
+from agora_workbench.code_execution.auth.entra import create_entra_auth_config
 
 server = CodeExecutionServer(
     server_config=config,
@@ -68,7 +68,7 @@ MCP servers often need to access downstream Azure resources (Storage, AI Search,
 - **System-assigned identity** — leave `AZURE_CLIENT_ID` unset
 
 ```python
-from code_execution.auth.entra import EntraCredentialProvider
+from agora_workbench.code_execution.auth.entra import EntraCredentialProvider
 
 # Tokens for downstream access (e.g., Azure Storage)
 provider = EntraCredentialProvider()  # uses AZURE_CLIENT_ID if set
@@ -91,7 +91,7 @@ The `AuthMiddleware` (Starlette level) runs on every request:
 Implement the three interfaces to integrate with any identity provider:
 
 ```python
-from code_execution.auth.base import (
+from agora_workbench.code_execution.auth.base import (
     AccessToken,
     AuthConfig,
     CredentialProvider,

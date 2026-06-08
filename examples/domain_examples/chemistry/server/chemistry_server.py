@@ -22,10 +22,10 @@ import os
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, Skill, State, ToolRegistry
-from code_execution.auth import create_noop_auth_config
-from code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
-from code_execution.data_access.credentials import create_storage_credential
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, Skill, State, ToolRegistry
+from agora_workbench.code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
+from agora_workbench.code_execution.data_access.credentials import create_storage_credential
 from domain_examples.chemistry.tools import CHEMISTRY_TOOLS
 
 # Path to the chemistry_tools package (relative to this file so it works

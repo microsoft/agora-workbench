@@ -35,8 +35,8 @@ A `RouterServer` aggregates tools from multiple upstreams into a single MCP endp
 
 ```python
 import asyncio
-from connector import RouterServer
-from connector.models import RouterConfig, UpstreamConfig
+from agora_workbench.connector import RouterServer
+from agora_workbench.connector.models import RouterConfig, UpstreamConfig
 
 config = RouterConfig(
     name="science-hub",
@@ -65,8 +65,8 @@ The agent sees:
 A `GatewayServer` proxies a **single** upstream with policy enforcement — rate limiting, tool allow/deny lists, and audit logging:
 
 ```python
-from connector import GatewayServer
-from connector.models import GatewayConfig, GatewayPolicy, UpstreamConfig
+from agora_workbench.connector import GatewayServer
+from agora_workbench.connector.models import GatewayConfig, GatewayPolicy, UpstreamConfig
 
 config = GatewayConfig(
     name="chem-gateway",
@@ -93,8 +93,8 @@ server = GatewayServer(config)
 A `DispatcherServer` fans out a single tool interface to a **pool of identical workers**. Use it when you need horizontal scaling — multiple replicas of the same `CodeExecutionServer` behind a load-balancing proxy that understands MCP sessions.
 
 ```python
-from connector import DispatcherServer
-from connector.models import DispatcherConfig, WorkerConfig
+from agora_workbench.connector import DispatcherServer
+from agora_workbench.connector.models import DispatcherConfig, WorkerConfig
 
 config = DispatcherConfig(
     name="chem-dispatcher",

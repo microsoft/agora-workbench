@@ -62,17 +62,11 @@ geo = [
 homepage = "https://github.com/microsoft/agora-workbench"
 
 [project.scripts]
-mcp-connector-server = "connector.cli:main"
+mcp-connector-server = "agora_workbench.connector.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["src", "."]
-# NOTE: activity_ui is intentionally omitted from the distribution. It is a
-# sidecar service (deployed via Docker COPY, and imported in tests from the repo
-# root), and its non-package static/ data dir under this mixed src/ + root layout
-# trips setuptools 82's package discovery -- it resolves activity_ui's dirs under
-# src/ (e.g. src/activity_ui/static), failing the build. Leaving it out of the
-# wheel unblocks `uv sync`. Proper fix: move activity_ui under src/.
-include = ["base*", "code_execution*", "connector*"]
+where = ["src"]
+include = ["agora_workbench*"]
 exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 
 [build-system]
@@ -99,7 +93,8 @@ docs = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["src/code_execution/tests", "src/connector/tests", "examples/domain_examples/tests", "activity_ui/tests"]
+pythonpath = ["."]
+testpaths = ["src/agora_workbench/code_execution/tests", "src/agora_workbench/connector/tests", "examples/domain_examples/tests", "activity_ui/tests"]
 addopts = '-m "not live"'
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

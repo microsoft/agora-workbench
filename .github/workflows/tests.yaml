@@ -46,19 +46,20 @@ jobs:
         id: code_execution_tests
         continue-on-error: true
         run: |
-          uv run pytest src/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
+          uv run pytest src/agora_workbench/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
       - name: Run connector tests
         id: connector_tests
         continue-on-error: true
         run: |
-          uv run pytest src/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
+          uv run pytest src/agora_workbench/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
 
       - name: Run domain examples tests
         id: domain_examples_tests
         continue-on-error: true
         run: |
           uv run pytest examples/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
+
 
       - name: Run activity UI tests
         id: activity_ui_tests

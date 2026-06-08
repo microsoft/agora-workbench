@@ -24,8 +24,8 @@ Start with the snippet from [Options for making a CodeExecutionServer](../../gui
 ```python
 # server.py
 import asyncio
-from code_execution import CodeExecutionServer, ServerConfig
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myserver",
@@ -67,7 +67,7 @@ Before adding a tool, it is important to understand the two separate Python proc
 │  Kernel process  (isolated environment)  │
 │  • runs agent-provided Python code       │
 │  • imports your tool implementation      │
-│  • CANNOT import code_execution          │
+│  • CANNOT import agora_workbench.code_execution          │
 └──────────────────────────────────────────┘
 ```
 
@@ -172,7 +172,7 @@ __all__ = ["MYSERVER_TOOLS"]
 **`tools/definitions.py`**
 
 ```python
-from code_execution import ReturnSpec, ToolDefinition, ToolParameter
+from agora_workbench.code_execution import ReturnSpec, ToolDefinition, ToolParameter
 
 summarize_numbers = ToolDefinition(
     name="summarize_numbers",
@@ -214,8 +214,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-from code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
-from code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, ToolRegistry
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 from tools import MYSERVER_TOOLS
 

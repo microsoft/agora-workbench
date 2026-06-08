@@ -7,8 +7,8 @@ Agora Workbench provides several mechanisms for making data available to code ex
 For large files (model weights, reference datasets) that need to be available at server startup, use `AssetSpec` in your `ServerConfig`:
 
 ```python
-from code_execution import ServerConfig
-from code_execution.code_execution_models import AssetSpec
+from agora_workbench.code_execution import ServerConfig
+from agora_workbench.code_execution.code_execution_models import AssetSpec
 
 config = ServerConfig(
     name="myserver",
@@ -87,8 +87,8 @@ data = pd.read_parquet("<blob>abc123</blob>")
 Tools and code execution can produce output files. Configure publishers to make these available:
 
 ```python
-from code_execution.auth import create_noop_auth_config
-from code_execution.data_access import LocalFilePublisher, BlobPublisher
+from agora_workbench.code_execution.auth import create_noop_auth_config
+from agora_workbench.code_execution.data_access import LocalFilePublisher, BlobPublisher
 
 publishers = [
     LocalFilePublisher(base_dir="/tmp/artifacts"),
