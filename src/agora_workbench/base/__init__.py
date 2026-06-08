@@ -157,6 +157,22 @@ class BaseMCPServer(ABC):
         # OAuth 2.0 Protected Resource Metadata (RFC 9728)
         async def protected_resource_metadata(request: Request):
             if not server.entra_client_id or not server.entra_tenant_id:
+                # When no Entra IDs are configured (e.g. noop auth), return a
+                # minimal valid metadata document indicating no authorization is
+                # required. This prevents agents that attempt OAuth discovery
+                # (e.g. gh cli) from erroring on a 404 while remaining
+                # compatible with agents that skip discovery entirely.
+                if not server.auth_config.require_authorization_header:
+                    host = request.headers.get("host", "localhost")
+                    scheme = request.url.scheme
+                    resource_url = f"{scheme}://{host}"
+                    return JSONResponse(
+                        {
+                            "resource": resource_url,
+                            "authorization_servers": [],
+                            "bearer_methods_supported": ["header"],
+                        }
+                    )
                 return JSONResponse(
                     {"error": "OAuth protected-resource metadata is not available."},
                     status_code=404,

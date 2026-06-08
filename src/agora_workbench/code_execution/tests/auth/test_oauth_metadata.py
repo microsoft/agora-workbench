@@ -206,8 +206,12 @@ class TestWWWAuthenticateHeader:
 class TestProtectedResourceMetadataWithAuthConfig:
     """Test metadata endpoint when a pluggable auth_config is used instead of Entra params."""
 
-    def test_returns_404_when_no_entra_params(self, monkeypatch):
-        """Metadata endpoint should return 404 when no Entra client/tenant IDs are available."""
+    def test_returns_minimal_metadata_when_noop_auth(self, monkeypatch):
+        """Metadata endpoint should return minimal valid metadata in noop auth mode.
+
+        Agents that perform OAuth discovery (e.g. gh cli) need a valid response
+        rather than a 404 to avoid erroring during their discovery flow.
+        """
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
         monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
 
@@ -215,7 +219,11 @@ class TestProtectedResourceMetadataWithAuthConfig:
         client = TestClient(_create_test_app(server))
 
         response = client.get("/.well-known/oauth-protected-resource")
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.json()
+        assert "resource" in data
+        assert data["authorization_servers"] == []
+        assert data["bearer_methods_supported"] == ["header"]
 
     def test_returns_200_when_entra_env_vars_set(self, monkeypatch):
         """Metadata endpoint should work when ENTRA env vars are set alongside noop auth."""
