@@ -22,7 +22,6 @@ src/
     base/              # BaseMCPServer ABC — shared HTTP hosting, auth middleware
     code_execution/    # CodeExecutionServer — kernel-backed code execution
     connector/         # ConnectorServer — lightweight MCP proxy (router, gateway, dispatcher)
-agent_helpers/       # Agent-side helpers (LLM factories, MCP clients)
 activity_ui/         # Real-time activity monitoring UI
 examples/
   domain_examples/   # Reference domain server implementations (chemistry, gis, energy)
@@ -68,8 +67,6 @@ Tests live in `tests/` subdirectories alongside the code they test. Configured t
 - `src/agora_workbench/code_execution/tests/`
 - `src/agora_workbench/connector/tests/`
 - `examples/domain_examples/tests/`
-- `agent_helpers/llm/tests/`
-- `agent_helpers/tests/`
 - `activity_ui/tests/`
 
 Markers: `unit`, `integration`, `live`, `asyncio`. Live tests are excluded by default (they require real credentials/network). `pytest-asyncio` runs in `auto` mode — async test functions are detected automatically.
@@ -87,7 +84,7 @@ uv run pytest src/agora_workbench/connector/tests/ -v  # Target a specific packa
 ## CI
 
 - **Linting** (`linting.yaml`): triggers on PRs changing `src/**`. Runs `ruff check` and `pyright --level error` on `src/`.
-- **Tests** (`tests.yaml`): triggers on PRs changing `src/`, `activity_ui/`, `agent_helpers/`, `examples/`. Runs `pytest -m "not live"` across all test paths.
+- **Tests** (`tests.yaml`): triggers on PRs changing `src/`, `activity_ui/`, `examples/`. Runs `pytest -m "not live"` across all test paths.
 
 Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not live"` pass for any changed areas.
 
@@ -95,7 +92,6 @@ Before finishing work, ensure `uv run ruff check .` and `uv run pytest -m "not l
 
 **Extras** (for optional feature dependencies):
 ```bash
-uv sync --extra agent          # Microsoft Agent Framework (MAF) + LLM factories (agent_helpers/llm/)
 uv sync --extra openai-agents  # OpenAI Agents SDK adapter
 uv sync --extra copilot-sdk    # GitHub Copilot SDK adapter
 uv sync --extra geo            # Geospatial (rasterio, titiler)

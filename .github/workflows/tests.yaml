@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests code_execution, connector, domain examples, agent_helpers (llm + mcp), and activity_ui
+# Tests code_execution, connector, domain examples, and activity_ui
 
 name: Tests
 
