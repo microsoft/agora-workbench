@@ -188,6 +188,39 @@ class BaseMCPServer(ABC):
 
         app.routes.append(Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]))
 
+        # OAuth Authorization Server Metadata & OpenID Configuration
+        # The Copilot CLI (and similar agents) probe these well-known endpoints
+        # during OAuth discovery. When running with noop auth, return a minimal
+        # valid metadata document so the client doesn't interpret a 404 as a
+        # failed discovery and throw MCPOAuthError.
+        async def oauth_authorization_server_metadata(request: Request):
+            if not server.auth_config.require_authorization_header:
+                host = request.headers.get("host", "localhost")
+                scheme = request.url.scheme
+                issuer = f"{scheme}://{host}"
+                return JSONResponse(
+                    {
+                        "issuer": issuer,
+                        "authorization_endpoint": "",
+                        "token_endpoint": "",
+                        "response_types_supported": [],
+                        "grant_types_supported": [],
+                    }
+                )
+            return JSONResponse(
+                {"error": "OAuth authorization server metadata is not available."},
+                status_code=404,
+            )
+
+        for path in [
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/oauth-authorization-server/mcp",
+            "/.well-known/openid-configuration",
+            "/.well-known/openid-configuration/mcp",
+            "/mcp/.well-known/openid-configuration",
+        ]:
+            app.routes.append(Route(path, oauth_authorization_server_metadata, methods=["GET"]))
+
     # ========================================================================
     # Auth middleware
     # ========================================================================
