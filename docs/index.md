@@ -33,6 +33,13 @@ Key capabilities:
 
 ## Tutorials
 
+Minimal connection walkthroughs for each supported SDK — wire your
+existing agent to a running Workbench MCP server in a few lines.
+
+**Before running any tutorial**, follow the
+[Start the chemistry MCP server](tutorials/start-chemistry-server.md) guide to
+build the base image and start the local server.
+
 | Tutorial | What you'll learn |
 | --- | --- |
 | [Your First Server](tutorials/first_server/README.md) | Build a server with a real domain tool, end-to-end |
