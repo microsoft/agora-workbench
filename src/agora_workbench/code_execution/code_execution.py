@@ -10,6 +10,7 @@ from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 from fastapi import HTTPException
 from fastmcp import Context
 
+from . import agent_guidance
 from .code_execution_models import CodeExecutionResult
 from .code_extraction import (
     ASSET_PATHLIB_IMPORT,
@@ -123,14 +124,15 @@ def _absolute_path_error(val: str, allowed_prefixes: "tuple[str, ...]") -> str:
       the user).
     """
     return (
-        f"Absolute path '{val}' is outside the allowed directories. Depending on what "
-        "you are doing:\n"
-        "- To SAVE a file for the user: write under AGORA_OUTPUT_DIR (a variable and env "
-        "var already set in the kernel), e.g. os.path.join(AGORA_OUTPUT_DIR, 'name.ext').\n"
-        "- To LOAD a dataset/asset: reference it by its catalog/asset id (e.g. the "
-        "<local>...</local> returned by search_data), which auto-resolves to a local path.\n"
-        f"- Internal scratch only (not visible to the user): {', '.join(allowed_prefixes)}.\n"
-        "Do not hardcode any other absolute path."
+        agent_guidance.redirect(
+            f"Absolute path '{val}' is outside the allowed directories.",
+            intents=[
+                agent_guidance.SAVE_OUTPUT,
+                agent_guidance.LOAD_ASSET,
+                agent_guidance.SCRATCH_ONLY.format(prefixes=", ".join(allowed_prefixes)),
+            ],
+        )
+        + "\nDo not hardcode any other absolute path."
     )
 
 
@@ -210,9 +212,15 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
                 parts = alias.name.split(".")
                 module_prefixes = [".".join(parts[:i]) for i in range(1, len(parts) + 1)]
                 if any(prefix in blocked_modules for prefix in module_prefixes):
-                    return False, (
+                    return False, agent_guidance.redirect(
                         f"Importing '{alias.name}' is not allowed in the code execution environment. "
-                        f"Blocked modules: {', '.join(sorted(blocked_modules))}"
+                        f"Blocked modules: {', '.join(sorted(blocked_modules))}. You cannot shell out "
+                        "or do direct filesystem/network I/O from the sandbox.",
+                        intents=[
+                            agent_guidance.DISCOVER_DATA,
+                            agent_guidance.LOAD_ASSET,
+                            agent_guidance.SAVE_OUTPUT,
+                        ],
                     )
         elif isinstance(node, ast.ImportFrom):
             if node.module:
@@ -221,9 +229,15 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
                 parts = node.module.split(".")
                 module_prefixes = [".".join(parts[:i]) for i in range(1, len(parts) + 1)]
                 if any(prefix in blocked_modules for prefix in module_prefixes):
-                    return False, (
+                    return False, agent_guidance.redirect(
                         f"Importing from '{node.module}' is not allowed in the code execution environment. "
-                        f"Blocked modules: {', '.join(sorted(blocked_modules))}"
+                        f"Blocked modules: {', '.join(sorted(blocked_modules))}. You cannot shell out "
+                        "or do direct filesystem/network I/O from the sandbox.",
+                        intents=[
+                            agent_guidance.DISCOVER_DATA,
+                            agent_guidance.LOAD_ASSET,
+                            agent_guidance.SAVE_OUTPUT,
+                        ],
                     )
 
         # --- 2. Blocked function calls ---
@@ -233,16 +247,24 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
                 continue
 
             if func_name and (func_name in blocked_calls or func_name in blocked_dangerous_calls):
-                return False, (
+                return False, agent_guidance.redirect(
                     f"Call to '{func_name}' is not allowed — filesystem exploration/manipulation "
-                    f"and dangerous metaprogramming functions are blocked in the code execution environment."
+                    f"and dangerous metaprogramming functions are blocked in the code execution environment.",
+                    intents=[
+                        agent_guidance.DISCOVER_DATA,
+                        agent_guidance.LOAD_ASSET,
+                        agent_guidance.SAVE_OUTPUT,
+                    ],
                 )
 
         # --- 3. Absolute-path restriction ---
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             val = node.value.strip()
             if _contains_parent_traversal(val):
-                return False, "Relative path traversal using '..' is not allowed in the code execution environment."
+                return False, agent_guidance.redirect(
+                    "Relative path traversal using '..' is not allowed in the code execution environment.",
+                    intents=[agent_guidance.LOAD_ASSET, agent_guidance.SAVE_OUTPUT],
+                )
 
             # Skip '/' only when it is a safe string-method delimiter
             # (e.g. s.split("/", 1)).  All other absolute paths are checked.
@@ -255,7 +277,10 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
             for candidate in _extract_dynamic_path_candidates(node, module_aliases):
                 val = candidate.strip()
                 if _contains_parent_traversal(val):
-                    return False, "Relative path traversal using '..' is not allowed in the code execution environment."
+                    return False, agent_guidance.redirect(
+                        "Relative path traversal using '..' is not allowed in the code execution environment.",
+                        intents=[agent_guidance.LOAD_ASSET, agent_guidance.SAVE_OUTPUT],
+                    )
 
                 if val.startswith("/") and not val.startswith("//"):
                     if not any(val == prefix or val.startswith(prefix + "/") for prefix in allowed_prefixes):

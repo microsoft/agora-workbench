@@ -23,6 +23,8 @@ from urllib.parse import urlparse
 import dill
 import httpx
 
+from . import agent_guidance
+
 LOGGER = logging.getLogger(__name__)
 
 # Maximum serialized object size (256 MB).  Objects exceeding this limit
@@ -77,10 +79,12 @@ def _validate_target_url(url: str) -> None:
         trusted_patterns = _parse_host_patterns(os.environ.get("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", ""))
         if not (trusted_patterns and _host_matches_any(host, trusted_patterns)):
             raise ValueError(
-                "Plain HTTP is only permitted for loopback addresses "
-                "(localhost, 127.0.0.1, ::1) or hosts listed in "
-                "OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS. "
-                "Use an HTTPS URL for all other inter-service object transfers."
+                agent_guidance.operator_gate(
+                    f"Plain HTTP to '{host}' is only permitted for loopback addresses "
+                    "(localhost, 127.0.0.1, ::1) or explicitly trusted hosts.",
+                    tell_user=("use an HTTPS URL, or ask the operator to add this host to the trusted list."),
+                    env_var="OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS",
+                )
             )
         LOGGER.warning(
             "Allowing plain-HTTP object transfer to trusted host '%s'. "
@@ -96,8 +100,11 @@ def _validate_target_url(url: str) -> None:
     if allowed_patterns and not is_loopback:
         if not _host_matches_any(host, allowed_patterns):
             raise ValueError(
-                f"Object transfer target host '{host}' is not in the allowed-host list. "
-                f"Update OBJECT_TRANSFER_ALLOWED_HOSTS to permit this host."
+                agent_guidance.operator_gate(
+                    f"Object transfer target host '{host}' is not in the allowed-host list.",
+                    tell_user="ask the operator to add this host if the transfer is expected.",
+                    env_var="OBJECT_TRANSFER_ALLOWED_HOSTS",
+                )
             )
 
 
@@ -164,7 +171,10 @@ class ObjectSerializer:
 
         if len(data) > MAX_TRANSFER_SIZE_BYTES:
             raise ValueError(
-                f"Serialized object size ({len(data):,} bytes) exceeds limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes)."
+                agent_guidance.operator_gate(
+                    f"Serialized object size ({len(data):,} bytes) exceeds limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes).",
+                    tell_user="reduce the object size or split the transfer into smaller pieces.",
+                )
             )
         return data
 
