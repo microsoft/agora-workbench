@@ -18,6 +18,7 @@ docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
 > token and binds to `127.0.0.1` only. Do not deploy this configuration.
 
 ```bash
+docker network inspect agora-activity >/dev/null 2>&1 || docker network create agora-activity
 cd examples/domain_examples/chemistry
 docker compose up -d --build
 curl http://localhost:8020/health
