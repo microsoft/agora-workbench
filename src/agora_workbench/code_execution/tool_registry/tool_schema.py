@@ -224,7 +224,12 @@ class StateTransition(BaseModel):
 
 
 class ToolDefinition(BaseModel):
-    """Schema for a complete tool definition in the registry."""
+    """Schema for a complete tool definition in the registry.
+
+    By default, tool ``X`` is imported as ``from {package}.{X} import {X}``
+    when registered in ``ToolRegistry(package=...)``. Override with ``module``
+    or ``module_override`` for custom import paths.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)  # Allow Type objects in fields
 

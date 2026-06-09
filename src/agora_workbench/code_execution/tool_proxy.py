@@ -160,7 +160,22 @@ def _build_proxy_source(tool_def: "ToolDefinition") -> str:  # noqa: C901 – ge
     body_lines: list[str] = []
 
     # lazy import of the real implementation
-    body_lines.append(f"from {tool_def.module} import {name} as _impl")
+    module_path = tool_def.module
+    if not module_path:
+        raise ValueError(
+            f"Tool '{name}' has no resolved module path. "
+            "Register it with ToolRegistry(package='...') or set module/module_override."
+        )
+    module_file = f"{module_path.replace('.', '/')}.py"
+    import_error_message = (
+        f"Could not import tool '{name}' from '{module_path}'. "
+        f"Expected: function '{name}' in module '{module_file}'. "
+        "Hint: set module or module_override on the ToolDefinition to use a custom path."
+    )
+    body_lines.append("try:")
+    body_lines.append(f"    from {module_path} import {name} as _impl")
+    body_lines.append("except ImportError as _import_error:")
+    body_lines.append(f"    raise ImportError({import_error_message!r}) from _import_error")
     body_lines.append("_log = globals().get('_tool_call_log')")
 
     # snapshot args
