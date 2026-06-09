@@ -188,7 +188,7 @@ class BaseMCPServer(ABC):
 
         app.routes.append(Route("/.well-known/oauth-protected-resource", protected_resource_metadata, methods=["GET"]))
 
-        # OAuth Authorization Server Metadata & OpenID Configuration
+        # OAuth Authorization Server Metadata (RFC 8414)
         # The Copilot CLI (and similar agents) probe these well-known endpoints
         # during OAuth discovery. When running with noop auth, return a minimal
         # valid metadata document so the client doesn't interpret a 404 as a
@@ -201,10 +201,10 @@ class BaseMCPServer(ABC):
                 return JSONResponse(
                     {
                         "issuer": issuer,
-                        "authorization_endpoint": "",
-                        "token_endpoint": "",
-                        "response_types_supported": [],
-                        "grant_types_supported": [],
+                        "authorization_endpoint": f"{issuer}/authorize",
+                        "token_endpoint": f"{issuer}/token",
+                        "response_types_supported": ["code"],
+                        "grant_types_supported": ["authorization_code"],
                     }
                 )
             return JSONResponse(
@@ -215,9 +215,6 @@ class BaseMCPServer(ABC):
         for path in [
             "/.well-known/oauth-authorization-server",
             "/.well-known/oauth-authorization-server/mcp",
-            "/.well-known/openid-configuration",
-            "/.well-known/openid-configuration/mcp",
-            "/mcp/.well-known/openid-configuration",
         ]:
             app.routes.append(Route(path, oauth_authorization_server_metadata, methods=["GET"]))
 

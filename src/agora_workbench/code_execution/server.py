@@ -716,7 +716,7 @@ class CodeExecutionServer(BaseMCPServer):
         Returns:
             True if caller is authorized, False otherwise
         """
-        if not request_token:
+        if request_token is None:
             LOGGER.warning("Session access attempt without authentication token")
             return False
 
@@ -830,7 +830,7 @@ class CodeExecutionServer(BaseMCPServer):
                 "No user identity in context. This indicates authentication middleware failed or was bypassed."
             )
 
-        if not user_token:
+        if user_token is None:
             raise RuntimeError(
                 "No user token in context. This indicates authentication middleware failed or was bypassed."
             )
