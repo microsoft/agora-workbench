@@ -39,6 +39,14 @@ The `type` field on `ServerConfig` controls how the Python environment is manage
 | `"conda"` | `environment.yml` content | Scientific packages with native deps (RDKit, GDAL, etc.) |
 | `"pip"` | `requirements.txt` content | Legacy environments or Docker-baked deps |
 
+### Environment model
+
+`CodeExecutionServer` always runs code in an isolated kernel environment built from `ServerConfig.dependency_file`, regardless of `type` (`uv`, `conda`, or `pip`).
+
+- For `type="uv"` and `type="pip"`, `dependency_file` contains `requirements.txt` content
+- For `type="conda"`, `dependency_file` contains `environment.yml` content
+- For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), use **`conda-forge`** rather than system package managers like `apt-get`
+
 ### Example: conda environment
 
 ```python
@@ -55,6 +63,25 @@ dependencies:
   - rdkit
   - numpy
   - pandas
+""",
+)
+```
+
+Minimal native-dependency example:
+
+```python
+config = ServerConfig(
+    name="circuits",
+    description="Conda environment with compiled/native dependencies.",
+    type="conda",
+    dependency_file="""\
+name: circuits
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - ngspice
+  - gdal
 """,
 )
 ```

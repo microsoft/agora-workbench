@@ -35,6 +35,34 @@ await server.run_http(host="0.0.0.0", port=8000)
 
 See `domains/example/server/example_server.py` for a complete reference implementation.
 
+## Environment Model
+
+`CodeExecutionServer` always runs code in an isolated kernel environment created from `ServerConfig.dependency_file`, for all environment types (`uv`, `conda`, and `pip`).
+
+- For `type="uv"` and `type="pip"`, `dependency_file` is `requirements.txt` content
+- For `type="conda"`, `dependency_file` is `environment.yml` content
+- For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), install from `conda-forge`
+- Avoid relying on system package managers like `apt-get` for kernel dependencies
+
+Minimal conda example with native dependencies:
+
+```python
+config = ServerConfig(
+    name="circuits",
+    description="Conda environment with native dependencies",
+    type="conda",
+    dependency_file="""\
+name: circuits
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - ngspice
+  - gdal
+""",
+)
+```
+
 ## Execution Modes and Session Meta Tools
 
 ### Background execution (`execute_<server>_code(background=True)`)
