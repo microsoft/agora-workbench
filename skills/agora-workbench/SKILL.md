@@ -92,12 +92,52 @@ See the [workflow-planning sub-skill](skills/workflow-planning/SKILL.md) for ful
 
 See the [async-execution sub-skill](skills/async-execution/SKILL.md) for submitting background jobs for long-running code and parallel execution across multiple inputs.
 
+## Handling Large Objects
+
+Stdout from `execute_{server}_code` is returned in the MCP tool response and
+consumed as agent context tokens. Overflowing this with large objects wastes
+context, triggers server-side truncation, and can degrade agent reasoning.
+
+### Rules
+
+1. **Never print large objects verbatim** — no `print(df)`, `print(long_list)`,
+   or `print(json.dumps(big_dict))`.
+2. **Summarize instead** — use `.head()`, `.shape`, `len()`, `.describe()`,
+   `.columns.tolist()`, or slicing to extract only what you need.
+3. **Store results in variables** — keep data in the persistent session and
+   inspect it with targeted follow-up calls:
+   ```python
+   # ✓ Good — store and summarize
+   result = compute_expensive_thing(...)
+   print(f"Shape: {result.shape}, columns: {result.columns.tolist()}")
+   print(result.head(5).to_string())
+
+   # ✗ Bad — dumps entire object into MCP response
+   result = compute_expensive_thing(...)
+   print(result)
+   ```
+4. **Write large outputs to files** — use `AGORA_OUTPUT_DIR` for data intended
+   for the user; use `/tmp` for intermediate scratch files you'll read back
+   server-side.
+5. **Use `{server}_push_object`** for cross-server transfers — never serialize
+   large objects through stdout to paste into another server call.
+6. **Paginate when exploring** — if you need to see rows 50–100 of a DataFrame,
+   slice it: `print(df.iloc[50:100].to_string())`.
+
+### What happens if you exceed the limit
+
+The server truncates stdout/stderr that exceeds its configured threshold
+(default 50 KB). The truncated response includes a notice. While this prevents
+context overflow, the lost information may require re-execution — so avoid
+hitting the limit proactively.
+
 ## Do Not
 
 - Do not call domain functions as MCP tools — they only exist inside the kernel.
 - Do not guess tool names — always search first.
 - Do not write output files outside `AGORA_OUTPUT_DIR`.
 - Do not paste large data into chat when `{server}_push_object` can transfer it server-to-server.
+- Do not print entire DataFrames, large lists, or raw API responses — summarize or slice.
 - Do not run long jobs synchronously — use `background=True` and poll.
 - Do not create new sessions unnecessarily — reuse the existing one.
 - Do not publish artifacts unless the user explicitly asks for a download or export.
