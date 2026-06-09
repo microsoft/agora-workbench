@@ -213,3 +213,95 @@ The server injects tracing proxies so that:
 - Tool calls are recorded with timing, arguments, and results
 - Errors are captured with full tracebacks
 - The agent sees structured output
+
+## Stateful domains — sharing objects across tool calls
+
+Each session has a **persistent Jupyter kernel**. Variables assigned in one `execute_*_code` call remain available in subsequent calls within the same session. This is the intended mechanism for sharing state between tool invocations.
+
+### The pattern: tools return live objects, the agent holds them in variables
+
+For domains where tools operate on complex objects (simulation models, networks, circuits, dataframes), tools should **return the live object** and accept it as a parameter in downstream calls:
+
+```python
+# energysystems_tools/define_network.py
+
+import pypsa
+
+def define_network(name: str, snapshots: int = 24) -> pypsa.Network:
+    """Create a PyPSA network and return it."""
+    import pandas as pd
+
+    network = pypsa.Network()
+    network.name = name
+    network.set_snapshots(pd.date_range("2025-01-01", periods=snapshots, freq="h"))
+    return network
+```
+
+```python
+# energysystems_tools/add_bus.py
+
+import pypsa
+
+def add_bus(network: pypsa.Network, name: str, v_nom: float = 110.0) -> dict:
+    """Add a bus to an existing network."""
+    network.add("Bus", name, v_nom=v_nom)
+    return {"bus_name": name, "v_nom": v_nom, "total_buses": len(network.buses)}
+```
+
+The agent composes these naturally:
+
+```python
+# Agent-generated code — variables persist in the kernel across calls
+network = define_network("grid1", snapshots=48)
+add_bus(network, "high_voltage", v_nom=220)
+add_bus(network, "low_voltage", v_nom=20)
+```
+
+In a subsequent `execute_*_code` call, `network` is still available:
+
+```python
+# Later call in the same session — kernel state persists
+result = optimize(network, solver="highs")
+print(result["objective_value"])
+```
+
+### Why this works
+
+- The kernel process is **one-per-session** and lives for the session's lifetime
+- Tool proxy functions run in the kernel's `__main__` namespace
+- Variables assigned in `__main__` persist across all `execute_*_code` invocations
+- Tools receive and return live Python objects — no serialization boundary
+
+### What to avoid
+
+**Do not** use `builtins._*` as a hidden registry for sharing state between tools:
+
+```python
+# ✗ Anti-pattern — hidden shared state via builtins
+def define_network(name: str) -> dict:
+    network = pypsa.Network()
+    import builtins
+    if not hasattr(builtins, "_networks"):
+        builtins._networks = {}
+    builtins._networks[name] = network  # hidden side-effect
+    return {"name": name}  # returns a summary, not the object
+
+def optimize(name: str) -> dict:
+    import builtins
+    network = builtins._networks[name]  # magic lookup
+    ...
+```
+
+This pattern obscures data flow from the agent and makes tools harder to compose. Instead, let the agent manage object references explicitly through kernel variables.
+
+### Return type guidance for stateful tools
+
+| Scenario | Return type | Example |
+|----------|-------------|---------|
+| Object will be passed to other tools | The live object | `-> pypsa.Network` |
+| Object + summary for the agent | Tuple or the object (agent can `print()` it) | `-> pypsa.Network` |
+| Pure query / leaf operation | Dict with results | `-> dict` |
+| Mutation of existing object | Dict summarizing what changed | `-> dict` |
+
+!!! tip "ToolDefinition return_spec for non-serializable returns"
+    `return_spec` documents the JSON-serializable summary that appears in traces. When a tool returns a live object, the tracing layer records it as a type reference (e.g. `<Network@1>`). You can still provide `return_spec` to document the *semantics* of what's returned, even if the actual value isn't a dict.

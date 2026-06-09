@@ -32,9 +32,9 @@ affordances=[
 ]
 ```
 
-### 3. Return structured dictionaries
+### 3. Return structured dictionaries — or live objects for stateful domains
 
-Tools should return dictionaries with well-named keys. The `return_spec` documents these for the agent:
+For stateless tools (queries, parsers, converters), return dictionaries with well-named keys:
 
 ```python
 return_spec=[
@@ -42,6 +42,8 @@ return_spec=[
     ReturnSpec(name="molecular_weight", type=float, description="Molecular weight in Daltons"),
 ]
 ```
+
+For stateful domains where objects are passed between tools (simulations, networks, circuits), **return the live object** so the agent can hold it in a kernel variable and pass it to subsequent tools. See [Stateful domains](tool-pattern.md#stateful-domains--sharing-objects-across-tool-calls) for the full pattern.
 
 ### 4. Fail fast with clear errors
 
