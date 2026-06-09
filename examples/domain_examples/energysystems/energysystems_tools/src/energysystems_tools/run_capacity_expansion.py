@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pypsa
 
 
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
-
-
-def run_capacity_expansion(network_name: str) -> dict:
+def run_capacity_expansion(network: pypsa.Network) -> dict:
     """Run investment optimization for extendable components.
 
     Generators and storage units with ``p_nom_extendable=True`` are
     optimized for both dispatch and capacity simultaneously.
 
     Args:
-        network_name: Name of a previously defined network with time
+        network: Live PyPSA network object returned by ``define_network``, with time
             series attached and extendable components.
 
     Returns:
@@ -28,9 +23,9 @@ def run_capacity_expansion(network_name: str) -> dict:
         ``optimal_capacities``, and ``investment_by_type``.
 
     Raises:
-        ValueError: If the network is not found.
+        Exception: Propagates errors raised by ``pypsa.Network.optimize``.
     """
-    n = _get_network(network_name)
+    n = network
 
     status, _ = n.optimize(solver_name="highs")
 

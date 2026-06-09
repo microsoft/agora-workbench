@@ -13,6 +13,22 @@ The ``module`` field on each definition points to the installed package
 
 from agora_workbench.code_execution import ReturnSpec, ToolDefinition, ToolParameter
 
+try:
+    import pypsa
+
+    PYPSA_NETWORK_TYPE = pypsa.Network
+except ModuleNotFoundError:
+    class Network:  # pragma: no cover - fallback for environments without pypsa installed
+        """Placeholder used only so metadata serializes as ``pypsa.Network``.
+
+        This fallback is not a functional network implementation; it only lets
+        tool definitions load/serialize in environments where PyPSA is absent.
+        """
+        pass
+
+    Network.__module__ = "pypsa"
+    PYPSA_NETWORK_TYPE = Network
+
 # ============================================================================
 # Low complexity: Network Setup
 # ============================================================================
@@ -21,7 +37,7 @@ define_network = ToolDefinition(
     name="define_network",
     description=(
         "Create a PyPSA network with a name and time snapshots. "
-        "Returns the network name, snapshot count, frequency, and time range."
+        "Returns a live `pypsa.Network` object for subsequent tool calls."
     ),
     required_parameters=[
         ToolParameter(name="name", type=str, description="Name for the network"),
@@ -47,11 +63,11 @@ define_network = ToolDefinition(
         ),
     ],
     return_spec=[
-        ReturnSpec(name="name", type=str, description="Network name"),
-        ReturnSpec(name="num_snapshots", type=int, description="Number of time steps"),
-        ReturnSpec(name="frequency", type=str, description="Time step frequency"),
-        ReturnSpec(name="start", type=str, description="First snapshot timestamp"),
-        ReturnSpec(name="end", type=str, description="Last snapshot timestamp"),
+        ReturnSpec(
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object with configured snapshots",
+        ),
     ],
     affordances=[
         "create a power network",
@@ -69,9 +85,9 @@ add_components = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network (must match define_network output)",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object returned by define_network",
         ),
     ],
     optional_parameters=[
@@ -137,9 +153,9 @@ add_time_series = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object returned by define_network",
         ),
         ToolParameter(
             name="profiles",
@@ -172,9 +188,9 @@ run_power_flow = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object returned by define_network",
         ),
     ],
     optional_parameters=[
@@ -209,9 +225,9 @@ run_optimal_power_flow = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object returned by define_network",
         ),
     ],
     return_spec=[
@@ -242,9 +258,9 @@ run_capacity_expansion = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network (must have time series and extendable components)",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object with time series and extendable components",
         ),
     ],
     return_spec=[
@@ -269,9 +285,9 @@ analyze_costs = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network (must have a solved OPF)",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object with a solved OPF",
         ),
     ],
     return_spec=[
@@ -298,9 +314,9 @@ analyze_topology = ToolDefinition(
     ),
     required_parameters=[
         ToolParameter(
-            name="network_name",
-            type=str,
-            description="Name of the network",
+            name="network",
+            type=PYPSA_NETWORK_TYPE,
+            description="Live PyPSA network object returned by define_network",
         ),
     ],
     return_spec=[

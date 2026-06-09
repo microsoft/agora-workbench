@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pypsa
 
 
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
-
-
-def run_optimal_power_flow(network_name: str) -> dict:
+def run_optimal_power_flow(network: pypsa.Network) -> dict:
     """Run linear optimal power flow to minimize total generation cost.
 
     Args:
-        network_name: Name of a previously defined network with generators
+        network: Live PyPSA network object returned by ``define_network``, with generators
             that have ``marginal_cost`` set.
 
     Returns:
@@ -25,9 +20,9 @@ def run_optimal_power_flow(network_name: str) -> dict:
         ``generator_dispatch``, ``line_flows``, and ``marginal_prices``.
 
     Raises:
-        ValueError: If the network is not found.
+        Exception: Propagates errors raised by ``pypsa.Network.optimize``.
     """
-    n = _get_network(network_name)
+    n = network
 
     status, _ = n.optimize(solver_name="highs")
 

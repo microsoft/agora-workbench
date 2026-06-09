@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
 
-
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
+if TYPE_CHECKING:
+    import pypsa
 
 
 def run_power_flow(
-    network_name: str,
+    network: pypsa.Network,
     method: str = "ac",
 ) -> dict:
     """Run power flow analysis on the network.
 
     Args:
-        network_name: Name of a previously defined network.
+        network: Live PyPSA network object returned by ``define_network``.
         method: ``"ac"`` for Newton-Raphson or ``"dc"`` for linear
             approximation (default: ``"ac"``).
 
@@ -30,9 +25,9 @@ def run_power_flow(
         loading and flows).
 
     Raises:
-        ValueError: If the network is not found or method is invalid.
+        ValueError: If method is invalid.
     """
-    n = _get_network(network_name)
+    n = network
 
     if method not in ("ac", "dc"):
         raise ValueError(f"method must be 'ac' or 'dc', got {method!r}")

@@ -2,37 +2,33 @@
 
 from __future__ import annotations
 
-import builtins
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pypsa
 
 
-def _get_network(name: str):
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
-
-
-def analyze_costs(network_name: str) -> dict:
+def analyze_costs(network: pypsa.Network) -> dict:
     """Analyze costs from a solved OPF: total cost, breakdown, marginal prices.
 
     Args:
-        network_name: Name of a previously defined network with a solved OPF.
+        network: Live PyPSA network object returned by ``define_network``, with a solved OPF.
 
     Returns:
         Dictionary with ``total_cost``, ``cost_by_carrier``,
         ``marginal_price_stats``, and ``most_expensive_bus``.
 
     Raises:
-        ValueError: If the network is not found or OPF has not been solved.
+        ValueError: If OPF has not been solved on the provided network.
     """
-    n = _get_network(network_name)
+    n = network
 
     # Check whether OPF dispatch results exist rather than testing
     # objective == 0 — a zero objective is valid (e.g. all-wind dispatch).
     has_dispatch = not n.generators_t.p.empty and len(n.generators_t.p.columns) > 0
     if not has_dispatch:
-        raise ValueError(f"Network {network_name!r} has no solved OPF. Run run_optimal_power_flow first.")
+        network_label = n.name if n.name else "<unnamed>"
+        raise ValueError(f"Network {network_label!r} has no solved OPF. Run run_optimal_power_flow first.")
 
     total_cost = round(float(n.objective), 4)
 

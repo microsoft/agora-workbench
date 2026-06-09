@@ -9,7 +9,7 @@ def define_network(
     snapshots: int = 24,
     start: str = "2025-01-01",
     freq: str = "h",
-) -> dict:
+) -> pypsa.Network:
     """Create a PyPSA network with the given name and snapshot range.
 
     Args:
@@ -19,8 +19,7 @@ def define_network(
         freq: Pandas frequency string (default: "h" for hourly).
 
     Returns:
-        Dictionary with ``name``, ``num_snapshots``, ``frequency``,
-        ``start``, and ``end``.
+        A live ``pypsa.Network`` object with snapshots configured.
 
     Raises:
         ValueError: If snapshots < 1.
@@ -33,17 +32,4 @@ def define_network(
     network.name = name
     network.set_snapshots(index)
 
-    # Store in the global namespace so subsequent tools can retrieve it
-    import builtins
-
-    if not hasattr(builtins, "_pypsa_networks"):
-        builtins._pypsa_networks = {}
-    builtins._pypsa_networks[name] = network
-
-    return {
-        "name": name,
-        "num_snapshots": len(index),
-        "frequency": freq,
-        "start": str(index[0]),
-        "end": str(index[-1]),
-    }
+    return network

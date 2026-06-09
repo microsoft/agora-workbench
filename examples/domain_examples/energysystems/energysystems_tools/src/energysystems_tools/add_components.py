@@ -2,22 +2,14 @@
 
 from __future__ import annotations
 
-import builtins
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import pypsa
-
-
-def _get_network(name: str) -> pypsa.Network:
-    """Retrieve a previously created network by name."""
-    networks = getattr(builtins, "_pypsa_networks", {})
-    if name not in networks:
-        raise ValueError(f"Network {name!r} not found. Call define_network first. Available: {sorted(networks)}")
-    return networks[name]
+if TYPE_CHECKING:
+    import pypsa
 
 
 def add_components(
-    network_name: str,
+    network: pypsa.Network,
     buses: list[dict] | None = None,
     generators: list[dict] | None = None,
     loads: list[dict] | None = None,
@@ -30,7 +22,7 @@ def add_components(
     component parameters (e.g. ``name``, ``bus``, ``p_nom``).
 
     Args:
-        network_name: Name of a previously defined network.
+        network: Live PyPSA network object returned by ``define_network``.
         buses: List of bus parameter dicts.
         generators: List of generator parameter dicts.
         loads: List of load parameter dicts.
@@ -41,9 +33,9 @@ def add_components(
         Dictionary with counts per component type and a summary string.
 
     Raises:
-        ValueError: If the network is not found.
+        KeyError: If component parameter dictionaries are missing required keys.
     """
-    n = _get_network(network_name)
+    n = network
 
     counts: dict[str, Any] = {
         "num_buses": 0,
@@ -95,5 +87,6 @@ def add_components(
     if counts["num_storage_units"]:
         parts.append(f"{counts['num_storage_units']} storage unit(s)")
 
-    counts["summary"] = f"Added {', '.join(parts)} to network {network_name!r}."
+    network_label = n.name if n.name else "<unnamed>"
+    counts["summary"] = f"Added {', '.join(parts)} to network {network_label!r}."
     return counts

@@ -28,6 +28,8 @@ define_network
 
 The tools are plain Python functions inside `execute_energysystems_code`.
 Write PyPSA directly when a task falls outside them.
+`define_network` returns a live `pypsa.Network` object; pass that object to
+the other tools in the same session.
 
 ## Local Data Catalog
 
@@ -81,8 +83,9 @@ To let the optimizer size a component, start it at zero capacity and mark it
 extendable with an annualized capital cost:
 
 ```python
+network = define_network(name="grid", snapshots=24)
 add_components(
-    network_name="grid",
+    network=network,
     generators=[{
         "name": "Wind", "bus": "Bus0", "carrier": "wind",
         "p_nom": 0,                # start with no capacity
@@ -124,8 +127,7 @@ status, _ = n.optimize(solver_name="highs")
 - Generators need `marginal_cost` for OPF to be meaningful — one without it
   is treated as free and dispatched first.
 - Lines need `s_nom` > 0 for line-loading calculations.
-- Profile `values` length must exactly equal `num_snapshots` from
-  `define_network`.
+- Profile `values` length must exactly equal `len(network.snapshots)`.
 - Use a full year of snapshots (8760) for realistic capacity-expansion
   results; a 24-hour horizon is fine for quick checks.
 
@@ -133,9 +135,9 @@ status, _ = n.optimize(solver_name="highs")
 
 ```python
 # Build a 2-bus network, solve OPF, break down costs by carrier
-define_network(name="grid", snapshots=24)
+network = define_network(name="grid", snapshots=24)
 add_components(
-    network_name="grid",
+    network=network,
     buses=[{"name": "North"}, {"name": "South"}],
     generators=[
         {"name": "Gas", "bus": "North", "p_nom": 500, "marginal_cost": 50, "carrier": "gas"},
@@ -144,7 +146,7 @@ add_components(
     loads=[{"name": "City", "bus": "South", "p_set": 400}],
     lines=[{"name": "N-S", "bus0": "North", "bus1": "South", "s_nom": 500, "x": 0.01}],
 )
-opf = run_optimal_power_flow(network_name="grid")
-costs = analyze_costs(network_name="grid")
+opf = run_optimal_power_flow(network=network)
+costs = analyze_costs(network=network)
 print(opf["status"], costs["total_cost"], costs["cost_by_carrier"])
 ```

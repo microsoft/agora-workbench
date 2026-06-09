@@ -66,6 +66,22 @@ def _make_handle_tool():
     )
 
 
+def _make_single_object_return_tool():
+    """Create a ToolDefinition that returns a single non-dict object."""
+
+    class FakeNetwork:
+        pass
+
+    return ToolDefinition(
+        name="define_network",
+        description="Create a network object.",
+        required_parameters=[ToolParameter(name="name", type=str, description="Network name")],
+        optional_parameters=[],
+        return_spec=[ReturnSpec(name="network", type=FakeNetwork, description="Live network object")],
+        module="mock_tools",
+    )
+
+
 def _exec_infrastructure(namespace=None):
     """Execute the tracing infrastructure code and return the namespace."""
     if namespace is None:
@@ -268,6 +284,18 @@ def test_generate_tool_proxies_returns_raw_objects():
 
 
 @pytest.mark.unit
+def test_generate_tool_proxies_single_object_return_docstring():
+    """Single non-dict return specs should render object return docs, not dict keys."""
+    tool = _make_single_object_return_tool()
+    reg = _registry_with(tool)
+    code = generate_tool_proxies(reg)
+
+    assert "dict with keys" not in code
+    assert "Returns:" in code
+    assert "'FakeNetwork': Live network object" in code
+
+
+@pytest.mark.unit
 def test_tracing_identity_refs_for_non_serializable():
     """Non-serializable objects get stable <Type@N> identity refs in traces."""
     ns = _exec_infrastructure()
@@ -357,6 +385,25 @@ def test_generate_list_tools_code():
     assert "solve_flowsheet" in output
     assert "x: str" in output
     assert "Create a new flowsheet." in output
+
+
+@pytest.mark.unit
+def test_generate_list_tools_code_single_object_return_type():
+    """list_tools() should show concrete return type for single non-dict returns."""
+    reg = _registry_with(_make_single_object_return_tool())
+    code = generate_list_tools_code(reg)
+    ns = {"__builtins__": __builtins__}
+    exec(code, ns)
+
+    old_stdout = sys.stdout
+    sys.stdout = captured = StringIO()
+    try:
+        ns["list_tools"]()
+    finally:
+        sys.stdout = old_stdout
+
+    output = captured.getvalue()
+    assert "define_network(name: str) -> 'FakeNetwork'" in output
 
 
 @pytest.mark.unit
