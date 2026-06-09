@@ -604,6 +604,19 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
             df.to_csv(agora_output("results.csv"), index=False)
 
+        Managing output size: stdout from your code is returned in the MCP
+        response and consumed as agent context.  Keep printed output concise:
+
+        - Never ``print()`` an entire DataFrame, large list, or raw API
+          response.  Use ``.head()``, ``.shape``, ``len()``, slicing, or
+          ``.describe()`` to summarize.
+        - Store large results in variables and inspect them with targeted
+          follow-up calls (e.g. ``print(df.columns.tolist())``).
+        - For data meant for the user, write to ``AGORA_OUTPUT_DIR`` and
+          publish — do not dump it to stdout.
+        - If output exceeds the server's truncation threshold it will be
+          clipped, but you should proactively avoid hitting that limit.
+
         Args:
             code: Python code to execute
             description: One-sentence summary of what the code does (shown in
