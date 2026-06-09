@@ -521,8 +521,9 @@ def _build_disallowed_actions_description(server: "CodeExecutionServer") -> str:
         f"- Blocked calls: {calls_text}\n"
         f"- Blocked dangerous calls: {dangerous_calls_text}\n"
         "- Relative path traversal using '..' segments is blocked.\n"
-        "- Absolute path literals are restricted. To save files for the user, write under "
-        "AGORA_OUTPUT_DIR (a kernel variable); to load data, reference it by catalog/asset "
+        "- Absolute path literals are restricted. To save files for the user, use "
+        "agora_output('filename') or write under AGORA_OUTPUT_DIR (both are pre-loaded "
+        "kernel variables); to load data, reference it by catalog/asset "
         "id (e.g. <local>...</local>) rather than a filesystem path. Hardcoded absolute "
         f"paths are allowed only under (internal scratch): {allowed_paths_text}\n\n"
         "Auto-resolution of handles and assets:\n"
@@ -590,16 +591,18 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         container literals (list/dict/tuple/set).
 
         Saving files for the user: write to ``AGORA_OUTPUT_DIR`` (available as
-        both an env var and a bare Python variable in the kernel).  Files
-        written there are registered as publishable artifacts.  To make a
-        file downloadable in the user's browser, publish it with the
-        publish_artifact tool using ``<gui>filename</gui>`` — but only do
-        so when the user explicitly asks for a download or export.
+        both an env var and a bare Python variable in the kernel).  The
+        ``agora_output(filename)`` helper is pre-loaded and returns the full
+        path — prefer it over f-strings.  Files written there are registered
+        as publishable artifacts.  To make a file downloadable in the user's
+        browser, publish it with the publish_artifact tool using
+        ``<gui>filename</gui>`` — but only do so when the user explicitly
+        asks for a download or export.
         Files written elsewhere (e.g. ``/tmp``) stay inside the kernel
         container and are not visible to the user.
         Example::
 
-            df.to_csv(f"{{AGORA_OUTPUT_DIR}}/results.csv", index=False)
+            df.to_csv(agora_output("results.csv"), index=False)
 
         Args:
             code: Python code to execute
