@@ -28,8 +28,10 @@ from typing import Optional
 # --- Intent primitives (single source of truth, reused across surfaces) ---
 
 SAVE_OUTPUT = (
-    "To SAVE a file for the user: write under AGORA_OUTPUT_DIR (a variable and env "
-    "var already set in the kernel), e.g. os.path.join(AGORA_OUTPUT_DIR, 'name.ext')."
+    "To SAVE a file for the user: write under AGORA_OUTPUT_DIR using the "
+    "agora_output() helper already available in the kernel, e.g. "
+    "df.to_csv(agora_output('results.csv')). "
+    "AGORA_OUTPUT_DIR is also available as a bare variable if needed."
 )
 
 LOAD_ASSET = (

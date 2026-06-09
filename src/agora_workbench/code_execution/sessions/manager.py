@@ -538,6 +538,10 @@ class SessionManager:
             "import os as __agora_os__\n"
             f"__agora_os__.environ['AGORA_OUTPUT_DIR'] = {outputs_dir!r}\n"
             f"AGORA_OUTPUT_DIR = {outputs_dir!r}\n"
+            f"def agora_output(__name: str) -> str:\n"
+            f'    """Return the full path for a file under AGORA_OUTPUT_DIR."""\n'
+            f"    import os as _os\n"
+            f"    return _os.path.join(AGORA_OUTPUT_DIR, __name)\n"
             "del __agora_os__\n"
         )
 
