@@ -2,8 +2,8 @@
 
 ## Data Manager
 
-::: code_execution.data_access.manager
+::: agora_workbench.code_execution.data_access.manager
 
 ## Asset Resolution
 
-::: code_execution.data_access.resolution
+::: agora_workbench.code_execution.data_access.resolution

@@ -4,7 +4,7 @@ Agora Workbench is designed around abstract interfaces that you can implement to
 
 ## Authentication interfaces
 
-Defined in `code_execution.auth.base`:
+Defined in `agora_workbench.code_execution.auth.base`:
 
 ### TokenValidator
 
@@ -53,7 +53,7 @@ Built-in implementations: `EntraCredentialProvider`, `NoOpCredentialProvider`
 
 ## Tool search backends
 
-Defined in `code_execution.tools.tool_search`:
+Defined in `agora_workbench.code_execution.tools.tool_search`:
 
 ### ToolSearchBackend
 
@@ -128,7 +128,7 @@ server = CodeExecutionServer(
 
 ## Data access: AssetFetcher
 
-Defined in `code_execution.data_access.fetchers`:
+Defined in `agora_workbench.code_execution.data_access.fetchers`:
 
 ### AssetFetcher
 
@@ -165,7 +165,7 @@ class S3Fetcher(AssetFetcher):
 
 ## Data access: AssetPublisher
 
-Defined in `code_execution.data_access.publishers`:
+Defined in `agora_workbench.code_execution.data_access.publishers`:
 
 ### AssetPublisher
 
@@ -188,20 +188,22 @@ Built-in implementations: `GuiPublisher`, `LocalFilePublisher`, `BlobPublisher`
 
 ## ConnectorServer
 
-Defined in `connector.base`:
+Defined in `agora_workbench.connector.base`:
 
-### Abstract methods for custom connectors
+### Implementing a custom connector
+
+A connector subclass implements a single abstract method, `_setup_tools()`.
+The upstream server list is **not** an abstract method — it is passed to the
+constructor as `upstreams=[UpstreamConfig(...), ...]`:
 
 ```python
 class ConnectorServer(BaseMCPServer):
-    @abstractmethod
-    def _setup_tools(self) -> None:
-        """Register mode-specific proxy tools."""
+    def __init__(self, *, name: str, upstreams: list[UpstreamConfig], ...):
         ...
 
     @abstractmethod
-    def _get_upstreams(self) -> list[UpstreamConfig]:
-        """Declare the upstream server list."""
+    def _setup_tools(self) -> None:
+        """Register mode-specific proxy tools."""
         ...
 ```
 
@@ -223,11 +225,11 @@ class MyServer(CodeExecutionServer):
 
 | Interface | Module | Purpose |
 |-----------|--------|---------|
-| `TokenValidator` | `code_execution.auth.base` | Custom token validation |
-| `IdentityExtractor` | `code_execution.auth.base` | Custom identity derivation |
-| `CredentialProvider` | `code_execution.auth.base` | Custom downstream credentials |
-| `ToolSearchBackend` | `code_execution.tools.tool_search` | Custom tool search |
-| `AssetFetcher` | `code_execution.data_access.fetchers` | Custom data sources |
-| `AssetPublisher` | `code_execution.data_access.publishers` | Custom artifact output |
-| `ConnectorServer` | `connector.base` | Custom server composition |
-| `CodeExecutionServer.preprocess_code` | `code_execution.server` | Code preprocessing |
+| `TokenValidator` | `agora_workbench.code_execution.auth.base` | Custom token validation |
+| `IdentityExtractor` | `agora_workbench.code_execution.auth.base` | Custom identity derivation |
+| `CredentialProvider` | `agora_workbench.code_execution.auth.base` | Custom downstream credentials |
+| `ToolSearchBackend` | `agora_workbench.code_execution.tools.tool_search` | Custom tool search |
+| `AssetFetcher` | `agora_workbench.code_execution.data_access.fetchers` | Custom data sources |
+| `AssetPublisher` | `agora_workbench.code_execution.data_access.publishers` | Custom artifact output |
+| `ConnectorServer` | `agora_workbench.connector.base` | Custom server composition |
+| `CodeExecutionServer.preprocess_code` | `agora_workbench.code_execution.server` | Code preprocessing |

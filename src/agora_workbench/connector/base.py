@@ -39,7 +39,8 @@ class ConnectorServer(BaseMCPServer):
     - Activity publishing
 
     Subclasses implement ``_setup_tools()`` to register their mode-specific
-    proxy tools and ``_get_upstreams()`` to declare their upstream list.
+    proxy tools. The upstream server list is supplied via the ``upstreams``
+    constructor argument.
     """
 
     def __init__(

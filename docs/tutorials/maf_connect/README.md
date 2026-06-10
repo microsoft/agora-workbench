@@ -25,7 +25,7 @@ between MAF and the workbench; build the agent itself by following the
 - Docker — the chemistry server runs as a local container.
 - `agent-framework` available in your env:
   ```bash
-  uv sync --extra agent
+  uv pip install agent-framework
   ```
 
 ## Start the chemistry MCP server

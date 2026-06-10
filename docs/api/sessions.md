@@ -2,12 +2,12 @@
 
 ## Session Container
 
-::: code_execution.sessions.session.Session
+::: agora_workbench.code_execution.sessions.session.Session
 
 ## Session Manager
 
-::: code_execution.sessions.manager.SessionManager
+::: agora_workbench.code_execution.sessions.manager.SessionManager
 
 ## Session Configuration
 
-::: code_execution.sessions.manager.SessionConfig
+::: agora_workbench.code_execution.sessions.manager.SessionConfig
