@@ -167,11 +167,11 @@ class CodeExecutionServer(BaseMCPServer):
                 Enables custom search backends (e.g. vector DB, Elasticsearch) without
                 modifying the built-in factory.
             publishers: Optional list of :class:`~.data_access.AssetPublisher` instances
-                that the ``{name}_publish_artifact`` MCP tool will dispatch to.
-                Publishers are checked in order via ``can_handle()``; the first match wins.
+                that the ``{name}_send`` MCP tool will dispatch to.
+                Publishers are routed by ``destination_name``; the first match wins.
                 A :class:`~.data_access.GuiPublisher` is always prepended (see
-                ``__init__``) so the publish tool is registered unconditionally and
-                ``<gui>name</gui>`` destinations work even when this list is ``None``.
+                ``__init__``) so the send tool is registered unconditionally and
+                the ``"user"`` destination works even when this list is ``None``.
             skills: Optional list of :class:`~.skills.Skill` objects for workflow planning
                 and skill loading. Use :func:`~.skills.discover_skills` to scan a directory.
             states: Optional list of :class:`~.tool_registry.State` objects defining the
@@ -686,11 +686,8 @@ class CodeExecutionServer(BaseMCPServer):
         # Setup batch-parallel execution tools.
         self._setup_parallel_execution_tools()
 
-        # Setup object transfer tool for server-to-server object transfer
-        self._setup_transfer_tool()
-
-        # Setup artifact publish tool (always available via GuiPublisher)
-        self._setup_publish_artifact_tool()
+        # Setup unified send tool (replaces push_object + publish_artifact)
+        self._setup_send_tool()
 
     # ========================================================================
     # Session Management Helpers
@@ -1466,42 +1463,52 @@ class CodeExecutionServer(BaseMCPServer):
                 server_name,
             )
 
-    def _setup_transfer_tool(self) -> None:
-        """Register MCP tools for cross-server object transfer.
+    def _setup_send_tool(self) -> None:
+        """Register the unified ``{name}_send`` MCP tool.
 
-        Adds ``{name}_push_object`` which serializes a Python variable from the
-        current session's kernel namespace and POSTs it directly to a target
-        MCP server's ``/object-transfer/receive`` endpoint.  The data flows
-        server-to-server without routing through the agent context.
+        This tool replaces both ``{name}_push_object`` (server-to-server) and
+        ``{name}_publish_artifact`` (blob/gui/local export) with a single
+        agent-facing tool that routes via ``destination_name`` on registered
+        publishers.
+
+        Architecture:
+            1. Destination Router — matches ``to`` param to a publisher
+            2. Materializer — resolves ``data_ref`` from kernel variable or output file
+            3. Calls ``publisher.publish(local_path, name, session_id)``
         """
+        from .data_access.publishers import GuiPublisher as _GuiPub, ServerPublisher as _ServerPub
+
         server = self
-        tool_name = f"{self.server_config.name}_push_object"
+        tool_name = f"{self.server_config.name}_send"
 
-        async def push_object(
+        # Build destination enum from registered publishers
+        destination_names = []
+        for p in self._publishers:
+            if p.destination_name not in destination_names:
+                destination_names.append(p.destination_name)
+
+        async def send(
             ctx: Context,
-            target_server_url: str,
-            variable_name: str,
-            target_variable_name: str = "",
-            target_session_id: str = "",
+            data_ref: str,
+            to: str,
+            name: str = "",
+            path: str = "",
+            session_id: str = "",
         ) -> str:
-            """Push a Python variable from this server's session to another MCP server.
+            """Send data from this server to a destination (peer server, blob, user, or local).
 
-            The variable is serialized from the kernel namespace, sent directly
-            to the target server over HTTP, and injected into the target's kernel
-            namespace.  This avoids passing large or non-JSONable objects through
-            the agent context.
+            The ``data_ref`` is resolved in order:
+            1. If it matches a kernel variable name → serialize via dill to a temp file
+            2. If it matches a file in ``AGORA_OUTPUT_DIR`` → use that file directly
+
+            The ``to`` parameter selects the destination publisher by its logical name.
 
             Args:
-                target_server_url: Base URL of the target MCP server
-                    (e.g. ``http://localhost:8001``).  The receive endpoint
-                    path is appended automatically.
-                variable_name: Name of the Python variable in this session's
-                    kernel namespace to transfer.
-                target_variable_name: Variable name to use on the target server
-                    (defaults to ``variable_name`` if empty).
-                target_session_id: Session ID on the target server.  If empty,
-                    the target server uses the first active session owned by
-                    the caller.
+                data_ref: Kernel variable name or filename in AGORA_OUTPUT_DIR.
+                to: Logical destination name (one of the registered publishers).
+                name: Optional rename at destination. Defaults to ``data_ref``.
+                path: Optional destination path (for blob/local publishers that need paths).
+                session_id: Target session ID (for server destinations; empty = auto-resolve).
 
             Returns:
                 JSON result with success status and transfer details.
@@ -1510,234 +1517,266 @@ class CodeExecutionServer(BaseMCPServer):
             import keyword
             import os
             import tempfile
-
-            from .object_transfer import ObjectTransferClient, MAX_TRANSFER_SIZE_BYTES
-
-            # Resolve bare server names (e.g. "gis") to Docker internal URLs.
-            # The agent often passes just the server name; expand it to
-            # http://{name}-server:8000 which is the Docker Compose convention.
-            # Only treat as a bare server name if it is a simple token with no
-            # path or port information. This avoids mangling inputs like
-            # "gis-server" (which would become "gis-server-server") or
-            # "gis:8000" (which would become "gis:8000-server").
-            if "://" not in target_server_url:
-                bare = target_server_url.strip().rstrip("/")
-                # Reject empty/whitespace-only input, or values containing path
-                # separators or port numbers (e.g. "gis:8000", "gis/path").
-                if not bare or "/" in bare or ":" in bare:
-                    return _json.dumps(
-                        {
-                            "success": False,
-                            "error": (
-                                "Invalid bare target_server_url. Provide either a simple "
-                                "server name (e.g. 'gis') or a full URL including scheme "
-                                "(e.g. 'http://gis-server:8000')."
-                            ),
-                        },
-                        indent=2,
-                    )
-
-                hostname = bare
-                if not hostname.endswith("-server"):
-                    hostname = f"{hostname}-server"
-
-                target_server_url = f"http://{hostname}:8000"
-                trusted_http_hosts = {
-                    entry.strip()
-                    for entry in os.environ.get("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", "").split(",")
-                    if entry.strip()
-                }
-                if hostname not in trusted_http_hosts and f"{hostname}:8000" not in trusted_http_hosts:
-                    LOGGER.warning(
-                        "Bare server name '%s' expanded to plain-HTTP URL '%s'. "
-                        "Object transfer validation may reject this HTTP destination unless "
-                        "OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS includes '%s'. "
-                        "Only if explicitly trusted will bearer tokens be forwarded over HTTP; "
-                        "alternatively, pass a full HTTPS URL to avoid this warning.",
-                        bare,
-                        target_server_url,
-                        hostname,
-                    )
-
-            # Validate variable names
-            if not variable_name.isidentifier() or keyword.iskeyword(variable_name):
-                return _json.dumps(
-                    {"success": False, "error": f"Invalid Python variable name: '{variable_name}'"},
-                    indent=2,
-                )
-
-            effective_target_name = target_variable_name or variable_name
-
-            if not effective_target_name.isidentifier() or keyword.iskeyword(effective_target_name):
-                return _json.dumps(
-                    {"success": False, "error": f"Invalid target variable name: '{effective_target_name}'"},
-                    indent=2,
-                )
-
-            # Get current session
-            session_id = None
-            if ctx:
-                try:
-                    session_id = ctx.session_id
-                except (RuntimeError, AttributeError):
-                    pass
-
-            fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
-            os.close(fd)
-
-            # transfer_id correlates source/target events in the activity
-            # feed.  Generate it up front so the except-path publish below
-            # always has a stable id, even if an exception fires before the
-            # serialize step (e.g. session creation failure).
             import uuid as _uuid
+
+            from .object_transfer import MAX_TRANSFER_SIZE_BYTES
 
             transfer_id = _uuid.uuid4().hex
 
+            # --- Destination Router ---
+            publisher = None
+            for p in server._publishers:
+                if p.destination_name == to:
+                    publisher = p
+                    break
+
+            if publisher is None:
+                return _json.dumps(
+                    {
+                        "success": False,
+                        "error": (f"Unknown destination '{to}'. Available destinations: {destination_names}"),
+                    },
+                    indent=2,
+                )
+
+            # --- Session resolution ---
+            mcp_session_id = None
+            if ctx:
+                try:
+                    mcp_session_id = ctx.session_id
+                except (RuntimeError, AttributeError):
+                    pass
+
             try:
-                server._restore_auth_context_for_mcp_session(session_id)
-                session = await server._get_or_create_session(tool_name, session_id=session_id)
+                server._restore_auth_context_for_mcp_session(mcp_session_id)
+                session = await server._get_or_create_session(tool_name, session_id=mcp_session_id)
+            except HTTPException as e:
+                if self._is_max_sessions_http_error(e):
+                    return _json.dumps(e.detail, indent=2)
+                return _json.dumps({"success": False, "error": str(e)}, indent=2)
+            except Exception as e:
+                return _json.dumps({"success": False, "error": f"Session error: {e}"}, indent=2)
 
-                # Serialize the variable from the kernel namespace via temp file
-                serialize_code = (
-                    f"import dill as __pkl__\n"
-                    f"with open({temp_path!r}, 'wb') as __f__:\n"
-                    f"    __pkl__.dump({variable_name}, __f__)\n"
-                    f"del __pkl__, __f__\n"
-                )
-                working_dir_str = str(server.working_dir) if server.working_dir else None
-                stdout, stderr, success, _displays, _artifacts = await server.session_manager.execute_code_for_session(
-                    session_id=session.session_id, code=serialize_code, timeout=60, working_dir=working_dir_str
-                )
+            effective_name = name or data_ref
+            # For path-based destinations (blob/local), use path if provided
+            logical_name = path or effective_name
 
-                if not success:
-                    error_msg = stderr.strip() or "Failed to serialize variable from kernel"
-                    return _json.dumps({"success": False, "error": error_msg}, indent=2)
+            # --- Materializer ---
+            # Determine if data_ref is a kernel variable or an output file.
+            # Strategy: check if it's a valid identifier (potential variable) first,
+            # then try to resolve from kernel; fall back to output dir file.
+            is_variable = data_ref.isidentifier() and not keyword.iskeyword(data_ref)
+            materialized_path = None
+            temp_path = None
+            is_server_destination = isinstance(publisher, _ServerPub)
 
-                # Check serialized size before reading into memory
-                file_size = os.path.getsize(temp_path)
-                if file_size > MAX_TRANSFER_SIZE_BYTES:
-                    return _json.dumps(
-                        {
-                            "success": False,
-                            "error": agent_guidance.operator_gate(
-                                f"Serialized object size ({file_size:,} bytes) exceeds "
-                                f"limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes).",
-                                tell_user="reduce the object size or split the transfer into smaller pieces.",
-                            ),
-                        },
-                        indent=2,
+            try:
+                if is_variable:
+                    # Try to serialize from kernel namespace
+                    fd, temp_path = tempfile.mkstemp(prefix="_mcp_send_", suffix=".pkl")
+                    os.close(fd)
+
+                    serialize_code = (
+                        f"import dill as __pkl__\n"
+                        f"with open({temp_path!r}, 'wb') as __f__:\n"
+                        f"    __pkl__.dump({data_ref}, __f__)\n"
+                        f"del __pkl__, __f__\n"
+                    )
+                    working_dir_str = str(server.working_dir) if server.working_dir else None
+                    (
+                        stdout,
+                        stderr,
+                        success,
+                        _displays,
+                        _artifacts,
+                    ) = await server.session_manager.execute_code_for_session(
+                        session_id=session.session_id,
+                        code=serialize_code,
+                        timeout=60,
+                        working_dir=working_dir_str,
                     )
 
-                # Read serialized bytes from temp file
-                with open(temp_path, "rb") as f:
-                    serialized = f.read()
+                    if success and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                        materialized_path = Path(temp_path)
+                    else:
+                        # Variable not found in kernel — fall through to file check
+                        try:
+                            os.unlink(temp_path)
+                        except OSError:
+                            pass
+                        temp_path = None
 
-                # Transfer to target server – prefer the fresh token from
-                # the current request context over the session-stored copy.
-                current_token = get_current_request_token() or session.user_token
-                client = ObjectTransferClient(
-                    user_token=current_token,
+                # If not materialized from kernel, try output directory
+                if materialized_path is None:
+                    record = server.session_manager.find_artifact_by_name(session.session_id, data_ref)
+                    if record is not None:
+                        materialized_path = record.path
+                    else:
+                        # Neither variable nor file found
+                        error_detail = f"Cannot resolve '{data_ref}': "
+                        if is_variable:
+                            error_detail += (
+                                "not found as a kernel variable or as a file in AGORA_OUTPUT_DIR. "
+                                "Ensure the variable exists in the kernel namespace or the file "
+                                "was written to AGORA_OUTPUT_DIR during a previous execute call."
+                            )
+                        else:
+                            error_detail += (
+                                "not a valid Python identifier and not found in AGORA_OUTPUT_DIR. "
+                                "Provide a kernel variable name or a filename written to AGORA_OUTPUT_DIR."
+                            )
+                        return _json.dumps({"success": False, "error": error_detail}, indent=2)
+
+                # --- Size check for server destinations ---
+                if is_server_destination:
+                    file_size = materialized_path.stat().st_size
+                    if file_size > MAX_TRANSFER_SIZE_BYTES:
+                        return _json.dumps(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"Serialized object size ({file_size:,} bytes) exceeds "
+                                    f"limit ({MAX_TRANSFER_SIZE_BYTES:,} bytes). "
+                                    "Reduce the object size or split into smaller pieces."
+                                ),
+                            },
+                            indent=2,
+                        )
+
+                # --- Publish ---
+                # Set context on publisher for destination-specific needs
+                if isinstance(publisher, _GuiPub):
+                    # GuiPublisher needs the download token
+                    record = server.session_manager.find_artifact_by_name(session.session_id, data_ref)
+                    if record is not None:
+                        publisher._download_token = record.token
+                    else:
+                        return _json.dumps(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"Cannot send '{data_ref}' to 'user': artifact must be a file "
+                                    "in AGORA_OUTPUT_DIR (not a kernel variable) for GUI download."
+                                ),
+                            },
+                            indent=2,
+                        )
+
+                if isinstance(publisher, _ServerPub):
+                    # ServerPublisher needs the bearer token and metadata
+                    current_token = get_current_request_token() or session.user_token
+                    publisher._user_token = current_token
+                    publisher._source_server = server.server_config.name
+                    publisher._transfer_id = transfer_id
+
+                target_session = session_id if is_server_destination else session.session_id
+                remote_uri = await publisher.publish(
+                    local_path=materialized_path,
+                    name=logical_name,
+                    session_id=target_session,
                 )
 
-                result = await client.push(
-                    target_url=target_server_url,
-                    variable_name=effective_target_name,
-                    serialized_data=serialized,
-                    metadata={
-                        "source_server": server.server_config.name,
-                        "source_variable": variable_name,
-                        "transfer_id": transfer_id,
-                    },
-                    target_session_id=target_session_id or None,
-                )
-
+                # --- Activity event ---
                 server.activity_publisher.publish_nowait(
                     {
-                        "type": "push_object_sent",
-                        "description": f"Push '{variable_name}' → {target_server_url}",
+                        "type": "send_completed",
+                        "description": f"send '{data_ref}' → {to}",
                         "transfer_id": transfer_id,
-                        "variable_name": variable_name,
-                        "target_server": target_server_url,
+                        "data_ref": data_ref,
+                        "destination": to,
+                        "name": logical_name,
                         "session_id": session.session_id,
                         "success": True,
+                        "remote_uri": remote_uri,
                     }
                 )
 
                 return _json.dumps(
                     {
                         "success": True,
-                        "source_server": server.server_config.name,
-                        "source_variable": variable_name,
-                        "target_variable": effective_target_name,
-                        "target_server_url": target_server_url,
-                        "size_bytes": len(serialized),
+                        "data_ref": data_ref,
+                        "destination": to,
+                        "name": logical_name,
+                        "remote_uri": remote_uri,
                         "transfer_id": transfer_id,
-                        "target_response": result,
                     },
                     indent=2,
                 )
-            except HTTPException as e:
-                if self._is_max_sessions_http_error(e):
-                    return _json.dumps(e.detail, indent=2)
-                LOGGER.error(f"Object transfer failed: {e}", exc_info=True)
+
+            except Exception as exc:
+                LOGGER.error("send tool failed: %s", exc, exc_info=True)
                 server.activity_publisher.publish_nowait(
                     {
-                        "type": "push_object_sent",
-                        "description": f"Push '{variable_name}' → {target_server_url} failed: {e}",
+                        "type": "send_completed",
+                        "description": f"send '{data_ref}' → {to} failed: {type(exc).__name__}",
                         "transfer_id": transfer_id,
-                        "variable_name": variable_name,
-                        "target_server": target_server_url,
-                        "session_id": session_id,
+                        "data_ref": data_ref,
+                        "destination": to,
+                        "session_id": session.session_id if session else mcp_session_id,
                         "success": False,
-                        "error": str(e),
+                        "error": f"{type(exc).__name__}: {exc}",
                     }
                 )
-                return _json.dumps({"success": False, "error": str(e)}, indent=2)
-            except Exception as e:
-                LOGGER.error(f"Object transfer failed: {e}", exc_info=True)
-                server.activity_publisher.publish_nowait(
-                    {
-                        "type": "push_object_sent",
-                        "description": f"Push '{variable_name}' → {target_server_url} failed: {type(e).__name__}: {e}",
-                        "transfer_id": transfer_id,
-                        "variable_name": variable_name,
-                        "target_server": target_server_url,
-                        "session_id": session_id,
-                        "success": False,
-                        "error": f"{type(e).__name__}: {e}",
-                    }
+                return _json.dumps(
+                    {"success": False, "error": f"{type(exc).__name__}: {exc}"},
+                    indent=2,
                 )
-                return _json.dumps({"success": False, "error": str(e)}, indent=2)
             finally:
                 server._clear_auth_context()
-                # Clean up temp file
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
+                # Clean up temp file if we created one
+                if temp_path:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
 
-        self.mcp.tool(
-            name=tool_name,
-            description=(
-                f"Push a Python variable from the {self.server_config.name} server's session "
-                "to another MCP server. The variable is serialized and transferred directly "
-                "between servers without passing through the agent context, enabling transfer "
-                "of large or non-JSONable Python objects.\n\n"
-                "IMPORTANT — the TARGET server must already have an active session before you "
-                "push. A session is created automatically the first time you call "
-                "`execute_{{server}}_code`. If no session exists on the target, push_object "
-                "fails with 'No active session found.' Always call "
-                "`execute_{{target}}_code` (even a trivial `print('ready')`) BEFORE your "
-                "first push_object to that server.\n\n"
-                "Workflow:\n"
-                "1. Run code on the source server to build the data in a kernel variable.\n"
-                "2. Ensure the target server has a session (call `execute_{{target}}_code` "
-                "if needed).\n"
-                "3. Call this tool with `target_server_url` set to just the server name "
-                "(e.g. 'gis') — it is automatically resolved to the Docker internal URL.\n"
-                "4. Run code on the target server to use the received variable."
-            ),
-        )(push_object)
+        # Build dynamic description with available destinations
+        dest_examples = []
+        for p in self._publishers:
+            dn = p.destination_name
+            if isinstance(p, _ServerPub):
+                dest_examples.append(
+                    f'  {self.server_config.name}_send(data_ref="my_var", to="{dn}") — '
+                    f"transfer variable to {dn} server's kernel"
+                )
+            elif isinstance(p, _GuiPub):
+                dest_examples.append(
+                    f'  {self.server_config.name}_send(data_ref="results.csv", to="user") — '
+                    "make file downloadable in browser"
+                )
+            elif dn == "blob":
+                dest_examples.append(
+                    f'  {self.server_config.name}_send(data_ref="results.csv", to="blob", '
+                    f'path="reports/results.csv") — upload to blob storage'
+                )
+            elif dn == "local":
+                dest_examples.append(
+                    f'  {self.server_config.name}_send(data_ref="output.csv", to="local") — copy to local filesystem'
+                )
+
+        examples_text = "\n".join(dest_examples)
+        dest_list = ", ".join(f"'{d}'" for d in destination_names)
+
+        description = (
+            f"Send data from the {self.server_config.name} server to a destination. "
+            "This is the unified tool for all data transfer — to peer servers, "
+            "blob storage, local filesystem, or browser download.\n\n"
+            f"Available destinations (to parameter): {dest_list}\n\n"
+            "The `data_ref` parameter accepts either:\n"
+            "- A Python variable name from the kernel namespace (for server-to-server transfers)\n"
+            "- A filename written to AGORA_OUTPUT_DIR during a previous execute call\n\n"
+            "Examples:\n"
+            f"{examples_text}\n\n"
+            "Parameters:\n"
+            "- data_ref (required): Kernel variable name or filename in AGORA_OUTPUT_DIR\n"
+            f"- to (required): Destination name — one of: {dest_list}\n"
+            "- name (optional): Rename at destination (defaults to data_ref)\n"
+            "- path (optional): Full destination path (for blob/local destinations)\n"
+            "- session_id (optional): Target session ID (for server destinations; auto-resolved if empty)"
+        )
+
+        self.mcp.tool(name=tool_name, description=description)(send)
+        LOGGER.info("Registered unified send tool: %s (destinations: %s)", tool_name, destination_names)
 
     async def _inspect_session_payload(self, session_id: str) -> dict[str, Any]:
         """Inspect a session's namespace and background job status."""
@@ -2159,214 +2198,6 @@ else:
         payload = await self._check_batch_payload(batch_id)
         payload["status"] = "partial_failure" if payload["failed"] else payload["status"]
         return payload
-
-    def _setup_publish_artifact_tool(self) -> None:
-        """Register the ``{name}_publish_artifact`` MCP tool.
-
-        The tool is always registered: a :class:`~.data_access.GuiPublisher` is
-        prepended to ``self._publishers`` in ``__init__``, so there is always at
-        least one publisher (``<gui>name</gui>``) available even when the caller
-        passes no ``publishers``.  Operator-supplied publishers (Blob, local)
-        extend the set.  At call time the tool resolves the artifact by name from
-        the session's registered artifacts, selects the appropriate publisher via
-        ``can_handle()``, uploads the file, emits an activity event, and returns
-        the remote URI.
-        """
-        from .data_access.publishers import parse_destination_tag
-
-        server = self
-        tool_name = f"{self.server_config.name}_publish_artifact"
-
-        async def publish_artifact(
-            ctx: Context,
-            artifact_name: str,
-            destination: str,
-        ) -> str:
-            """Push an artifact from the session output directory to remote storage.
-
-            The artifact must have been written to ``AGORA_OUTPUT_DIR`` during a
-            previous execute call so that it is registered in the session's artifact
-            registry.
-
-            The *destination* tag selects the publisher:
-            - ``<gui>results.csv</gui>`` → GuiPublisher (browser download)
-            - ``<blob>results.csv</blob>`` → BlobPublisher
-            - ``<local>output</local>`` → LocalFilePublisher
-
-            The inner value of the tag is used as the logical name; path-like
-            values (e.g. ``subdir/report.pdf``) are accepted.
-
-            Args:
-                artifact_name: Filename relative to ``AGORA_OUTPUT_DIR``
-                    (e.g. ``"results.csv"`` or ``"subdir/report.pdf"``).
-                destination: Tagged destination string that selects the publisher
-                    and provides the logical upload name
-                    (e.g. ``"<blob>results.csv</blob>"``).
-
-            Returns:
-                JSON object with ``success``, ``remote_uri``, and ``artifact_name``.
-            """
-            import json as _json
-
-            mcp_session_id = None
-            if ctx:
-                try:
-                    mcp_session_id = ctx.session_id
-                except (RuntimeError, AttributeError):
-                    # ctx.session_id may raise if the MCP transport does not
-                    # provide a session identifier (e.g. stdio transport).
-                    # Fall through to let _get_or_create_session handle it.
-                    pass
-
-            # Parse the destination tag to validate its format and extract the name.
-            parsed = parse_destination_tag(destination)
-            if parsed is None:
-                return _json.dumps(
-                    {
-                        "success": False,
-                        "error": (
-                            f"Invalid destination format {destination!r}. "
-                            "Expected a tag-based destination such as "
-                            "<blob>results.csv</blob> or <local>output</local>."
-                        ),
-                    },
-                    indent=2,
-                )
-
-            _tag_type, logical_name = parsed
-
-            # Find the publisher that handles this destination tag.
-            publisher = None
-            for p in server._publishers:
-                if p.can_handle(destination):
-                    publisher = p
-                    break
-
-            if publisher is None:
-                return _json.dumps(
-                    {
-                        "success": False,
-                        "error": (
-                            f"No publisher configured for destination {destination!r}. "
-                            f"Registered publisher types: "
-                            f"{[type(p).__name__ for p in server._publishers]}."
-                        ),
-                    },
-                    indent=2,
-                )
-
-            # Authenticate and resolve the session (same pattern as other
-            # session-scoped tools: restore auth context, verify ownership).
-            try:
-                server._restore_auth_context_for_mcp_session(mcp_session_id)
-                session = await server._get_or_create_session(tool_name, session_id=mcp_session_id)
-                session_id = session.session_id
-            except Exception as exc:
-                return _json.dumps(
-                    {
-                        "success": False,
-                        "error": f"Cannot publish: session authentication failed: {exc}",
-                    },
-                    indent=2,
-                )
-
-            record = server.session_manager.find_artifact_by_name(session_id, artifact_name)
-            if record is None:
-                return _json.dumps(
-                    {
-                        "success": False,
-                        "error": (
-                            f"Artifact {artifact_name!r} not found in session {session_id}. "
-                            "Ensure the file was written to AGORA_OUTPUT_DIR during a "
-                            "previous execute call."
-                        ),
-                    },
-                    indent=2,
-                )
-
-            # Publish the artifact.
-            try:
-                # GuiPublisher needs the download token to build the URL.
-                from .data_access.publishers import GuiPublisher as _GuiPub
-
-                if isinstance(publisher, _GuiPub):
-                    publisher._download_token = record.token
-                remote_uri = await publisher.publish(
-                    local_path=record.path,
-                    name=logical_name,
-                    session_id=session_id,
-                )
-            except Exception as exc:
-                LOGGER.error(
-                    "publish_artifact failed for %r → %r: %s",
-                    artifact_name,
-                    destination,
-                    exc,
-                    exc_info=True,
-                )
-                server.activity_publisher.publish_nowait(
-                    {
-                        "type": "artifact_published",
-                        "description": f"publish {artifact_name} → {destination} failed: {type(exc).__name__}",
-                        "success": False,
-                        "artifact_name": artifact_name,
-                        "destination": destination,
-                        "session_id": session_id,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-                return _json.dumps(
-                    {
-                        "success": False,
-                        "error": f"Publish failed: {type(exc).__name__}: {exc}",
-                    },
-                    indent=2,
-                )
-
-            LOGGER.info(
-                "publish_artifact: %r → %r (session %s)",
-                artifact_name,
-                remote_uri,
-                session_id,
-            )
-            server.activity_publisher.publish_nowait(
-                {
-                    "type": "artifact_published",
-                    "description": f"publish {artifact_name} → {destination}",
-                    "success": True,
-                    "artifact_name": artifact_name,
-                    "destination": destination,
-                    "remote_uri": remote_uri,
-                    "session_id": session_id,
-                    "size_bytes": record.size_bytes,
-                    "mime_type": record.mime_type,
-                }
-            )
-            return _json.dumps(
-                {
-                    "success": True,
-                    "artifact_name": artifact_name,
-                    "remote_uri": remote_uri,
-                },
-                indent=2,
-            )
-
-        self.mcp.tool(
-            name=tool_name,
-            description=(
-                "Publish an artifact from the session output directory to remote storage or "
-                "make it downloadable via the GUI. "
-                "Only use this tool when the user explicitly requests a file download, "
-                "export, or save — do not publish artifacts proactively. "
-                "The artifact must have been written to AGORA_OUTPUT_DIR during a previous "
-                "execute call. Use a tagged destination to select the publisher: "
-                "<gui>results.csv</gui> for browser download via the activity UI, "
-                "<blob>results.csv</blob> for Azure Blob Storage, "
-                "<local>output</local> for local file storage."
-            ),
-        )(publish_artifact)
-
-        LOGGER.info("Registered publish artifact tool: %s", tool_name)
 
     def _setup_parallel_execution_tools(self) -> None:
         """Register map-style parallel execution tools."""

@@ -104,6 +104,17 @@ class AssetPublisher(ABC):
         """
         self.credential = credential
 
+    @property
+    @abstractmethod
+    def destination_name(self) -> str:
+        """Logical name used for routing in the unified send tool.
+
+        This name is what agents pass as the ``to`` parameter, e.g.
+        ``"blob"``, ``"user"``, ``"gis"``.  Must be unique across all
+        publishers registered on a single server.
+        """
+        ...
+
     @abstractmethod
     async def publish(self, local_path: Path, name: str, session_id: str) -> str:
         """Publish a local artifact to this publisher's configured destination.
@@ -160,6 +171,10 @@ class BlobPublisher(AssetPublisher):
 
     # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
+
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "blob"
 
     def __init__(
         self,
@@ -262,6 +277,10 @@ class GuiPublisher(AssetPublisher):
     Handles destination tags of the form ``<gui>name</gui>``.
     """
 
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "user"
+
     def __init__(self, public_url_fn: "Callable[[], str]"):
         """
         Initialise the GuiPublisher.
@@ -326,6 +345,10 @@ class LocalFilePublisher(AssetPublisher):
     Handles destination tags of the form ``<local>name</local>``.
     """
 
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "local"
+
     def __init__(self, base_dir: Path | str):
         """
         Initialise the LocalFilePublisher.
@@ -374,3 +397,97 @@ class LocalFilePublisher(AssetPublisher):
         shutil.copy2(local_path, dest)
         LOGGER.info("LocalFilePublisher: copied %d bytes → %s", dest.stat().st_size, dest)
         return str(dest)
+
+
+class ServerPublisher(AssetPublisher):
+    """Publisher that pushes serialized objects to a peer MCP server's kernel.
+
+    Each instance represents a single peer server destination. Operators
+    register one ``ServerPublisher`` per reachable peer in the ``publishers``
+    list at server construction time.
+
+    The publisher serializes the local file content and POSTs it to the
+    target server's ``/object-transfer/receive`` endpoint using the existing
+    :class:`~..object_transfer.ObjectTransferClient` infrastructure.
+
+    Lazy session creation: the target session is resolved on the receiving
+    end using the forwarded bearer token — no pre-creation required.
+    """
+
+    def __init__(
+        self,
+        server_name: str,
+        target_url: str | None = None,
+    ):
+        """
+        Initialise the ServerPublisher.
+
+        Args:
+            server_name: Logical name of the target server (e.g. ``"gis"``).
+                Used as ``destination_name`` for routing and for Docker URL
+                expansion if ``target_url`` is not provided.
+            target_url: Full base URL of the target MCP server.  If ``None``,
+                the URL is auto-expanded from ``server_name`` using the Docker
+                Compose convention (``http://{name}-server:8000``).
+        """
+        super().__init__(credential=None)
+        self._server_name = server_name
+        if target_url:
+            self._target_url = target_url.rstrip("/")
+        else:
+            hostname = server_name if server_name.endswith("-server") else f"{server_name}-server"
+            self._target_url = f"http://{hostname}:8000"
+
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return self._server_name
+
+    def can_handle(self, destination: str) -> bool:
+        """ServerPublisher does not use tag-based routing.
+
+        It is routed via ``destination_name`` in the unified send tool.
+        For backwards-compat with the ``publish_artifact`` tag-based flow,
+        this always returns ``False``.
+        """
+        return False
+
+    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+        """Serialize and push the file to the target server's kernel.
+
+        The file at ``local_path`` is expected to be a dill-serialized pickle.
+        It is base64-encoded and sent to the target's receive endpoint.
+
+        Args:
+            local_path: Path to the serialized (pickle) file to transfer.
+            name: Variable name to inject on the target kernel.
+            session_id: Session ID on the target server (empty string to
+                let the target resolve via bearer token).
+
+        Returns:
+            A human-readable confirmation message.
+        """
+        from ..object_transfer import ObjectTransferClient
+
+        if not local_path.is_file():
+            raise FileNotFoundError(f"Transfer file not found at {local_path}")
+
+        serialized = local_path.read_bytes()
+
+        # user_token is injected by the send tool before calling publish
+        user_token = getattr(self, "_user_token", "")
+        if not user_token:
+            raise RuntimeError("ServerPublisher requires _user_token to be set before publish() is called.")
+
+        client = ObjectTransferClient(user_token=user_token)
+        result = await client.push(
+            target_url=self._target_url,
+            variable_name=name,
+            serialized_data=serialized,
+            metadata={
+                "source_server": getattr(self, "_source_server", "unknown"),
+                "transfer_id": getattr(self, "_transfer_id", ""),
+            },
+            target_session_id=session_id or None,
+        )
+
+        return f"Injected '{name}' into {self._server_name} kernel (response: {result})"

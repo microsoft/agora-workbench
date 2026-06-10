@@ -70,11 +70,8 @@ class GatewayServer(ConnectorServer):
         if "parallel_execute" not in blocked:
             self._register_parallel_execution_proxies(upstream)
 
-        if "publish_artifact" not in blocked:
-            self._register_publish_artifact_proxy(upstream)
-
-        if "push_object" not in blocked:
-            self._register_push_object_proxy(upstream)
+        if "send" not in blocked:
+            self._register_send_proxy(upstream)
 
         if "plan_workflow" not in blocked:
             self._register_plan_workflow_proxy(upstream)

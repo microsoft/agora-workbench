@@ -14,6 +14,7 @@ from .publishers import (
     BlobPublisher,
     GuiPublisher,
     LocalFilePublisher,
+    ServerPublisher,
     parse_destination_tag,
 )
 from .resolution import (
@@ -29,6 +30,7 @@ __all__ = [
     "BlobPublisher",
     "GuiPublisher",
     "LocalFilePublisher",
+    "ServerPublisher",
     "parse_destination_tag",
     "AssetResolutionMiddleware",
     "looks_like_qualified_name",

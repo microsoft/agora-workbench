@@ -61,8 +61,7 @@ class RouterServer(ConnectorServer):
             self._register_session_proxies(upstream)
             self._register_check_job_proxy(upstream)
             self._register_parallel_execution_proxies(upstream)
-            self._register_publish_artifact_proxy(upstream)
-            self._register_push_object_proxy(upstream)
+            self._register_send_proxy(upstream)
             self._register_plan_workflow_proxy(upstream)
             self._register_load_skill_proxy(upstream)
 
