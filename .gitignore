@@ -24,6 +24,7 @@ wheels/
 .env
 .env.agent
 deployment/.env.server
+**/.env.server
 .venv
 env/
 venv/
