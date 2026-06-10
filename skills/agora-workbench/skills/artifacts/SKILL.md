@@ -19,9 +19,17 @@ get_artifact(artifact_id="...")   # Get full metadata for a specific artifact
 query_catalog(sql="SELECT name, domain, description FROM artifacts WHERE domain = 'powergrid'")
 ```
 
-Results include the artifact's `storage_uri`, `domain`, `source_type` (local or blob),
-`description`, and `content_type`. Use these tools to find the correct asset
-reference before using it in code.
+**Not all servers have a data catalog.** These tools (`search_data`,
+`list_domains`, `get_artifact`, `query_catalog`) are registered only when the
+server is configured with one — and unlike most tools they are **not** prefixed
+with the server name. If they are not in the server's tool list, the server has
+no catalog: skip them and use the data references the user provides directly.
+Configuring a catalog is a server-author/deployment task, not something you can
+do from the client side.
+
+When present, results include the artifact's `storage_uri`, `domain`,
+`source_type` (local or blob), `description`, and `content_type`. Use these
+tools to find the correct asset reference before using it in code.
 
 ## Fetching Data Assets
 
@@ -91,21 +99,27 @@ is the correct default in all environments.
 
 To produce downloadable files for the user:
 
-1. Write files to `AGORA_OUTPUT_DIR` inside `execute_{server}_code`.
-   Use the **variable name directly** — do not resolve it to an absolute path:
+1. Write files to the session output directory inside `execute_{server}_code`.
+   The kernel pre-injects a helper and a variable for this — never resolve the
+   path to an absolute string yourself:
 
    ```python
-   # ✓ Correct — use the pre-injected variable name
+   # ✓ Preferred — agora_output() builds the path for you, no f-string needed
+   df.to_csv(agora_output("results.csv"), index=False)
+
+   # ✓ Also correct — use the pre-injected variable name directly
    df.to_csv(f"{AGORA_OUTPUT_DIR}/results.csv", index=False)
 
-   # ✓ Also correct — read from environment
+   # ✓ Also correct — read AGORA_OUTPUT_DIR from the environment
    import os
-   output_dir = os.environ["AGORA_OUTPUT_DIR"]
-   df.to_csv(f"{output_dir}/results.csv", index=False)
+   df.to_csv(f"{os.environ['AGORA_OUTPUT_DIR']}/results.csv", index=False)
 
    # ✗ WRONG — do not hardcode the resolved path (triggers path guardrails)
    df.to_csv("/tmp/agora_output_abc123/results.csv", index=False)
    ```
+
+   Both `agora_output("name")` and the bare `AGORA_OUTPUT_DIR` symbol are
+   injected automatically — no `import` is required to use them.
 
 2. Publish only when the user explicitly requests a download or export:
    ```
@@ -128,6 +142,6 @@ returns an error listing the registered publisher types. When unsure, try
 ### Rules
 
 - Only write user-facing files to `AGORA_OUTPUT_DIR` — files elsewhere stay inside the container.
-- Always reference `AGORA_OUTPUT_DIR` by variable name, never by its resolved absolute path.
+- Build output paths with `agora_output("name")` or the `AGORA_OUTPUT_DIR` variable — never hardcode the resolved absolute path.
 - Do not publish unless the user asks for a download or export.
 - The `artifact_name` must match a file already written to `AGORA_OUTPUT_DIR`.
