@@ -418,6 +418,7 @@ class ServerPublisher(AssetPublisher):
         self,
         server_name: str,
         target_url: str | None = None,
+        timeout: float = 60.0,
     ):
         """
         Initialise the ServerPublisher.
@@ -429,9 +430,11 @@ class ServerPublisher(AssetPublisher):
             target_url: Full base URL of the target MCP server.  If ``None``,
                 the URL is auto-expanded from ``server_name`` using the Docker
                 Compose convention (``http://{name}-server:8000``).
+            timeout: HTTP read/write timeout in seconds for the transfer request.
         """
         super().__init__(credential=None)
         self._server_name = server_name
+        self._timeout = timeout
         if target_url:
             self._target_url = target_url.rstrip("/")
         else:
@@ -455,7 +458,11 @@ class ServerPublisher(AssetPublisher):
         """Serialize and push the file to the target server's kernel.
 
         The file at ``local_path`` is expected to be a dill-serialized pickle.
-        It is base64-encoded and sent to the target's receive endpoint.
+        It is base64-encoded and sent to the target's ``/object-transfer/receive``
+        endpoint.
+
+        Validates the target URL before sending credentials to prevent SSRF and
+        bearer-token leakage (see ``_validate_target_url``).
 
         Args:
             local_path: Path to the serialized (pickle) file to transfer.
@@ -465,8 +472,20 @@ class ServerPublisher(AssetPublisher):
 
         Returns:
             A human-readable confirmation message.
+
+        Raises:
+            FileNotFoundError: If *local_path* does not exist.
+            RuntimeError: If no user token was set before calling publish.
+            ValueError: If the target URL fails validation.
+            httpx.HTTPStatusError: On non-2xx responses from the target.
+            httpx.RequestError: On connection / timeout errors.
         """
-        from ..object_transfer import ObjectTransferClient
+        import base64
+        import re as _re
+
+        import httpx
+
+        from ..object_transfer import _validate_target_url
 
         if not local_path.is_file():
             raise FileNotFoundError(f"Transfer file not found at {local_path}")
@@ -478,16 +497,33 @@ class ServerPublisher(AssetPublisher):
         if not user_token:
             raise RuntimeError("ServerPublisher requires _user_token to be set before publish() is called.")
 
-        client = ObjectTransferClient(user_token=user_token)
-        result = await client.push(
-            target_url=self._target_url,
-            variable_name=name,
-            serialized_data=serialized,
-            metadata={
+        _validate_target_url(self._target_url)
+
+        # Strip common MCP path suffixes so the agent can pass the MCP
+        # endpoint URL directly (e.g. http://gis-server:8000/mcp).
+        base = _re.sub(r"/mcp/?$", "", self._target_url.rstrip("/"))
+        receive_url = f"{base}/object-transfer/receive"
+
+        payload: dict = {
+            "variable_name": name,
+            "data": base64.b64encode(serialized).decode("ascii"),
+            "metadata": {
                 "source_server": getattr(self, "_source_server", "unknown"),
                 "transfer_id": getattr(self, "_transfer_id", ""),
             },
-            target_session_id=session_id or None,
-        )
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
+        ) as client:
+            response = await client.post(
+                receive_url,
+                json=payload,
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+            response.raise_for_status()
+            result = response.json()
 
         return f"Injected '{name}' into {self._server_name} kernel (response: {result})"

@@ -1,15 +1,14 @@
 """
-Server-to-server object transfer for MCP code execution servers.
+Server-to-server object transfer utilities for MCP code execution servers.
 
-Enables direct transfer of Python objects between MCP servers without
-routing through the agent context. Objects are serialized with dill
-in the source kernel, transmitted via HTTP, and deserialized into the
-target server's kernel namespace.
+Provides URL validation, serialization helpers, and constants used by
+:class:`~.data_access.publishers.ServerPublisher` (which handles the actual
+HTTP transfer) and the ``/object-transfer/receive`` endpoint in ``server.py``.
 
 Typical flow (agent-triggered):
-    1. Agent calls ``{source}_push_object(target_url, variable_name, target_variable_name)``
+    1. Agent calls ``{source}_send(data_ref="var", to="gis")``
     2. Source server serializes the named variable from the kernel namespace
-    3. Source server POSTs the serialized payload to target's ``/object-transfer/receive``
+    3. ServerPublisher POSTs the serialized payload to target's ``/object-transfer/receive``
     4. Target server deserializes and injects the object into its kernel namespace
     5. Agent can now reference the variable by name on the target server
 """
@@ -17,11 +16,10 @@ Typical flow (agent-triggered):
 import base64
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
 
 import dill
-import httpx
 
 from . import agent_guidance
 
@@ -187,70 +185,3 @@ class ObjectSerializer:
     def from_base64(encoded: str) -> bytes:
         """Decode a base64 string back to raw bytes."""
         return base64.b64decode(encoded)
-
-
-class ObjectTransferClient:
-    """HTTP client for pushing serialized objects to a remote MCP server.
-
-    The client authenticates to the target server using the caller's
-    bearer token (forwarded from the current session).
-    """
-
-    def __init__(self, user_token: str, timeout: float = 60.0):
-        self._user_token = user_token
-        self._timeout = timeout
-
-    async def push(
-        self,
-        target_url: str,
-        variable_name: str,
-        serialized_data: bytes,
-        metadata: Optional[dict] = None,
-        target_session_id: Optional[str] = None,
-    ) -> dict:
-        """Push a serialized object to a remote server's receive endpoint.
-
-        Args:
-            target_url: Base URL of the target server (e.g. ``https://host:8001``).
-                        ``/object-transfer/receive`` is appended automatically.
-                        Must use ``https://`` unless the host is a loopback address.
-            variable_name: Variable name to assign on the target server.
-            serialized_data: Object bytes produced by :class:`ObjectSerializer`.
-            metadata: Optional metadata dict to store alongside the object.
-            target_session_id: Optional session ID on the target server.  If
-                provided, the object is stored in that specific session.
-
-        Returns:
-            Response payload from the target server.
-
-        Raises:
-            ValueError: If ``target_url`` fails HTTPS or hostname allow-list
-                validation (see :func:`_validate_target_url`).
-            httpx.HTTPStatusError: On non-2xx responses.
-            httpx.RequestError: On connection / timeout errors.
-        """
-        _validate_target_url(target_url)
-        # Strip common MCP path suffixes so the agent can pass the MCP
-        # endpoint URL directly (e.g. http://gis-server:8000/mcp).
-        import re as _re
-
-        base = _re.sub(r"/mcp/?$", "", target_url.rstrip("/"))
-        receive_url = f"{base}/object-transfer/receive"
-        payload: dict = {
-            "variable_name": variable_name,
-            "data": ObjectSerializer.to_base64(serialized_data),
-            "metadata": metadata or {},
-        }
-        if target_session_id:
-            payload["session_id"] = target_session_id
-
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
-        ) as client:
-            response = await client.post(
-                receive_url,
-                json=payload,
-                headers={"Authorization": f"Bearer {self._user_token}"},
-            )
-            response.raise_for_status()
-            return response.json()
