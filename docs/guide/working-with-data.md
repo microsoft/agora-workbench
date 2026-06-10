@@ -200,7 +200,9 @@ The catalog is stored as a SQLite database on disk, so it persists across server
 
 ### MCP tools exposed
 
-Once configured, the catalog registers three tools on your MCP server:
+Once configured, the catalog registers four tools on your MCP server (these
+tool names are **not** prefixed with the server name, and they appear only when
+a catalog is configured):
 
 | Tool | Description |
 |------|-------------|
