@@ -14,6 +14,7 @@ Key capabilities:
 - **Authentication** — pluggable auth with built-in support for Azure Entra ID and no-op dev mode
 - **Server networks** — compose multiple servers behind a `ConnectorServer` (router or gateway) for multi-domain deployments
 - **Deployment** — Docker-based deployment with Azure Container Apps support
+- **Real-time activity UI** — a browser dashboard that streams every code execution, tool search, skill load, plot, and artifact your agent produces, grouped by session
 
 ## Quick links
 
@@ -27,7 +28,7 @@ Key capabilities:
 | Work with data files | [Working with data](guide/working-with-data.md) |
 | Connect multiple servers | [Server networks](guide/server-networks.md) |
 | Deploy to production | [Deploying your server](guide/deploying.md) |
-| Monitor in production | [Monitoring your servers](guide/monitoring.md) |
+| Watch my agent live in a browser (activity UI) | [Monitoring your servers](guide/monitoring.md) |
 | Configure authentication | [Authentication options](guide/authentication.md) |
 | Extend with custom interfaces | [Extension points](guide/extension-points.md) |
 

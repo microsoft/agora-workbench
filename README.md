@@ -52,10 +52,12 @@ pip install git+https://github.com/microsoft/agora-workbench.git
 
 | Extra | Example integration |
 |-------|---------------------|
-| `agent` | Microsoft Agent Framework (MAF) adapter |
 | `openai-agents` | OpenAI Agents SDK adapter |
 | `copilot-sdk` | GitHub Copilot SDK adapter |
 | `geo` | Geospatial domain examples (rasterio, etc.) |
+
+The Microsoft Agent Framework (MAF) adapter has no dedicated extra — install it
+directly with `uv pip install agent-framework`.
 
 Pick one (not both):
 
