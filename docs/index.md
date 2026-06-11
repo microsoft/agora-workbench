@@ -30,7 +30,7 @@ Key capabilities:
 | Work with data files | [Working with data](guide/working-with-data.md) |
 | Connect multiple servers | [Server networks](guide/server-networks.md) |
 | Deploy to production | [Deploying your server](guide/deploying.md) |
-| Watch my agent live in a browser (activity UI) | [Monitoring your servers](guide/monitoring.md) |
+| Watch my agent live | [Monitoring your servers](guide/monitoring.md) |
 | Configure authentication | [Authentication options](guide/authentication.md) |
 | Extend with custom interfaces | [Extension points](guide/extension-points.md) |
 
