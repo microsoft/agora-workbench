@@ -1,9 +1,8 @@
 # Core concepts
 
-Agora Workbench is a toolkit for turning **domain-specific Python tooling into
-MCP servers that an AI agent drives by writing code**. This page explains the
-mental model — the *what* and *why*. For step-by-step instructions, follow the
-links to the how-to guides.
+This page explains the mental model behind Agora Workbench — the *what* and
+*why*. For what it is in one paragraph, see the [home page](../index.md); for
+step-by-step instructions, follow the links to the how-to guides below.
 
 ## The core idea: code is the action surface
 
