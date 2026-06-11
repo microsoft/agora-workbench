@@ -605,6 +605,7 @@ class TestSendTool:
 
         tools = await server.mcp.list_tools()
         send_tool = next(t for t in tools if t.name == "test_send")
+        assert send_tool.description is not None
         assert "'user'" in send_tool.description
         assert "'local'" in send_tool.description
 
