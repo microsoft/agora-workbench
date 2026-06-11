@@ -411,6 +411,16 @@ class ServerPublisher(AssetPublisher):
     validation (HTTPS enforcement, host allow-lists) is applied before
     sending credentials.
 
+    .. note::
+
+        When ``target_url`` is not provided, the URL is auto-expanded from
+        ``server_name`` using the Docker Compose convention
+        (``http://{name}-server:8000``). By default, plain HTTP URLs are
+        rejected by ``_validate_target_url`` unless the hostname appears in
+        the ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`` environment variable.
+        Operators deploying with Docker Compose internal networking should
+        set this variable to include the auto-expanded hostnames.
+
     Session resolution on the target: when ``session_id`` is empty the
     receive endpoint selects the first active session owned by the caller
     (identified by the forwarded bearer token). If no active session exists

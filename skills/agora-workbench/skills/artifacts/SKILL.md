@@ -70,8 +70,10 @@ parameter. The server resolves this to the correct internal address based on
 its deployment configuration.
 
 If the transfer fails with a connection or trust error, the error message will
-indicate the expanded URL and what went wrong. In that case, ask the user for
-guidance on the correct destination name.
+indicate the expanded URL and what went wrong. Surface this error to the user —
+it is an operator configuration issue (the environment variables
+`OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` or `OBJECT_TRANSFER_ALLOWED_HOSTS` may
+need to be adjusted by the deployment operator).
 
 Do not attempt to guess deployment URLs, ports, or hostnames — the logical name
 is the correct default in all environments.
@@ -83,6 +85,7 @@ is the correct default in all environments.
 | `data_ref` | Kernel variable name or filename in `AGORA_OUTPUT_DIR` to transfer |
 | `to` | Logical destination name (e.g., `"gis"`, `"blob"`, `"user"`, `"local"`) |
 | `name` | Variable name at destination (defaults to `data_ref` if empty) |
+| `path` | Full destination path for blob/local publishers (e.g., `"outputs/report.csv"`) |
 | `session_id` | Target session ID (if empty, uses the caller's first active session on target) |
 
 ### When to use object transfer

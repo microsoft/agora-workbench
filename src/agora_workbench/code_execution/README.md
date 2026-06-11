@@ -236,7 +236,7 @@ MCP servers can transfer Python objects directly to each other without routing d
 
 ### How it works
 
-1. The agent calls `{server}_push_object` on the source server, specifying the target server URL, source variable name, and optional target variable name.
+1. The agent calls `{server}_send(data_ref="var", to="target_server")` on the source server.
 2. The source server serializes the named variable from the kernel namespace using `dill` and POSTs it to the target server's `/object-transfer/receive` endpoint.
 3. The target server deserializes the payload and injects the object into its kernel namespace.
 4. The agent can then reference the variable by name on the target server in subsequent `execute_code` calls.
@@ -252,12 +252,8 @@ MCP servers can transfer Python objects directly to each other without routing d
 ### Example (agent-side)
 
 ```python
-# Push a variable named "gdf" from the GIS server to the process server
-await gis_push_object(
-    target_url="http://process-server:8002",
-    variable_name="gdf",
-    target_variable_name="imported_gdf",  # name on the target server (optional)
-)
+# Send a variable named "gdf" from the GIS server to the process server
+await gis_send(data_ref="gdf", to="process", name="imported_gdf")
 ```
 
 The target server then makes `imported_gdf` available in all subsequent code execution calls for that session.
