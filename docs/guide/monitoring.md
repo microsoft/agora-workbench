@@ -75,8 +75,7 @@ The UI renders a live feed of event cards grouped by session. Each event type sh
 | `skill_loaded` | Which skill was loaded into the session |
 | `workflow_planned` | Domain, current/target state, and planned tool |
 | `artifact_published` | File name, destination, size, and download link |
-| `push_object_sent` / `push_object_received` | Cross-server object transfer tracking (legacy) |
-| `send_completed` | Unified send tool completion (transfer, publish, or export) |
+| `push_object_sent` / `push_object_received` | Cross-server object transfer tracking |
 | `batch_cancelled` | Parallel batch cancellation status |
 
 ### Rich outputs

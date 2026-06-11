@@ -1481,11 +1481,17 @@ class CodeExecutionServer(BaseMCPServer):
         server = self
         tool_name = f"{self.server_config.name}_send"
 
-        # Build destination enum from registered publishers
-        destination_names = []
+        # Build destination enum from registered publishers and validate uniqueness.
+        destination_names: list[str] = []
         for p in self._publishers:
-            if p.destination_name not in destination_names:
-                destination_names.append(p.destination_name)
+            dn = p.destination_name
+            if dn in destination_names:
+                raise ValueError(
+                    f"Duplicate publisher destination_name '{dn}' registered on server "
+                    f"'{self.server_config.name}'. Each publisher must have a unique "
+                    f"destination_name. Conflicting publisher: {type(p).__name__}."
+                )
+            destination_names.append(dn)
 
         async def send(
             ctx: Context,
@@ -1570,6 +1576,33 @@ class CodeExecutionServer(BaseMCPServer):
             temp_path = None
             is_server_destination = isinstance(publisher, _ServerPub)
 
+            # Server destinations only accept kernel variables (serialized pickles).
+            # Sending raw output-dir files to a server would fail on deserialization.
+            if is_server_destination:
+                if not is_variable:
+                    return _json.dumps(
+                        {
+                            "success": False,
+                            "error": (
+                                f"Server destination '{to}' requires a valid Python variable name "
+                                f"as data_ref, but got '{data_ref}'. Use a kernel variable name."
+                            ),
+                        },
+                        indent=2,
+                    )
+                # Validate that the effective target name is a valid Python identifier
+                target_var_name = name or data_ref
+                if not target_var_name.isidentifier() or keyword.iskeyword(target_var_name):
+                    return _json.dumps(
+                        {
+                            "success": False,
+                            "error": f"Invalid target variable name: '{target_var_name}'. Must be a valid Python identifier.",
+                        },
+                        indent=2,
+                    )
+                # path is not meaningful for server destinations
+                logical_name = target_var_name
+
             try:
                 if is_variable:
                     # Try to serialize from kernel namespace
@@ -1599,12 +1632,27 @@ class CodeExecutionServer(BaseMCPServer):
                     if success and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
                         materialized_path = Path(temp_path)
                     else:
-                        # Variable not found in kernel — fall through to file check
+                        # Distinguish "variable not found" (NameError) from
+                        # serialization failures (dill errors, __getstate__ issues).
+                        # Only fall through to file lookup on NameError.
+                        error_text = stderr.strip() if stderr else ""
+                        is_name_error = "NameError" in error_text
+
                         try:
                             os.unlink(temp_path)
                         except OSError:
-                            pass
+                            LOGGER.debug("Failed to remove temp file %s during cleanup", temp_path, exc_info=True)
                         temp_path = None
+
+                        if not is_name_error and error_text:
+                            # Real serialization failure — report to agent
+                            return _json.dumps(
+                                {
+                                    "success": False,
+                                    "error": (f"Failed to serialize variable '{data_ref}' from kernel: {error_text}"),
+                                },
+                                indent=2,
+                            )
 
                 # If not materialized from kernel, try output directory
                 if materialized_path is None:
@@ -1644,12 +1692,18 @@ class CodeExecutionServer(BaseMCPServer):
                         )
 
                 # --- Publish ---
-                # Set context on publisher for destination-specific needs
+                # Create per-call copies to avoid race conditions with
+                # concurrent requests mutating shared publisher state.
+                import copy as _copy
+
+                pub_instance = publisher
+
                 if isinstance(publisher, _GuiPub):
                     # GuiPublisher needs the download token
                     record = server.session_manager.find_artifact_by_name(session.session_id, data_ref)
                     if record is not None:
-                        publisher._download_token = record.token
+                        pub_instance = _copy.copy(publisher)
+                        pub_instance._download_token = record.token
                     else:
                         return _json.dumps(
                             {
@@ -1664,22 +1718,26 @@ class CodeExecutionServer(BaseMCPServer):
 
                 if isinstance(publisher, _ServerPub):
                     # ServerPublisher needs the bearer token and metadata
+                    pub_instance = _copy.copy(publisher)
                     current_token = get_current_request_token() or session.user_token
-                    publisher._user_token = current_token
-                    publisher._source_server = server.server_config.name
-                    publisher._transfer_id = transfer_id
+                    pub_instance._user_token = current_token
+                    pub_instance._source_server = server.server_config.name
+                    pub_instance._transfer_id = transfer_id
 
                 target_session = session_id if is_server_destination else session.session_id
-                remote_uri = await publisher.publish(
+                remote_uri = await pub_instance.publish(
                     local_path=materialized_path,
                     name=logical_name,
                     session_id=target_session,
                 )
 
                 # --- Activity event ---
+                # Use existing event types for UI compatibility:
+                # server destinations → push_object_sent, file destinations → artifact_published
+                event_type = "push_object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
-                        "type": "send_completed",
+                        "type": event_type,
                         "description": f"send '{data_ref}' → {to}",
                         "transfer_id": transfer_id,
                         "data_ref": data_ref,
@@ -1705,9 +1763,10 @@ class CodeExecutionServer(BaseMCPServer):
 
             except Exception as exc:
                 LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                event_type = "push_object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
-                        "type": "send_completed",
+                        "type": event_type,
                         "description": f"send '{data_ref}' → {to} failed: {type(exc).__name__}",
                         "transfer_id": transfer_id,
                         "data_ref": data_ref,

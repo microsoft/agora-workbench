@@ -113,7 +113,7 @@ class AssetPublisher(ABC):
         ``"blob"``, ``"user"``, ``"gis"``.  Must be unique across all
         publishers registered on a single server.
         """
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     async def publish(self, local_path: Path, name: str, session_id: str) -> str:
@@ -406,12 +406,17 @@ class ServerPublisher(AssetPublisher):
     register one ``ServerPublisher`` per reachable peer in the ``publishers``
     list at server construction time.
 
-    The publisher serializes the local file content and POSTs it to the
-    target server's ``/object-transfer/receive`` endpoint using the existing
-    :class:`~..object_transfer.ObjectTransferClient` infrastructure.
+    The publisher reads a dill-serialized file, base64-encodes it, and POSTs
+    it to the target server's ``/object-transfer/receive`` endpoint. URL
+    validation (HTTPS enforcement, host allow-lists) is applied before
+    sending credentials.
 
-    Lazy session creation: the target session is resolved on the receiving
-    end using the forwarded bearer token — no pre-creation required.
+    Session resolution on the target: when ``session_id`` is empty the
+    receive endpoint selects the first active session owned by the caller
+    (identified by the forwarded bearer token). If no active session exists
+    on the target, the receive endpoint returns a 404 — the agent must
+    ensure a session exists on the target (e.g. via ``execute_{target}_code``)
+    before sending.
     """
 
     def __init__(
