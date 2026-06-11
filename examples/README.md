@@ -8,7 +8,6 @@ This directory contains working examples that demonstrate how to build and use A
 |-----------|-------------|
 | [`servers/`](servers/) | Domain-specific MCP server implementations (chemistry, earth science, energy systems) with Docker Compose for local deployment |
 | [`agent_free_getting_started/`](agent_free_getting_started/) | Quickstart showing how to run a `CodeExecutionServer` and call it directly over MCP — no agent framework required |
-| [`send_tool_demo/`](send_tool_demo/) | Demonstrates running a server pair with inter-server tool invocation |
 
 ## Getting Started
 
