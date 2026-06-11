@@ -408,8 +408,11 @@ def test_generate_list_tools_code_single_object_return_type():
 
 @pytest.mark.unit
 def test_generate_list_tools_code_newline_in_description():
-    """Descriptions with newlines must not produce a SyntaxError in generated code."""
-    tool = _make_simple_tool("multi_line_tool", description="Line one.\nLine two.\nLine three.")
+    """Descriptions with newlines, carriage returns, and backslashes must not produce a SyntaxError."""
+    tool = _make_simple_tool(
+        "multi_line_tool",
+        description="Line one.\nLine two.\r\nBackslash: path\\to\\file.",
+    )
     reg = _registry_with(tool)
 
     code = generate_list_tools_code(reg)
@@ -428,7 +431,7 @@ def test_generate_list_tools_code_newline_in_description():
     assert "multi_line_tool" in output
     assert "Line one." in output
     assert "Line two." in output
-    assert "Line three." in output
+    assert "Backslash: path" in output
 
 
 @pytest.mark.unit
