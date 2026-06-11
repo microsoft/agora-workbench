@@ -61,20 +61,6 @@ prefixed with the server name, e.g. `chemistry`):
 | `{name}_publish_artifact` | Make an output file available to the user |
 | `{name}_push_object` | Move a Python object to another server |
 
-Notice the split: **discovery, code execution, and a few cross-boundary actions
-are MCP tools; the domain computations are not.** A useful rule for when to
-promote something to its own MCP tool instead of leaving it as a kernel
-function — do it only when the action:
-
-- needs **auth or approval** gating,
-- crosses a **state or trust boundary** (publishing a file, server-to-server
-  transfer),
-- must **enforce an invariant**, or
-- has a strong **performance** reason.
-
-Pure, composable computation belongs in the kernel as a function the agent calls
-in code.
-
 ## Sessions and state
 
 The first `execute_{name}_code` call creates a **session** — a long-lived
