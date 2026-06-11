@@ -30,7 +30,7 @@ If your framework isn't listed above, you can connect any MCP client that suppor
 - **Auth**: Bearer token in the `Authorization` header (or no auth with `create_noop_auth_config()` for local dev)
 - **Tools**: Auto-discovered — the agent receives all registered tools on connection
 
-For a minimal example without any agent framework (raw MCP client or `curl`), see [`examples/agent_examples/agent_free_getting_started/README.md`](https://github.com/microsoft/agora-workbench/tree/main/examples/agent_examples/agent_free_getting_started).
+For a minimal example without any agent framework (raw MCP client or `curl`), see [`examples/agent_free_getting_started/README.md`](https://github.com/microsoft/agora-workbench/tree/main/examples/agent_free_getting_started).
 
 ## Workbench skill
 

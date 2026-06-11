@@ -82,7 +82,7 @@ fi
 # ── Resolve defaults ─────────────────────────────────────────────────────────
 
 if [[ -z "$DOCKERFILE" ]]; then
-    SERVER_DOCKERFILE="${REPO_ROOT}/examples/domain_examples/${SERVER_NAME}/Dockerfile"
+    SERVER_DOCKERFILE="${REPO_ROOT}/examples/servers/${SERVER_NAME}/Dockerfile"
     if [[ -f "$SERVER_DOCKERFILE" ]]; then
         DOCKERFILE="$SERVER_DOCKERFILE"
     else

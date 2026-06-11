@@ -372,8 +372,8 @@ class TestSkillFrontmatter:
 
         from agora_workbench.code_execution.tools.search.state_graph import _discover_skills
 
-        # Use the domain_examples directory as the test fixture source
-        domains_dir = Path(__file__).resolve().parents[3] / "examples" / "domain_examples"
+        # Use the servers directory as the test fixture source
+        domains_dir = Path(__file__).resolve().parents[3] / "examples" / "servers"
         return [s for s in _discover_skills(domains_dir) if s.get("states")]
 
     @pytest.mark.unit

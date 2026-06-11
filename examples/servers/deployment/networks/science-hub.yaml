@@ -1,0 +1,17 @@
+name: science-hub
+connector:
+  server: science-hub
+  params: ../parameters/connector.bicepparam
+  context: ../../..
+  dockerfile: ../../base.Dockerfile
+upstreams:
+  - server: chemistry
+    params: ../parameters/chemistry.bicepparam
+    internal: true
+    context: ../../..
+    dockerfile: ../../../examples/servers/chemistry/Dockerfile
+  - server: earthscience
+    params: ../parameters/earthscience.bicepparam
+    internal: true
+    context: ../../..
+    dockerfile: ../../../examples/servers/earthscience/Dockerfile

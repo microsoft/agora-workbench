@@ -68,7 +68,7 @@ docker compose up -d --build
 
 # Then bring up whichever MCP servers you want.
 # Each one's compose attaches to the same shared network:
-cd ../domain_examples/chemistry
+cd ../servers/chemistry
 docker compose up -d --build
 
 # Open the UI:
@@ -151,7 +151,7 @@ the base, then the domain server:
 
 ```bash
 docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
-cd examples/domain_examples/chemistry
+cd examples/servers/chemistry
 docker compose up -d --build --force-recreate
 ```
 

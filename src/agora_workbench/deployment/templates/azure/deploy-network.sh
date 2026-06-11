@@ -357,7 +357,7 @@ for node in "${nodes[@]}"; do
 
     # Resolve Dockerfile ("_" is sentinel for unset)
     if [[ "$dockerfile" == "_" || -z "$dockerfile" ]]; then
-        server_df="${REPO_ROOT}/examples/domain_examples/${server}/Dockerfile"
+        server_df="${REPO_ROOT}/examples/servers/${server}/Dockerfile"
         if [[ -f "$server_df" ]]; then
             dockerfile="$server_df"
         else
