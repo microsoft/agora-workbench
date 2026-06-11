@@ -129,9 +129,9 @@ isn't running, code execution is unaffected.
 
 ## Authentication
 
-Auth is pluggable. Use **no-op auth** for local development (any bearer token is
-accepted) and **Entra ID** for production. The server publishes RFC 9728 OAuth
-metadata so MCP clients can discover how to authenticate.
+Auth is pluggable. Use **no-op auth** for local development (requests do not require 
+a bearer token and any bearer token is accepted) and **Entra ID** for production. 
+The server publishes RFC 9728 OAuth metadata so MCP clients can discover how to authenticate.
 
 → See [Authentication options](authentication.md).
 
