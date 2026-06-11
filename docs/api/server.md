@@ -1,6 +1,6 @@
 # Code Execution Server
 
-::: code_execution.server
+::: agora_workbench.code_execution.server
     options:
       members:
         - CodeExecutionServer

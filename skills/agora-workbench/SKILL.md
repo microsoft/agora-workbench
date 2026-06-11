@@ -116,9 +116,10 @@ context, triggers server-side truncation, and can degrade agent reasoning.
    result = compute_expensive_thing(...)
    print(result)
    ```
-4. **Write large outputs to files** — use `AGORA_OUTPUT_DIR` for data intended
-   for the user; use `/tmp` for intermediate scratch files you'll read back
-   server-side.
+4. **Write large outputs to files** — use `agora_output("name")` (or the
+   `AGORA_OUTPUT_DIR` variable) for data intended for the user; use `/tmp` for
+   intermediate scratch files you'll read back server-side. See the
+   [artifacts sub-skill](skills/artifacts/SKILL.md) for the output path helpers.
 5. **Use `{server}_send`** for cross-server transfers — never serialize
    large objects through stdout to paste into another server call.
 6. **Paginate when exploring** — if you need to see rows 50–100 of a DataFrame,

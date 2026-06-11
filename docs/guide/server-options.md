@@ -122,7 +122,7 @@ class ChemistryServer(CodeExecutionServer):
 
 ## Configuration reference
 
-`ServerConfig` has four groups of settings:
+`ServerConfig` has five groups of settings:
 
 ### Identity
 
@@ -143,6 +143,13 @@ class ChemistryServer(CodeExecutionServer):
 | `auto_build` | Build environment on startup if missing (default: `True`) |
 | `build_dir` | Custom build directory (default: `~/.cache/mcp-envs/{name}`) |
 | `additional_commands` | Extra shell commands after env setup |
+
+### Assets
+
+| Field | Description |
+|-------|-------------|
+| `assets` | List of `AssetSpec` objects provisioned into the env cache at startup (see [Working with data](working-with-data.md#asset-provisioning)) |
+| `auto_provision` | Fetch the declared `assets` on startup (default: `True`) |
 
 ### Execution
 

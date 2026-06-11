@@ -48,8 +48,7 @@ Pass the running server as an `mcp_servers` config block when you
 create a session:
 
 ```python
-from copilot import CopilotClient
-from copilot.session import PermissionHandler
+from copilot import CopilotClient, PermissionHandler
 
 mcp_servers = {
     "chemistry": {

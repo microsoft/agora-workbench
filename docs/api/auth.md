@@ -2,8 +2,8 @@
 
 ## Base Auth
 
-::: code_execution.auth.base
+::: agora_workbench.code_execution.auth.base
 
 ## Entra ID
 
-::: code_execution.auth.entra
+::: agora_workbench.code_execution.auth.entra

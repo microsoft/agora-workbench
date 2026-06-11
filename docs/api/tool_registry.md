@@ -2,8 +2,8 @@
 
 ## Registry
 
-::: code_execution.tool_registry.tool_registry.ToolRegistry
+::: agora_workbench.code_execution.tool_registry.tool_registry.ToolRegistry
 
 ## Tool Schema
 
-::: code_execution.tool_registry.tool_schema
+::: agora_workbench.code_execution.tool_registry.tool_schema
