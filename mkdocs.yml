@@ -52,6 +52,7 @@ markdown_extensions:
 nav:
   - Home:
       - index.md
+      - Core concepts: guide/concepts.md
       - Options for making a CodeExecutionServer: guide/server-options.md
       - CodeExecutionServer tool pattern: guide/tool-pattern.md
       - CodeExecutionServer skill pattern: guide/skill-pattern.md

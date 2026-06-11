@@ -6,6 +6,8 @@ A multi-domain AI agent system that combines LLM-driven workflows with isolated 
 
 Agora Workbench provides **`CodeExecutionServer`** — a base class for building MCP (Model Context Protocol) servers that execute Python code in sandboxed environments with domain-specific packages. An AI agent connects to your server, discovers available tools, and runs code against them.
 
+New to Agora Workbench? Start with **[Core concepts](guide/concepts.md)** for the mental model behind the design.
+
 Key capabilities:
 
 - **Isolated code execution** — each server runs Python in its own environment (uv, conda, or pip) with its own dependencies
@@ -14,6 +16,7 @@ Key capabilities:
 - **Authentication** — pluggable auth with built-in support for Azure Entra ID and no-op dev mode
 - **Server networks** — compose multiple servers behind a `ConnectorServer` (router or gateway) for multi-domain deployments
 - **Deployment** — Docker-based deployment with Azure Container Apps support
+- **Real-time activity UI** — a browser dashboard that streams your agent's activity in real time, grouped by session
 
 ## Quick links
 
@@ -27,7 +30,7 @@ Key capabilities:
 | Work with data files | [Working with data](guide/working-with-data.md) |
 | Connect multiple servers | [Server networks](guide/server-networks.md) |
 | Deploy to production | [Deploying your server](guide/deploying.md) |
-| Monitor in production | [Monitoring your servers](guide/monitoring.md) |
+| Watch my agent live | [Monitoring your servers](guide/monitoring.md) |
 | Configure authentication | [Authentication options](guide/authentication.md) |
 | Extend with custom interfaces | [Extension points](guide/extension-points.md) |
 
