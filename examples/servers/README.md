@@ -1,12 +1,12 @@
-# Domain Servers
+# Example Servers
 
-Reference implementations of domain-specific MCP code execution servers built with Agora Workbench.
+Reference implementations of MCP code execution servers built with Agora Workbench.
 
-Each server subclasses `CodeExecutionServer`, ships a containerized Python environment with domain packages pre-installed, and registers domain tools via a `ToolRegistry`.
+Each server subclasses `CodeExecutionServer`, ships a containerized Python environment with specialized packages pre-installed, and registers tools via a `ToolRegistry`.
 
 ## Servers
 
-| Server | Domain | Key Packages | Port |
+| Server | Focus Area | Key Packages | Port |
 |--------|--------|--------------|------|
 | [`chemistry/`](chemistry/) | Cheminformatics | RDKit, scikit-learn | 8020 |
 | [`earthscience/`](earthscience/) | Geospatial / remote sensing | rasterio, xarray, pystac-client, Planetary Computer | 8021 |
@@ -32,4 +32,4 @@ See each server's README for verification steps and usage examples.
 | Directory | Purpose |
 |-----------|---------|
 | `deployment/` | Azure Bicep parameters and multi-server network compose files |
-| `tests/` | Integration tests for domain server logic (run with `pytest -m "not live"`) |
+| `tests/` | Integration tests for server logic (run with `pytest -m "not live"`) |
