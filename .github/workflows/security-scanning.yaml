@@ -1,8 +1,20 @@
-# Weekly security scanning: CodeQL static analysis and dependency component detection
+# CodeQL static analysis and dependency component detection
+#
+# CodeQL runs on:
+#   - Every push to main
+#   - Every pull request targeting main
+#   - Weekly schedule (Monday 04:30 UTC) per internal compliance requirements
+#   - Manual dispatch
+#
+# Component Detection runs on schedule and manual dispatch only.
 
 name: Security Scanning
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '30 4 * * 1'  # Every Monday at 04:30 UTC
   workflow_dispatch:  # Allow manual trigger
@@ -39,6 +51,7 @@ jobs:
 
   component-detection:
     name: Component Detection
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
