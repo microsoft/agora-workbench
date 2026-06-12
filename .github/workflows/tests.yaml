@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests code_execution, connector, domain examples, and activity_ui
+# Tests code_execution, connector, example servers, and activity_ui
 
 name: Tests
 
@@ -54,11 +54,11 @@ jobs:
         run: |
           uv run pytest src/agora_workbench/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
 
-      - name: Run domain examples tests
-        id: domain_examples_tests
+      - name: Run example servers tests
+        id: servers_tests
         continue-on-error: true
         run: |
-          uv run pytest examples/domain_examples/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
+          uv run pytest examples/servers/tests/ -m "not live" -v --json-report --json-report-file=servers-report.json
 
 
       - name: Run activity UI tests
@@ -72,7 +72,7 @@ jobs:
         run: |
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           connector_status="${{ steps.connector_tests.outcome }}"
-          domain_examples_status="${{ steps.domain_examples_tests.outcome }}"
+          servers_status="${{ steps.servers_tests.outcome }}"
           activity_ui_status="${{ steps.activity_ui_tests.outcome }}"
           
           echo "## Test Results"
@@ -88,10 +88,10 @@ jobs:
             echo "❌ Connector tests failed"
           fi
 
-          if [ "$domain_examples_status" == "success" ]; then
-            echo "✅ Domain examples tests passed"
+          if [ "$servers_status" == "success" ]; then
+            echo "✅ Example servers tests passed"
           else
-            echo "❌ Domain examples tests failed"
+            echo "❌ Example servers tests failed"
           fi
 
           if [ "$activity_ui_status" == "success" ]; then
@@ -100,7 +100,7 @@ jobs:
             echo "❌ Activity UI tests failed"
           fi
           
-          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$domain_examples_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
+          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$servers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1

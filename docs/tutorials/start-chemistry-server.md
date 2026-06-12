@@ -19,7 +19,7 @@ docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile 
 
 ```bash
 docker network inspect agora-activity >/dev/null 2>&1 || docker network create agora-activity
-cd examples/domain_examples/chemistry
+cd examples/servers/chemistry
 docker compose up -d --build
 curl http://localhost:8020/health
 # => {"status":"healthy", ...}
@@ -30,5 +30,5 @@ The server is now listening at `http://localhost:8020/mcp`.
 ## Cleanup
 
 ```bash
-cd examples/domain_examples/chemistry && docker compose down
+cd examples/servers/chemistry && docker compose down
 ```

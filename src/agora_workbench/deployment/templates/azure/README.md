@@ -337,14 +337,14 @@ the file share. Subsequent replicas (and restarts) reuse the cached content.
    ARG BASE_IMAGE=mcp-server-base:local
    FROM ${BASE_IMAGE}
 
-   COPY --chown=appuser:appuser path/to/your/server /app/domain_examples/<name>
+   COPY --chown=appuser:appuser path/to/your/server /app/servers/<name>
 
    # Pre-build environment during docker build (required for ACA deployment).
    # The server's --warm flag builds the conda/pip/uv environment and exits.
    # At runtime, the server detects the pre-built env and starts immediately.
-   RUN python -m domain_examples.<name>.server.<name>_server --warm
+   RUN python -m servers.<name>.server.<name>_server --warm
 
-   CMD ["python", "-m", "domain_examples.<name>.server.<name>_server"]
+   CMD ["python", "-m", "servers.<name>.server.<name>_server"]
    ```
 4. Ensure your server script handles `--warm`:
    ```python

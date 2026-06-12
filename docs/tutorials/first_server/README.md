@@ -11,7 +11,7 @@ By the end you will have:
 - A `--warm` flag for Docker pre-build
 
 To see a version of this pattern that leverages the more advanced feature of Agora Workbench, jump to the
-[chemistry example](https://github.com/microsoft/agora-workbench/tree/main/examples/domain_examples/chemistry).
+[chemistry example](https://github.com/microsoft/agora-workbench/tree/main/examples/servers/chemistry).
 For advanced tool features (state transitions, skills, affordances) see the
 [Tool pattern](../../guide/tool-pattern.md) and [Skill pattern](../../guide/skill-pattern.md) guides.
 
@@ -143,7 +143,7 @@ def summarize_numbers(numbers: list[float]) -> dict:
 Note: The implementation imports `statistics` lazily (inside the function body).
 This works fine in the kernel environment but keeps the module importable
 even if `statistics` is not installed at import time. It is also a pattern
-you will see throughout the domain examples.
+you will see throughout the example servers.
 
 ---
 
@@ -321,7 +321,7 @@ Pre-building the environment in the image layer means the container is ready to 
 
 ## Where to go next
 
-- **Production reference**: the [chemistry example](https://github.com/microsoft/agora-workbench/tree/main/examples/domain_examples/chemistry) applies all of these patterns at scale — conda environment, multiple tools with state transitions, skills, blob storage publishers, and prelude injection.
+- **Production reference**: the [chemistry example](https://github.com/microsoft/agora-workbench/tree/main/examples/servers/chemistry) applies all of these patterns at scale — conda environment, multiple tools with state transitions, skills, blob storage publishers, and prelude injection.
 - **More tool features**: [Tool pattern](../../guide/tool-pattern.md) covers `StateTransition`, `affordances`, optional parameters, and `ReturnSpec` in depth.
 - **Multi-step workflows**: [Skill pattern](../../guide/skill-pattern.md) shows how to compose tools into agent-executable skill guides.
 - **All server options**: [Options for making a CodeExecutionServer](../../guide/server-options.md) is the reference for `ServerConfig`, auth, publishers, and more.

@@ -54,7 +54,7 @@ pip install git+https://github.com/microsoft/agora-workbench.git
 |-------|---------------------|
 | `openai-agents` | OpenAI Agents SDK adapter |
 | `copilot-sdk` | GitHub Copilot SDK adapter |
-| `geo` | Geospatial domain examples (rasterio, etc.) |
+| `geo` | Geospatial example server dependencies (rasterio, etc.) |
 
 Pick one (not both):
 

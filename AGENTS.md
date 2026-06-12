@@ -25,8 +25,8 @@ src/
     deployment/        # Deployment scaffold CLI and templates
 activity_ui/         # Real-time activity monitoring UI
 examples/
-  domain_examples/   # Reference domain server implementations (chemistry, gis, energy)
-  agent_examples/    # Reference agent configurations
+  servers/   # Reference domain server implementations (chemistry, gis, energy)
+  agent_free_getting_started/  # Agent-free quickstart (raw MCP client usage)
 docs/               # MkDocs documentation site
 ```
 
@@ -53,7 +53,7 @@ Both expose tools via **FastMCP** over Streamable HTTP with Bearer token auth mi
 
 ## Adding Domain Tools
 
-Follow the pattern in `examples/domain_examples/`. A domain server:
+Follow the pattern in `examples/servers/`. A domain server:
 
 1. Subclasses `CodeExecutionServer`
 2. Defines tools as `ToolDefinition` objects registered with a `ToolRegistry`
@@ -66,7 +66,7 @@ Tests live in `tests/` subdirectories alongside the code they test. Configured t
 
 - `src/agora_workbench/code_execution/tests/`
 - `src/agora_workbench/connector/tests/`
-- `examples/domain_examples/tests/`
+- `examples/servers/tests/`
 - `activity_ui/tests/`
 
 Markers: `unit`, `integration`, `live`, `asyncio`. Live tests are excluded by default (they require real credentials/network). `pytest-asyncio` runs in `auto` mode — async test functions are detected automatically.
