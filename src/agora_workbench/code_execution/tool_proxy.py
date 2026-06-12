@@ -272,7 +272,7 @@ def generate_list_tools_code(tool_registry: "ToolRegistry") -> str:
             ret = "None"
 
         header = f"{td.name}({sig}) -> {ret}"
-        desc = td.description.replace('"', '\\"')
+        desc = td.description.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
         tool_lines.append(f'    print("  {header}")')
         tool_lines.append(f'    print("    {desc}")')
         tool_lines.append("    print()")

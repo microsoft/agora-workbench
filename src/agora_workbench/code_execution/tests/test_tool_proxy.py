@@ -407,6 +407,34 @@ def test_generate_list_tools_code_single_object_return_type():
 
 
 @pytest.mark.unit
+def test_generate_list_tools_code_newline_in_description():
+    """Descriptions with newlines, carriage returns, and backslashes must not produce a SyntaxError."""
+    tool = _make_simple_tool(
+        "multi_line_tool",
+        description="Line one.\nLine two.\r\nBackslash: path\\to\\file.",
+    )
+    reg = _registry_with(tool)
+
+    code = generate_list_tools_code(reg)
+    # exec() would raise SyntaxError before the fix
+    ns = {"__builtins__": __builtins__}
+    exec(code, ns)
+
+    old_stdout = sys.stdout
+    sys.stdout = captured = StringIO()
+    try:
+        ns["list_tools"]()
+    finally:
+        sys.stdout = old_stdout
+
+    output = captured.getvalue()
+    assert "multi_line_tool" in output
+    assert "Line one." in output
+    assert "Line two." in output
+    assert "Backslash: path" in output
+
+
+@pytest.mark.unit
 def test_flush_snippet_safe_without_log():
     """FLUSH_SNIPPET must safely return [] when no _tool_call_log exists."""
     ns = {"__builtins__": __builtins__}
