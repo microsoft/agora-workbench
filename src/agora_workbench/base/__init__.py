@@ -342,8 +342,11 @@ class BaseMCPServer(ABC):
                         )
                         return
 
-                    # Store auth context for downstream handlers
-                    set_current_request_token(token)
+                    # Store auth context for downstream handlers.
+                    # When no Authorization header was provided (noop/open auth),
+                    # use a synthetic placeholder so downstream code that forwards
+                    # tokens (e.g. ServerPublisher) has a non-empty value.
+                    set_current_request_token(token or "noop-dev-token")
                     set_current_token_claims(token_data)
                     set_current_user_identity(user_identity)
 

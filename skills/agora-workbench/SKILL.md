@@ -120,7 +120,7 @@ context, triggers server-side truncation, and can degrade agent reasoning.
    `AGORA_OUTPUT_DIR` variable) for data intended for the user; use `/tmp` for
    intermediate scratch files you'll read back server-side. See the
    [artifacts sub-skill](skills/artifacts/SKILL.md) for the output path helpers.
-5. **Use `{server}_push_object`** for cross-server transfers — never serialize
+5. **Use `{server}_send`** for cross-server transfers — never serialize
    large objects through stdout to paste into another server call.
 6. **Paginate when exploring** — if you need to see rows 50–100 of a DataFrame,
    slice it: `print(df.iloc[50:100].to_string())`.
@@ -137,7 +137,7 @@ hitting the limit proactively.
 - Do not call domain functions as MCP tools — they only exist inside the kernel.
 - Do not guess tool names — always search first.
 - Do not write output files outside `AGORA_OUTPUT_DIR`.
-- Do not paste large data into chat when `{server}_push_object` can transfer it server-to-server.
+- Do not paste large data into chat when `{server}_send` can transfer it server-to-server.
 - Do not print entire DataFrames, large lists, or raw API responses — summarize or slice.
 - Do not run long jobs synchronously — use `background=True` and poll.
 - Do not create new sessions unnecessarily — reuse the existing one.

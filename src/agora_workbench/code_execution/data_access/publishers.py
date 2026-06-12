@@ -104,6 +104,17 @@ class AssetPublisher(ABC):
         """
         self.credential = credential
 
+    @property
+    @abstractmethod
+    def destination_name(self) -> str:
+        """Logical name used for routing in the unified send tool.
+
+        This name is what agents pass as the ``to`` parameter, e.g.
+        ``"blob"``, ``"user"``, ``"gis"``.  Must be unique across all
+        publishers registered on a single server.
+        """
+        raise NotImplementedError
+
     @abstractmethod
     async def publish(self, local_path: Path, name: str, session_id: str) -> str:
         """Publish a local artifact to this publisher's configured destination.
@@ -160,6 +171,10 @@ class BlobPublisher(AssetPublisher):
 
     # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
+
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "blob"
 
     def __init__(
         self,
@@ -262,6 +277,10 @@ class GuiPublisher(AssetPublisher):
     Handles destination tags of the form ``<gui>name</gui>``.
     """
 
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "user"
+
     def __init__(self, public_url_fn: "Callable[[], str]"):
         """
         Initialise the GuiPublisher.
@@ -326,6 +345,10 @@ class LocalFilePublisher(AssetPublisher):
     Handles destination tags of the form ``<local>name</local>``.
     """
 
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return "local"
+
     def __init__(self, base_dir: Path | str):
         """
         Initialise the LocalFilePublisher.
@@ -374,3 +397,148 @@ class LocalFilePublisher(AssetPublisher):
         shutil.copy2(local_path, dest)
         LOGGER.info("LocalFilePublisher: copied %d bytes → %s", dest.stat().st_size, dest)
         return str(dest)
+
+
+class ServerPublisher(AssetPublisher):
+    """Publisher that pushes serialized objects to a peer MCP server's kernel.
+
+    Each instance represents a single peer server destination. Operators
+    register one ``ServerPublisher`` per reachable peer in the ``publishers``
+    list at server construction time.
+
+    The publisher reads a dill-serialized file, base64-encodes it, and POSTs
+    it to the target server's ``/object-transfer/receive`` endpoint. URL
+    validation (HTTPS enforcement, host allow-lists) is applied before
+    sending credentials.
+
+    .. note::
+
+        When ``target_url`` is not provided, the URL is auto-expanded from
+        ``server_name`` using the Docker Compose convention
+        (``http://{name}-server:8000``). By default, plain HTTP URLs are
+        rejected by ``_validate_target_url`` unless the hostname appears in
+        the ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`` environment variable.
+        Operators deploying with Docker Compose internal networking should
+        set this variable to include the auto-expanded hostnames.
+
+    Session resolution on the target: when ``session_id`` is empty the
+    receive endpoint selects the first active session owned by the caller
+    (identified by the forwarded bearer token). If no active session exists
+    on the target, the receive endpoint returns a 404 — the agent must
+    ensure a session exists on the target (e.g. via ``execute_{target}_code``)
+    before sending.
+    """
+
+    def __init__(
+        self,
+        server_name: str,
+        target_url: str | None = None,
+        timeout: float = 60.0,
+    ):
+        """
+        Initialise the ServerPublisher.
+
+        Args:
+            server_name: Logical name of the target server (e.g. ``"gis"``).
+                Used as ``destination_name`` for routing and for Docker URL
+                expansion if ``target_url`` is not provided.
+            target_url: Full base URL of the target MCP server.  If ``None``,
+                the URL is auto-expanded from ``server_name`` using the Docker
+                Compose convention (``http://{name}-server:8000``).
+            timeout: HTTP read/write timeout in seconds for the transfer request.
+        """
+        super().__init__(credential=None)
+        self._server_name = server_name
+        self._timeout = timeout
+        if target_url:
+            self._target_url = target_url.rstrip("/")
+        else:
+            hostname = server_name if server_name.endswith("-server") else f"{server_name}-server"
+            self._target_url = f"http://{hostname}:8000"
+
+    @property
+    def destination_name(self) -> str:  # noqa: D102
+        return self._server_name
+
+    def can_handle(self, destination: str) -> bool:
+        """ServerPublisher does not use tag-based routing.
+
+        It is routed via ``destination_name`` in the unified send tool.
+        For backwards-compat with the ``publish_artifact`` tag-based flow,
+        this always returns ``False``.
+        """
+        return False
+
+    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+        """Serialize and push the file to the target server's kernel.
+
+        The file at ``local_path`` is expected to be a dill-serialized pickle.
+        It is base64-encoded and sent to the target's ``/object-transfer/receive``
+        endpoint.
+
+        Validates the target URL before sending credentials to prevent SSRF and
+        bearer-token leakage (see ``_validate_target_url``).
+
+        Args:
+            local_path: Path to the serialized (pickle) file to transfer.
+            name: Variable name to inject on the target kernel.
+            session_id: Session ID on the target server (empty string to
+                let the target resolve via bearer token).
+
+        Returns:
+            A human-readable confirmation message.
+
+        Raises:
+            FileNotFoundError: If *local_path* does not exist.
+            RuntimeError: If no user token was set before calling publish.
+            ValueError: If the target URL fails validation.
+            httpx.HTTPStatusError: On non-2xx responses from the target.
+            httpx.RequestError: On connection / timeout errors.
+        """
+        import base64
+        import re as _re
+
+        import httpx
+
+        from ..object_transfer import _validate_target_url
+
+        if not local_path.is_file():
+            raise FileNotFoundError(f"Transfer file not found at {local_path}")
+
+        serialized = local_path.read_bytes()
+
+        # user_token is injected by the send tool before calling publish
+        user_token = getattr(self, "_user_token", "")
+        if not user_token:
+            raise RuntimeError("ServerPublisher requires _user_token to be set before publish() is called.")
+
+        _validate_target_url(self._target_url)
+
+        # Strip common MCP path suffixes so the agent can pass the MCP
+        # endpoint URL directly (e.g. http://gis-server:8000/mcp).
+        base = _re.sub(r"/mcp/?$", "", self._target_url.rstrip("/"))
+        receive_url = f"{base}/object-transfer/receive"
+
+        payload: dict = {
+            "variable_name": name,
+            "data": base64.b64encode(serialized).decode("ascii"),
+            "metadata": {
+                "source_server": getattr(self, "_source_server", "unknown"),
+                "transfer_id": getattr(self, "_transfer_id", ""),
+            },
+        }
+        if session_id:
+            payload["session_id"] = session_id
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
+        ) as client:
+            response = await client.post(
+                receive_url,
+                json=payload,
+                headers={"Authorization": f"Bearer {user_token}"},
+            )
+            response.raise_for_status()
+            result = response.json()
+
+        return f"Injected '{name}' into {self._server_name} kernel (response: {result})"

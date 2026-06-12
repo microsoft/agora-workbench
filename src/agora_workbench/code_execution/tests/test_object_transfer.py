@@ -5,7 +5,6 @@ import pytest
 
 from ..object_transfer import (
     ObjectSerializer,
-    ObjectTransferClient,
 )
 from ..sessions.objects import ObjectStore
 
@@ -135,23 +134,34 @@ class TestObjectStoreGetMetadata:
 
 
 # ---------------------------------------------------------------------------
-# ObjectTransferClient tests
+# ServerPublisher tests
 # ---------------------------------------------------------------------------
 
 
-class TestObjectTransferClient:
-    """Tests for the HTTP transfer client."""
+class TestServerPublisher:
+    """Tests for the ServerPublisher HTTP transfer logic."""
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_push_constructs_correct_request(self):
-        """Test that push sends the correct payload to the target server."""
+    async def test_publish_constructs_correct_request(self, tmp_path):
+        """Test that publish sends the correct payload to the target server."""
         from unittest.mock import AsyncMock, patch, MagicMock
 
-        client = ObjectTransferClient(user_token="test-token")
+        from ..data_access.publishers import ServerPublisher
 
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
+        publisher._user_token = "test-token"
+        publisher._source_server = "chemistry"
+        publisher._transfer_id = "abc123"
+
+        # Create a temp file with serialized data
         serialized = ObjectSerializer.serialize({"test": "data"})
-        expected_b64 = ObjectSerializer.to_base64(serialized)
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(serialized)
+
+        import base64
+
+        expected_b64 = base64.b64encode(serialized).decode("ascii")
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -165,11 +175,10 @@ class TestObjectTransferClient:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
-            result = await client.push(
-                target_url="http://localhost:8001",
-                variable_name="target_var",
-                serialized_data=serialized,
-                metadata={"source": "test"},
+            result = await publisher.publish(
+                local_path=pkl_file,
+                name="target_var",
+                session_id="",
             )
 
             # Verify the HTTP call was made correctly
@@ -180,46 +189,30 @@ class TestObjectTransferClient:
             payload = call_args[1]["json"]
             assert payload["variable_name"] == "target_var"
             assert payload["data"] == expected_b64
-            assert payload["metadata"]["source"] == "test"
+            assert payload["metadata"]["source_server"] == "chemistry"
+            assert payload["metadata"]["transfer_id"] == "abc123"
 
             headers = call_args[1]["headers"]
             assert headers["Authorization"] == "Bearer test-token"
 
-            assert result == {"success": True, "variable_name": "target_var"}
+            assert "Injected 'target_var' into gis kernel" in result
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_push_strips_trailing_slash(self):
-        """Test that trailing slashes are handled in target URL."""
-        from unittest.mock import AsyncMock, patch, MagicMock
-
-        client = ObjectTransferClient(user_token="token")
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"success": True}
-
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
-
-            await client.push(
-                target_url="http://localhost:8001/",
-                variable_name="k",
-                serialized_data=b"data",
-            )
-            url = mock_client.post.call_args[0][0]
-            assert url == "http://localhost:8001/object-transfer/receive"
-
-    @pytest.mark.unit
-    @pytest.mark.asyncio
-    async def test_push_strips_mcp_suffix(self):
+    async def test_publish_strips_mcp_suffix(self, tmp_path):
         """Test that /mcp suffix is stripped before appending /object-transfer/receive."""
         from unittest.mock import AsyncMock, patch, MagicMock
 
-        client = ObjectTransferClient(user_token="token")
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001/mcp")
+        publisher._user_token = "token"
+        publisher._source_server = "src"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"success": True}
@@ -231,21 +224,26 @@ class TestObjectTransferClient:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
-            await client.push(
-                target_url="http://localhost:8001/mcp",
-                variable_name="k",
-                serialized_data=b"data",
-            )
+            await publisher.publish(local_path=pkl_file, name="k", session_id="")
             url = mock_client.post.call_args[0][0]
             assert url == "http://localhost:8001/object-transfer/receive"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_push_strips_mcp_trailing_slash_suffix(self):
+    async def test_publish_strips_mcp_trailing_slash(self, tmp_path):
         """Test that /mcp/ suffix (with trailing slash) is stripped correctly."""
         from unittest.mock import AsyncMock, patch, MagicMock
 
-        client = ObjectTransferClient(user_token="token")
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001/mcp/")
+        publisher._user_token = "token"
+        publisher._source_server = "src"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"success": True}
@@ -257,34 +255,43 @@ class TestObjectTransferClient:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
-            await client.push(
-                target_url="http://localhost:8001/mcp/",
-                variable_name="k",
-                serialized_data=b"data",
-            )
+            await publisher.publish(local_path=pkl_file, name="k", session_id="")
             url = mock_client.post.call_args[0][0]
             assert url == "http://localhost:8001/object-transfer/receive"
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_push_rejects_non_loopback_http(self):
-        """Test that push raises ValueError for plain-HTTP non-loopback targets."""
-        client = ObjectTransferClient(user_token="secret-token")
+    async def test_publish_rejects_non_loopback_http(self, tmp_path):
+        """Test that publish raises ValueError for plain-HTTP non-loopback targets."""
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://gis-server:8000")
+        publisher._user_token = "secret-token"
+        publisher._source_server = "src"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
 
         with pytest.raises(ValueError, match="Plain HTTP"):
-            await client.push(
-                target_url="http://gis-server:8000",
-                variable_name="my_var",
-                serialized_data=b"data",
-            )
+            await publisher.publish(local_path=pkl_file, name="my_var", session_id="")
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_push_includes_auth_header_for_loopback_http(self):
+    async def test_publish_includes_auth_header_for_loopback_http(self, tmp_path):
         """Test that Authorization header is included for loopback HTTP targets."""
         from unittest.mock import AsyncMock, patch, MagicMock
 
-        client = ObjectTransferClient(user_token="test-token")
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://127.0.0.1:8001")
+        publisher._user_token = "test-token"
+        publisher._source_server = "src"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"success": True}
@@ -296,16 +303,59 @@ class TestObjectTransferClient:
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
-            await client.push(
-                target_url="http://127.0.0.1:8001",
-                variable_name="my_var",
-                serialized_data=b"data",
-            )
+            await publisher.publish(local_path=pkl_file, name="my_var", session_id="")
 
             headers = mock_client.post.call_args[1]["headers"]
             assert headers.get("Authorization") == "Bearer test-token", (
                 "Bearer token should be forwarded to loopback HTTP targets"
             )
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_publish_includes_session_id_when_provided(self, tmp_path):
+        """Test that session_id is included in payload when not empty."""
+        from unittest.mock import AsyncMock, patch, MagicMock
+
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
+        publisher._user_token = "token"
+        publisher._source_server = "src"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"success": True}
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            await publisher.publish(local_path=pkl_file, name="var", session_id="session-123")
+
+            payload = mock_client.post.call_args[1]["json"]
+            assert payload["session_id"] == "session-123"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_publish_raises_without_token(self, tmp_path):
+        """Test that publish raises RuntimeError when no user token is set."""
+        from ..data_access.publishers import ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
+        # No _user_token set
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        with pytest.raises(RuntimeError, match="_user_token"):
+            await publisher.publish(local_path=pkl_file, name="var", session_id="")
 
 
 # ---------------------------------------------------------------------------

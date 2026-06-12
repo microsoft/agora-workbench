@@ -25,8 +25,7 @@ Connectors provide full parity with direct upstream access. All of the following
 - **Session management** — list, inspect, close sessions
 - **Background jobs** — `check_job` for polling long-running executions
 - **Parallel execution** — `parallel_execute`, `check_batch`, `cancel_batch`
-- **Artifact publishing** — `publish_artifact` to remote storage
-- **Object transfer** — `push_object` for server-to-server variable passing
+- **Unified send** — `{name}_send` for data transfer (to peer servers, blob storage, user download, or local filesystem)
 - **Workflow planning** — `plan_workflow` and `load_skill` per upstream
 
 ## RouterServer

@@ -4,7 +4,7 @@ When an agent uses the workbench it must follow several platform-specific
 contracts that don't exist in a plain Python environment: load data via
 ``<type>id</type>`` asset tags, discover data/tools via ``search_data`` /
 tool search, save user output under ``AGORA_OUTPUT_DIR``, surface files with
-``publish_artifact`` + ``<gui>``, and push objects between peer servers. When
+``{server}_send`` + ``to="user"``, and send objects between peer servers. When
 the agent breaks one of these rules, the error it gets back is its only
 teacher.
 

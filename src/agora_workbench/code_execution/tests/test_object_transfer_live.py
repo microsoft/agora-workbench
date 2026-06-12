@@ -74,6 +74,7 @@ def _make_server(
     name: str,
     build_dir: Path,
     work_dir: Path,
+    publishers: "list | None" = None,
 ) -> CodeExecutionServer:
     """Create a CodeExecutionServer with test-friendly settings."""
     config = ServerConfig(
@@ -92,6 +93,7 @@ def _make_server(
         session_manager=session_manager,
         auth_config=create_noop_auth_config(),
         working_dir=work_dir,
+        publishers=publishers,
     )
 
 
@@ -109,9 +111,15 @@ def _clear_auth_context():
 
 
 @pytest_asyncio.fixture(scope="module")
-async def source_server(module_build_dir: Path, module_work_dir: Path) -> AsyncGenerator[CodeExecutionServer, None]:
-    """Source server that will push objects."""
-    server = _make_server("source", module_build_dir, module_work_dir / "source")
+async def source_server(
+    module_build_dir: Path, module_work_dir: Path, target_http_server: str
+) -> AsyncGenerator[CodeExecutionServer, None]:
+    """Source server that will send objects to the target."""
+    from ..data_access.publishers import ServerPublisher
+
+    # Register a ServerPublisher pointing at the target HTTP server
+    target_pub = ServerPublisher(server_name="target", target_url=target_http_server)
+    server = _make_server("source", module_build_dir, module_work_dir / "source", publishers=[target_pub])
     (module_work_dir / "source").mkdir(exist_ok=True)
     await server._ensure_environment()
     await server._register_kernel(kernel_name="tools-py")
@@ -215,29 +223,29 @@ async def _exec(server: CodeExecutionServer, session_id: str, code: str, timeout
         set_current_session(None)
 
 
-async def _push_object(
+async def _send_object(
     source_server: CodeExecutionServer,
     src_session: str,
-    target_url: str,
-    variable_name: str,
-    target_variable_name: str = "",
-    target_session_id: str = "",
+    to: str,
+    data_ref: str,
+    name: str = "",
+    session_id: str = "",
 ) -> dict:
-    """Call push_object on the source server with proper auth context."""
+    """Call send on the source server with proper auth context."""
     _set_auth_context()
     try:
         session = source_server.session_manager.get_session(src_session)
         set_current_session(session)
 
-        tool_name = f"{source_server.server_config.name}_push_object"
+        tool_name = f"{source_server.server_config.name}_send"
         tool = await source_server.mcp.get_tool(tool_name)
 
         result_json = await tool.fn(
             ctx=None,
-            target_server_url=target_url,
-            variable_name=variable_name,
-            target_variable_name=target_variable_name,
-            target_session_id=target_session_id,
+            data_ref=data_ref,
+            to=to,
+            name=name,
+            session_id=session_id,
         )
         return json.loads(result_json)
     finally:
@@ -255,7 +263,7 @@ async def _push_object(
 class TestObjectTransferLive:
     """End-to-end object transfer between two CodeExecutionServer instances."""
 
-    async def test_push_simple_variable(self, source_server, target_server, target_http_server):
+    async def test_push_simple_variable(self, source_server, target_server):
         """Transfer a simple Python dict from source to target."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
@@ -263,25 +271,25 @@ class TestObjectTransferLive:
         r = await _exec(source_server, src_session, "transfer_data = {'key': 'value', 'count': 42}")
         assert r.success, f"Source setup failed: {r.error}"
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="transfer_data",
-            target_variable_name="received_data",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="transfer_data",
+            name="received_data",
+            session_id=tgt_session,
         )
         assert result["success"], f"Push failed: {result}"
-        assert result["source_variable"] == "transfer_data"
-        assert result["target_variable"] == "received_data"
-        assert result["size_bytes"] > 0
+        assert result["data_ref"] == "transfer_data"
+        assert result["name"] == "received_data"
+        assert result["transfer_id"]
 
         r = await _exec(target_server, tgt_session, "import json; print(json.dumps(received_data))")
         assert r.success, f"Target read failed: {r.error}"
         received = json.loads(r.stdout.strip())
         assert received == {"key": "value", "count": 42}
 
-    async def test_push_numpy_array(self, source_server, target_server, target_http_server):
+    async def test_push_numpy_array(self, source_server, target_server):
         """Transfer a numpy array between servers."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
@@ -293,13 +301,13 @@ class TestObjectTransferLive:
         )
         assert r.success, f"Source setup failed: {r.error}"
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="arr",
-            target_variable_name="remote_arr",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="arr",
+            name="remote_arr",
+            session_id=tgt_session,
         )
         assert result["success"], f"Push failed: {result}"
 
@@ -313,57 +321,57 @@ class TestObjectTransferLive:
         assert "(10, 10)" in lines[0]
         assert "True" in lines[1]
 
-    async def test_push_preserves_variable_name(self, source_server, target_server, target_http_server):
-        """When target_variable_name is omitted, source name is used."""
+    async def test_push_preserves_variable_name(self, source_server, target_server):
+        """When name is empty, source data_ref is used as the variable name."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
 
         r = await _exec(source_server, src_session, "same_name_var = [1, 2, 3]")
         assert r.success
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="same_name_var",
-            target_variable_name="",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="same_name_var",
+            name="",
+            session_id=tgt_session,
         )
         assert result["success"]
-        assert result["target_variable"] == "same_name_var"
+        assert result["name"] == "same_name_var"
 
         r = await _exec(target_server, tgt_session, "print(same_name_var)")
         assert r.success
         assert "[1, 2, 3]" in r.stdout
 
-    async def test_push_nonexistent_variable_fails(self, source_server, target_server, target_http_server):
+    async def test_push_nonexistent_variable_fails(self, source_server, target_server):
         """Pushing a variable that doesn't exist in the kernel should fail gracefully."""
         src_session = _create_session(source_server)
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="no_such_var",
+            to="target",
+            data_ref="no_such_var",
         )
         assert not result["success"]
         assert "NameError" in result["error"] or "no_such_var" in result["error"]
 
-    async def test_push_invalid_variable_name_rejected(self, source_server, target_server, target_http_server):
+    async def test_push_invalid_variable_name_rejected(self, source_server, target_server):
         """Variable names that aren't valid Python identifiers are rejected."""
         src_session = _create_session(source_server)
 
         for bad_name in ["123abc", "my-var", "import", "class"]:
-            result = await _push_object(
+            result = await _send_object(
                 source_server,
                 src_session,
-                target_http_server,
-                variable_name=bad_name,
+                to="target",
+                data_ref=bad_name,
             )
             assert not result["success"], f"Should have rejected '{bad_name}'"
             assert "Invalid" in result["error"] or "variable name" in result["error"]
 
-    async def test_push_class_instance(self, source_server, target_server, target_http_server):
+    async def test_push_class_instance(self, source_server, target_server):
         """Transfer a custom class instance — the kind of object that can't travel through JSON."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
@@ -384,13 +392,13 @@ class TestObjectTransferLive:
         )
         assert r.success, f"Source setup failed: {r.error}"
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="grid",
-            target_variable_name="remote_grid",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="grid",
+            name="remote_grid",
+            session_id=tgt_session,
         )
         assert result["success"], f"Push failed: {result}"
 
@@ -405,7 +413,7 @@ class TestObjectTransferLive:
         assert "bus_a" in lines[1]
         assert "3" in lines[2]
 
-    async def test_push_large_object(self, source_server, target_server, target_http_server):
+    async def test_push_large_object(self, source_server, target_server):
         """Transfer a moderately large object (~10 MB numpy array)."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
@@ -417,21 +425,21 @@ class TestObjectTransferLive:
         )
         assert r.success
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="large_arr",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="large_arr",
+            session_id=tgt_session,
         )
         assert result["success"], f"Push failed: {result}"
-        assert result["size_bytes"] > 1_000_000
+        assert result["transfer_id"]
 
         r = await _exec(target_server, tgt_session, "print(large_arr.shape)")
         assert r.success
         assert "(1000, 1000)" in r.stdout
 
-    async def test_push_does_not_mutate_source(self, source_server, target_server, target_http_server):
+    async def test_push_does_not_mutate_source(self, source_server, target_server):
         """The source variable must remain intact after transfer."""
         src_session = _create_session(source_server)
         tgt_session = _create_session(target_server)
@@ -439,12 +447,12 @@ class TestObjectTransferLive:
         r = await _exec(source_server, src_session, "src_obj = {'original': True}")
         assert r.success
 
-        result = await _push_object(
+        result = await _send_object(
             source_server,
             src_session,
-            target_http_server,
-            variable_name="src_obj",
-            target_session_id=tgt_session,
+            to="target",
+            data_ref="src_obj",
+            session_id=tgt_session,
         )
         assert result["success"]
 

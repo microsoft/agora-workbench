@@ -121,8 +121,8 @@ All events are flat `ActivityEvent` dicts ([`models.py`](models.py)). The curren
 | `skill_loaded` | `load_{name}_skill` returns | `skill_name`, `session_id`, `success` |
 | `workflow_planned` | `plan_{name}_workflow` returns | `domain`, `mode`, `current_state`, `target_state`, `tool_name`, `session_id` |
 | `batch_cancelled` | `{name}_cancel_batch` succeeds or fails | `batch_id`, `session_id`, `success`, `error` |
-| `push_object_sent` | `{name}_push_object` (sender side) | `transfer_id`, `variable_name`, `target_server`, `session_id` |
-| `push_object_received` | The receiving server's `/receive_transfer` endpoint | `transfer_id`, `variable_name`, `source_server`, `session_id` |
+| `push_object_sent` | `{name}_send` to a server destination | `transfer_id`, `data_ref`, `destination`, `session_id` |
+| `push_object_received` | The receiving server's `/object-transfer/receive` endpoint | `transfer_id`, `variable_name`, `source_server`, `session_id` |
 
 Every event also carries `server` (the MCP server's name) and `timestamp`
 (unix seconds, set by the publisher).

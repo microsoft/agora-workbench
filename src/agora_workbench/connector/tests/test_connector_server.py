@@ -363,7 +363,7 @@ class TestRouterProxyToolRegistration:
 
     @pytest.mark.asyncio
     async def test_registers_companion_proxy_tools(self):
-        """Router registers check_job, parallel_execute, publish_artifact, push_object proxies."""
+        """Router registers check_job, parallel_execute, send proxies."""
         config = RouterConfig(
             name="science-hub",
             upstreams=[
@@ -392,8 +392,7 @@ class TestRouterProxyToolRegistration:
         assert "chemistry_parallel_execute" in tool_names
         assert "chemistry_check_batch" in tool_names
         assert "chemistry_cancel_batch" in tool_names
-        assert "chemistry_publish_artifact" in tool_names
-        assert "chemistry_push_object" in tool_names
+        assert "chemistry_send" in tool_names
 
     @pytest.mark.asyncio
     async def test_workflow_proxy_only_with_state_annotated_tools(self):
@@ -508,7 +507,7 @@ class TestGatewayPolicyEnforcement:
             name="chem-gateway",
             upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
             policy=GatewayPolicy(
-                blocked_tools=["parallel_execute", "push_object"],
+                blocked_tools=["parallel_execute", "send"],
             ),
         )
         server = GatewayServer(config)
@@ -532,11 +531,10 @@ class TestGatewayPolicyEnforcement:
         assert "chemistry_parallel_execute" not in tool_names
         assert "chemistry_check_batch" not in tool_names
         assert "chemistry_cancel_batch" not in tool_names
-        assert "chemistry_push_object" not in tool_names
+        assert "chemistry_send" not in tool_names
 
         # Non-blocked tools should still be registered
         assert "chemistry_check_job" in tool_names
-        assert "chemistry_publish_artifact" in tool_names
         assert "plan_chemistry_workflow" in tool_names
         assert "load_chemistry_skill" in tool_names
 
@@ -569,8 +567,7 @@ class TestGatewayPolicyEnforcement:
         assert "chemistry_parallel_execute" in tool_names
         assert "chemistry_check_batch" in tool_names
         assert "chemistry_cancel_batch" in tool_names
-        assert "chemistry_publish_artifact" in tool_names
-        assert "chemistry_push_object" in tool_names
+        assert "chemistry_send" in tool_names
         assert "plan_chemistry_workflow" in tool_names
         assert "load_chemistry_skill" in tool_names
 

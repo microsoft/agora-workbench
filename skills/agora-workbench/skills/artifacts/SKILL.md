@@ -60,34 +60,33 @@ identity fetches the data on your behalf.
 Move Python objects between servers without serializing through agent context:
 
 ```
-{server}_push_object(
-    variable_name="molecule_data",
-    target_server_url="gis",
-    target_variable_name="input_data"
-)
+{server}_send(data_ref="molecule_data", to="gis", name="input_data")
 ```
 
 ### Addressing the target server
 
-Use the **bare server name** (e.g., `"gis"`, `"chemistry"`) as the
-`target_server_url`. The server resolves this to the correct internal address
-based on its deployment configuration.
+Use the **logical server name** (e.g., `"gis"`, `"chemistry"`) as the `to`
+parameter. The server resolves this to the correct internal address based on
+its deployment configuration.
 
 If the transfer fails with a connection or trust error, the error message will
-indicate the expanded URL and what went wrong. In that case, ask the user for
-the target server's full URL and retry with that instead.
+indicate the expanded URL and what went wrong. Surface this error to the user —
+it is an operator configuration issue (the environment variables
+`OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` or `OBJECT_TRANSFER_ALLOWED_HOSTS` may
+need to be adjusted by the deployment operator).
 
-Do not attempt to guess deployment URLs, ports, or hostnames — the bare name
+Do not attempt to guess deployment URLs, ports, or hostnames — the logical name
 is the correct default in all environments.
 
 ### Parameters
 
 | Parameter | Usage |
 |-----------|-------|
-| `variable_name` | Name of the Python variable in the current session to transfer |
-| `target_server_url` | Bare server name (e.g., `"gis"`) or full URL if bare name fails |
-| `target_variable_name` | Variable name on the target (defaults to `variable_name` if empty) |
-| `target_session_id` | Target session ID (if empty, uses the caller's first active session on target) |
+| `data_ref` | Kernel variable name or filename in `AGORA_OUTPUT_DIR` to transfer |
+| `to` | Logical destination name (e.g., `"gis"`, `"blob"`, `"user"`, `"local"`) |
+| `name` | Variable name at destination (defaults to `data_ref` if empty) |
+| `path` | Full destination path for blob/local publishers (e.g., `"outputs/report.csv"`) |
+| `session_id` | Target session ID (if empty, uses the caller's first active session on target) |
 
 ### When to use object transfer
 
@@ -123,25 +122,25 @@ To produce downloadable files for the user:
 
 2. Publish only when the user explicitly requests a download or export:
    ```
-   {server}_publish_artifact(artifact_name="results.csv", destination="<gui>results.csv</gui>")
+   {server}_send(data_ref="results.csv", to="user")
    ```
 
-### Destination tags
+### Destinations
 
-| Tag | Publisher | Use case |
-|-----|-----------|----------|
-| `<gui>filename</gui>` | GuiPublisher | Browser download for the user |
-| `<blob>filename</blob>` | BlobPublisher | Azure Blob Storage |
-| `<local>path</local>` | LocalFilePublisher | Local filesystem |
+| Destination | Publisher | Use case |
+|-------------|-----------|----------|
+| `"user"` | GuiPublisher | Browser download for the user |
+| `"blob"` | BlobPublisher | Azure Blob Storage |
+| `"local"` | LocalFilePublisher | Local filesystem |
 
-**Not all destination tags are supported by every server.** Available publishers
-depend on the server's configuration. If you use an unsupported tag, the tool
-returns an error listing the registered publisher types. When unsure, try
-`<gui>...</gui>` first — the GuiPublisher is always available.
+**Not all destinations are available on every server.** Available destinations
+depend on the server's configured publishers. If you use an unsupported
+destination, the tool returns an error listing the available options. When
+unsure, try `"user"` first — the GuiPublisher is always available.
 
 ### Rules
 
 - Only write user-facing files to `AGORA_OUTPUT_DIR` — files elsewhere stay inside the container.
 - Build output paths with `agora_output("name")` or the `AGORA_OUTPUT_DIR` variable — never hardcode the resolved absolute path.
 - Do not publish unless the user asks for a download or export.
-- The `artifact_name` must match a file already written to `AGORA_OUTPUT_DIR`.
+- The `data_ref` must match a file already written to `AGORA_OUTPUT_DIR` (for file-based sends).

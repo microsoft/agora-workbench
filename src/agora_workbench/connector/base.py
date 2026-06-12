@@ -356,64 +356,44 @@ class ConnectorServer(BaseMCPServer):
             description=f"Cancel all running jobs in a parallel batch and clean up child sessions on {upstream_name}.",
         )(cancel_batch_proxy)
 
-    def _register_publish_artifact_proxy(self, upstream: UpstreamConfig) -> None:
-        """Register a publish_artifact proxy tool for an upstream."""
+    def _register_send_proxy(self, upstream: UpstreamConfig) -> None:
+        """Register a send proxy tool for an upstream."""
         server = self
         upstream_name = upstream.name
-        tool_name = f"{upstream_name}_publish_artifact"
+        tool_name = f"{upstream_name}_send"
 
-        async def publish_artifact_proxy(ctx: Context, artifact_name: str, destination: str) -> str:
-            """Push an artifact from the session output directory to remote storage (proxied)."""
-            return await server._proxy_mcp_tool_call(
-                upstream=upstream,
-                tool_name=tool_name,
-                arguments={"artifact_name": artifact_name, "destination": destination},
-                ctx=ctx,
-            )
-
-        self.mcp.tool(
-            name=tool_name,
-            description=(
-                f"Publish an artifact from a session on {upstream_name} to remote storage. "
-                f"The artifact must have been written to AGORA_OUTPUT_DIR during a previous execute call."
-            ),
-        )(publish_artifact_proxy)
-
-    def _register_push_object_proxy(self, upstream: UpstreamConfig) -> None:
-        """Register a push_object proxy tool for an upstream."""
-        server = self
-        upstream_name = upstream.name
-        tool_name = f"{upstream_name}_push_object"
-
-        async def push_object_proxy(
+        async def send_proxy(
             ctx: Context,
-            target_server_url: str,
-            variable_name: str,
-            target_variable_name: str = "",
-            target_session_id: str = "",
+            data_ref: str,
+            to: str,
+            name: str = "",
+            path: str = "",
+            session_id: str = "",
         ) -> str:
-            """Push a Python variable from this upstream's session to another server (proxied)."""
+            """Send data from an upstream server to a destination (proxied)."""
+            arguments: dict = {"data_ref": data_ref, "to": to}
+            if name:
+                arguments["name"] = name
+            if path:
+                arguments["path"] = path
+            if session_id:
+                arguments["session_id"] = session_id
             return await server._proxy_mcp_tool_call(
                 upstream=upstream,
                 tool_name=tool_name,
-                arguments={
-                    "target_server_url": target_server_url,
-                    "variable_name": variable_name,
-                    "target_variable_name": target_variable_name,
-                    "target_session_id": target_session_id,
-                },
+                arguments=arguments,
                 ctx=ctx,
             )
 
         self.mcp.tool(
             name=tool_name,
             description=(
-                f"Push a Python variable from a {upstream_name} session to another MCP server. "
-                f"The variable is serialized and transferred directly between servers without "
-                f"passing through the agent context. Use a bare server name (e.g. 'gis') or a "
-                f"full URL as target_server_url."
+                f"Send data from the {upstream_name} server to a destination (peer server, "
+                f"blob storage, local filesystem, or browser download). "
+                f"The data_ref parameter accepts a kernel variable name or a filename in "
+                f"AGORA_OUTPUT_DIR. The 'to' parameter selects the destination."
             ),
-        )(push_object_proxy)
+        )(send_proxy)
 
     def _has_state_annotated_tools(self, upstream_name: str) -> bool:
         """Check if an upstream has any tools with non-empty state transitions."""

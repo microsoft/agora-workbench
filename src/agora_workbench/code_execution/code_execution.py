@@ -595,8 +595,8 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         ``agora_output(filename)`` helper is pre-loaded and returns the full
         path — prefer it over f-strings.  Files written there are registered
         as publishable artifacts.  To make a file downloadable in the user's
-        browser, publish it with the publish_artifact tool using
-        ``<gui>filename</gui>`` — but only do so when the user explicitly
+        browser, send it with the send tool using ``to="user"``
+        — but only do so when the user explicitly
         asks for a download or export.
         Files written elsewhere (e.g. ``/tmp``) stay inside the kernel
         container and are not visible to the user.
@@ -734,7 +734,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
             # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
             # Artifact download URLs are no longer emitted here — agents use the
-            # publish_artifact tool with <gui>name</gui> to explicitly surface files.
+            # send tool with to="user" to explicitly surface files.
             server.activity_publisher.publish_nowait(
                 {
                     "type": "code_executed" if result.success else "code_failed",
@@ -771,11 +771,11 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             # (the file is otherwise invisible to them).
             if result.success and result_dict["artifacts"]:
                 names = ", ".join(a["name"] for a in result_dict["artifacts"])
-                publish_tool = f"{server.server_config.name}_publish_artifact"
+                send_tool = f"{server.server_config.name}_send"
                 result_dict["note"] = (
                     f"Saved {len(result_dict['artifacts'])} file(s) to AGORA_OUTPUT_DIR: {names}. "
                     "The user can download these directly from the activity feed. Mention them, and "
-                    f"if a shareable link is wanted, publish with {publish_tool} using <gui>filename</gui>."
+                    f'if a shareable link is wanted, use {send_tool}(data_ref="filename", to="user").'
                 )
             result_dict["session_id"] = session.session_id
             return json.dumps(result_dict, indent=2)

@@ -12,6 +12,7 @@ import pytest
 from ...data_access.publishers import (
     BlobPublisher,
     LocalFilePublisher,
+    ServerPublisher,
     _validate_artifact_name,
     parse_destination_tag,
 )
@@ -94,6 +95,48 @@ class TestValidateArtifactName:
     def test_rejects_windows_style_traversal(self):
         with pytest.raises(ValueError, match="parent traversal"):
             _validate_artifact_name("subdir\\..\\..\\escape.txt")
+
+
+# ---------------------------------------------------------------------------
+# destination_name property
+# ---------------------------------------------------------------------------
+
+
+class TestDestinationName:
+    """Tests for the ``destination_name`` property on publishers."""
+
+    def test_blob_publisher_destination_name(self):
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        assert pub.destination_name == "blob"
+
+    def test_local_publisher_destination_name(self, tmp_path):
+        pub = LocalFilePublisher(base_dir=tmp_path)
+        assert pub.destination_name == "local"
+
+    def test_server_publisher_destination_name(self):
+        pub = ServerPublisher(server_name="gis")
+        assert pub.destination_name == "gis"
+
+    def test_server_publisher_custom_name(self):
+        pub = ServerPublisher(server_name="chemistry", target_url="http://chem:9000")
+        assert pub.destination_name == "chemistry"
+
+    def test_server_publisher_url_expansion(self):
+        pub = ServerPublisher(server_name="gis")
+        assert pub._target_url == "http://gis-server:8000"
+
+    def test_server_publisher_url_expansion_already_suffixed(self):
+        pub = ServerPublisher(server_name="gis-server")
+        assert pub._target_url == "http://gis-server:8000"
+
+    def test_server_publisher_explicit_url(self):
+        pub = ServerPublisher(server_name="gis", target_url="https://gis.example.com:443/")
+        assert pub._target_url == "https://gis.example.com:443"
+
+    def test_server_publisher_can_handle_returns_false(self):
+        """ServerPublisher does not participate in tag-based routing."""
+        pub = ServerPublisher(server_name="gis")
+        assert pub.can_handle("<gis>data</gis>") is False
 
 
 # ---------------------------------------------------------------------------
@@ -432,8 +475,8 @@ def _make_server_with_publishers(publishers):
     )
 
 
-class TestPublishArtifactTool:
-    """Tests for the {name}_publish_artifact MCP tool."""
+class TestSendTool:
+    """Tests for the {name}_send MCP tool."""
 
     @pytest.mark.asyncio
     async def test_tool_registered_when_publishers_provided(self, tmp_path):
@@ -441,19 +484,54 @@ class TestPublishArtifactTool:
         server = _make_server_with_publishers([pub])
 
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "test_publish_artifact" in tool_names
+        assert "test_send" in tool_names
 
     @pytest.mark.asyncio
     async def test_tool_always_registered_with_gui_publisher(self):
-        """GuiPublisher is auto-registered, so publish tool is always available."""
+        """GuiPublisher is auto-registered, so send tool is always available."""
         server = _make_server_with_publishers([])
 
         tool_names = {t.name for t in await server.mcp.list_tools()}
-        assert "test_publish_artifact" in tool_names
+        assert "test_send" in tool_names
 
     @pytest.mark.asyncio
-    async def test_publish_succeeds(self, tmp_path, monkeypatch):
-        """End-to-end: artifact registered, publisher copies the file."""
+    async def test_send_unknown_destination(self, tmp_path):
+        """Returns error JSON for unknown destination."""
+        pub = LocalFilePublisher(base_dir=tmp_path)
+        server = _make_server_with_publishers([pub])
+
+        mcp_tool = await server.mcp.get_tool("test_send")
+
+        result_json = await mcp_tool.fn(
+            ctx=None,
+            data_ref="results.csv",
+            to="nonexistent",
+        )
+        result = json.loads(result_json)
+
+        assert result["success"] is False
+        assert "Unknown destination" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_send_no_session(self, tmp_path):
+        """Returns error JSON when there is no auth context (ctx=None)."""
+        pub = LocalFilePublisher(base_dir=tmp_path)
+        server = _make_server_with_publishers([pub])
+
+        mcp_tool = await server.mcp.get_tool("test_send")
+
+        result_json = await mcp_tool.fn(
+            ctx=None,
+            data_ref="results.csv",
+            to="local",
+        )
+        result = json.loads(result_json)
+
+        assert result["success"] is False
+
+    @pytest.mark.asyncio
+    async def test_send_to_local_succeeds(self, tmp_path, monkeypatch):
+        """End-to-end: artifact registered, send copies the file to local."""
         from ... import sessions as sessions_pkg
         from ...sessions import (
             SessionManager,
@@ -499,11 +577,11 @@ class TestPublishArtifactTool:
         mock_ctx = MagicMock()
         mock_ctx.session_id = session_id
 
-        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
+        mcp_tool = await server.mcp.get_tool("test_send")
         result_json = await mcp_tool.fn(
             ctx=mock_ctx,
-            artifact_name="results.csv",
-            destination="<local>results.csv</local>",
+            data_ref="results.csv",
+            to="local",
         )
         result = json.loads(result_json)
         assert result["success"] is True
@@ -520,58 +598,16 @@ class TestPublishArtifactTool:
         set_current_token_claims(None)
 
     @pytest.mark.asyncio
-    async def test_publish_invalid_destination(self, tmp_path, monkeypatch):
-        """Returns error JSON for malformed destination."""
+    async def test_send_destination_names_in_description(self, tmp_path):
+        """Tool description includes registered destination names."""
         pub = LocalFilePublisher(base_dir=tmp_path)
         server = _make_server_with_publishers([pub])
 
-        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
-
-        result_json = await mcp_tool.fn(
-            ctx=None,
-            artifact_name="results.csv",
-            destination="results.csv",  # missing tag
-        )
-        result = json.loads(result_json)
-
-        assert result["success"] is False
-        assert "Invalid destination format" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_publish_no_matching_publisher(self, tmp_path, monkeypatch):
-        """Returns error JSON when no publisher handles the destination tag."""
-        pub = LocalFilePublisher(base_dir=tmp_path)  # only handles <local>
-        server = _make_server_with_publishers([pub])
-
-        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
-
-        result_json = await mcp_tool.fn(
-            ctx=None,
-            artifact_name="results.csv",
-            destination="<blob>results.csv</blob>",  # no BlobPublisher registered
-        )
-        result = json.loads(result_json)
-
-        assert result["success"] is False
-        assert "No publisher configured" in result["error"]
-
-    @pytest.mark.asyncio
-    async def test_publish_no_session(self, tmp_path):
-        """Returns error JSON when there is no auth context (ctx=None)."""
-        pub = LocalFilePublisher(base_dir=tmp_path)
-        server = _make_server_with_publishers([pub])
-
-        mcp_tool = await server.mcp.get_tool("test_publish_artifact")
-
-        result_json = await mcp_tool.fn(
-            ctx=None,
-            artifact_name="results.csv",
-            destination="<local>results.csv</local>",
-        )
-        result = json.loads(result_json)
-
-        assert result["success"] is False
-        assert "session authentication failed" in result["error"]
+        tools = await server.mcp.list_tools()
+        send_tool = next(t for t in tools if t.name == "test_send")
+        assert send_tool.description is not None
+        assert "'user'" in send_tool.description
+        assert "'local'" in send_tool.description
 
 
 # ---------------------------------------------------------------------------
