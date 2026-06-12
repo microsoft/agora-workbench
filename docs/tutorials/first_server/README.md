@@ -143,7 +143,7 @@ def summarize_numbers(numbers: list[float]) -> dict:
 Note: The implementation imports `statistics` lazily (inside the function body).
 This works fine in the kernel environment but keeps the module importable
 even if `statistics` is not installed at import time. It is also a pattern
-you will see throughout the domain examples.
+you will see throughout the example servers.
 
 ---
 
