@@ -1485,7 +1485,11 @@ class CodeExecutionServer(BaseMCPServer):
         raw = os.getenv("AGORA_PEER_REGISTRY", "").strip()
         if raw:
             try:
-                env_map = json.loads(raw) if raw.startswith("{") else json.load(open(raw))  # noqa: SIM115
+                if raw.startswith("{"):
+                    env_map = json.loads(raw)
+                else:
+                    with open(raw, encoding="utf-8") as f:
+                        env_map = json.load(f)
                 if isinstance(env_map, dict):
                     registry.update({str(k): str(v) for k, v in env_map.items()})
                 else:
