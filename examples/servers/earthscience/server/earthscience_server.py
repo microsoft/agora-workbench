@@ -28,6 +28,7 @@ from pathlib import Path
 
 from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, discover_skills
 from agora_workbench.code_execution.auth import create_noop_auth_config
+from servers.peers import peer_registry_for
 
 _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 
@@ -76,6 +77,9 @@ config = ServerConfig(
     type="conda",
     dependency_file=ENVIRONMENT_YML,
     auto_build=True,
+    # Peer servers reachable via earthscience_send(to=...). Override per-deployment
+    # with the AGORA_PEER_REGISTRY env var. See servers/peers.py.
+    peer_registry=peer_registry_for("earthscience"),
 )
 
 

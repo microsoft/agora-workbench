@@ -21,6 +21,7 @@ from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, Sk
 from agora_workbench.code_execution.auth import create_noop_auth_config
 from servers.energysystems.tools import ENERGYSYSTEMS_TOOLS
 from servers.energysystems.server.catalog_setup import setup_catalog
+from servers.peers import peer_registry_for
 
 # Path to the energysystems_tools package (relative to this file so it works
 # both inside Docker and when running locally from the repo root).
@@ -82,6 +83,9 @@ config = ServerConfig(
         # (the Dockerfile COPYs the repo layout to preserve this).
         f'python -m pip install --no-deps "{_ENERGYSYSTEMS_TOOLS_PKG}"',
     ],
+    # Peer servers reachable via energysystems_send(to=...). Override per-deployment
+    # with the AGORA_PEER_REGISTRY env var. See servers/peers.py.
+    peer_registry=peer_registry_for("energysystems"),
 )
 
 

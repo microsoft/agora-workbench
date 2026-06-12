@@ -12,6 +12,8 @@ FROM ${BASE_IMAGE}
 
 # Copy the full domain tree (server, tools, skills, energysystems_tools package)
 COPY --chown=appuser:appuser examples/servers/energysystems /app/servers/energysystems
+# Shared peer topology imported by the server config (servers.peers).
+COPY --chown=appuser:appuser examples/servers/peers.py /app/servers/peers.py
 
 # Pre-build environment (warm start)
 RUN python -m servers.energysystems.server.energysystems_server --warm

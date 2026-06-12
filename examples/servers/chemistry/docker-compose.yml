@@ -62,6 +62,10 @@ services:
       # the shared docker network.  Bearer tokens still traverse HTTP, so this
       # is only safe because all peers are on a private docker network.
       OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-server,earthscience-server,energysystems-server"
+      # Peer registry for {name}_send(to=<peer>). Docker-network base URLs (the
+      # server drops its own name automatically). Overrides the localhost
+      # defaults baked into servers/peers.py for this deployment.
+      AGORA_PEER_REGISTRY: '{"chemistry":"http://chemistry-server:8000","earthscience":"http://earthscience-server:8000","energysystems":"http://energysystems-server:8000"}'
     networks:
       - agora-activity
     healthcheck:

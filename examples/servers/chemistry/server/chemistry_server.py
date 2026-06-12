@@ -27,6 +27,7 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.data_access import AssetPublisher, BlobPublisher, LocalFilePublisher
 from agora_workbench.code_execution.data_access.credentials import create_storage_credential
 from servers.chemistry.tools import CHEMISTRY_TOOLS
+from servers.peers import peer_registry_for
 
 # Path to the chemistry_tools package (relative to this file so it works
 # both inside Docker and when running locally from the repo root).
@@ -168,6 +169,9 @@ config = ServerConfig(
         # import parse_molecule``) resolve correctly inside the kernel.
         f"python -m pip install --no-deps {_CHEMISTRY_TOOLS_PKG}",
     ],
+    # Peer servers reachable via chemistry_send(to=...). Override per-deployment
+    # with the AGORA_PEER_REGISTRY env var. See servers/peers.py.
+    peer_registry=peer_registry_for("chemistry"),
 )
 
 

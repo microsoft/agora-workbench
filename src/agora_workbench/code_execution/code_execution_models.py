@@ -133,7 +133,7 @@ class ServerConfig(BaseModel):
         max_timeout, default_timeout, output_truncation_threshold, parallel_max_concurrency
 
     **Features** — optional server capabilities:
-        tool_search_backend
+        tool_search_backend, peer_registry
 
     For fields that also have an environment variable counterpart (e.g.,
     output_truncation_threshold / CODE_OUTPUT_TRUNCATION_THRESHOLD), the
@@ -242,6 +242,18 @@ class ServerConfig(BaseModel):
         description=(
             "Tool search backend for the server-side search_tools MCP tool. "
             "Supported values: 'bm25' (default) and 'azure_ai_search'."
+        ),
+    )
+    peer_registry: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Logical name → base URL map of peer CodeExecutionServers this server may push "
+            "objects to via ``{name}_send(to=<peer>)``. Lets the send tool resolve peer "
+            "destinations dynamically — operators maintain one shared registry instead of "
+            "pre-registering a ServerPublisher per peer (O(N) config, not O(N²)). Merged with "
+            "the ``AGORA_PEER_REGISTRY`` env var, which is either inline JSON or a path to a "
+            "JSON file and takes precedence. The server's own ``name`` is ignored if present. "
+            "Only names in this allow-list are reachable — the agent cannot send to arbitrary URLs."
         ),
     )
 

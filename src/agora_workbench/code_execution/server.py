@@ -199,6 +199,11 @@ class CodeExecutionServer(BaseMCPServer):
 
         self._gui_publisher = GuiPublisher(public_url_fn=self.public_url)
         self._publishers.insert(0, self._gui_publisher)
+
+        # Shared peer registry: name → base URL of peer servers reachable via
+        # {name}_send(to=<peer>). Resolved once so the send tool can construct a
+        # ServerPublisher on demand instead of requiring one pre-registered per peer.
+        self._peer_registry: dict[str, str] = self._load_peer_registry()
         # Resolution: ServerConfig overrides env var; env var provides deployment default.
         if server_config.parallel_max_concurrency is not None:
             parallel_execute_max_concurrency = server_config.parallel_max_concurrency
@@ -1463,6 +1468,34 @@ class CodeExecutionServer(BaseMCPServer):
                 server_name,
             )
 
+    def _load_peer_registry(self) -> "dict[str, str]":
+        """Resolve the peer registry (name → base URL) for dynamic send destinations.
+
+        Merges ``ServerConfig.peer_registry`` with the ``AGORA_PEER_REGISTRY`` env
+        var (inline JSON or a path to a JSON file; env takes precedence). The
+        server's own name is dropped — a server never sends to itself. Only names
+        present here are reachable, so the operator keeps a single allow-list and
+        the agent cannot push to arbitrary URLs.
+        """
+        import json
+        import os
+
+        registry: dict[str, str] = {str(k): str(v) for k, v in (self.server_config.peer_registry or {}).items()}
+
+        raw = os.getenv("AGORA_PEER_REGISTRY", "").strip()
+        if raw:
+            try:
+                env_map = json.loads(raw) if raw.startswith("{") else json.load(open(raw))  # noqa: SIM115
+                if isinstance(env_map, dict):
+                    registry.update({str(k): str(v) for k, v in env_map.items()})
+                else:
+                    LOGGER.warning("AGORA_PEER_REGISTRY is not a JSON object; ignoring")
+            except (OSError, ValueError) as exc:
+                LOGGER.warning("Failed to load AGORA_PEER_REGISTRY (%r): %s", raw, exc)
+
+        registry.pop(self.server_config.name, None)
+        return registry
+
     def _setup_send_tool(self) -> None:
         """Register the unified ``{name}_send`` MCP tool.
 
@@ -1493,6 +1526,11 @@ class CodeExecutionServer(BaseMCPServer):
                 )
             destination_names.append(dn)
 
+        # Peers resolvable dynamically from the shared registry — destinations the
+        # agent can use even though no ServerPublisher is pre-registered for them.
+        registry_peer_names = [n for n in self._peer_registry if n not in destination_names]
+        all_destination_names = destination_names + registry_peer_names
+
         async def send(
             ctx: Context,
             data_ref: str,
@@ -1511,7 +1549,7 @@ class CodeExecutionServer(BaseMCPServer):
 
             Args:
                 data_ref: Kernel variable name or filename in AGORA_OUTPUT_DIR.
-                to: Logical destination name (one of the registered publishers).
+                to: Logical destination name — a registered publisher or a peer in the server's registry.
                 name: Optional rename at destination. Defaults to ``data_ref``.
                 path: Optional destination path (for blob/local publishers that need paths).
                 session_id: Target session ID (for server destinations; empty = auto-resolve).
@@ -1530,17 +1568,26 @@ class CodeExecutionServer(BaseMCPServer):
             transfer_id = _uuid.uuid4().hex
 
             # --- Destination Router ---
+            # 1. Prefer a pre-registered publisher (user/blob/local/static peer).
             publisher = None
             for p in server._publishers:
                 if p.destination_name == to:
                     publisher = p
                     break
 
+            # 2. Fall back to the shared peer registry: construct a ServerPublisher
+            #    on demand. Only registry names (operator allow-list) are reachable;
+            #    the ServerPublisher still validates the URL before sending creds.
+            if publisher is None:
+                peer_url = server._peer_registry.get(to)
+                if peer_url:
+                    publisher = _ServerPub(server_name=to, target_url=peer_url)
+
             if publisher is None:
                 return _json.dumps(
                     {
                         "success": False,
-                        "error": (f"Unknown destination '{to}'. Available destinations: {destination_names}"),
+                        "error": (f"Unknown destination '{to}'. Available destinations: {all_destination_names}"),
                     },
                     indent=2,
                 )
@@ -1732,9 +1779,9 @@ class CodeExecutionServer(BaseMCPServer):
                 )
 
                 # --- Activity event ---
-                # Use existing event types for UI compatibility:
-                # server destinations → push_object_sent, file destinations → artifact_published
-                event_type = "push_object_sent" if is_server_destination else "artifact_published"
+                # Activity event types: server destinations → object_sent,
+                # file destinations → artifact_published.
+                event_type = "object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
                         "type": event_type,
@@ -1763,7 +1810,7 @@ class CodeExecutionServer(BaseMCPServer):
 
             except Exception as exc:
                 LOGGER.error("send tool failed: %s", exc, exc_info=True)
-                event_type = "push_object_sent" if is_server_destination else "artifact_published"
+                event_type = "object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
                         "type": event_type,
@@ -1813,8 +1860,14 @@ class CodeExecutionServer(BaseMCPServer):
                     f'  {self.server_config.name}_send(data_ref="output.csv", to="local") — copy to local filesystem'
                 )
 
+        for peer_name in registry_peer_names:
+            dest_examples.append(
+                f'  {self.server_config.name}_send(data_ref="my_var", to="{peer_name}") — '
+                f"transfer variable to {peer_name} server's kernel (resolved via peer registry)"
+            )
+
         examples_text = "\n".join(dest_examples)
-        dest_list = ", ".join(f"'{d}'" for d in destination_names)
+        dest_list = ", ".join(f"'{d}'" for d in all_destination_names)
 
         description = (
             f"Send data from the {self.server_config.name} server to a destination. "
@@ -1835,7 +1888,12 @@ class CodeExecutionServer(BaseMCPServer):
         )
 
         self.mcp.tool(name=tool_name, description=description)(send)
-        LOGGER.info("Registered unified send tool: %s (destinations: %s)", tool_name, destination_names)
+        LOGGER.info(
+            "Registered unified send tool: %s (static: %s, registry peers: %s)",
+            tool_name,
+            destination_names,
+            registry_peer_names,
+        )
 
     async def _inspect_session_payload(self, session_id: str) -> dict[str, Any]:
         """Inspect a session's namespace and background job status."""
@@ -2673,7 +2731,7 @@ else:
                     )
                     self.activity_publisher.publish_nowait(
                         {
-                            "type": "push_object_received",
+                            "type": "object_received",
                             "description": (
                                 f"Receive '{variable_name}' from "
                                 f"{transfer_metadata.get('source_server') or 'another server'} "
@@ -2707,7 +2765,7 @@ else:
 
                 self.activity_publisher.publish_nowait(
                     {
-                        "type": "push_object_received",
+                        "type": "object_received",
                         "description": (
                             f"Received '{variable_name}' from "
                             f"{transfer_metadata.get('source_server') or 'another server'}"
