@@ -1,5 +1,5 @@
 # This workflow runs tests on the src module when relevant files change
-# Tests code_execution, connector, domain examples, and activity_ui
+# Tests code_execution, connector, example servers, and activity_ui
 
 name: Tests
 
@@ -54,11 +54,11 @@ jobs:
         run: |
           uv run pytest src/agora_workbench/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
 
-      - name: Run domain examples tests
+      - name: Run example servers tests
         id: servers_tests
         continue-on-error: true
         run: |
-          uv run pytest examples/servers/tests/ -m "not live" -v --json-report --json-report-file=domain-examples-report.json
+          uv run pytest examples/servers/tests/ -m "not live" -v --json-report --json-report-file=servers-report.json
 
 
       - name: Run activity UI tests
@@ -89,9 +89,9 @@ jobs:
           fi
 
           if [ "$servers_status" == "success" ]; then
-            echo "✅ Domain examples tests passed"
+            echo "✅ Example servers tests passed"
           else
-            echo "❌ Domain examples tests failed"
+            echo "❌ Example servers tests failed"
           fi
 
           if [ "$activity_ui_status" == "success" ]; then
