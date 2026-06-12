@@ -366,15 +366,46 @@ class TestSkillFrontmatter:
     """Validate SKILL.md frontmatter state annotations."""
 
     @staticmethod
-    def _discover_skills_with_states() -> list[dict]:
-        """Find all SKILL.md files with a states field in frontmatter."""
+    def _collect_skill_paths() -> list:
+        """Return explicit list of SKILL.md paths from example servers."""
         from pathlib import Path
 
-        from agora_workbench.code_execution.tools.search.state_graph import _discover_skills
+        repo_root = Path(__file__).resolve().parents[4]
+        servers_dir = repo_root / "examples" / "servers"
+        if not servers_dir.is_dir():
+            return []
+        return sorted(servers_dir.rglob("skills/SKILL.md"))
 
-        # Use the servers directory as the test fixture source
-        domains_dir = Path(__file__).resolve().parents[3] / "examples" / "servers"
-        return [s for s in _discover_skills(domains_dir) if s.get("states")]
+    @staticmethod
+    def _parse_skills(paths: list) -> list[dict]:
+        """Parse frontmatter from explicit SKILL.md paths."""
+        from agora_workbench.code_execution.tools.search.state_graph import _parse_skill_frontmatter
+
+        skills: list[dict] = []
+        for path in paths:
+            fm = _parse_skill_frontmatter(path)
+            if not fm.get("name"):
+                continue
+            # Derive domain from the parent server directory name
+            # e.g. examples/servers/chemistry/skills/SKILL.md -> chemistry
+            domain = path.parent.parent.name
+            skills.append(
+                {
+                    "name": fm["name"],
+                    "description": fm.get("description", ""),
+                    "domain": domain,
+                    "states": fm.get("states", []),
+                    "path": str(path),
+                }
+            )
+        return skills
+
+    @staticmethod
+    def _skills_with_states() -> list[dict]:
+        """Return parsed skills that declare state annotations."""
+        cls = TestSkillFrontmatter
+        paths = cls._collect_skill_paths()
+        return [s for s in cls._parse_skills(paths) if s.get("states")]
 
     @pytest.mark.unit
     def test_skill_states_are_valid_tokens(self):
@@ -382,7 +413,7 @@ class TestSkillFrontmatter:
         valid = _all_valid_tokens()
         if not valid:
             pytest.skip("No domain state Enums registered; cannot validate skill tokens")
-        skills = self._discover_skills_with_states()
+        skills = self._skills_with_states()
         invalid: list[tuple[str, str]] = []
         for skill in skills:
             for token in skill["states"]:
@@ -392,8 +423,8 @@ class TestSkillFrontmatter:
 
     @pytest.mark.unit
     def test_skill_states_match_domain(self):
-        """Skills under domains/X/ should only reference X.* state tokens."""
-        skills = self._discover_skills_with_states()
+        """Skills should only reference state tokens prefixed with their own domain."""
+        skills = self._skills_with_states()
         mismatches: list[tuple[str, str, str]] = []
         for skill in skills:
             domain = skill["domain"]
@@ -406,7 +437,7 @@ class TestSkillFrontmatter:
     @pytest.mark.unit
     def test_skill_states_minimum_cardinality(self):
         """Skills with states should have at least 2 (entry + exit)."""
-        skills = self._discover_skills_with_states()
+        skills = self._skills_with_states()
         too_few: list[tuple[str, int]] = []
         for skill in skills:
             if len(skill["states"]) < 2:
