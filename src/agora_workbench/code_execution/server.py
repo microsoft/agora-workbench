@@ -1477,9 +1477,6 @@ class CodeExecutionServer(BaseMCPServer):
         present here are reachable, so the operator keeps a single allow-list and
         the agent cannot push to arbitrary URLs.
         """
-        import json
-        import os
-
         registry: dict[str, str] = {str(k): str(v) for k, v in (self.server_config.peer_registry or {}).items()}
 
         raw = os.getenv("AGORA_PEER_REGISTRY", "").strip()
