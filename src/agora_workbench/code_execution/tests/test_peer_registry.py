@@ -83,3 +83,77 @@ class TestSendToolSurfacesRegistry:
         assert "earthscience" in description
         # The default 'user' destination (GuiPublisher) is always present too.
         assert "user" in description
+
+
+class TestRegistryHttpPeerIsTrusted:
+    """A plain-HTTP peer configured in the registry should not also require the
+    operator to list it in OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS. The send tool
+    builds the on-demand ServerPublisher with ``trust_http=True`` because the
+    operator already chose the scheme in the registry URL."""
+
+    @pytest.mark.unit
+    def test_registry_built_publisher_trusts_http(self):
+        """The publisher constructed for a registry peer carries trust_http=True."""
+        from ..data_access.publishers import ServerPublisher
+
+        # Mirror how the send tool constructs the on-demand publisher.
+        pub = ServerPublisher(server_name="earthscience", target_url="http://earthscience-server:8000", trust_http=True)
+        assert pub._trust_http is True
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_registry_http_peer_passes_validation_without_env(self, monkeypatch, tmp_path):
+        """A registry http:// peer publishes successfully with no trusted-host env var."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from ..data_access.publishers import ServerPublisher
+
+        monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
+
+        publisher = ServerPublisher(
+            server_name="earthscience",
+            target_url="http://earthscience-server:8000",
+            trust_http=True,
+        )
+        publisher._user_token = "tok"
+        publisher._source_server = "alpha"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"success": True}
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            # Would raise ValueError("Plain HTTP ...") without trust_http.
+            await publisher.publish(local_path=pkl_file, name="my_var", session_id="")
+            url = mock_client.post.call_args[0][0]
+            assert url == "http://earthscience-server:8000/object-transfer/receive"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_static_publisher_still_requires_env(self, monkeypatch, tmp_path):
+        """A statically-built publisher (not from the registry) still needs the env var."""
+        from ..data_access.publishers import ServerPublisher
+
+        monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://gis-server:8000")
+        publisher._user_token = "tok"
+        publisher._source_server = "alpha"
+        publisher._transfer_id = ""
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        with pytest.raises(ValueError, match="Plain HTTP"):
+            await publisher.publish(local_path=pkl_file, name="my_var", session_id="")
+

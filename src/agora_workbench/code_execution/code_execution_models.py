@@ -253,7 +253,9 @@ class ServerConfig(BaseModel):
             "pre-registering a ServerPublisher per peer (O(N) config, not O(N²)). Merged with "
             "the ``AGORA_PEER_REGISTRY`` env var, which is either inline JSON or a path to a "
             "JSON file and takes precedence. The server's own ``name`` is ignored if present. "
-            "Only names in this allow-list are reachable — the agent cannot send to arbitrary URLs."
+            "Only names in this allow-list are reachable — the agent cannot send to arbitrary URLs. "
+            "A plain-HTTP registry peer is trusted as configured (the operator chose the scheme "
+            "in the URL), so it need not also appear in ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``."
         ),
     )
 

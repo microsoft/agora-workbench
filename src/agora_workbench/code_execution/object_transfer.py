@@ -33,7 +33,7 @@ MAX_TRANSFER_SIZE_BYTES = 256 * 1024 * 1024
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
-def _validate_target_url(url: str) -> None:
+def _validate_target_url(url: str, trust_http: bool = False) -> None:
     """Validate a target URL before sending credentials.
 
     Enforces the following rules to prevent SSRF and Bearer-token leakage:
@@ -47,6 +47,12 @@ def _validate_target_url(url: str) -> None:
           shared docker network).  Patterns follow the same syntax as
           ``OBJECT_TRANSFER_ALLOWED_HOSTS`` (space- or comma-separated, optional
           leading ``*.`` wildcard).
+        - the caller passed ``trust_http=True``, which signals the URL came
+          from an operator-configured source that already encodes the scheme
+          choice (e.g. a peer in ``AGORA_PEER_REGISTRY`` / ``peer_registry``).
+          In that case the operator typed the ``http://`` URL themselves, so
+          re-listing the host in ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`` would
+          be redundant.
       All other plain-HTTP destinations are rejected to prevent bearer-token
       exposure over unencrypted connections.
     * When the environment variable ``OBJECT_TRANSFER_ALLOWED_HOSTS`` is set,
@@ -57,6 +63,11 @@ def _validate_target_url(url: str) -> None:
 
     Args:
         url: The target URL to validate.
+        trust_http: When ``True``, allow plain HTTP to a non-loopback host
+            without requiring it in ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``.
+            Set by callers whose URL originates from an operator-curated
+            registry (the operator already chose the scheme). The
+            ``OBJECT_TRANSFER_ALLOWED_HOSTS`` SSRF check still applies.
 
     Raises:
         ValueError: If the URL fails any validation rule.
@@ -75,7 +86,8 @@ def _validate_target_url(url: str) -> None:
         raise ValueError(f"Object transfer target URL must use HTTP or HTTPS (got '{parsed.scheme}').")
     if parsed.scheme == "http" and not is_loopback:
         trusted_patterns = _parse_host_patterns(os.environ.get("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", ""))
-        if not (trusted_patterns and _host_matches_any(host, trusted_patterns)):
+        host_is_trusted = trust_http or (trusted_patterns and _host_matches_any(host, trusted_patterns))
+        if not host_is_trusted:
             raise ValueError(
                 agent_guidance.operator_gate(
                     f"Plain HTTP to '{host}' is only permitted for loopback addresses "

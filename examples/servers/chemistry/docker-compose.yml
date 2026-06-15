@@ -58,13 +58,12 @@ services:
       # links surfaced in the activity UI; must match the published port on
       # the host so a browser click reaches the server.
       SERVER_PUBLIC_URL: "http://localhost:8020"
-      # Trust sibling domain-example servers as plain-HTTP push_object targets on
-      # the shared docker network.  Bearer tokens still traverse HTTP, so this
-      # is only safe because all peers are on a private docker network.
-      OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS: "chemistry-server,earthscience-server,energysystems-server"
       # Peer registry for {name}_send(to=<peer>). Docker-network base URLs (the
       # server drops its own name automatically). Overrides the localhost
-      # defaults baked into servers/peers.py for this deployment.
+      # defaults baked into servers/peers.py for this deployment. Plain-HTTP
+      # registry peers are trusted as configured here (the operator chose the
+      # scheme), so no separate OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS is needed —
+      # bearer tokens still traverse HTTP, safe only on this private network.
       AGORA_PEER_REGISTRY: '{"chemistry":"http://chemistry-server:8000","earthscience":"http://earthscience-server:8000","energysystems":"http://energysystems-server:8000"}'
     networks:
       - agora-activity

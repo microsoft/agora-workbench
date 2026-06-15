@@ -1579,10 +1579,13 @@ class CodeExecutionServer(BaseMCPServer):
             # 2. Fall back to the shared peer registry: construct a ServerPublisher
             #    on demand. Only registry names (operator allow-list) are reachable;
             #    the ServerPublisher still validates the URL before sending creds.
+            #    trust_http=True: the registry URL's scheme was chosen by the
+            #    operator, so a plain-HTTP peer need not also be listed in
+            #    OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS.
             if publisher is None:
                 peer_url = server._peer_registry.get(to)
                 if peer_url:
-                    publisher = _ServerPub(server_name=to, target_url=peer_url)
+                    publisher = _ServerPub(server_name=to, target_url=peer_url, trust_http=True)
 
             if publisher is None:
                 return _json.dumps(

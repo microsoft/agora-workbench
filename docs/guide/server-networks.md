@@ -221,11 +221,17 @@ returns `Unknown destination '<name>'`.
 
 - Only operator-registered names are reachable (an allow-list — the agent cannot
   push to arbitrary hosts).
-- HTTPS is required for non-loopback hosts. Plain HTTP is permitted only to
-  loopback (`localhost`/`127.0.0.1`/`::1`) or hosts listed in
-  `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` (e.g. a private Docker network).
+- HTTPS is required for non-loopback hosts in general. **Registry peers are
+  exempt**: because the operator chose the scheme directly in the registry URL,
+  a `http://` peer is trusted as-is — you do **not** also need to list it in
+  `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`. (That env var still governs plain-HTTP
+  transfers that don't go through the registry, e.g. statically pre-registered
+  publishers.)
+- The `OBJECT_TRANSFER_ALLOWED_HOSTS` SSRF allow-list, when set, still applies
+  to registry peers.
 - The caller's bearer token is forwarded over the link, so peers must share an
-  auth realm.
+  auth realm. Prefer HTTPS for any non-loopback peer so the token is not sent
+  over an unencrypted connection.
 
 ### Runtime requirements
 

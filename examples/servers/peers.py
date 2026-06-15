@@ -16,7 +16,10 @@ example, on a shared Docker network::
 
     AGORA_PEER_REGISTRY='{"earthscience":"http://earthscience-server:8000"}'
 
-(plain HTTP to non-loopback hosts also needs ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``).
+A plain-HTTP peer listed in the registry is trusted as configured — the operator
+chose the scheme here, so it does not also need to appear in
+``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``. (Prefer HTTPS for non-loopback peers so
+the forwarded bearer token isn't sent over an unencrypted connection.)
 """
 
 from __future__ import annotations
