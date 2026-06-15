@@ -1,11 +1,13 @@
 ---
 name: agora-workbench
 description: >
-  Use Agora Workbench MCP servers for domain-specific Python code execution,
-  tool discovery, workflow planning, and data management. Activate when
-  connected to any MCP server built with agora-workbench (CodeExecutionServer
-  or ConnectorServer), or when the user asks about domain tools, code
-  execution environments, or multi-server workflows.
+  Drive Agora Workbench MCP servers — any server that exposes an
+  execute_*_code tool — by writing Python that runs inside the server's
+  persistent kernel, where its tools and libraries already live. Activate
+  whenever an execute_*_code tool is connected and the user asks for work that
+  could run there, BEFORE reaching for local shell, standalone scripts, or
+  package installs. The server already has the environment; call its tool
+  instead of rebuilding the capability locally.
 compatibility: Requires an MCP-compatible agent client with Streamable HTTP transport support.
 metadata:
   author: microsoft
@@ -16,13 +18,14 @@ metadata:
 
 ## Core Mental Model
 
-- Domain tools are **Python functions injected into the kernel namespace** — they are NOT individual MCP tools. Call them by writing Python code inside `execute_{server}_code`.
+- When a server exposes an `execute_{server}_code` tool, that tool **is** the way to do the work — its tools and libraries are already installed in the server's kernel. Do not install packages or write standalone scripts locally to replicate what the server provides; call the tool. Even if the server's source is visible in your workspace, use the live tool — don't copy or re-implement it.
+- The server's tools are **Python functions injected into the kernel namespace** — they are NOT individual MCP tools. Call them by writing Python code inside `execute_{server}_code`.
 - Sessions are **persistent** — variables, imports, and state survive across `execute_{server}_code` calls. Do not recompute or re-import unnecessarily.
-- Always **discover before using** — call `search_{server}_tools` before assuming a domain function exists. Never guess tool names.
+- Always **discover before using** — call `search_{server}_tools` before assuming a function exists. Never guess tool names.
 
 ## Discovery
 
-Before writing any domain code, discover what is available:
+Before writing any code, discover what is available:
 
 ```
 search_{server}_tools(query="", top=999)           # Full catalog
@@ -40,7 +43,7 @@ The primary MCP tool is `execute_{server}_code`:
 
 | Parameter | Usage |
 |-----------|-------|
-| `code` | Python code that calls domain functions from the kernel namespace |
+| `code` | Python code that calls the server's functions from the kernel namespace |
 | `description` | One-sentence summary shown to the user — **always set this** |
 | `timeout` | Seconds before execution is killed (increase for heavy computation) |
 | `background` | Set `True` for long-running jobs; poll with `{server}_check_job(job_id=...)` |
@@ -70,7 +73,7 @@ execute_{server}_code(
 - A session is created automatically on first `execute_{server}_code` call.
 - All subsequent calls reuse the same session (variables persist).
 - Use `{server}_inspect_session(session_id=...)` to see what variables exist and check background job status.
-- Use `{server}_close_session(session_id=...)` only when done with a domain entirely.
+- Use `{server}_close_session(session_id=...)` only when done with a server entirely.
 - Use `{server}_list_sessions()` to see active sessions.
 
 ## Artifacts and Publishing
@@ -134,7 +137,8 @@ hitting the limit proactively.
 
 ## Do Not
 
-- Do not call domain functions as MCP tools — they only exist inside the kernel.
+- Do not `pip`/`uv install` packages or write standalone local scripts to do work a connected `execute_{server}_code` tool already covers — the kernel already has the environment. Even if the server's source is in your workspace, call the live tool; do not copy or re-implement it.
+- Do not call the server's functions as MCP tools — they only exist inside the kernel.
 - Do not guess tool names — always search first.
 - Do not write output files outside `AGORA_OUTPUT_DIR`.
 - Do not paste large data into chat when `{server}_send` can transfer it server-to-server.
