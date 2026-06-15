@@ -1,6 +1,6 @@
-# Weekly security scanning: CodeQL static analysis and dependency component detection
+# Weekly dependency component detection via Dependabot
 
-name: Security Scanning
+name: Component Detection
 
 on:
   schedule:
@@ -8,35 +8,6 @@ on:
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  codeql:
-    name: CodeQL Analysis
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ['python']
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: '/language:${{ matrix.language }}'
-
   component-detection:
     name: Component Detection
     runs-on: ubuntu-latest
