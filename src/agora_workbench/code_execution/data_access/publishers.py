@@ -434,6 +434,7 @@ class ServerPublisher(AssetPublisher):
         server_name: str,
         target_url: str | None = None,
         timeout: float = 60.0,
+        trust_http: bool = False,
     ):
         """
         Initialise the ServerPublisher.
@@ -446,10 +447,17 @@ class ServerPublisher(AssetPublisher):
                 the URL is auto-expanded from ``server_name`` using the Docker
                 Compose convention (``http://{name}-server:8000``).
             timeout: HTTP read/write timeout in seconds for the transfer request.
+            trust_http: When ``True``, plain-HTTP transfers to this peer are
+                permitted without listing the host in
+                ``OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS``. Set by the unified send
+                tool when the publisher is built on demand from an
+                operator-curated peer registry, where the operator already
+                chose the scheme in the configured URL.
         """
         super().__init__(credential=None)
         self._server_name = server_name
         self._timeout = timeout
+        self._trust_http = trust_http
         if target_url:
             self._target_url = target_url.rstrip("/")
         else:
@@ -512,7 +520,7 @@ class ServerPublisher(AssetPublisher):
         if not user_token:
             raise RuntimeError("ServerPublisher requires _user_token to be set before publish() is called.")
 
-        _validate_target_url(self._target_url)
+        _validate_target_url(self._target_url, trust_http=self._trust_http)
 
         # Strip common MCP path suffixes so the agent can pass the MCP
         # endpoint URL directly (e.g. http://gis-server:8000/mcp).

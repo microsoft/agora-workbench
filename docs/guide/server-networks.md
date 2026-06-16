@@ -172,6 +172,85 @@ This sends roughly 75% of new sessions to `large-worker` and 25% to `small-worke
 | Team-specific access control | `GatewayServer` per team |
 | High-availability with failover | `DispatcherServer` with `worker_failure_policy="reroute"` |
 
+## Server-to-server transfers (the peer registry)
+
+`{name}_send(to="<peer>")` pushes a Python object from one server's kernel
+directly into a peer server's kernel — useful when one domain produces input for
+another (e.g. build a network in `energysystems`, then render it in
+`earthscience`). This is a direct kernel-to-kernel transfer and does **not**
+require a `ConnectorServer`.
+
+For a server to be a valid `to=` destination, the **operator** must register it
+in the sender's **peer registry** — a single `name → base URL` map. You maintain
+one table instead of hand-wiring a publisher per pair (O(N) config, not O(N²)).
+
+### Configuring the registry
+
+Two sources, merged (the env var takes precedence); the server always drops its
+own name:
+
+**1. In `ServerConfig`:**
+
+```python
+config = ServerConfig(
+    name="energysystems",
+    # ...
+    peer_registry={"earthscience": "https://earthscience.internal:8000"},
+)
+```
+
+**2. Via the `AGORA_PEER_REGISTRY` env var** — inline JSON, or a path to a JSON
+file. One shared file can be handed to every server (each ignores its own
+entry), so the whole mesh is described in one place:
+
+```bash
+AGORA_PEER_REGISTRY='{"chemistry":"http://chemistry-server:8000","earthscience":"http://earthscience-server:8000","energysystems":"http://energysystems-server:8000"}'
+```
+
+The URL is the server **root** (where `/object-transfer/receive` lives), not the
+`/mcp` endpoint.
+
+### What the agent sees
+
+The agent calls `energysystems_send(data_ref="grid", to="earthscience")` with a
+**logical name**, never a URL — so it can only reach operator-registered peers.
+Registered peers appear in the send tool's own description; an unregistered `to=`
+returns `Unknown destination '<name>'`.
+
+### Security and transport
+
+- Only operator-registered names are reachable (an allow-list — the agent cannot
+  push to arbitrary hosts).
+- HTTPS is required for non-loopback hosts in general. **Registry peers are
+  exempt**: because the operator chose the scheme directly in the registry URL,
+  a `http://` peer is trusted as-is — you do **not** also need to list it in
+  `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS`. (That env var still governs plain-HTTP
+  transfers that don't go through the registry, e.g. statically pre-registered
+  publishers.)
+- The `OBJECT_TRANSFER_ALLOWED_HOSTS` SSRF allow-list, when set, still applies
+  to registry peers.
+- The caller's bearer token is forwarded over the link, so peers must share an
+  auth realm. Prefer HTTPS for any non-loopback peer so the token is not sent
+  over an unencrypted connection.
+
+### Runtime requirements
+
+These are properties of the push itself, not the registry:
+
+- The **receiving** server must already have an active session for the caller —
+  have the agent run `execute_<target>_code` on the target once before sending,
+  or the receive endpoint returns 404.
+- Both servers must be live at transfer time.
+- There is a maximum transfer size; route large datasets through blob storage
+  (`to="blob"`) instead of a direct push.
+
+### Example
+
+The bundled `chemistry`, `earthscience`, and `energysystems` example servers
+share one topology table in `examples/servers/peers.py` (localhost defaults for
+bare-host dev) and override it for the dockerised deployment via
+`AGORA_PEER_REGISTRY` in each `docker-compose.yml`.
+
 ## Authentication pass-through
 
 Connector servers pass the user's bearer token to upstream servers. Configure Entra ID on the connector:

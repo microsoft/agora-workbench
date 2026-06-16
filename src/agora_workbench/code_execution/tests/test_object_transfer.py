@@ -517,3 +517,33 @@ class TestValidateTargetUrl:
         monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
         with pytest.raises(ValueError, match="Plain HTTP"):
             _validate_target_url("http://chemistry-server:8000")
+
+    @pytest.mark.unit
+    def test_trust_http_allows_plain_http_without_env(self, monkeypatch):
+        """trust_http=True permits plain HTTP to a non-loopback host with no env var.
+
+        Models a peer whose http:// URL came from AGORA_PEER_REGISTRY: the
+        operator already chose the scheme, so re-listing it in
+        OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS is unnecessary.
+        """
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
+        # Without trust_http this would raise; with it, validation passes.
+        _validate_target_url("http://earthscience-server:8000", trust_http=True)
+
+    @pytest.mark.unit
+    def test_trust_http_still_enforces_allow_list(self, monkeypatch):
+        """trust_http=True only unblocks the scheme — the SSRF allow-list still applies."""
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.delenv("OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS", raising=False)
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "earthscience-server")
+
+        # Scheme is unblocked by trust_http, but the allow-list rejects this host.
+        with pytest.raises(ValueError, match="allowed-host"):
+            _validate_target_url("http://chemistry-server:8000", trust_http=True)
+
+        # A host that satisfies the allow-list passes.
+        _validate_target_url("http://earthscience-server:8000", trust_http=True)
+

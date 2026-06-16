@@ -13,8 +13,8 @@ EventType = Literal[
     "code_failed",
     "job_started",
     "job_finished",
-    "push_object_sent",
-    "push_object_received",
+    "object_sent",
+    "object_received",
     "tool_search",
     "data_searched",
     "skill_loaded",
@@ -74,11 +74,11 @@ class ActivityEvent(BaseModel):
     # parallel_execute correlation (set on per-child code_executed/code_failed)
     batch_id: Optional[str] = None
 
-    # push_object correlation
+    # object-transfer correlation
     transfer_id: Optional[str] = None
     variable_name: Optional[str] = None
-    target_server: Optional[str] = None  # set on push_object_sent
-    source_server: Optional[str] = None  # set on push_object_received
+    target_server: Optional[str] = None  # set on object_sent
+    source_server: Optional[str] = None  # set on object_received
 
     # tool_search
     query: Optional[str] = None

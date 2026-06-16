@@ -109,7 +109,7 @@
       }
       .badge.code_executed, .badge.code_failed { background: #1f6feb33; color: #79c0ff; }
       .badge.job_started, .badge.job_finished { background: #ffa65733; color: #ffa657; }
-      .badge.push_object_sent, .badge.push_object_received { background: #56d36433; color: #56d364; }
+      .badge.object_sent, .badge.object_received { background: #56d36433; color: #56d364; }
       .badge.tool_search, .badge.skill_loaded, .badge.workflow_planned { background: #d2a8ff22; color: #d2a8ff; }
       .badge.data_searched { background: #39c5cf22; color: #39c5cf; }
       .badge.batch_cancelled { background: #f8514922; color: #f85149; }
@@ -295,7 +295,7 @@
         exec:  ["code_executed", "code_failed"],
         job:   ["job_started", "job_finished", "batch_cancelled"],
         orch:  ["tool_search", "data_searched", "skill_loaded", "workflow_planned"],
-        push:  ["push_object_sent", "push_object_received"],
+        transfer: ["object_sent", "object_received"],
         artifact: ["artifact_published"],
       };
       const TYPE_TO_GROUP = {};

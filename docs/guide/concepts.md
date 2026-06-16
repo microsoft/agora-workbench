@@ -58,8 +58,7 @@ prefixed with the server name, e.g. `chemistry`):
 | `plan_{name}_workflow` | Navigate the state graph (only when tools declare state) |
 | `{name}_list_sessions`, `{name}_inspect_session`, `{name}_close_session` | Inspect, list, or close sessions |
 | `{name}_parallel_execute`, `{name}_check_batch` | Fan code out across many inputs |
-| `{name}_publish_artifact` | Make an output file available to the user |
-| `{name}_push_object` | Move a Python object to another server |
+| `{name}_send` | Send data to a destination — a peer server's kernel, blob storage, the user (browser download), or the local filesystem |
 
 ## Sessions and state
 
