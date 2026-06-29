@@ -87,7 +87,7 @@ build-backend = "hatchling.build"
 [project]
 name = "my-domain-tools"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.6"
 # No dependencies — domain libraries come from the kernel environment (conda/uv)
 ```
 
@@ -116,6 +116,9 @@ def parse_molecule(smiles: str) -> dict:
 
 !!! warning "Kernel import boundary"
     Implementation modules must **not** import from `code_execution`, `base`, `connector`, or any server-side package. These are only available in the server process. The kernel environment has only the packages listed in your `ServerConfig.dependency_file` plus whatever you install via `additional_commands`.
+
+!!! info "Kernel Python version"
+    The execution kernel can run any Python ≥ 3.6. The server's injected infrastructure is compatible with Python 3.6+, so tool packages may target older runtimes (e.g., legacy ML stacks with Python 3.6–3.9). The server process itself requires Python ≥ 3.11.
 
 ### Installing the package into the kernel
 

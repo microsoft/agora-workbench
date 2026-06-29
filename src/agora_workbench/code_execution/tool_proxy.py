@@ -64,7 +64,12 @@ def _single_object_return_type(return_spec: list) -> type | None:
 
 
 def generate_tracing_infrastructure_code() -> str:
-    """Return Python source for ToolCallLog class + initialization."""
+    """Return Python source for ToolCallLog class + initialization.
+
+    IMPORTANT: This code is exec'd inside the kernel, which may run Python 3.6+.
+    Do not use syntax requiring a newer version (e.g., PEP 604 unions, walrus operator,
+    match statements, PEP 585 built-in generics like list[int]).
+    """
     return textwrap.dedent("""\
         import time, json, traceback
 
@@ -72,11 +77,11 @@ def generate_tracing_infrastructure_code() -> str:
             \"\"\"Accumulates structured tool-call records during a single execute_code invocation.\"\"\"
 
             def __init__(self):
-                self._calls: list[dict] = []
-                self._object_refs: dict[int, str] = {}
-                self._next_ref: int = 1
+                self._calls = []
+                self._object_refs = {}
+                self._next_ref = 1
 
-            def record(self, tool_name: str, args: dict, result, duration_ms: float, success: bool, error: str | None = None):
+            def record(self, tool_name, args, result, duration_ms, success, error=None):
                 self._calls.append({
                     "tool_name": tool_name,
                     "args": self._safe_serialize(args),
@@ -87,7 +92,7 @@ def generate_tracing_infrastructure_code() -> str:
                     "timestamp": time.time(),
                 })
 
-            def flush(self) -> list[dict]:
+            def flush(self):
                 \"\"\"Return all accumulated records and reset.\"\"\"
                 calls = self._calls
                 self._calls = []
