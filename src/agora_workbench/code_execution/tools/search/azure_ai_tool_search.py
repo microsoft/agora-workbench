@@ -240,11 +240,11 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
                     select=_SELECT_FIELDS,
                     filter=filter_expr,
                     top=top,
-                    vector_queries=[
+                    vector_queries=[  # type: ignore[arg-type]
                         VectorizedQuery(
                             vector=query_vector,
                             fields="description_vector",
-                            k=top,
+                            k_nearest_neighbors=top,
                         )
                     ],
                 )
@@ -309,14 +309,14 @@ class AzureAIToolSearchBackend(ToolSearchBackend):
     def _build_index(self, embedding_dimensions: int) -> SearchIndex:
         """Construct the Azure AI Search index schema."""
         fields = [
-            SimpleField(name="id", type=SearchFieldDataType.String, key=True, filterable=True),
+            SimpleField(name="id", type=SearchFieldDataType.String, key=True, filterable=True),  # type: ignore[arg-type]
             SearchableField(name="name", sortable=True),
             SearchableField(name="server_name", filterable=True, sortable=True),
             SearchableField(name="description"),
             SearchableField(name="affordances", collection=True),
             SearchableField(name="state_requires", collection=True, filterable=True),
             SearchableField(name="state_produces", collection=True, filterable=True),
-            SimpleField(name="type", type=SearchFieldDataType.String, filterable=True),
+            SimpleField(name="type", type=SearchFieldDataType.String, filterable=True),  # type: ignore[arg-type]
             SearchField(
                 name="description_vector",
                 type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
