@@ -48,6 +48,33 @@ class GatewayPolicy(BaseModel):
     )
 
 
+class BridgeEdge(BaseModel):
+    """A synthetic cross-server edge in the unified state graph.
+
+    Bridges declare that reaching ``from_state`` on one upstream enables
+    transitioning to ``to_state`` on another. They are injected into the
+    hub-level :class:`~code_execution.tools.search.state_graph.StateGraph`
+    as navigation aids — they do not gate execution.
+    """
+
+    from_state: str = Field(
+        description=(
+            "Source state token (e.g. 'graphormer.reduction_predicted'). "
+            "Must exist in an upstream catalog's state_produces."
+        )
+    )
+    to_state: str = Field(
+        description=(
+            "Target state token (e.g. 'ezbattery.electrolyte_configured'). "
+            "Must exist in an upstream catalog's state_requires."
+        )
+    )
+    description: str = Field(
+        default="",
+        description="Human-readable note explaining what data/context flows across this bridge.",
+    )
+
+
 class RouterConfig(BaseModel):
     """Configuration for a RouterServer.
 
@@ -63,6 +90,14 @@ class RouterConfig(BaseModel):
     upstreams: list[UpstreamConfig] = Field(
         description="Upstream servers to aggregate (one or more).",
         min_length=1,
+    )
+    bridges: list[BridgeEdge] = Field(
+        default_factory=list,
+        description=(
+            "Cross-server bridge edges for the unified state graph. "
+            "Each bridge declares a navigation link between states on different upstreams. "
+            "Validated at startup against the aggregated catalog."
+        ),
     )
     entra_client_id: Optional[str] = Field(
         default=None,

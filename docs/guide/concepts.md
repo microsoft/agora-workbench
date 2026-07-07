@@ -78,6 +78,11 @@ over stateless tool calls.
 3. **State graph** *(optional)* — tools can declare `requires` / `produces`
    states, and `plan_{name}_workflow` turns these into ordered paths. Registered
    only when tools carry state annotations.
+4. **Unified state graph** *(router only)* — when a `RouterServer` is configured
+   with `bridges`, it builds a composed `StateGraph` over all upstreams and
+   exposes `plan_{router_name}_workflow`. Bridge edges enable cross-server path
+   queries (e.g., "graphormer output → battery simulation") without modifying
+   individual upstream tool definitions.
 
 → See [Skill pattern](skill-pattern.md).
 

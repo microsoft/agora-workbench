@@ -27,6 +27,7 @@ Connectors provide full parity with direct upstream access. All of the following
 - **Parallel execution** — `parallel_execute`, `check_batch`, `cancel_batch`
 - **Unified send** — `{name}_send` for data transfer (to peer servers, blob storage, user download, or local filesystem)
 - **Workflow planning** — `plan_workflow` and `load_skill` per upstream
+- **Unified workflow planning** — `plan_{router_name}_workflow` across all upstreams (with optional bridge edges)
 
 ## RouterServer
 
@@ -58,6 +59,57 @@ The agent sees:
 - `execute_gis_code`
 - `execute_energy_code`
 - A unified `search_science-hub_tools` that covers all upstreams
+
+### Unified state graph and bridge edges
+
+When upstream tools declare `requires`/`produces` state transitions, the router builds a **unified state graph** spanning all upstreams and exposes a `plan_{router_name}_workflow` tool. By default, each upstream's states form disconnected islands. To enable cross-server path queries, declare **bridge edges** in the router config:
+
+```python
+from agora_workbench.connector import RouterServer, BridgeEdge
+from agora_workbench.connector.models import RouterConfig, UpstreamConfig
+
+config = RouterConfig(
+    name="science-hub",
+    upstreams=[
+        UpstreamConfig(name="graphormer", url="http://graphormer:8000"),
+        UpstreamConfig(name="ezbattery", url="http://ezbattery:8000"),
+    ],
+    bridges=[
+        BridgeEdge(
+            from_state="graphormer.reduction_predicted",
+            to_state="ezbattery.electrolyte_configured",
+            description="Pass predicted potentials to battery simulation",
+        ),
+    ],
+)
+
+server = RouterServer(config)
+```
+
+The agent can now query `plan_science-hub_workflow(mode="path", current_state="graphormer.reduction_predicted", target_state="ezbattery.simulation_complete")` and get a cross-server path that traverses the bridge.
+
+**Key design points:**
+
+- **Bridges are a navigation aid** — they help agents discover multi-server workflows at cold-start. They do not gate execution or move data automatically.
+- **Hub-side overlay only** — bridges exist only in the router's composed graph. Each upstream's own `plan_{upstream}_workflow` remains self-consistent and unchanged.
+- **Validated at startup** — both `from_state` and `to_state` must exist in the aggregated upstream catalogs. Invalid bridges fail loudly with a `ValueError`.
+- **Tagged in output** — bridge steps appear with `server="(bridge)"` and a `bridge:` name prefix, so agents can distinguish them from real tool transitions.
+- **OR semantics** — `requires` means "reachable from any one of these states". A bridge saying "A enables B" does not express AND-conjunctions; that would need a fused precondition state.
+
+**YAML configuration** (equivalent):
+
+```yaml
+name: science-hub
+upstreams:
+  - name: graphormer
+    url: http://graphormer:8000
+  - name: ezbattery
+    url: http://ezbattery:8000
+bridges:
+  - from_state: graphormer.reduction_predicted
+    to_state: ezbattery.electrolyte_configured
+    description: Pass predicted potentials to battery simulation
+```
 
 ## GatewayServer
 

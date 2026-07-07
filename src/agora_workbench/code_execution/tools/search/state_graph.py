@@ -228,6 +228,50 @@ class StateGraph:
             for st in tool.state_produces:
                 self._to_state[st].append(tool)
 
+    def inject_bridges(self, bridges: list[dict[str, str]]) -> None:
+        """Inject synthetic cross-server bridge edges into the graph.
+
+        Each bridge is represented as a synthetic :class:`ToolInfo` entry
+        with ``state_requires=(from_state,)`` and ``state_produces=(to_state,)``.
+        Bridge tools are tagged with a ``bridge:`` prefix in their name and
+        ``"(bridge)"`` as the server name so planner output distinguishes them
+        from real tool transitions.
+
+        Parameters
+        ----------
+        bridges : list[dict[str, str]]
+            Each dict must have ``from_state``, ``to_state``, and optionally
+            ``description``.
+        """
+        for bridge in bridges:
+            from_state = bridge["from_state"]
+            to_state = bridge["to_state"]
+            description = bridge.get("description", f"Bridge: {from_state} → {to_state}")
+
+            # Derive a readable synthetic tool name
+            bridge_name = f"bridge:{from_state}→{to_state}"
+
+            synthetic_tool = ToolInfo(
+                name=bridge_name,
+                description=description,
+                server_name="(bridge)",
+                state_requires=(from_state,),
+                state_produces=(to_state,),
+            )
+
+            self._tools.append(synthetic_tool)
+            self._from_state[from_state].append(synthetic_tool)
+            self._to_state[to_state].append(synthetic_tool)
+
+            # Ensure both states appear in the domain vocabulary
+            for token in (from_state, to_state):
+                domain = self._domain_for_state(token)
+                if domain and domain not in self._domain_states:
+                    self._domain_states[domain] = {}
+                if domain and token not in self._domain_states.get(domain, {}):
+                    suffix = token.split(".", 1)[1] if "." in token else token
+                    self._domain_states.setdefault(domain, {})[token] = suffix.upper()
+
     def _infer_states_from_tools(self) -> None:
         """Build a minimal state vocabulary from tool state annotations.
 

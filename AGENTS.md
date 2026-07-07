@@ -51,6 +51,22 @@ Do **not** use bare package names — `from code_execution import ...` is wrong.
 
 Both expose tools via **FastMCP** over Streamable HTTP with Bearer token auth middleware.
 
+
+### Unified State Graph (Router)
+
+`RouterServer` supports a **unified state graph** for cross-server workflow discovery. When configured with `bridges` in `RouterConfig`, it:
+
+1. Aggregates state-annotated `ToolInfo` from all upstreams
+2. Injects synthetic bridge edges (declared in config, not in upstream tools)
+3. Registers `plan_{router_name}_workflow` for cross-server path queries
+
+Bridge edges live in `RouterConfig.bridges` as `BridgeEdge` objects (`from_state`, `to_state`, `description`). They are validated at startup against the aggregated catalog — both states must exist. The `StateGraph.inject_bridges()` method handles insertion.
+
+Key files:
+- `connector/models.py` — `BridgeEdge` model, `RouterConfig.bridges` field
+- `connector/base.py` — `_setup_unified_state_graph()` method
+- `code_execution/tools/search/state_graph.py` — `StateGraph.inject_bridges()`
+
 ## Adding Domain Tools
 
 Follow the pattern in `examples/servers/`. A domain server:
