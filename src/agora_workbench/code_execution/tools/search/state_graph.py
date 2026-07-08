@@ -423,7 +423,23 @@ class StateGraph:
 
         if not result:
             return self._no_results_response(domain)
-        return {"domains": result}
+
+        # Collect bridge edges (synthetic cross-domain transitions)
+        bridge_edges: list[dict[str, Any]] = []
+        for tool in self._tools:
+            if tool.server_name == "(bridge)":
+                for req in tool.state_requires:
+                    for prod in tool.state_produces:
+                        bridge_edges.append({
+                            "from": req,
+                            "to": prod,
+                            "description": tool.description,
+                        })
+
+        response: dict[str, Any] = {"domains": result}
+        if bridge_edges:
+            response["bridges"] = bridge_edges
+        return response
 
     def from_state(self, state: str) -> dict[str, Any]:
         """Tools and skills reachable from a given state."""

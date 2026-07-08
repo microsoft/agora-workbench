@@ -54,7 +54,7 @@ Both expose tools via **FastMCP** over Streamable HTTP with Bearer token auth mi
 
 ### Unified State Graph (Router)
 
-`RouterServer` supports a **unified state graph** for cross-server workflow discovery. When configured with `bridges` in `RouterConfig`, it:
+`RouterServer` supports a **unified state graph** for cross-server workflow discovery. It registers `plan_{router_name}_workflow` whenever upstreams have state-annotated tools. Optionally, `bridges` in `RouterConfig` inject cross-server edges:
 
 1. Aggregates state-annotated `ToolInfo` from all upstreams
 2. Injects synthetic bridge edges (declared in config, not in upstream tools)

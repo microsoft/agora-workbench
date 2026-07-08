@@ -195,7 +195,7 @@ class TestInjectBridges:
         assert "beta.ready" in graph._domain_states["beta"]
 
     def test_overview_includes_bridge_edges(self):
-        """Overview mode shows bridge edges in the graph."""
+        """Overview mode shows bridge edges in a top-level 'bridges' list."""
         tools = [
             ToolInfo(
                 name="predict_reduction_potential",
@@ -210,13 +210,18 @@ class TestInjectBridges:
             {
                 "from_state": "graphormer.reduction_predicted",
                 "to_state": "ezbattery.electrolyte_configured",
+                "description": "Pass potentials to battery sim",
             }
         ])
 
         overview = graph.overview()
-        # The bridge tool's server is "(bridge)", so it won't appear in a
-        # single-domain overview filter. But in the full overview, the
-        # target state should exist in its domain.
+        # Bridge edges appear in a top-level "bridges" list
+        assert "bridges" in overview
+        assert len(overview["bridges"]) == 1
+        bridge = overview["bridges"][0]
+        assert bridge["from"] == "graphormer.reduction_predicted"
+        assert bridge["to"] == "ezbattery.electrolyte_configured"
+        # Target domain exists in domains list
         domains = {d["domain"] for d in overview["domains"]}
         assert "ezbattery" in domains
 

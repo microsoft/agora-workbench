@@ -619,21 +619,22 @@ class ConnectorServer(BaseMCPServer):
         graph = StateGraph(tools=all_tool_infos, skills=all_skills)
 
         # Validate and inject bridges
-        all_states = set()
+        produced_states: set[str] = set()
+        required_states: set[str] = set()
         for tool in all_tool_infos:
-            all_states.update(tool.state_requires)
-            all_states.update(tool.state_produces)
+            required_states.update(tool.state_requires)
+            produced_states.update(tool.state_produces)
 
         valid_bridges: list[dict[str, str]] = []
         for bridge in bridges:
             errors = []
-            if bridge["from_state"] not in all_states:
+            if bridge["from_state"] not in produced_states:
                 errors.append(
-                    f"from_state '{bridge['from_state']}' not found in any upstream catalog"
+                    f"from_state '{bridge['from_state']}' not found in any upstream's state_produces"
                 )
-            if bridge["to_state"] not in all_states:
+            if bridge["to_state"] not in required_states:
                 errors.append(
-                    f"to_state '{bridge['to_state']}' not found in any upstream catalog"
+                    f"to_state '{bridge['to_state']}' not found in any upstream's state_requires"
                 )
             if errors:
                 LOGGER.error(
@@ -656,7 +657,7 @@ class ConnectorServer(BaseMCPServer):
             )
 
         # Register the plan_{connector}_workflow tool
-        tool_name = f"plan_{connector_name}_workflow"
+        plan_tool_name = f"plan_{connector_name}_workflow"
 
         async def plan_unified_workflow(
             ctx: Context,
@@ -664,7 +665,7 @@ class ConnectorServer(BaseMCPServer):
             mode: str = "overview",
             current_state: str = "",
             target_state: str = "",
-            tool_name_param: str = "",
+            tool_name: str = "",
         ) -> str:
             """Plan and navigate the unified workflow state graph across all upstreams.
 
@@ -673,7 +674,7 @@ class ConnectorServer(BaseMCPServer):
                 mode: Query mode — 'overview', 'next_steps', 'path', or 'tool'.
                 current_state: State token for 'next_steps'/'path' modes.
                 target_state: Target state token for 'path' mode.
-                tool_name_param: Tool name for 'tool' mode.
+                tool_name: Tool name for 'tool' mode.
             """
             if mode == "overview":
                 result = graph.overview(domain)
@@ -682,13 +683,13 @@ class ConnectorServer(BaseMCPServer):
             elif mode == "path":
                 result = graph.path(current_state, target_state)
             elif mode == "tool":
-                result = graph.tool_lookup(tool_name_param)
+                result = graph.tool_lookup(tool_name)
             else:
                 result = {"error": f"Unknown mode '{mode}'. Use: overview, next_steps, path, tool."}
             return json.dumps(result)
 
         self.mcp.tool(
-            name=tool_name,
+            name=plan_tool_name,
             description=(
                 f"Plan and navigate the unified {connector_name} workflow state graph spanning "
                 f"all upstream domains. Use 'overview' to see the full cross-server graph "

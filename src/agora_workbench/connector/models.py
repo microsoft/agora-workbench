@@ -60,13 +60,13 @@ class BridgeEdge(BaseModel):
     from_state: str = Field(
         description=(
             "Source state token (e.g. 'graphormer.reduction_predicted'). "
-            "Must exist in an upstream catalog's state_produces."
+            "Must exist in an upstream tool's state_produces."
         )
     )
     to_state: str = Field(
         description=(
             "Target state token (e.g. 'ezbattery.electrolyte_configured'). "
-            "Must exist in an upstream catalog's state_requires."
+            "Must exist in an upstream tool's state_requires."
         )
     )
     description: str = Field(
