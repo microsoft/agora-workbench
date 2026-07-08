@@ -118,6 +118,18 @@ class BaseMCPServer(ABC):
 
         await self._startup()
 
+        # FastMCP >=3.4.3 auto-enables DNS-rebinding protection when
+        # settings.host is a localhost variant, rejecting requests whose Host
+        # header isn't in a localhost allowlist (HTTP 421). This breaks
+        # service-to-service /catalog fetches from connectors/routers over
+        # internal hostnames. Only override when the current setting would
+        # trigger protection and the actual bind host is non-localhost.
+        import fastmcp as _fastmcp
+
+        _LOCALHOST_VARIANTS = ("127.0.0.1", "localhost", "::1")
+        if _fastmcp.settings.host in _LOCALHOST_VARIANTS and host not in _LOCALHOST_VARIANTS:
+            _fastmcp.settings.host = host
+
         # Build the Streamable HTTP app
         app = self.mcp.http_app(transport="streamable-http")
 
