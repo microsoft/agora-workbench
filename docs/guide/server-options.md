@@ -47,6 +47,14 @@ The `type` field on `ServerConfig` controls how the Python environment is manage
 - For `type="conda"`, `dependency_file` contains `environment.yml` content
 - For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), use **`conda-forge`** rather than system package managers like `apt-get`
 
+!!! warning "Heavy models load *per session*"
+    Each `execute_{name}_code` session runs in its **own kernel process**, so
+    anything a tool loads — including a multi-gigabyte model — is loaded once
+    *per session*. N concurrent sessions means N copies in RAM, which readily
+    exhausts a modest host. If your environment includes a large model or other
+    expensive process-global state, load it once in a **[sidecar](sidecars.md)**
+    and share it across sessions instead.
+
 ### Example: conda environment
 
 ```python
