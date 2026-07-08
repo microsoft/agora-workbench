@@ -120,6 +120,39 @@ def parse_molecule(smiles: str) -> dict:
 !!! info "Kernel Python version"
     The execution kernel can run any Python ≥ 3.6. The server's injected infrastructure is compatible with Python 3.6+, so tool packages may target older runtimes (e.g., legacy ML stacks with Python 3.6–3.9). The server process itself requires Python ≥ 3.11.
 
+### Reaching a sidecar from a tool
+
+Tool code runs in a **fresh kernel process per session**, so loading an
+expensive resource (a large model) inside a tool pays that cost *every session*
+— on a modest host this exhausts RAM. The fix is a
+**[sidecar](sidecars.md)**: the server loads the resource once per container and
+exports its URL to every kernel via an environment variable. A tool reaches it
+over loopback HTTP — no server-side imports required (which the boundary above
+forbids anyway):
+
+```python
+# my_domain_tools/predict.py
+import os
+import httpx
+
+def predict(smiles: str) -> dict:
+    """Run inference against the shared model sidecar."""
+    base = os.environ.get("MYMODEL_SERVICE_URL")  # SidecarConfig.url_env_var
+    if base:
+        resp = httpx.post(f"{base}/predict", json={"smiles": smiles}, timeout=600)
+        resp.raise_for_status()
+        return resp.json()
+    # Dev/test fallback: load and run the model in-process.
+    from .model import load_model
+    return load_model().predict(smiles)
+```
+
+The `url_env_var` name is whatever you set on the `SidecarConfig`; guarding on
+its presence keeps the same tool working in unit tests and local development
+without the sidecar running. See [Sidecars](sidecars.md) for how to declare and
+serve one. (This mirrors how static [assets](working-with-data.md#asset-provisioning)
+are reached via `MCP_ASSET_CACHE_DIR`.)
+
 ### Installing the package into the kernel
 
 Use `additional_commands` in your `ServerConfig` to pip-install the tools package into the kernel environment:
@@ -274,6 +307,13 @@ print(result["objective_value"])
 - Tool proxy functions run in the kernel's `__main__` namespace
 - Variables assigned in `__main__` persist across all `execute_*_code` invocations
 - Tools receive and return live Python objects — no serialization boundary
+
+!!! note "This sharing is per *session*, not per *container*"
+    Kernel variables are shared across tool calls **within one session**. They
+    are **not** shared between sessions — each session is a separate kernel
+    process with its own copy. To share one expensive instance (e.g. a model)
+    across *all* sessions, don't hold it in a kernel variable; serve it from a
+    **[sidecar](sidecars.md)**.
 
 ### What to avoid
 
