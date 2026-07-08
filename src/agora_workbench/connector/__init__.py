@@ -13,6 +13,7 @@ from .base import ConnectorServer
 from .dispatcher import DispatcherServer
 from .gateway import GatewayServer
 from .models import (
+    BridgeEdge,
     DispatcherConfig,
     GatewayConfig,
     GatewayPolicy,
@@ -23,6 +24,7 @@ from .models import (
 from .router import RouterServer
 
 __all__ = [
+    "BridgeEdge",
     "ConnectorServer",
     "DispatcherConfig",
     "DispatcherServer",

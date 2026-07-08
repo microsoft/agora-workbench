@@ -68,6 +68,10 @@ class RouterServer(ConnectorServer):
         # Unified skill loader across all upstreams
         self._register_unified_load_skill()
 
+        # Unified state graph with cross-server bridge edges
+        bridges = [b.model_dump() for b in self.config.bridges]
+        self._setup_unified_state_graph(bridges)
+
     def _register_unified_load_skill(self) -> None:
         """Register a router-level load_skill that routes to the correct upstream."""
         server = self

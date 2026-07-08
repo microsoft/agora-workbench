@@ -569,6 +569,147 @@ class ConnectorServer(BaseMCPServer):
         )(search_connector_tools)
 
     # ========================================================================
+    # Unified State Graph
+    # ========================================================================
+
+    def _setup_unified_state_graph(self, bridges: list[dict[str, str]]) -> None:
+        """Build a unified state graph over all upstream catalogs with bridge edges.
+
+        Instantiates a single :class:`StateGraph` from the aggregated tool and
+        skill metadata, injects cross-server bridge edges, validates them, and
+        registers a ``plan_{connector_name}_workflow`` tool.
+
+        Parameters
+        ----------
+        bridges : list[dict[str, str]]
+            Each dict has ``from_state``, ``to_state``, and optionally ``description``.
+        """
+        from agora_workbench.code_execution.tools.search.state_graph import StateGraph
+
+        connector_name = self._server_name
+
+        # Aggregate ToolInfo across all upstreams (mirrors _setup_search_tool)
+        all_tool_infos: list[ToolInfo] = []
+        for upstream_name, tools in self._upstream_catalogs.items():
+            for td in tools:
+                if td.state_transition.requires or td.state_transition.produces:
+                    all_tool_infos.append(
+                        ToolInfo(
+                            name=td.name,
+                            description=td.description,
+                            server_name=td.server_name or upstream_name,
+                            affordances=tuple(td.affordances),
+                            state_requires=tuple(sorted(td.state_transition.requires)),
+                            state_produces=tuple(sorted(td.state_transition.produces)),
+                        )
+                    )
+
+        all_skills: list[dict[str, Any]] = []
+        for skills in self._upstream_skills.values():
+            all_skills.extend(skills)
+
+        if not all_tool_infos and not bridges:
+            LOGGER.debug(
+                "No state-annotated tools or bridges for '%s'; skipping unified state graph.",
+                connector_name,
+            )
+            return
+
+        # Build the graph (no filesystem domains_dir — state vocab is inferred)
+        graph = StateGraph(tools=all_tool_infos, skills=all_skills)
+
+        # Validate and inject bridges
+        produced_states: set[str] = set()
+        required_states: set[str] = set()
+        for tool in all_tool_infos:
+            required_states.update(tool.state_requires)
+            produced_states.update(tool.state_produces)
+
+        valid_bridges: list[dict[str, str]] = []
+        for bridge in bridges:
+            errors = []
+            if bridge["from_state"] not in produced_states:
+                errors.append(
+                    f"from_state '{bridge['from_state']}' not found in any upstream's state_produces"
+                )
+            if bridge["to_state"] not in required_states:
+                errors.append(
+                    f"to_state '{bridge['to_state']}' not found in any upstream's state_requires"
+                )
+            if errors:
+                LOGGER.error(
+                    "Bridge validation failed for %s → %s: %s",
+                    bridge.get("from_state"),
+                    bridge.get("to_state"),
+                    "; ".join(errors),
+                )
+                raise ValueError(
+                    f"Invalid bridge edge in '{connector_name}' config: {'; '.join(errors)}"
+                )
+            valid_bridges.append(bridge)
+
+        if valid_bridges:
+            graph.inject_bridges(valid_bridges)
+            LOGGER.info(
+                "Injected %d bridge edge(s) into unified state graph for '%s'.",
+                len(valid_bridges),
+                connector_name,
+            )
+
+        # Register the plan_{connector}_workflow tool
+        plan_tool_name = f"plan_{connector_name}_workflow"
+
+        async def plan_unified_workflow(
+            ctx: Context,
+            domain: str = "",
+            mode: str = "overview",
+            current_state: str = "",
+            target_state: str = "",
+            tool_name: str = "",
+        ) -> str:
+            """Plan and navigate the unified workflow state graph across all upstreams.
+
+            Args:
+                domain: Domain name to filter (empty for all domains).
+                mode: Query mode — 'overview', 'next_steps', 'path', or 'tool'.
+                current_state: State token for 'next_steps'/'path' modes.
+                target_state: Target state token for 'path' mode.
+                tool_name: Tool name for 'tool' mode.
+            """
+            if mode == "overview":
+                result = graph.overview(domain)
+            elif mode == "next_steps":
+                result = graph.from_state(current_state)
+            elif mode == "path":
+                result = graph.path(current_state, target_state)
+            elif mode == "tool":
+                result = graph.tool_lookup(tool_name)
+            else:
+                result = {"error": f"Unknown mode '{mode}'. Use: overview, next_steps, path, tool."}
+            return json.dumps(result)
+
+        self.mcp.tool(
+            name=plan_tool_name,
+            description=(
+                f"Plan and navigate the unified {connector_name} workflow state graph spanning "
+                f"all upstream domains. Use 'overview' to see the full cross-server graph "
+                f"(including bridge edges between servers), 'next_steps' to explore from a "
+                f"current state, 'path' to find a route between states (may cross server "
+                f"boundaries via bridges), and 'tool' for state details of a specific tool. "
+                f"Bridge edges (server='(bridge)') are navigation aids — actual data flows "
+                f"as values the agent passes between tool calls."
+            ),
+        )(plan_unified_workflow)
+
+        LOGGER.info(
+            "Unified state graph registered for '%s': %d tools, %d bridges, %d domains.",
+            connector_name,
+            len(all_tool_infos),
+            len(valid_bridges),
+            len(graph._domain_states),
+        )
+
+    # ========================================================================
     # MCP Proxy Infrastructure
     # ========================================================================
 
