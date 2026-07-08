@@ -201,4 +201,4 @@ class SidecarManager:
             try:
                 proc.send_signal(sig)
             except ProcessLookupError:
-                pass
+                pass  # Already gone while attempting fallback signal.
