@@ -60,6 +60,7 @@ nav:
   - Other options:
       - Attaching to your agent: guide/attaching-to-your-agent.md
       - Working with data: guide/working-with-data.md
+      - Sidecars (shared helper processes): guide/sidecars.md
       - Server networks with ConnectorServer: guide/server-networks.md
       - Deploying your server: guide/deploying.md
       - Monitoring your servers: guide/monitoring.md

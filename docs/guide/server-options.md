@@ -122,7 +122,7 @@ class ChemistryServer(CodeExecutionServer):
 
 ## Configuration reference
 
-`ServerConfig` has five groups of settings:
+`ServerConfig` has six groups of settings:
 
 ### Identity
 
@@ -150,6 +150,12 @@ class ChemistryServer(CodeExecutionServer):
 |-------|-------------|
 | `assets` | List of `AssetSpec` objects provisioned into the env cache at startup (see [Working with data](working-with-data.md#asset-provisioning)) |
 | `auto_provision` | Fetch the declared `assets` on startup (default: `True`) |
+
+### Sidecars
+
+| Field | Description |
+|-------|-------------|
+| `sidecars` | List of `SidecarConfig` objects — long-lived helper processes launched at startup and stopped on shutdown, used to load an expensive resource (e.g. a model) once and share it across all kernel sessions over loopback HTTP (see [Sidecars](sidecars.md)) |
 
 ### Execution
 

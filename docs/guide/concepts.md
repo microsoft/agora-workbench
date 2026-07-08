@@ -100,6 +100,20 @@ over stateless tool calls.
 
 → See [Working with data](working-with-data.md).
 
+## Sidecars: sharing a heavy resource
+
+Because every session runs in its own kernel process, anything a tool loads is
+loaded *per session* — fine for a small import, ruinous for a multi-gigabyte
+model. A **sidecar** is a long-lived helper process the server launches at
+startup so an expensive resource (typically a model) is loaded **once per
+container** and shared by all sessions over loopback HTTP. Declare it in
+`ServerConfig.sidecars`; the framework starts it, waits for its health check,
+exports its URL to every kernel, and stops it on shutdown. A sidecar is a plain
+internal service — not an MCP endpoint and invisible to the agent (contrast with
+a `ConnectorServer`, which proxies other MCP servers).
+
+→ See [Sidecars](sidecars.md).
+
 ## Producing output: artifacts and publishing
 
 Code writes user-facing files into the session output directory — addressed via
