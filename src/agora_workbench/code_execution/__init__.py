@@ -1,7 +1,7 @@
 """Code execution package exports."""
 
 from .server import CodeExecutionServer
-from .code_execution_models import AssetSpec, CodeExecutionResult, ServerConfig
+from .code_execution_models import AssetSpec, CodeExecutionResult, ServerConfig, SidecarConfig
 from .data_access.publishers import ServerPublisher
 from .skills import Skill, discover_skills
 from .tool_registry import (
@@ -20,6 +20,7 @@ __all__ = [
     "ServerConfig",
     "ServerPublisher",
     "Skill",
+    "SidecarConfig",
     "discover_skills",
     "ReturnSpec",
     "State",

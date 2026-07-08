@@ -27,6 +27,7 @@ from . import agent_guidance
 from . import environment_builders
 from . import asset_provisioner
 from . import code_execution as execution_defaults
+from .sidecar import SidecarManager
 from .code_execution_models import (
     CodeExecutionResult,
     ServerConfig,
@@ -180,6 +181,10 @@ class CodeExecutionServer(BaseMCPServer):
         super().__init__()
         self.server_config = server_config
         self.tool_registry = tool_registry
+
+        # Sidecar processes (e.g. a shared model service). Lazily started in
+        # _startup and stopped in _shutdown; no-op when none are declared.
+        self._sidecar_manager = SidecarManager(server_config)
 
         self.skills: list["Skill"] = list(skills or [])
         self.states: list["State"] = list(states or [])
@@ -2515,6 +2520,12 @@ else:
         cache_dir = self.server_config.get_cache_dir()
         os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
 
+        # Launch declared sidecars now that the environment exists (env-Python
+        # sidecars need the built kernel env). Each sidecar's base URL is
+        # exported to os.environ so kernels spawned below inherit it. This must
+        # precede kernel registration so the discovery env var is in place.
+        await self._sidecar_manager.start_all()
+
         # Register the environment as a Jupyter kernel
         await self._register_kernel(kernel_name="tools-py")
 
@@ -2532,6 +2543,10 @@ else:
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
+        try:
+            await self._sidecar_manager.stop_all()
+        except Exception:
+            LOGGER.warning("Sidecar shutdown raised; continuing", exc_info=True)
         await self._close_tool_search_backends()
         for publisher in self._publishers:
             try:
