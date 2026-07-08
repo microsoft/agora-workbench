@@ -10,7 +10,7 @@ This module contains Pydantic models used by the code execution server:
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AssetSpec(BaseModel):
@@ -134,6 +134,34 @@ class SidecarConfig(BaseModel):
         default_factory=dict,
         description="Extra environment variables set on the sidecar process (merged over the inherited environment).",
     )
+
+    @field_validator("host")
+    @classmethod
+    def _validate_loopback_host(cls, value: str) -> str:
+        """Reject non-loopback bind addresses.
+
+        A sidecar is an internal implementation detail reached only by co-located
+        kernels; binding it to a routable address (e.g. ``0.0.0.0``) would expose
+        it off-box. Only loopback addresses and ``localhost`` are permitted. For a
+        genuinely remote/shared service, don't use a sidecar — point tool code at
+        the remote URL directly (see the sidecars guide).
+        """
+        import ipaddress
+
+        if value == "localhost":
+            return value
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"Sidecar host must be a loopback IP address or 'localhost', got {value!r}."
+            ) from exc
+        if not address.is_loopback:
+            raise ValueError(
+                f"Sidecar host must be loopback (got {value!r}); sidecars are internal and "
+                f"must not be exposed off-box. Use a separate service for remote access."
+            )
+        return value
 
     def base_url(self) -> str:
         """The base URL kernels use to reach the sidecar."""

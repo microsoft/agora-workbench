@@ -49,6 +49,8 @@ class SidecarManager:
     def __init__(self, config: "ServerConfig"):
         self._config = config
         self._processes: dict[str, subprocess.Popen] = {}
+        # name -> url_env_var we exported, so shutdown can unset the now-stale URL.
+        self._injected_env_vars: dict[str, str] = {}
 
     @property
     def running(self) -> bool:
@@ -101,6 +103,7 @@ class SidecarManager:
         # Publish the discovery URL so kernels (which copy os.environ at spawn)
         # can reach the sidecar. Mirrors how MCP_ASSET_CACHE_DIR is exposed.
         os.environ[spec.url_env_var] = spec.base_url()
+        self._injected_env_vars[spec.name] = spec.url_env_var
         LOGGER.info(
             "Sidecar '%s' ready at %s (exported as %s).",
             spec.name,
@@ -121,11 +124,13 @@ class SidecarManager:
 
     def _build_env(self, spec: "SidecarConfig") -> dict[str, str]:
         env = os.environ.copy()
-        # Tell the sidecar where to bind. A single entrypoint can honor these
-        # without hardcoding the address chosen by the operator.
+        # Apply caller-supplied overrides first, then set the bind address so the
+        # reserved SIDECAR_HOST/SIDECAR_PORT always reflect the configured values
+        # the manager health-checks — a caller cannot accidentally redirect the
+        # sidecar to a different address/port via ``spec.env``.
+        env.update(spec.env)
         env["SIDECAR_HOST"] = spec.host
         env["SIDECAR_PORT"] = str(spec.port)
-        env.update(spec.env)
         return env
 
     async def _await_ready(self, spec: "SidecarConfig", proc: subprocess.Popen) -> None:
@@ -167,24 +172,41 @@ class SidecarManager:
             await self._stop_one(name)
 
     async def _stop_one(self, name: str) -> None:
-        proc = self._processes.pop(name, None)
+        proc = self._processes.get(name)
         if proc is None:
             return
         if proc.poll() is not None:
+            self._untrack(name)
             return
 
         LOGGER.info("Terminating sidecar '%s' (pid %d).", name, proc.pid)
         self._signal_group(proc, signal.SIGTERM)
         try:
             await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=_TERMINATION_GRACE_S)
+            self._untrack(name)
             return
         except asyncio.TimeoutError:
             LOGGER.warning("Sidecar '%s' did not exit after SIGTERM; sending SIGKILL.", name)
         self._signal_group(proc, signal.SIGKILL)
         try:
             await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=_TERMINATION_GRACE_S)
+            self._untrack(name)
         except asyncio.TimeoutError:
-            LOGGER.error("Sidecar '%s' (pid %d) did not exit after SIGKILL.", name, proc.pid)
+            # The process is still alive and unresponsive. Keep it tracked so
+            # ``running`` stays accurate and a later stop_all() can retry, rather
+            # than silently orphaning it.
+            LOGGER.error(
+                "Sidecar '%s' (pid %d) did not exit after SIGKILL; leaving it tracked for retry.",
+                name,
+                proc.pid,
+            )
+
+    def _untrack(self, name: str) -> None:
+        """Drop a confirmed-stopped sidecar and unset its now-stale discovery URL."""
+        self._processes.pop(name, None)
+        env_var = self._injected_env_vars.pop(name, None)
+        if env_var is not None:
+            os.environ.pop(env_var, None)
 
     @staticmethod
     def _signal_group(proc: subprocess.Popen, sig: int) -> None:

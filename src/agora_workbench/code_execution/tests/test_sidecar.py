@@ -63,6 +63,18 @@ def test_sidecar_config_health_url_normalizes_missing_slash():
     assert spec.health_url() == "http://127.0.0.1:9100/ready"
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.5", "::1", "localhost"])
+def test_sidecar_config_allows_loopback_hosts(host):
+    spec = SidecarConfig(name="m", command=["-m", "x"], url_env_var="U", port=9100, host=host)
+    assert spec.host == host
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "10.0.0.5", "example.com", ""])
+def test_sidecar_config_rejects_non_loopback_hosts(host):
+    with pytest.raises(ValidationError):
+        SidecarConfig(name="m", command=["-m", "x"], url_env_var="U", port=9100, host=host)
+
+
 def test_server_config_sidecars_default_empty():
     config = _server_config()
     assert config.sidecars == []
@@ -164,6 +176,26 @@ async def test_manager_starts_health_checks_and_injects_env(tmp_path, monkeypatc
         await manager.stop_all()
 
     assert manager.running is False
+    # Shutdown must unset the now-stale discovery URL so it does not leak into
+    # later tests (or mislead kernels about a sidecar that is gone).
+    assert env_var not in os.environ
+
+
+def test_build_env_reserves_sidecar_host_and_port():
+    """Caller-supplied SIDECAR_HOST/PORT must not override the configured bind."""
+    spec = SidecarConfig(
+        name="fake",
+        command=["-m", "svc"],
+        url_env_var="SVC_URL",
+        port=9100,
+        host="127.0.0.1",
+        env={"SIDECAR_HOST": "0.0.0.0", "SIDECAR_PORT": "1", "EXTRA": "keep"},
+    )
+    manager = SidecarManager(_server_config(sidecars=[spec]))
+    env = manager._build_env(spec)
+    assert env["SIDECAR_HOST"] == "127.0.0.1"
+    assert env["SIDECAR_PORT"] == "9100"
+    assert env["EXTRA"] == "keep"
 
 
 @pytest.mark.asyncio
