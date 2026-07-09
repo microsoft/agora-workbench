@@ -50,6 +50,12 @@ reference = cache / "data/reference.parquet"
 df = pd.read_parquet(reference)
 ```
 
+!!! note "Provisioning model weights?"
+    Assets deliver the **files**. If loading those files (e.g. into a large
+    model) is expensive, don't load them inside every session — that pays the
+    cost once per kernel. Provision the weights as an asset, then load them once
+    in a **[sidecar](sidecars.md)** that serves inference over loopback HTTP.
+
 ## Data catalog (DataLakeDataManager)
 
 The `DataLakeDataManager` provides server-side data discovery and caching for dynamic assets — files the agent finds and uses during a session rather than pre-provisioned at startup.

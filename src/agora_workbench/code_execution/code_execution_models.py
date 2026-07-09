@@ -10,7 +10,7 @@ This module contains Pydantic models used by the code execution server:
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AssetSpec(BaseModel):
@@ -57,6 +57,119 @@ class AssetSpec(BaseModel):
         default=None,
         description="SHA-256 hex digest. When provided, skip download if destination matches.",
     )
+
+
+class SidecarConfig(BaseModel):
+    """Specification for a long-lived helper process co-located with the server.
+
+    A *sidecar* is a background process the ``CodeExecutionServer`` launches at
+    startup and shuts down on exit. It exists to host expensive, process-global
+    state — most commonly a heavy model that would otherwise be reloaded (and
+    its memory multiplied) inside every isolated kernel session. The model is
+    loaded **once** in the sidecar; kernel-side tool code reaches it over
+    loopback HTTP, so each ``execute_{name}_code`` session stays cheap.
+
+    By default the sidecar runs with the server's own **kernel environment**
+    Python interpreter (``ServerConfig.get_python_path()``), so it can import
+    the same heavy dependencies the tools use without a second environment. Set
+    ``use_env_python=False`` to launch an arbitrary executable instead (e.g. a
+    sidecar shipped as a standalone binary or served from another interpreter).
+
+    Discovery contract:
+        The resolved base URL (``http://{host}:{port}``) is exported into the
+        environment under ``url_env_var`` on the server process *before* any
+        kernel is spawned, so every kernel inherits it. Tool code reads it::
+
+            import os, httpx
+            base = os.environ["MYMODEL_SERVICE_URL"]
+            resp = httpx.post(f"{base}/predict", json={...}, timeout=600)
+
+        The sidecar process is told where to bind via the ``SIDECAR_HOST`` and
+        ``SIDECAR_PORT`` environment variables (in addition to any ``env``
+        overrides), so a single entrypoint can honor the configured address.
+    """
+
+    name: str = Field(description="Logical name for the sidecar (e.g., 'retrochimera-model').")
+    command: list[str] = Field(
+        description=(
+            "Argument vector for the sidecar. When ``use_env_python`` is True (default) "
+            "these args are appended to the kernel environment's Python interpreter, so "
+            "``['-m', 'mypkg.model_service']`` runs that module in the tools' environment. "
+            "When False, ``command`` is executed verbatim as its own program."
+        )
+    )
+    use_env_python: bool = Field(
+        default=True,
+        description=(
+            "Prepend the server's kernel-environment Python (ServerConfig.get_python_path()) "
+            "to ``command``. Disable to run an arbitrary executable that manages its own runtime."
+        ),
+    )
+    url_env_var: str = Field(
+        description=(
+            "Environment variable name under which the sidecar's base URL is exported to "
+            "the server process (and therefore inherited by every kernel). Tool code reads "
+            "this to locate the sidecar."
+        )
+    )
+    host: str = Field(
+        default="127.0.0.1",
+        description="Loopback bind address for the sidecar. Kept on 127.0.0.1 by default; the sidecar is an internal implementation detail and must not be exposed off-box.",
+    )
+    port: int = Field(
+        gt=0,
+        lt=65536,
+        description="TCP port the sidecar listens on (passed to it via SIDECAR_PORT and used to build url_env_var).",
+    )
+    health_path: str = Field(
+        default="/health",
+        description="Path polled (HTTP GET, expecting 2xx) to determine readiness after launch.",
+    )
+    readiness_timeout_s: float = Field(
+        default=120.0,
+        gt=0,
+        description="Maximum seconds to wait for the sidecar's health endpoint to return success before failing startup.",
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Extra environment variables set on the sidecar process (merged over the inherited environment).",
+    )
+
+    @field_validator("host")
+    @classmethod
+    def _validate_loopback_host(cls, value: str) -> str:
+        """Reject non-loopback bind addresses.
+
+        A sidecar is an internal implementation detail reached only by co-located
+        kernels; binding it to a routable address (e.g. ``0.0.0.0``) would expose
+        it off-box. Only loopback addresses and ``localhost`` are permitted. For a
+        genuinely remote/shared service, don't use a sidecar — point tool code at
+        the remote URL directly (see the sidecars guide).
+        """
+        import ipaddress
+
+        if value == "localhost":
+            return value
+        try:
+            address = ipaddress.ip_address(value)
+        except ValueError as exc:
+            raise ValueError(
+                f"Sidecar host must be a loopback IP address or 'localhost', got {value!r}."
+            ) from exc
+        if not address.is_loopback:
+            raise ValueError(
+                f"Sidecar host must be loopback (got {value!r}); sidecars are internal and "
+                f"must not be exposed off-box. Use a separate service for remote access."
+            )
+        return value
+
+    def base_url(self) -> str:
+        """The base URL kernels use to reach the sidecar."""
+        return f"http://{self.host}:{self.port}"
+
+    def health_url(self) -> str:
+        """The URL polled to determine readiness."""
+        return f"{self.base_url()}{self.health_path if self.health_path.startswith('/') else '/' + self.health_path}"
 
 
 class ToolCallRecord(BaseModel):
@@ -185,6 +298,16 @@ class ServerConfig(BaseModel):
     additional_commands: list[str] = Field(
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
+    )
+    sidecars: list[SidecarConfig] = Field(
+        default_factory=list,
+        description=(
+            "Long-lived helper processes launched at server startup and stopped on shutdown. "
+            "Use a sidecar to load an expensive, process-global resource (e.g. a large model) "
+            "exactly once and share it across all kernel sessions over loopback HTTP, instead "
+            "of paying its memory cost inside every isolated kernel. Each sidecar's base URL is "
+            "exported to kernels via its ``url_env_var``. Not started during ``warm`` (build-time)."
+        ),
     )
 
     # --- Assets ---

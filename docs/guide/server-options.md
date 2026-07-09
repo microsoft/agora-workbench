@@ -47,6 +47,14 @@ The `type` field on `ServerConfig` controls how the Python environment is manage
 - For `type="conda"`, `dependency_file` contains `environment.yml` content
 - For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), use **`conda-forge`** rather than system package managers like `apt-get`
 
+!!! warning "Heavy models load *per session*"
+    Each `execute_{name}_code` session runs in its **own kernel process**, so
+    anything a tool loads — including a multi-gigabyte model — is loaded once
+    *per session*. N concurrent sessions means N copies in RAM, which readily
+    exhausts a modest host. If your environment includes a large model or other
+    expensive process-global state, load it once in a **[sidecar](sidecars.md)**
+    and share it across sessions instead.
+
 ### Example: conda environment
 
 ```python
@@ -122,7 +130,7 @@ class ChemistryServer(CodeExecutionServer):
 
 ## Configuration reference
 
-`ServerConfig` has five groups of settings:
+`ServerConfig` has six groups of settings:
 
 ### Identity
 
@@ -150,6 +158,12 @@ class ChemistryServer(CodeExecutionServer):
 |-------|-------------|
 | `assets` | List of `AssetSpec` objects provisioned into the env cache at startup (see [Working with data](working-with-data.md#asset-provisioning)) |
 | `auto_provision` | Fetch the declared `assets` on startup (default: `True`) |
+
+### Sidecars
+
+| Field | Description |
+|-------|-------------|
+| `sidecars` | List of `SidecarConfig` objects — long-lived helper processes launched at startup and stopped on shutdown, used to load an expensive resource (e.g. a model) once and share it across all kernel sessions over loopback HTTP (see [Sidecars](sidecars.md)) |
 
 ### Execution
 
