@@ -174,7 +174,7 @@ async def test_manager_starts_health_checks_and_injects_env(tmp_path, monkeypatc
             assert resp.status_code == 200
     finally:
         await manager.stop_all()
-
+        os.environ.pop(env_var, None)
     assert manager.running is False
     # Shutdown must unset the now-stale discovery URL so it does not leak into
     # later tests (or mislead kernels about a sidecar that is gone).
