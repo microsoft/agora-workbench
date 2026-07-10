@@ -544,6 +544,24 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
         return
     if final is None:
         return
+
+    # Flush tool-call trace from the kernel before publishing the event,
+    # so the activity UI can display which domain tools were invoked.
+    tool_calls: list[dict] = []
+    if server.tool_registry and server.tool_registry.tools and session_id in server._tool_proxies_injected:
+        from .tool_proxy import FLUSH_SNIPPET
+
+        try:
+            trace_result = await server.session_manager.execute_code_for_session(
+                session_id=session_id, code=FLUSH_SNIPPET, timeout=10
+            )
+            stdout, _stderr, success, _displays, _artifacts = trace_result
+            if success and stdout:
+                raw_calls = json.loads(stdout.strip())
+                tool_calls = [ToolCallRecord(**record).model_dump() for record in raw_calls]
+        except Exception:
+            LOGGER.debug("Failed to flush tool-call trace for job_finished event (job %s)", job_id)
+
     server.activity_publisher.publish_nowait(
         {
             "type": "job_finished",
@@ -557,6 +575,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
             "duration_ms": (
                 float(final.get("elapsed_seconds", 0.0)) * 1000.0 if final.get("elapsed_seconds") is not None else None
             ),
+            "tool_calls": tool_calls,
         }
     )
 
