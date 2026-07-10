@@ -454,7 +454,7 @@ class TestDispatcherProxyCall:
                 result = await server._proxy_dispatcher_call(
                     upstream=upstream,
                     tool_name="execute_code",
-                    arguments={"code": "print('hi')", "description": "", "timeout": 300, "background": False},
+                    arguments={"code": "print('hi')", "description": ""},
                     ctx=None,
                     connector_session_id="conn-session-1",
                 )
@@ -486,7 +486,7 @@ class TestDispatcherProxyCall:
                 result = await server._proxy_dispatcher_call(
                     upstream=upstream,
                     tool_name="execute_code",
-                    arguments={"code": "x", "description": "", "timeout": 300, "background": False},
+                    arguments={"code": "x", "description": ""},
                     ctx=None,
                     connector_session_id="conn-session-1",
                 )

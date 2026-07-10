@@ -289,8 +289,9 @@ class ConnectorServer(BaseMCPServer):
         self.mcp.tool(
             name=tool_name,
             description=(
-                f"Check status/output for a background code execution job started with "
-                f"execute_{upstream_name}_code(background=True)."
+                f"Check status/output for a background code execution job on {upstream_name}. "
+                f"Jobs are created when the upstream's execution_mode is 'async_only' or when "
+                f"'adaptive' mode promotes a long-running execution to background."
             ),
         )(check_job_proxy)
 
@@ -629,13 +630,9 @@ class ConnectorServer(BaseMCPServer):
         for bridge in bridges:
             errors = []
             if bridge["from_state"] not in produced_states:
-                errors.append(
-                    f"from_state '{bridge['from_state']}' not found in any upstream's state_produces"
-                )
+                errors.append(f"from_state '{bridge['from_state']}' not found in any upstream's state_produces")
             if bridge["to_state"] not in required_states:
-                errors.append(
-                    f"to_state '{bridge['to_state']}' not found in any upstream's state_requires"
-                )
+                errors.append(f"to_state '{bridge['to_state']}' not found in any upstream's state_requires")
             if errors:
                 LOGGER.error(
                     "Bridge validation failed for %s → %s: %s",
@@ -643,9 +640,7 @@ class ConnectorServer(BaseMCPServer):
                     bridge.get("to_state"),
                     "; ".join(errors),
                 )
-                raise ValueError(
-                    f"Invalid bridge edge in '{connector_name}' config: {'; '.join(errors)}"
-                )
+                raise ValueError(f"Invalid bridge edge in '{connector_name}' config: {'; '.join(errors)}")
             valid_bridges.append(bridge)
 
         if valid_bridges:

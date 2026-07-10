@@ -176,19 +176,19 @@ class RouterServer(ConnectorServer):
             ctx: Context,
             code: str,
             description: str = "",
-            timeout: int = 300,
-            background: bool = False,
+            timeout: int | None = None,
         ) -> str:
             """Execute Python code on the upstream server (proxied)."""
+            arguments: dict = {
+                "code": code,
+                "description": description,
+            }
+            if timeout is not None:
+                arguments["timeout"] = timeout
             return await server._proxy_mcp_tool_call(
                 upstream=upstream,
                 tool_name=tool_name,
-                arguments={
-                    "code": code,
-                    "description": description,
-                    "timeout": timeout,
-                    "background": background,
-                },
+                arguments=arguments,
                 ctx=ctx,
             )
 
