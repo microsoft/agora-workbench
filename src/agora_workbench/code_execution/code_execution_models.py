@@ -346,11 +346,14 @@ class ServerConfig(BaseModel):
         ),
     )
     promotion_threshold_s: float = Field(
-        default=30.0,
+        default=60.0,
         gt=0,
         description=(
             "Seconds to wait before promoting a synchronous execution to a "
-            "background job.  Only used when ``execution_mode='adaptive'``."
+            "background job.  Only used when ``execution_mode='adaptive'``.  "
+            "Default is 60 s — safely under typical reverse-proxy / load-balancer "
+            "request timeouts (often 60–300 s) while still allowing fast tools "
+            "to complete synchronously."
         ),
     )
     max_timeout: int = Field(

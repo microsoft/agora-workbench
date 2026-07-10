@@ -24,7 +24,7 @@ class TestExecutionModeConfig:
 
     def test_default_promotion_threshold(self):
         config = ServerConfig(name="t", description="d", type="uv", dependency_file="numpy\n")
-        assert config.promotion_threshold_s == 30.0
+        assert config.promotion_threshold_s == 60.0
 
     def test_async_only_mode_accepted(self):
         config = ServerConfig(
@@ -82,7 +82,7 @@ class TestExecutionModeConfig:
         )
         data = json.loads(config.model_dump_json())
         assert data["execution_mode"] == "adaptive"
-        assert data["promotion_threshold_s"] == 30.0
+        assert data["promotion_threshold_s"] == 60.0
 
 
 # ============================================================================
