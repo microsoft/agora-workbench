@@ -647,7 +647,11 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             timeout: Execution timeout in seconds (max: {max_timeout})
 
         Returns:
-            Execution result with stdout, stderr, status, and session_id
+            JSON string with either an inline execution result (stdout, stderr,
+            success, session_id) or a background job handle (job_id, status,
+            poll_tool, session_id).  A job handle is returned when the server's
+            ``execution_mode`` is ``async_only``, or when ``adaptive`` mode
+            promotes a long-running execution.
         """
         # Extract session_id from fastmcp Context
         session_id = None

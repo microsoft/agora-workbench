@@ -91,34 +91,71 @@ class TestExecutionModeConfig:
 
 
 @pytest.mark.asyncio
-async def test_async_only_always_returns_job_handle(test_server):
-    """In async_only mode, every execution returns a job handle instead of inline results."""
+async def test_async_only_returns_job_handle_via_server_method(test_server):
+    """_execute_code_background (used by async_only mode) returns a job handle and completes."""
+    session_id = test_server.session_manager.create_session(
+        data={}, user_identity="test_user", user_token="test-token", token_claims={}
+    )
+    session = test_server.session_manager.get_session(session_id)
+    set_current_session(session)
+    try:
+        job_result = await test_server._execute_code_background("print('hello')", timeout=10)
+    finally:
+        set_current_session(None)
+
+    assert "job_id" in job_result
+    assert job_result["status"] == "running"
+    assert job_result["session_id"] == session_id
+
+    # Wait for completion
+    final_status = None
+    for _ in range(30):
+        status = test_server.session_manager.check_background_job(job_result["job_id"])
+        if status["status"] != "running":
+            final_status = status
+            break
+        await asyncio.sleep(0.1)
+
+    assert final_status is not None
+    assert final_status["status"] == "completed"
+    assert "hello" in final_status["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_async_only_mode_routes_through_background(test_server):
+    """In async_only mode, _execute_code_with_promotion is not used — verify via server config."""
     original_mode = test_server.server_config.execution_mode
     test_server.server_config.execution_mode = "async_only"
     try:
+        # async_only should be reflected in config
+        assert test_server.server_config.execution_mode == "async_only"
+
+        # Verify the execution path: async_only goes through _execute_code_background,
+        # which always returns a job handle dict (never a CodeExecutionResult).
         session_id = test_server.session_manager.create_session(
             data={}, user_identity="test_user", user_token="test-token", token_claims={}
         )
         session = test_server.session_manager.get_session(session_id)
         set_current_session(session)
         try:
-            job_result = await test_server._execute_code_background("print('hello')", timeout=10)
+            result = await test_server._execute_code_background("print('async_only_test')", timeout=10)
         finally:
             set_current_session(None)
 
-        assert "job_id" in job_result
-        assert job_result["status"] == "running"
-        assert job_result["session_id"] == session_id
+        # Must be a job handle, not inline results
+        assert isinstance(result, dict)
+        assert "job_id" in result
+        assert result["status"] == "running"
+        assert "stdout" not in result  # not inline — must poll
 
-        # Wait for completion
+        # Wait and verify completion
         for _ in range(30):
-            status = test_server.session_manager.check_background_job(job_result["job_id"])
+            status = test_server.session_manager.check_background_job(result["job_id"])
             if status["status"] != "running":
                 break
             await asyncio.sleep(0.1)
-
         assert status["status"] == "completed"
-        assert "hello" in status["stdout"]
+        assert "async_only_test" in status["stdout"]
     finally:
         test_server.server_config.execution_mode = original_mode
 

@@ -867,7 +867,9 @@ class SessionManager:
 
         Args:
             session_id: Session identifier.
-            code: **Pre-processed** Python code (preambles already applied by caller).
+            code: Python code to execute.  This method applies the outputs and
+                token preambles internally (same as the foreground path), so
+                callers should pass the raw user code — **not** pre-preambled.
             timeout: Total execution timeout in seconds.
             promotion_threshold_s: Seconds to wait before promoting.
             working_dir: Optional working directory for the kernel.
