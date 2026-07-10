@@ -668,8 +668,9 @@ class CodeExecutionServer(BaseMCPServer):
         self.mcp.tool(
             name=f"{self.server_config.name}_check_job",
             description=(
-                "Check status/output for a background code execution job started with "
-                f"{self.get_tool_name()}(background=True)."
+                "Check status/output for a background code-execution job. "
+                "Jobs are created when execution_mode is 'async_only' or when "
+                "'adaptive' mode promotes a long-running execution to background."
             ),
         )(check_job_tool)
 
@@ -1081,6 +1082,44 @@ class CodeExecutionServer(BaseMCPServer):
             session_id=session_id, code=code, timeout=timeout, working_dir=working_dir_str
         )
         return result
+
+    async def _execute_code_with_promotion(
+        self, code: str, timeout: int, promotion_threshold_s: float
+    ) -> "CodeExecutionResult | dict[str, Any]":
+        """Execute code synchronously, promoting to a background job if it exceeds the threshold.
+
+        Returns:
+            CodeExecutionResult when execution completes within the threshold.
+            dict (job handle with ``promoted=True``) when promoted to background.
+        """
+        session = get_current_session()
+        session_id = session.session_id
+        working_dir_str = str(self.working_dir) if self.working_dir else None
+
+        result = await self.session_manager.start_promoted_execution_for_session(
+            session_id=session_id,
+            code=code,
+            timeout=timeout,
+            promotion_threshold_s=promotion_threshold_s,
+            working_dir=working_dir_str,
+        )
+
+        if isinstance(result, dict):
+            # Promoted to background — return the job handle as-is
+            return result
+
+        # Completed within threshold — convert the tuple to CodeExecutionResult
+        stdout, stderr, success, displays, artifacts = result
+        execution_result = CodeExecutionResult(
+            stdout=stdout,
+            stderr=stderr,
+            execution_time=0.0,  # not tracked in tuple path; tracing adds timing
+            success=success,
+            error=None if success else "Kernel execution failed",
+            displays=displays,
+            artifacts=artifacts,
+        )
+        return self.postprocess_result(execution_result)
 
     async def _execute_code_with_tracing(self, code: str, timeout: int) -> CodeExecutionResult:
         """

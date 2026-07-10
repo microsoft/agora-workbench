@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastmcp import Context
 
 from . import agent_guidance
-from .code_execution_models import CodeExecutionResult
+from .code_execution_models import CodeExecutionResult, ToolCallRecord
 from .code_extraction import (
     ASSET_PATHLIB_IMPORT,
     _VAR_PREFIX_ASSET,
@@ -569,7 +569,6 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         code: str,
         description: str = "",
         timeout: int = server.default_timeout,
-        background: bool = False,
     ) -> str:
         """
         Execute Python code in the isolated environment with persistent state.
@@ -617,13 +616,16 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         - If output exceeds the server's truncation threshold it will be
           clipped, but you should proactively avoid hitting that limit.
 
+        **Adaptive execution:** This server may promote long-running code to
+        background execution automatically. If a response contains
+        ``"promoted": true``, the code is still running — use the tool named
+        in ``poll_tool`` with the returned ``job_id`` to retrieve results.
+
         Args:
             code: Python code to execute
             description: One-sentence summary of what the code does (shown in
                 the activity UI). Optional but strongly recommended.
             timeout: Execution timeout in seconds (max: {max_timeout})
-            background: When True, submit code to run in the same session kernel
-                and return immediately with a job handle.
 
         Returns:
             Execution result with stdout, stderr, status, and session_id
@@ -699,13 +701,23 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
             LOGGER.info(
                 f"Executing code in {server.server_config.name} environment "
-                f"(session={session.session_id[:8]}, timeout={timeout}s)"
+                f"(session={session.session_id[:8]}, timeout={timeout}s, "
+                f"mode={server.server_config.execution_mode})"
             )
 
-            if background:
+            execution_mode = server.server_config.execution_mode
+            check_tool_name = f"{server.server_config.name}_check_job"
+
+            # --- async_only: always submit as background ---
+            if execution_mode == "async_only":
                 job_result = await server._execute_code_background(code, timeout)
                 if description:
                     job_result["description"] = description
+                job_result["poll_tool"] = check_tool_name
+                job_result["message"] = (
+                    f"Code submitted for background execution. "
+                    f"Poll with {check_tool_name}(job_id='{job_result.get('job_id')}')."
+                )
                 server.session_manager.update_session(session.session_id, session)
                 bg_session_id = session.session_id
                 bg_job_id = job_result.get("job_id")
@@ -725,12 +737,50 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                     )
                 return json.dumps(job_result, indent=2)
 
-            # Execute code with persistent namespace from session
-            result = await server._execute_code_with_tracing(code, timeout)
-            result.description = description
+            # --- adaptive: sync with promotion to background ---
+            if execution_mode == "adaptive":
+                adaptive_result = await server._execute_code_with_promotion(
+                    code, timeout, server.server_config.promotion_threshold_s
+                )
+                if isinstance(adaptive_result, dict):
+                    # Promoted to background
+                    if description:
+                        adaptive_result["description"] = description
+                    adaptive_result["poll_tool"] = check_tool_name
+                    adaptive_result["message"] = (
+                        f"Execution exceeded {server.server_config.promotion_threshold_s}s "
+                        f"and was promoted to background. "
+                        f"Poll with {check_tool_name}(job_id='{adaptive_result.get('job_id')}')."
+                    )
+                    server.session_manager.update_session(session.session_id, session)
+                    bg_session_id = session.session_id
+                    bg_job_id = adaptive_result.get("job_id")
+                    server.activity_publisher.publish_nowait(
+                        {
+                            "type": "job_started",
+                            "description": description,
+                            "code": code,
+                            "session_id": bg_session_id,
+                            "job_id": bg_job_id,
+                        }
+                    )
+                    if bg_job_id:
+                        asyncio.create_task(
+                            _publish_job_finished_when_done(server, bg_session_id, bg_job_id),
+                            name=f"activity-job-finished-{bg_job_id}",
+                        )
+                    return json.dumps(adaptive_result, indent=2)
+                # Completed within threshold — adaptive_result is a CodeExecutionResult
+                result = adaptive_result
+                result.description = description
+                server.session_manager.update_session(session.session_id, session)
+                # Fall through to the sync result formatting below
 
-            # Save the session to persist updated state
-            server.session_manager.update_session(session.session_id, session)
+            else:
+                # --- sync (default): block until completion ---
+                result = await server._execute_code_with_tracing(code, timeout)
+                result.description = description
+                server.session_manager.update_session(session.session_id, session)
 
             # Publish activity event (best-effort; no-op when ACTIVITY_UI_URL is unset).
             # Artifact download URLs are no longer emitted here — agents use the
@@ -826,8 +876,33 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]":
     """Build a tool that checks status/output for a background code-execution job."""
 
+    async def _flush_tool_call_trace(session_id: str) -> list[dict]:
+        """Harvest tool-call records from a session kernel after a background job completes.
+
+        Returns a list of ToolCallRecord dicts, or empty on any failure.
+        """
+        from .tool_proxy import FLUSH_SNIPPET
+
+        if not (server.tool_registry and server.tool_registry.tools and session_id in server._tool_proxies_injected):
+            return []
+        try:
+            trace_result = await server.session_manager.execute_code_for_session(
+                session_id=session_id, code=FLUSH_SNIPPET, timeout=10
+            )
+            stdout, _stderr, success, _displays, _artifacts = trace_result
+            if success and stdout:
+                raw_calls = json.loads(stdout.strip())
+                return [ToolCallRecord(**record).model_dump() for record in raw_calls]
+        except Exception:
+            LOGGER.warning("Failed to flush tool-call trace for session %s", session_id)
+        return []
+
     async def check_job_tool(ctx: Context, job_id: str) -> str:
-        """Check the status of a background `execute_code(background=True)` job."""
+        """Check the status of a background code-execution job.
+
+        Jobs are created when execution_mode is 'async_only' or when
+        'adaptive' mode promotes a long-running execution to background.
+        """
         mcp_session_id = None
         if ctx:
             try:
@@ -845,6 +920,15 @@ def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaita
             # execute_code path: the user — not the agent — downloads files,
             # and the URLs already ride the job_finished activity event.
             status.pop("artifacts", None)
+
+            # Flush tool-call trace when the job has completed
+            if status.get("status") in ("completed", "failed"):
+                job_session_id = status.get("session_id")
+                if job_session_id:
+                    tool_calls = await _flush_tool_call_trace(job_session_id)
+                    if tool_calls:
+                        status["tool_calls"] = tool_calls
+
             return json.dumps(status, indent=2)
         except Exception as e:
             LOGGER.error(f"check_job failed: {e}", exc_info=True)

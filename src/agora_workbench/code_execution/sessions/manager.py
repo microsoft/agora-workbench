@@ -848,6 +848,203 @@ class SessionManager:
 
         return {"job_id": job_id, "status": job.status, "session_id": session_id}
 
+    async def start_promoted_execution_for_session(
+        self,
+        session_id: str,
+        code: str,
+        timeout: float,
+        promotion_threshold_s: float,
+        working_dir: Optional[str] = None,
+    ) -> "Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]":
+        """Execute code synchronously, promoting to a background job if it exceeds the threshold.
+
+        Starts executing like the normal foreground path. If the kernel reaches
+        ``idle`` within *promotion_threshold_s* seconds the result is returned
+        as a ``(stdout, stderr, success, displays, artifacts)`` tuple — identical
+        to :meth:`execute_code_for_session`.  If the threshold expires while the
+        kernel is still busy, the in-flight execution is registered as a
+        :class:`_BackgroundJob` and a job-handle dict is returned instead.
+
+        Args:
+            session_id: Session identifier.
+            code: **Pre-processed** Python code (preambles already applied by caller).
+            timeout: Total execution timeout in seconds.
+            promotion_threshold_s: Seconds to wait before promoting.
+            working_dir: Optional working directory for the kernel.
+
+        Returns:
+            Either the 5-tuple ``(stdout, stderr, success, displays, artifacts)``
+            when the execution completes within the threshold, or a dict with
+            ``job_id``, ``status``, ``session_id``, and ``promoted=True``.
+        """
+        try:
+            session = self.get_session(session_id)
+            user_token = session.user_token
+            user_identity = session.user_identity
+        except ValueError:
+            return (
+                "",
+                (
+                    f"Session {session_id} is no longer available (expired or cleaned up). "
+                    "Please create a new session and retry."
+                ),
+                False,
+                [],
+                [],
+            )
+
+        running_job_id = self._get_running_job_for_session(session_id)
+        if running_job_id:
+            return "", f"Session busy — job {running_job_id} is still running", False, [], []
+
+        async with self._get_kernel_execute_lock(session_id):
+            km, kc = await self._get_or_create_kernel(
+                session_id, working_dir, user_token=user_token, user_identity=user_identity
+            )
+            code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
+                session_id, code, user_token
+            )
+            outputs_before = self._snapshot_outputs_dir(session_id)
+            msg_id = kc.execute(code)
+
+            # --- Collect iopub messages for up to promotion_threshold_s ---
+            stdout_parts: list[str] = []
+            stderr_parts: list[str] = []
+            displays: list[dict] = []
+            displays_bytes = 0
+            success = True
+            completed = False
+
+            def _maybe_capture_display(content_data: dict, content_meta: dict) -> None:
+                nonlocal displays_bytes
+                entry = _extract_display(content_data, content_meta)
+                if entry is None:
+                    return
+                size = len(entry["data"]) if isinstance(entry["data"], (str, bytes)) else 0
+                if displays_bytes + size > _MAX_DISPLAY_BYTES_PER_EXECUTE:
+                    return
+                displays_bytes += size
+                displays.append(entry)
+
+            start_time = time.monotonic()
+            deadline = start_time + promotion_threshold_s
+
+            while True:
+                now = time.monotonic()
+                remaining = deadline - now
+                if remaining <= 0:
+                    break  # threshold reached, promote
+
+                try:
+                    msg = await asyncio.wait_for(
+                        kc.get_iopub_msg(timeout=min(remaining, 1.0)),
+                        timeout=remaining + 0.5,
+                    )
+                except (queue.Empty, asyncio.TimeoutError):
+                    if time.monotonic() >= deadline:
+                        break
+                    continue
+
+                msg_type = msg["msg_type"]
+                content = msg.get("content", {})
+                parent_id = msg.get("parent_header", {}).get("msg_id")
+                if parent_id != msg_id:
+                    continue
+
+                if msg_type == "stream":
+                    stream_name = content.get("name", "stdout")
+                    text = content.get("text", "")
+                    if stream_name == "stdout":
+                        stdout_parts.append(text)
+                    elif stream_name == "stderr":
+                        stderr_parts.append(text)
+                elif msg_type == "error":
+                    traceback = "\n".join(content.get("traceback", []))
+                    stderr_parts.append(_strip_ansi(traceback))
+                    success = False
+                elif msg_type == "execute_result":
+                    data = content.get("data", {})
+                    text_result = data.get("text/plain", "")
+                    if text_result:
+                        stdout_parts.append(text_result)
+                    _maybe_capture_display(data, content.get("metadata", {}))
+                elif msg_type in ("display_data", "update_display_data"):
+                    data = content.get("data", {})
+                    text_result = data.get("text/plain", "")
+                    if text_result:
+                        stdout_parts.append(text_result)
+                    _maybe_capture_display(data, content.get("metadata", {}))
+                elif msg_type == "status" and content.get("execution_state") == "idle":
+                    # Drain trailing messages
+                    while True:
+                        try:
+                            trailing_msg = await asyncio.wait_for(kc.get_iopub_msg(timeout=0.2), timeout=0.5)
+                        except (queue.Empty, asyncio.TimeoutError, Exception):
+                            break
+                        r_type = trailing_msg["msg_type"]
+                        r_content = trailing_msg.get("content", {})
+                        r_parent = trailing_msg.get("parent_header", {}).get("msg_id")
+                        if r_parent != msg_id:
+                            continue
+                        if r_type == "stream":
+                            txt = r_content.get("text", "")
+                            if r_content.get("name") == "stdout":
+                                stdout_parts.append(txt)
+                            elif r_content.get("name") == "stderr":
+                                stderr_parts.append(txt)
+                        elif r_type == "execute_result":
+                            data = r_content.get("data", {})
+                            t = data.get("text/plain", "")
+                            if t:
+                                stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
+                        elif r_type in ("display_data", "update_display_data"):
+                            data = r_content.get("data", {})
+                            t = data.get("text/plain", "")
+                            if t:
+                                stdout_parts.append(t)
+                            _maybe_capture_display(data, r_content.get("metadata", {}))
+                    completed = True
+                    break
+
+            if completed:
+                # Finished within threshold — return as normal foreground result
+                stdout = "".join(stdout_parts)
+                stderr = "".join(stderr_parts)
+                self._kernel_last_used[session_id] = time.time()
+                try:
+                    outputs_after = self._snapshot_outputs_dir(session_id)
+                    artifacts = self._register_artifacts_from_diff(session_id, outputs_before, outputs_after)
+                except Exception:
+                    LOGGER.warning("Artifact discovery failed for session %s", session_id, exc_info=True)
+                    artifacts = []
+                return stdout, stderr, success, displays, artifacts
+
+            # --- Promote to background job ---
+            job_id = f"j_{uuid.uuid4().hex[:12]}"
+            job = _BackgroundJob(
+                job_id=job_id,
+                session_id=session_id,
+                msg_id=msg_id,
+                timeout=timeout,
+                start_time=start_time,
+                user_identity=user_identity or "",
+                stdout_parts=stdout_parts,
+                stderr_parts=stderr_parts,
+                success=success,
+                outputs_before=outputs_before,
+            )
+            job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
+            self._background_jobs[job_id] = job
+            self._session_running_jobs[session_id] = job_id
+
+            return {
+                "job_id": job_id,
+                "status": "running",
+                "session_id": session_id,
+                "promoted": True,
+            }
+
     def check_background_job(self, job_id: str, caller_identity: Optional[str] = None) -> dict[str, Any]:
         """Return current status/output for a background job.
 
