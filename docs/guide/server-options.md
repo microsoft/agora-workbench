@@ -169,6 +169,8 @@ class ChemistryServer(CodeExecutionServer):
 
 | Field | Description |
 |-------|-------------|
+| `execution_mode` | `"sync"` (default), `"async_only"`, or `"adaptive"` — controls whether `execute_{name}_code` blocks, always backgrounds, or auto-promotes long-running calls |
+| `promotion_threshold_s` | Seconds before adaptive mode promotes to background (default: 60) |
 | `max_timeout` | Maximum allowed timeout per execution (default: 600s) |
 | `default_timeout` | Default timeout (default: 300s) |
 | `output_truncation_threshold` | Max chars in stdout/stderr before truncation |

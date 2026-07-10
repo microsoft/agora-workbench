@@ -70,7 +70,7 @@ The UI renders a live feed of event cards grouped by session. Each event type sh
 |---|---|
 | `code_executed` | The Python code, stdout, stderr, duration, and any tool calls made |
 | `code_failed` | Same as above, plus the error message and traceback |
-| `job_started` / `job_finished` | Background job lifecycle with final results |
+| `job_started` / `job_finished` | Background job lifecycle with final results and tool-call traces |
 | `tool_search` | The query, matched tools, and matched skills |
 | `skill_loaded` | Which skill was loaded into the session |
 | `workflow_planned` | Domain, current/target state, and planned tool |
@@ -127,7 +127,7 @@ These are intentional:
 - **No persistence** — the buffer is in-memory (200 events by default, configurable via `ACTIVITY_UI_BUFFER`). Restarting the UI clears history.
 - **No auth** — binds to `127.0.0.1:8030` only. Loopback is the security model. **Do not bind to `0.0.0.0` without putting auth in front** — events contain raw agent code and stdout.
 - **No intra-call streaming** — events fire at MCP tool-call boundaries, not while code is running. A long `execute_code` shows nothing until it completes.
-- **No events for poll/housekeeping tools** — `check_job`, `check_batch`, `list_sessions`, `get_session_info` don't publish events. Only lifecycle transitions appear.
+- **No events for poll/housekeeping tools** — `check_job`, `check_batch`, `list_sessions`, `get_session_info` don't publish events. Only lifecycle transitions appear. (Note: `job_finished` events are emitted automatically when a background or promoted job reaches a terminal state — they are not triggered by `check_job` polling.)
 
 ## Health endpoint
 
