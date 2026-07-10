@@ -41,7 +41,7 @@ class TestExecutionModeConfig:
     def test_invalid_execution_mode_rejected(self):
         with pytest.raises(ValidationError):
             ServerConfig(
-                name="t", description="d", type="uv", dependency_file="numpy\n", execution_mode="invalid"
+                name="t", description="d", type="uv", dependency_file="numpy\n", execution_mode="invalid"  # type: ignore[arg-type]
             )
 
     def test_promotion_threshold_must_be_positive(self):
