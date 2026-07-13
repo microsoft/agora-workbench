@@ -130,13 +130,15 @@ class TestInjectBridges:
         assert path.get("path") is None
 
         # Inject bridge
-        graph.inject_bridges([
-            {
-                "from_state": "graphormer.reduction_predicted",
-                "to_state": "ezbattery.electrolyte_configured",
-                "description": "Pass predicted potentials to battery sim",
-            }
-        ])
+        graph.inject_bridges(
+            [
+                {
+                    "from_state": "graphormer.reduction_predicted",
+                    "to_state": "ezbattery.electrolyte_configured",
+                    "description": "Pass predicted potentials to battery sim",
+                }
+            ]
+        )
 
         # After bridge: path exists
         path = graph.path("graphormer.reduction_predicted", "ezbattery.simulation_complete")
@@ -162,12 +164,14 @@ class TestInjectBridges:
             ),
         ]
         graph = StateGraph(tools=tools, skills=[])
-        graph.inject_bridges([
-            {
-                "from_state": "graphormer.reduction_predicted",
-                "to_state": "ezbattery.electrolyte_configured",
-            }
-        ])
+        graph.inject_bridges(
+            [
+                {
+                    "from_state": "graphormer.reduction_predicted",
+                    "to_state": "ezbattery.electrolyte_configured",
+                }
+            ]
+        )
 
         result = graph.from_state("graphormer.reduction_predicted")
         tool_names = [t["name"] for t in result["tools_from_here"]]
@@ -186,9 +190,7 @@ class TestInjectBridges:
             ),
         ]
         graph = StateGraph(tools=tools, skills=[])
-        graph.inject_bridges([
-            {"from_state": "alpha.done", "to_state": "beta.ready"}
-        ])
+        graph.inject_bridges([{"from_state": "alpha.done", "to_state": "beta.ready"}])
 
         # beta domain should now exist
         assert "beta" in graph._domain_states
@@ -206,13 +208,15 @@ class TestInjectBridges:
             ),
         ]
         graph = StateGraph(tools=tools, skills=[])
-        graph.inject_bridges([
-            {
-                "from_state": "graphormer.reduction_predicted",
-                "to_state": "ezbattery.electrolyte_configured",
-                "description": "Pass potentials to battery sim",
-            }
-        ])
+        graph.inject_bridges(
+            [
+                {
+                    "from_state": "graphormer.reduction_predicted",
+                    "to_state": "ezbattery.electrolyte_configured",
+                    "description": "Pass potentials to battery sim",
+                }
+            ]
+        )
 
         overview = graph.overview()
         # Bridge edges appear in a top-level "bridges" list

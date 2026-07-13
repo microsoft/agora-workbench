@@ -211,8 +211,7 @@ class DispatcherServer(ConnectorServer):
             ctx: Context,
             code: str,
             description: str = "",
-            timeout: int = 300,
-            background: bool = False,
+            timeout: int | None = None,
         ) -> str:
             """Execute Python code on a worker (dispatched)."""
             connector_session_id = _get_session_id_from_context(ctx)
@@ -235,15 +234,16 @@ class DispatcherServer(ConnectorServer):
                 server._active_calls[worker_name] = server._active_calls.get(worker_name, 0) + 1
 
             try:
+                arguments: dict = {
+                    "code": code,
+                    "description": description,
+                }
+                if timeout is not None:
+                    arguments["timeout"] = timeout
                 result = await server._proxy_dispatcher_call(
                     upstream=upstream,
                     tool_name=server._upstream_execute_tool_name or "execute_code",
-                    arguments={
-                        "code": code,
-                        "description": description,
-                        "timeout": timeout,
-                        "background": background,
-                    },
+                    arguments=arguments,
                     ctx=ctx,
                     connector_session_id=connector_session_id,
                 )

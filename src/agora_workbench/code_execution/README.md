@@ -63,33 +63,72 @@ dependencies:
 )
 ```
 
-## Execution Modes and Session Meta Tools
+## Execution Modes
 
-### Background execution (`execute_<server>_code(background=True)`)
+`ServerConfig.execution_mode` controls how the `execute_<server>_code` tool returns results. There are three modes:
 
-`execute_<server>_code` supports a `background` flag:
+| Mode | Behavior |
+|------|----------|
+| `"sync"` (default) | Block until completion or timeout, return full result inline |
+| `"async_only"` | Always submit as a background job, return a job handle immediately |
+| `"adaptive"` | Start synchronously; if still running after `promotion_threshold_s` (default 60 s), promote to background and return a job handle |
 
-- `background=False` (default): run inline and return full execution output.
-- `background=True`: submit execution to the current session kernel and return immediately with a job handle.
+### Sync mode (default)
 
-Example submission result:
+Standard blocking execution. The tool call returns when the code finishes or the timeout expires.
+
+### Async-only mode
+
+Every invocation is submitted as a background job. The tool immediately returns a job handle:
 
 ```json
 {
   "job_id": "j_1234abcd5678",
   "status": "running",
-  "session_id": "..."
+  "session_id": "...",
+  "poll_tool": "myserver_check_job",
+  "message": "Code submitted for background execution. Poll with myserver_check_job(job_id='j_1234abcd5678')."
 }
 ```
 
-Use the `check_job` tool to poll status for jobs started with `background=True`.
+Use this mode when all tools on the server are long-running and you want to eliminate timeout tuning entirely.
+
+### Adaptive mode
+
+Starts executing synchronously. If the code completes within `promotion_threshold_s` seconds (default 60 s), the result is returned inline — identical to sync mode. If the threshold expires while the kernel is still busy, the execution is automatically promoted to a background job:
+
+```json
+{
+  "job_id": "j_1234abcd5678",
+  "status": "running",
+  "session_id": "...",
+  "promoted": true,
+  "poll_tool": "myserver_check_job",
+  "message": "Execution exceeded 60s and was promoted to background. Poll with myserver_check_job(job_id='j_1234abcd5678')."
+}
+```
+
+This mode avoids manual timeout tuning while keeping short operations fast. The `poll_tool` field in the response tells the agent which tool to call next.
+
+### Configuration
+
+```python
+config = ServerConfig(
+    name="chemistry",
+    description="...",
+    type="uv",
+    dependency_file="...",
+    execution_mode="adaptive",       # "sync", "async_only", or "adaptive"
+    promotion_threshold_s=60.0,      # seconds before promotion (adaptive only)
+)
+```
 
 ### `check_job` tool
 
 `check_job(job_id)` returns current background-job state and output:
 
 - Running job: `job_id`, `session_id`, `status`, `elapsed_seconds`, partial `stdout`/`stderr`
-- Terminal job (`completed` / `failed`): same fields plus `success` and optional `error`
+- Terminal job (`completed` / `failed`): same fields plus `success`, optional `error`, and `tool_calls` (structured trace records from any domain tools invoked during execution)
 
 Example terminal result:
 
@@ -101,7 +140,10 @@ Example terminal result:
   "elapsed_seconds": 12.341,
   "stdout": "...",
   "stderr": "",
-  "success": true
+  "success": true,
+  "tool_calls": [
+    {"tool_name": "run_dft", "args": {"smiles": "CCO"}, "duration_ms": 11200, "success": true}
+  ]
 }
 ```
 
@@ -109,11 +151,11 @@ Access control: background jobs are user-owned. `check_job` intentionally return
 
 ### Background job lifecycle and concurrency
 
-1. Submit with `execute_<server>_code(background=True)`.
+1. A job is created when execution_mode is `async_only`, or when `adaptive` mode promotes a long-running execution.
 2. Poll with `check_job(job_id)` until `status` is terminal.
-3. When terminal, consume final output (`stdout`/`stderr`/`success`/`error`).
+3. When terminal, consume final output (`stdout`/`stderr`/`success`/`error`/`tool_calls`).
 
-Only **one concurrent background job per session** is allowed. If a second background (or foreground) execution is attempted while one is running, the server returns a session-busy error with the active `job_id`.
+Only **one concurrent background job per session** is allowed. If a second execution is attempted while one is running, the server returns a session-busy error with the active `job_id`.
 
 Completed/failed background jobs are retained in-memory for bounded polling history and are eventually purged.
 

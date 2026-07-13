@@ -331,6 +331,31 @@ class ServerConfig(BaseModel):
 
     # --- Execution ---
 
+    execution_mode: Literal["sync", "async_only", "adaptive"] = Field(
+        default="sync",
+        description=(
+            "Controls how the ``execute_{name}_code`` tool returns results.\n\n"
+            "- ``sync`` (default): blocks until completion or timeout, returning "
+            "the full result inline.\n"
+            "- ``async_only``: every invocation is submitted as a background job "
+            "and the tool returns a job handle immediately.  The agent must poll "
+            "with ``{name}_check_job`` to retrieve results.\n"
+            "- ``adaptive``: starts executing synchronously; if execution is still "
+            "running after ``promotion_threshold_s`` seconds, it is automatically "
+            "promoted to a background job and a job handle is returned."
+        ),
+    )
+    promotion_threshold_s: float = Field(
+        default=60.0,
+        gt=0,
+        description=(
+            "Seconds to wait before promoting a synchronous execution to a "
+            "background job.  Only used when ``execution_mode='adaptive'``.  "
+            "Default is 60 s — safely under typical reverse-proxy / load-balancer "
+            "request timeouts (often 60–300 s) while still allowing fast tools "
+            "to complete synchronously."
+        ),
+    )
     max_timeout: int = Field(
         default=600,
         description="Maximum allowed execution timeout in seconds for any single code run.",

@@ -668,8 +668,9 @@ class CodeExecutionServer(BaseMCPServer):
         self.mcp.tool(
             name=f"{self.server_config.name}_check_job",
             description=(
-                "Check status/output for a background code execution job started with "
-                f"{self.get_tool_name()}(background=True)."
+                "Check status/output for a background code-execution job. "
+                "Jobs are created when execution_mode is 'async_only' or when "
+                "'adaptive' mode promotes a long-running execution to background."
             ),
         )(check_job_tool)
 
@@ -1081,6 +1082,70 @@ class CodeExecutionServer(BaseMCPServer):
             session_id=session_id, code=code, timeout=timeout, working_dir=working_dir_str
         )
         return result
+
+    async def _execute_code_with_promotion(
+        self, code: str, timeout: int, promotion_threshold_s: float
+    ) -> "CodeExecutionResult | dict[str, Any]":
+        """Execute code synchronously, promoting to a background job if it exceeds the threshold.
+
+        Returns:
+            CodeExecutionResult when execution completes within the threshold.
+            dict (job handle with ``promoted=True``) when promoted to background.
+        """
+        # Validate and preprocess, matching the sync/background paths
+        is_valid, error_msg = self.validate_code(code)
+        if not is_valid:
+            return CodeExecutionResult(success=False, error=error_msg)
+
+        code = self.preprocess_code(code)
+
+        session = get_current_session()
+        session_id = session.session_id
+        working_dir_str = str(self.working_dir) if self.working_dir else None
+
+        start_time = time.monotonic()
+        result = await self.session_manager.start_promoted_execution_for_session(
+            session_id=session_id,
+            code=code,
+            timeout=timeout,
+            promotion_threshold_s=promotion_threshold_s,
+            working_dir=working_dir_str,
+        )
+
+        if isinstance(result, dict):
+            # Promoted to background — return the job handle as-is
+            return result
+
+        # Completed within threshold — convert the tuple to CodeExecutionResult
+        execution_time = time.monotonic() - start_time
+        stdout, stderr, success, displays, artifacts = result
+        execution_result = CodeExecutionResult(
+            stdout=stdout,
+            stderr=stderr,
+            execution_time=execution_time,
+            success=success,
+            error=None if success else "Kernel execution failed",
+            displays=displays,
+            artifacts=artifacts,
+        )
+        execution_result = self.postprocess_result(execution_result)
+
+        # Flush tool-call trace records, matching the sync path
+        if (
+            self.tool_registry
+            and self.tool_registry.tools
+            and session
+            and session.session_id in self._tool_proxies_injected
+        ):
+            try:
+                trace_result = await self._execute_code(FLUSH_SNIPPET, timeout=10)
+                if trace_result.success and trace_result.stdout:
+                    raw_calls = json.loads(trace_result.stdout.strip())
+                    execution_result.tool_calls = [ToolCallRecord(**record) for record in raw_calls]
+            except Exception as e:
+                LOGGER.warning(f"Failed to extract tool call trace: {e}")
+
+        return execution_result
 
     async def _execute_code_with_tracing(self, code: str, timeout: int) -> CodeExecutionResult:
         """
