@@ -68,6 +68,12 @@ agent builds up state incrementally like a notebook rather than re-sending data
 every turn. This persistence is the main thing a code-execution server gives you
 over stateless tool calls.
 
+Each execution response includes the execution `session_id`. To continue an
+active session from another agent or a new MCP connection, pass that value as
+`execution_session_id` to `execute_{name}_code`. This is distinct from the MCP
+transport session ID; the server resumes only an existing session owned by the
+caller, and rejects unknown or expired IDs rather than creating a new kernel.
+
 → See the [Sessions API](../api/sessions.md).
 
 ## Three layers of guidance for the agent
