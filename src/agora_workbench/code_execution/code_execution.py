@@ -588,6 +588,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         code: str,
         description: str = "",
         timeout: int = server.default_timeout,
+        execution_session_id: Optional[str] = None,
     ) -> str:
         """
         Execute Python code in the isolated environment with persistent state.
@@ -645,6 +646,10 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             description: One-sentence summary of what the code does (shown in
                 the activity UI). Optional but strongly recommended.
             timeout: Execution timeout in seconds (max: {max_timeout})
+            execution_session_id: Existing execution session to resume. Use the
+                ``session_id`` returned by an earlier execution or session
+                management tool. The caller must own the session. Unknown or
+                expired IDs fail; they never create a new session.
 
         Returns:
             JSON string with either an inline execution result (stdout, stderr,
@@ -666,7 +671,10 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             # Restore auth ContextVars using the MCP transport session id
             server._restore_auth_context_for_mcp_session(session_id)
 
-            session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
+            if execution_session_id:
+                session = await server._get_existing_session(execution_session_id)
+            else:
+                session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
             set_current_session(session)
 
             # Inject tool proxies on first use of this session

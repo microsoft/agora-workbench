@@ -3,7 +3,9 @@ Tests for code execution functionality.
 """
 
 import asyncio
+import json
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +13,7 @@ from contextlib import contextmanager
 from fastapi import HTTPException
 
 from .. import CodeExecutionResult
+from .. import code_execution as execution_defaults
 from ..sessions import (
     set_current_request_token,
     set_current_session,
@@ -50,6 +53,47 @@ async def test_math_calculation(test_server, simple_code_samples):
     assert result.success is True
     assert "4" in result.stdout
     assert result.error is None
+
+
+@pytest.mark.asyncio
+async def test_execute_code_resumes_explicit_execution_session(test_server):
+    """An agent can run follow-up code in an owned session from another MCP connection."""
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        execute_code_tool = execution_defaults.build_tool(test_server)
+        result = await execute_code_tool(
+            ctx=SimpleNamespace(session_id=None),
+            code="resumed_value = 42\nprint(resumed_value)",
+            execution_session_id=session_id,
+        )
+        payload = json.loads(result)
+
+        assert payload["success"] is True
+        assert payload["session_id"] == session_id
+        assert payload["stdout"].strip() == "42"
+
+        follow_up = await test_server.execute_code_with_session(
+            "print(resumed_value)",
+            timeout=10,
+            session_id=session_id,
+        )
+        assert follow_up.success is True
+        assert follow_up.stdout.strip() == "42"
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
 
 
 @pytest.mark.asyncio

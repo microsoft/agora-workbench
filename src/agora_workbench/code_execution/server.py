@@ -815,6 +815,21 @@ class CodeExecutionServer(BaseMCPServer):
                 session.token_claims = fresh_claims
             LOGGER.debug(f"Refreshed token for session {session.session_id[:8]}")
 
+    async def _get_existing_session(self, session_id: str) -> "Session":
+        """Load an existing execution session after validating caller ownership.
+
+        Unlike transport-session lookup, this method never creates a session.
+        It is used for explicit cross-agent reconnection, where a stale or
+        invalid ID must fail instead of becoming a new empty kernel.
+        """
+        session = self.session_manager.get_session(session_id)
+        request_token = get_current_request_token()
+        if not await self._verify_session_ownership(session, request_token):
+            raise PermissionError(f"Not authorized to access session {session_id}.")
+
+        self._refresh_session_token(session)
+        return session
+
     async def _get_or_create_session(self, tool_name: str, session_id: Optional[str] = None) -> "Session":
         """
         Get or create a session for tool execution.
@@ -847,15 +862,7 @@ class CodeExecutionServer(BaseMCPServer):
         # If transport provided a session_id, prefer it deterministically.
         if session_id:
             try:
-                session = self.session_manager.get_session(session_id)
-
-                # Verify caller is authorized to access this session
-                request_token = get_current_request_token()
-                if not await self._verify_session_ownership(session, request_token):
-                    raise PermissionError(f"Not authorized to access session {session_id}.")
-
-                self._refresh_session_token(session)
-                return session
+                return await self._get_existing_session(session_id)
             except ValueError:
                 try:
                     self.session_manager.create_session(

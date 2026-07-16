@@ -302,6 +302,46 @@ class TestSessionOwnershipValidation:
         assert session.session_id == session_id
         assert session.user_identity == "user@example.com"
 
+    @pytest.mark.asyncio
+    async def test_get_existing_session_requires_existing_authorized_session(self, mock_entra_env):
+        """Explicit reconnection must never create a session for an unknown ID."""
+        from ... import CodeExecutionServer
+        from ...code_execution_models import ServerConfig
+        from ...sessions import set_current_user_identity
+
+        config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+        server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
+        set_current_request_token("authorized-token")
+        set_current_user_identity("user@example.com")
+
+        with pytest.raises(ValueError, match="Session missing-session not found"):
+            await server._get_existing_session("missing-session")
+
+        assert server.session_manager.storage.count() == 0
+
+    @pytest.mark.asyncio
+    async def test_get_existing_session_validates_ownership(self, mock_entra_env):
+        """Explicit reconnection applies the same ownership check as transport sessions."""
+        from ... import CodeExecutionServer
+        from ...code_execution_models import ServerConfig
+        from ...sessions import set_current_user_identity
+
+        config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+        server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
+        session_id = server.session_manager.create_session(
+            data={},
+            metadata={"type": "test"},
+            user_identity="user@example.com",
+            user_token="test-token",
+            token_claims={},
+        )
+        server._verify_session_ownership = AsyncMock(return_value=False)
+        set_current_request_token("unauthorized-token")
+        set_current_user_identity("user@example.com")
+
+        with pytest.raises(PermissionError, match=f"Not authorized to access session {session_id}"):
+            await server._get_existing_session(session_id)
+
 
 class TestSessionTokenRefresh:
     """Tests for session token refresh on existing sessions."""
