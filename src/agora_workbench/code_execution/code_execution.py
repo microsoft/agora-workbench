@@ -671,7 +671,9 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             # Restore auth ContextVars using the MCP transport session id
             server._restore_auth_context_for_mcp_session(session_id)
 
-            if execution_session_id:
+            if execution_session_id is not None:
+                if not execution_session_id:
+                    raise ValueError("execution_session_id must be a non-empty session id.")
                 session = await server._get_existing_session(execution_session_id)
             else:
                 session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
