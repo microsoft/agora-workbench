@@ -1,24 +1,7 @@
-# CODEOWNERS — msr-central/agora-agent
+# CODEOWNERS — microsoft/agora-workbench
 #
-# Default: every file requires review from the core team.
-# Later rules override earlier ones for matching paths, so files that
-# bots, agents, or workflows should be able to update autonomously are
-# listed below with NO owners (→ no required reviewers).
+# Every file requires review from the repository admins.
 #
 # Reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 
-# ── Default ──────────────────────────────────────────────────────────
-*                               @msr-central/msr-agora-github-sg
-
-# ── Bot / agent / workflow-friendly (no required reviewers) ─────────
-
-# README files anywhere in the repo (updated by docs workflows & agents)
-**/README.md
-
-# Dependency lock files & manifests (updated by Dependabot)
-**/uv.lock
-**/requirements.txt
-
-# CI/CD workflows & agentic workflow configs (updated by agents & gh aw compile)
-.github/workflows/**
-.github/aw/**
+*                               @bicsaurus @Danrong430 @jsmith13 @karin-strauss
