@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a problem or unexpected behavior in Agora Workbench.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please search existing issues before opening a new one.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is.
+      placeholder: When I run ..., I expected ... but instead ...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the behavior.
+      placeholder: |
+        1. Configure '...'
+        2. Run '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Relevant version and platform details.
+      placeholder: |
+        - Agora Workbench version / commit:
+        - Python version:
+        - OS:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and additional context
+      description: Paste any relevant log output or stack traces. This is automatically formatted, so no backticks needed.
+      render: shell
+    validations:
+      required: false
