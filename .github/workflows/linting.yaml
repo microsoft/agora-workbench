@@ -49,7 +49,7 @@ jobs:
         run: uv sync
       
       - name: Install Pyright
-        run: uv pip install pyright
+        run: uv pip install pyright==1.1.384
       
       - name: Run Ruff
         run: uv run ruff check --output-format=github src
