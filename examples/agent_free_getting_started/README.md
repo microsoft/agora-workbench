@@ -107,6 +107,16 @@ async def main() -> None:
     print("Sessions:", first_text(sessions))
 
     session_id = payload["session_id"]
+    resumed = await session.call_tool(
+        "execute_starter_code",
+        {
+            "description": "Reuse the retained DataFrame.",
+            "execution_session_id": session_id,
+            "code": "print(int(df['x'].max()))",
+        },
+    )
+    print("Resumed execution stdout:", json.loads(first_text(resumed))["stdout"].strip())
+
     closed = await session.call_tool("starter_close_session", {"session_id": session_id})
     print("Close session result:", first_text(closed))
 
@@ -175,7 +185,7 @@ EXEC_RESPONSE=$(curl -sS http://127.0.0.1:8010/mcp \
       "name":"execute_starter_code",
       "arguments":{
         "description":"Compute 2+2",
-        "code":"print(2+2)"
+        "code":"value = 2 + 2\nprint(value)"
       }
     }
   }')
@@ -183,6 +193,31 @@ EXEC_RESPONSE=$(curl -sS http://127.0.0.1:8010/mcp \
 echo "$EXEC_RESPONSE"
 EXEC_SESSION_ID=$(echo "$EXEC_RESPONSE" | python3 -c "import sys,json; r=json.load(sys.stdin); print(json.loads(r['result']['content'][0]['text'])['session_id'])")
 echo "Execution session: $EXEC_SESSION_ID"
+```
+
+Resume that execution session from this or another authenticated MCP connection
+by passing its ID to the execution tool. This ID is not the `Mcp-Session-Id`
+transport header:
+
+```bash
+curl -sS http://127.0.0.1:8010/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: $SESSION_ID" \
+  -H 'Authorization: ******' \
+  -d "{
+    \"jsonrpc\":\"2.0\",
+    \"id\":4,
+    \"method\":\"tools/call\",
+    \"params\":{
+      \"name\":\"execute_starter_code\",
+      \"arguments\":{
+        \"description\":\"Reuse state from the retained execution session\",
+        \"execution_session_id\":\"$EXEC_SESSION_ID\",
+        \"code\":\"print(value)\"
+      }
+    }
+  }"
 ```
 
 Close the execution session (note: this is the execution session ID, not the MCP transport session):
@@ -194,7 +229,7 @@ curl -sS http://127.0.0.1:8010/mcp \
   -H 'Authorization: Bearer dev-token' \
   -d "{
     \"jsonrpc\":\"2.0\",
-    \"id\":4,
+    \"id\":5,
     \"method\":\"tools/call\",
     \"params\":{
       \"name\":\"starter_close_session\",

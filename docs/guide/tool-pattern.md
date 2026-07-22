@@ -301,6 +301,23 @@ result = optimize(network, solver="highs")
 print(result["objective_value"])
 ```
 
+### Resuming a session from another agent
+
+Every execution response includes a `session_id`. If a different agent or a new
+MCP connection must process the retained state, pass that value explicitly:
+
+```text
+execute_energysystems_code(
+    execution_session_id="<session_id from the earlier execution>",
+    description="Optimize the retained network.",
+    code='result = optimize(network, solver="highs")\nprint(result["objective_value"])',
+)
+```
+
+`execution_session_id` is an execution-kernel identifier, not the MCP transport
+session ID. The server verifies that the caller owns the session; unknown,
+expired, or unauthorized IDs fail without creating a new kernel.
+
 ### Why this works
 
 - The kernel process is **one-per-session** and lives for the session's lifetime

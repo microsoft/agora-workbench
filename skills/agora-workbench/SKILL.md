@@ -47,6 +47,7 @@ The primary MCP tool is `execute_{server}_code`:
 | `description` | One-sentence summary shown to the user — **always set this** |
 | `timeout` | Seconds before execution is killed (increase for heavy computation) |
 | `background` | Set `True` for long-running jobs; poll with `{server}_check_job(job_id=...)` |
+| `execution_session_id` | Existing execution session to resume from another agent or MCP connection |
 
 ### Canonical example
 
@@ -72,6 +73,10 @@ execute_{server}_code(
 
 - A session is created automatically on first `execute_{server}_code` call.
 - All subsequent calls reuse the same session (variables persist).
+- To continue an active session from another agent or MCP connection, pass its
+  returned `session_id` as `execution_session_id` to `execute_{server}_code`.
+  This is not the MCP transport session ID; unknown, expired, or unauthorized
+  IDs fail rather than creating a new session.
 - Use `{server}_inspect_session(session_id=...)` to see what variables exist and check background job status.
 - Use `{server}_close_session(session_id=...)` only when done with a server entirely.
 - Use `{server}_list_sessions()` to see active sessions.
