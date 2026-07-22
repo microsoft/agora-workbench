@@ -4,10 +4,13 @@
 name: Tests
 
 permissions:
-  id-token: write
   contents: read
   pull-requests: read
-  
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:  # Manual trigger anytime
   pull_request:
@@ -22,19 +25,19 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0  # Need full history for path checking
           submodules: recursive
       
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: "latest"
           enable-cache: true
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
       
@@ -54,6 +57,12 @@ jobs:
         run: |
           uv run pytest src/agora_workbench/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
 
+      - name: Run deployment tests
+        id: deployment_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/agora_workbench/deployment/tests/ -m "not live" -v --json-report --json-report-file=deployment-report.json
+
       - name: Run example servers tests
         id: servers_tests
         continue-on-error: true
@@ -72,6 +81,7 @@ jobs:
         run: |
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           connector_status="${{ steps.connector_tests.outcome }}"
+          deployment_status="${{ steps.deployment_tests.outcome }}"
           servers_status="${{ steps.servers_tests.outcome }}"
           activity_ui_status="${{ steps.activity_ui_tests.outcome }}"
           
@@ -88,6 +98,12 @@ jobs:
             echo "❌ Connector tests failed"
           fi
 
+          if [ "$deployment_status" == "success" ]; then
+            echo "✅ Deployment tests passed"
+          else
+            echo "❌ Deployment tests failed"
+          fi
+
           if [ "$servers_status" == "success" ]; then
             echo "✅ Example servers tests passed"
           else
@@ -100,7 +116,7 @@ jobs:
             echo "❌ Activity UI tests failed"
           fi
           
-          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$servers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
+          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$deployment_status" == "success" ] && [ "$servers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1
