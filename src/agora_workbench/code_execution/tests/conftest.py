@@ -27,11 +27,28 @@ os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
 
 from .. import CodeExecutionServer, ServerConfig
 from ..sessions import SessionManager, SessionConfig, set_current_session
+from ..sessions import manager as _session_manager_module
 from agora_workbench.code_execution import ToolDefinition, ToolParameter, ToolRegistry
 
 
 # Test authentication token for all tests
 TEST_USER_TOKEN = "test-user-token-for-testing"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_outputs_base_dir(tmp_path_factory, monkeypatch):
+    """Redirect session artifact output to a temp dir for every test.
+
+    ``SessionManager.create_session`` eagerly creates a per-session subdir
+    under the module-level ``_OUTPUTS_BASE_DIR`` constant, which defaults to
+    ``~/agora-outputs``. Without this fixture, every test that creates a
+    session litters the developer's real home directory with empty UUID
+    folders. Patching the constant keeps production behavior intact while
+    isolating tests to a temp directory.
+    """
+    base = tmp_path_factory.mktemp("agora-outputs")
+    monkeypatch.setattr(_session_manager_module, "_OUTPUTS_BASE_DIR", base)
+    yield
 
 
 @pytest.fixture
