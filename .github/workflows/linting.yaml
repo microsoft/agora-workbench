@@ -18,13 +18,13 @@ jobs:
         id: detect
         shell: bash
         run: |
-          git fetch origin ${{ github.base_ref }}
+          git fetch origin "${{ github.base_ref }}"
           BASE="origin/${{ github.base_ref }}"
           
           if git diff --name-only "$BASE"...HEAD | grep -qE '^(src/|pyproject\.toml$|uv\.lock$|\.github/workflows/linting\.yaml$)'; then
-            echo "src=true" >> $GITHUB_OUTPUT
+            echo "src=true" >> "$GITHUB_OUTPUT"
           else
-            echo "src=false" >> $GITHUB_OUTPUT
+            echo "src=false" >> "$GITHUB_OUTPUT"
           fi
 
   linting-src:
