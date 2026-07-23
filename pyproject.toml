@@ -74,7 +74,7 @@ exclude = ["tests*", "scripts*", "examples*", "deployment*"]
 "agora_workbench.deployment.templates" = ["**/*"]
 
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
