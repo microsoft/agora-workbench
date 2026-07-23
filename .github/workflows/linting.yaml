@@ -18,41 +18,50 @@ jobs:
         id: detect
         shell: bash
         run: |
-          # Get the base branch
-          git fetch origin ${{ github.base_ref }}
+          git fetch origin "${{ github.base_ref }}"
           BASE="origin/${{ github.base_ref }}"
           
-          if git diff --name-only $BASE...HEAD | grep -qE '^src/'; then
-            echo "src=true" >> $GITHUB_OUTPUT
+          if git diff --name-only "$BASE"...HEAD | grep -qE '^(src/|pyproject\.toml$|uv\.lock$|\.github/workflows/linting\.yaml$)'; then
+            echo "src=true" >> "$GITHUB_OUTPUT"
           else
-            echo "src=false" >> $GITHUB_OUTPUT
+            echo "src=false" >> "$GITHUB_OUTPUT"
           fi
 
   linting-src:
     name: Lint src
     needs: changes
-    if: ${{ needs.changes.outputs.src == 'true' }}
     runs-on: ubuntu-latest
     steps:
+      - name: No linting required
+        if: ${{ needs.changes.outputs.src != 'true' }}
+        run: echo "No source or dependency changes require linting."
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: ${{ needs.changes.outputs.src == 'true' }}
       
       - name: Install uv
+        if: ${{ needs.changes.outputs.src == 'true' }}
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           python-version: "3.11"
           enable-cache: true
 
       - name: initialize submodules
+        if: ${{ needs.changes.outputs.src == 'true' }}
         run: git submodule update --init --recursive
 
       - name: Install dependencies
+        if: ${{ needs.changes.outputs.src == 'true' }}
         run: uv sync
       
       - name: Install Pyright
+        if: ${{ needs.changes.outputs.src == 'true' }}
         run: uv pip install pyright==1.1.384
       
       - name: Run Ruff
+        if: ${{ needs.changes.outputs.src == 'true' }}
         run: uv run ruff check --output-format=github src
       
       - name: Run Pyright
+        if: ${{ needs.changes.outputs.src == 'true' }}
         run: uv run pyright --level error src

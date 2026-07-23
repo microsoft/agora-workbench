@@ -14,56 +14,91 @@ concurrency:
 on:
   workflow_dispatch:  # Manual trigger anytime
   pull_request:
-    paths:
-      - 'src/**'
-      - 'activity_ui/**'
-      - 'examples/**'
-      - '.github/workflows/tests.yaml'
     
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.detect.outputs.tests }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: detect
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tests=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch origin "${{ github.base_ref }}"
+          BASE="origin/${{ github.base_ref }}"
+
+          if git diff --name-only "$BASE"...HEAD | grep -qE '^(src/|activity_ui/|examples/|pyproject\.toml$|uv\.lock$|\.github/workflows/tests\.yaml$)'; then
+            echo "tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tests=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: changes
     runs-on: ubuntu-latest
     
     steps:
+      - name: No tests required
+        if: ${{ needs.changes.outputs.tests != 'true' }}
+        run: echo "No source or dependency changes require tests."
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         with:
           fetch-depth: 0  # Need full history for path checking
           submodules: recursive
       
       - name: Install uv
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
           version: "latest"
           enable-cache: true
 
       - name: Set up Python
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.11'
       
       - name: Install dependencies
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         run: |
           uv sync
 
       - name: Run code execution tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         id: code_execution_tests
         continue-on-error: true
         run: |
           uv run pytest src/agora_workbench/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
       - name: Run connector tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         id: connector_tests
         continue-on-error: true
         run: |
           uv run pytest src/agora_workbench/connector/tests/ -m "not live" -v --json-report --json-report-file=connector-report.json
 
       - name: Run deployment tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         id: deployment_tests
         continue-on-error: true
         run: |
           uv run pytest src/agora_workbench/deployment/tests/ -m "not live" -v --json-report --json-report-file=deployment-report.json
 
       - name: Run example servers tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         id: servers_tests
         continue-on-error: true
         run: |
@@ -71,13 +106,14 @@ jobs:
 
 
       - name: Run activity UI tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
         id: activity_ui_tests
         continue-on-error: true
         run: |
           uv run pytest activity_ui/tests/ -m "not live" -v --json-report --json-report-file=activity-ui-report.json
       
       - name: Test Summary
-        if: always()
+        if: ${{ always() && needs.changes.outputs.tests == 'true' }}
         run: |
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
           connector_status="${{ steps.connector_tests.outcome }}"
