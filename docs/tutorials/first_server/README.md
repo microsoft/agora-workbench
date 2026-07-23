@@ -29,7 +29,7 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myserver",
-    description="Execute Python code with statistics helpers.",
+    description="Execute Python code with numpy helpers.",
     type="uv",
     dependency_file="",
 )
@@ -41,8 +41,8 @@ if __name__ == "__main__":
 ```
 
 This already gives the agent an `execute_myserver_code` MCP tool. The agent can
-run Python in a fresh `uv` environment and use standard-library modules such as
-`statistics` without listing them as dependencies.
+run Python in a fresh `uv` environment and use standard-library modules without
+listing them as dependencies.
 
 **File layout so far:**
 
@@ -127,25 +127,27 @@ requires-python = ">=3.11"
 ```python
 def summarize_numbers(numbers: list[float]) -> dict:
     """Return basic summary statistics for a list of numbers."""
-    import statistics
+    import numpy as np
 
     if not numbers:
         raise ValueError("numbers must not be empty")
 
+    arr = np.array(numbers, dtype=float)
     return {
-        "count": len(numbers),
-        "mean": statistics.mean(numbers),
-        "median": statistics.median(numbers),
-        "stdev": statistics.stdev(numbers) if len(numbers) > 1 else 0.0,
-        "min": min(numbers),
-        "max": max(numbers),
+        "count": int(len(arr)),
+        "mean": float(np.mean(arr)),
+        "median": float(np.median(arr)),
+        "stdev": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
+        "min": float(np.min(arr)),
+        "max": float(np.max(arr)),
     }
 ```
 
-Note: The implementation imports `statistics` lazily (inside the function body).
-This works fine in the kernel environment but keeps the module importable
-even if `statistics` is not installed at import time. It is also a pattern
-you will see throughout the example servers.
+Note: The implementation imports `numpy` lazily (inside the function body).
+This keeps the module importable even if `numpy` is not installed at import
+time and is a pattern you will see throughout the example servers.
+`numpy` is a third-party library, so it must be listed in `dependency_file`
+(added in Step 5).
 
 ---
 
@@ -226,9 +228,9 @@ _TOOLS_PKG = str(Path(__file__).resolve().parent / "myserver_tools")
 
 config = ServerConfig(
     name="myserver",
-    description="Execute Python code with statistics helpers.",
+    description="Execute Python code with numpy helpers.",
     type="uv",
-    dependency_file="statistics\n",
+    dependency_file="numpy\n",
     # Install the implementation package into the kernel environment
     additional_commands=[
         f"pip install --no-deps {_TOOLS_PKG}",
