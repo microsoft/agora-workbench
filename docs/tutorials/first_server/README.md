@@ -31,7 +31,7 @@ config = ServerConfig(
     name="myserver",
     description="Execute Python code with statistics helpers.",
     type="uv",
-    dependency_file="statistics\n",
+    dependency_file="",
 )
 
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
@@ -40,7 +40,9 @@ if __name__ == "__main__":
     asyncio.run(server.run_http(host="0.0.0.0", port=8000))
 ```
 
-This already gives the agent an `execute_myserver_code` MCP tool. The agent can run arbitrary Python in a fresh `uv` environment that has the `statistics` package available.
+This already gives the agent an `execute_myserver_code` MCP tool. The agent can
+run Python in a fresh `uv` environment and use standard-library modules such as
+`statistics` without listing them as dependencies.
 
 **File layout so far:**
 
@@ -58,7 +60,7 @@ Before adding a tool, it is important to understand the two separate Python proc
 ```
 ┌──────────────────────────────────────────┐
 │  Server process  (your machine / Docker) │
-│  • imports code_execution                │
+│  • imports Agora Workbench               │
 │  • holds ToolDefinition metadata         │
 │  • manages the MCP endpoint              │
 └────────────────┬─────────────────────────┘

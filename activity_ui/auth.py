@@ -149,7 +149,8 @@ def create_token_validator() -> TokenValidator:
     """Create the appropriate TokenValidator based on environment configuration.
 
     Returns NoOpTokenValidator when ACTIVITY_UI_AUTH_DISABLED=true.
-    Returns EntraTokenValidator when tenant and audience are configured.
+    Returns EntraTokenValidator when the tenant and either the audience or
+    client ID are configured.
     Raises RuntimeError if auth is enabled but config is incomplete.
     """
     if os.getenv("ACTIVITY_UI_AUTH_DISABLED", "").lower() == "true":

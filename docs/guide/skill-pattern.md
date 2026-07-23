@@ -15,8 +15,19 @@ Skills are passed explicitly to `CodeExecutionServer` via the `skills=` paramete
 ## File structure
 
 ```
-domains/
-└── chemistry/
+my_server/
+└── skills/
+    ├── SKILL.md                    # Main skill descriptor
+    ├── molecular-analysis.md       # Workflow: molecular analysis chain
+    ├── drug-screening.md           # Workflow: drug-likeness screening
+    └── similarity-and-clustering.md # Workflow: fingerprint similarity
+```
+
+The bundled chemistry server follows this pattern under
+`examples/servers/chemistry/`:
+
+```
+examples/servers/chemistry/
     └── skills/
         ├── SKILL.md                    # Main skill descriptor
         ├── molecular-analysis.md       # Workflow: molecular analysis chain

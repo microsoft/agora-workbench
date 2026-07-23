@@ -43,7 +43,7 @@ return_spec=[
 ]
 ```
 
-For stateful domains where objects are passed between tools (simulations, networks, circuits), **return the live object** so the agent can hold it in a kernel variable and pass it to subsequent tools. See [Stateful domains](tool-pattern.md#stateful-domains--sharing-objects-across-tool-calls) for the full pattern.
+For stateful domains where objects are passed between tools (simulations, networks, circuits), **return the live object** so the agent can hold it in a kernel variable and pass it to subsequent tools. See [Stateful domains](tool-pattern.md#stateful-domains-sharing-objects-across-tool-calls) for the full pattern.
 
 ### 4. Fail fast with clear errors
 

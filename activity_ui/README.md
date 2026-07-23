@@ -10,15 +10,16 @@ the server side of the conversation.
 
 ## What it is
 
-One FastAPI process in a Docker container. Three source files do the real work:
+One FastAPI process in a Docker container. The main source files are:
 
 | File | Role |
 |---|---|
 | [`server.py`](server.py) | FastAPI app — defines endpoints, in-memory event bus |
+| [`auth.py`](auth.py) | Entra ID validation and browser stream-token handling |
 | [`models.py`](models.py) | Pydantic `ActivityEvent` schema (the wire format) |
 | [`static/index.html`](static/index.html) | The browser page — vanilla HTML/CSS/JS, no build step |
 
-Endpoints (defined in `server.py:82-131`):
+Endpoints:
 
 | Endpoint | Purpose |
 |---|---|
@@ -49,7 +50,7 @@ Endpoints (defined in `server.py:82-131`):
 ```
 
 Each MCP server publishes events fire-and-forget via the
-[`ActivityPublisher`](../code_execution/code_execution/activity_publisher.py).
+[`ActivityPublisher`](../src/agora_workbench/code_execution/activity_publisher.py).
 If `ACTIVITY_UI_URL` is unset, or the UI is down, publishes silently
 no-op — tool execution is never blocked or failed by observability.
 
@@ -59,17 +60,19 @@ a small in-memory buffer.
 ## Quickstart
 
 ```bash
+# Run from the repository root.
 # One-time per host:
 docker network create agora-activity
 
 # Start the UI (stays up across MCP-server restarts):
-cd src/activity_ui
-docker compose up -d --build
+docker compose -f activity_ui/docker-compose.yml up -d --build
+
+# Build the shared server base image once:
+docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
 
 # Then bring up whichever MCP servers you want.
 # Each one's compose attaches to the same shared network:
-cd ../servers/chemistry
-docker compose up -d --build
+docker compose -f examples/servers/chemistry/docker-compose.yml up -d --build
 
 # Open the UI:
 #   http://127.0.0.1:8030
@@ -78,7 +81,7 @@ docker compose up -d --build
 Stop the UI when you don't need it:
 
 ```bash
-cd src/activity_ui && docker compose down
+docker compose -f activity_ui/docker-compose.yml down
 ```
 
 MCP servers' publishes will fail silently after that — tool calls keep working.
@@ -137,15 +140,14 @@ The UI groups events by `session_id` in the feed. Events without a
 The static file is copied into the image at build time. After editing:
 
 ```bash
-cd src/activity_ui
-docker compose up -d --build
+docker compose -f activity_ui/docker-compose.yml up -d --build
 ```
 
 The chemistry/earthscience containers don't need to restart.
 
 ### Iterating on publish call sites
 
-Publish calls live in `src/code_execution/code_execution/` — that source is
+Publish calls live in `src/agora_workbench/code_execution/` — that source is
 baked into the base image `mcp-server-base:local`. After editing, rebuild
 the base, then the domain server:
 
@@ -177,10 +179,11 @@ These are intentional, not bugs:
 
 - **No persistence.** Buffer is in-memory; restart of the activity-ui
   container clears history. Sessions and live publishes are unaffected.
-- **No auth.** The compose binds to `127.0.0.1:8030` only — loopback is the
-  whole security model. Safe for single-user local dev. **Do not bind to
-  `0.0.0.0` without putting auth in front of it** — events contain raw
-  agent code, stdout, and tool arguments.
+- **Local compose disables auth.** The provided compose file binds to
+  `127.0.0.1:8030` and sets `ACTIVITY_UI_AUTH_DISABLED=true` for single-user
+  development. For remote deployment, enable Entra ID authentication and do
+  not expose the unauthenticated service directly; events contain agent code,
+  stdout, and tool arguments.
 - **No real-time intra-call streaming.** Events fire at MCP-tool-call
   boundaries, not while code is running. A long `execute_code` shows
   nothing until it completes, then the whole event lands.
@@ -195,8 +198,8 @@ These are intentional, not bugs:
 ## Files
 
 ```
-src/activity_ui/
-├── Dockerfile          # Python 3.12-slim image
+activity_ui/
+├── Dockerfile          # Python 3.12 Azure Linux image
 ├── docker-compose.yml  # Standalone service + agora-activity external network
 ├── requirements.txt    # fastapi, uvicorn, sse-starlette, pydantic
 ├── server.py           # FastAPI app, ring buffer, SSE fan-out

@@ -4,11 +4,8 @@ Defines the canonical state tokens for the chemistry tool graph.
 Each token represents a meaningful intermediate artifact that downstream
 tools can consume.
 
-Note: This module lives under ``servers.chemistry`` rather than
-``domains.chemistry``, so it is **not** auto-discovered by the default
-``StateGraph`` loader (which searches ``domains/*/states.py``).  For
-production deployments, either move the domain under ``domains/`` or
-extend ``StateGraph._load_domain_states`` to search additional paths.
+The example server passes these values explicitly through the ``states``
+argument to ``CodeExecutionServer``.
 """
 
 from enum import Enum

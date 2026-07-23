@@ -4,11 +4,11 @@ Endpoints:
     POST /events  — ingest one ActivityEvent (called by CodeExecutionServer.ActivityPublisher)
     GET  /stream  — Server-Sent Events stream for the browser
     GET  /events/recent — JSON snapshot of the in-memory event buffer
-    GET  /        — static frontend (placeholder HTML for now; React later)
+    GET  /        — static browser dashboard
 
 Run:
     uv run python -m activity_ui.server
-    # or in docker-compose, see src/activity_ui/Dockerfile
+    # or in docker-compose, see activity_ui/Dockerfile
 """
 
 from __future__ import annotations
@@ -106,7 +106,8 @@ def create_app() -> FastAPI:
         This endpoint is NOT in EasyAuth excludedPaths, so the browser must
         be logged in via EasyAuth. The token is set as an HttpOnly cookie.
         """
-        # Extract identity from EasyAuth-injected header (trusted on protected paths)
+        # Trust this header only behind EasyAuth or a proxy that strips
+        # client-supplied identity headers.
         subject = request.headers.get("X-MS-CLIENT-PRINCIPAL-ID")
         if not subject:
             # In local dev (NoOp mode), allow anonymous stream tokens
@@ -163,7 +164,7 @@ def create_app() -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    # Static frontend (placeholder HTML for now; replaced by React build later).
+    # Static browser dashboard.
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
