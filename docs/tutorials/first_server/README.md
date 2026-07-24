@@ -29,9 +29,9 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myserver",
-    description="Execute Python code with numpy helpers.",
+    description="Execute Python code.",
     type="uv",
-    dependency_file="",
+    dependency_file="# third-party packages, one per line (e.g. numpy)\n",
 )
 
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
