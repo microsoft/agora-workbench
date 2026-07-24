@@ -4,22 +4,27 @@ A framework for creating MCP servers that execute Python code in isolated enviro
 
 ## Overview
 
-Each domain (powergrid, process, foundry, etc.) defines a server under `domains/<name>/server/` that uses this module's `CodeExecutionServer` base class. The server provisions a Python environment (via uv, conda, or pip), exposes an `execute_<name>_code` MCP tool, and manages sessions with persistent state across calls.
+Each application configures a `CodeExecutionServer` with a Python environment
+(uv, conda, or pip), optional domain tools and skills, and an authentication
+provider. The server exposes an `execute_<name>_code` MCP tool and manages
+stateful kernel sessions across calls.
 
 The main components are:
 
-- **`CodeExecutionServer`** (`code_execution/server.py`) — FastMCP-based server with subprocess code execution, Entra ID authentication, and customizable validation/preprocessing hooks
-- **`ServerConfig`** (`code_execution/code_execution_models.py`) — defines the server identity, Python environment type (`uv`, `conda`, `pip`), dependencies, build settings, asset provisioning, execution policy, and feature flags
-- **Environment Builders** (`code_execution/environment_builders.py`) — automated virtual environment creation
-- **Session Management** (`code_execution/sessions/`) — stateful workflows across MCP calls, with decorators (`@auto_session_tool`, `@create_session_tool`, `@requires_session`), context-based session injection, and automatic cleanup
+- **`CodeExecutionServer`** (`server.py`) — FastMCP-based server with kernel-backed code execution, pluggable authentication, and customizable validation/preprocessing hooks
+- **`ServerConfig`** (`code_execution_models.py`) — defines server identity, environment type (`uv`, `conda`, `pip`), dependencies, build settings, asset provisioning, execution policy, and feature flags
+- **Environment Builders** (`environment_builders.py`) — automated virtual environment creation
+- **Session Management** (`sessions/`) — stateful kernels, request-context session binding, inspection, capacity limits, and automatic cleanup
 
 ## Creating a Server
 
-Domain servers live in `domains/<name>/server/` and are registered in `server_registry.yaml`. A minimal server:
+A minimal server:
 
 ```python
-from code_execution import CodeExecutionServer, ServerConfig
-from code_execution.auth import create_noop_auth_config
+import asyncio
+
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig
+from agora_workbench.code_execution.auth import create_noop_auth_config
 
 config = ServerConfig(
     name="myenv",
@@ -30,10 +35,12 @@ config = ServerConfig(
 )
 
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
-await server.run_http(host="0.0.0.0", port=8000)
+
+if __name__ == "__main__":
+    asyncio.run(server.run_http(host="0.0.0.0", port=8000))
 ```
 
-See `domains/example/server/example_server.py` for a complete reference implementation.
+See `examples/servers/` for complete reference implementations.
 
 ## Environment Model
 
@@ -270,7 +277,11 @@ Recommended handling: close an unused session (`<server>_close_session`) or retr
 
 ## Docker
 
-Server images are built from a single multi-stage `Dockerfile` in `docker/`. Building requires Azure CLI credentials (run `az login` first) — see `docker/README.md` for full build and run instructions.
+The shared base image and server image templates live in
+`src/agora_workbench/deployment/templates/docker/`. The example servers include
+Docker Compose files for local use. See the
+[deployment guide](../../../../docs/guide/deploying.md) for local and Azure
+Container Apps instructions.
 
 ## Object Transfer
 
@@ -289,20 +300,20 @@ MCP servers can transfer Python objects directly to each other without routing d
 |------------|-------|
 | Maximum object size | 256 MB (serialized) |
 | Serialization format | `dill` (supports lambdas, closures, and nested classes that standard `pickle` cannot handle) |
-| Authentication | Bearer token from the calling session is forwarded to the target server; the `/object-transfer/receive` endpoint requires the same Entra ID auth as `/mcp` |
+| Authentication | Caller authentication is forwarded to the target server; the `/object-transfer/receive` endpoint uses the same auth policy as `/mcp` |
 
 ### Example (agent-side)
 
 ```python
-# Send a variable named "gdf" from the GIS server to the process server
-await gis_send(data_ref="gdf", to="process", name="imported_gdf")
+# Agent-side pseudocode: send a result to a configured peer server.
+await source_send(data_ref="result", to="target_server", name="imported_result")
 ```
 
-The target server then makes `imported_gdf` available in all subsequent code execution calls for that session.
+The target server then makes `imported_result` available in subsequent code
+execution calls for that session.
 
 ## Tests
 
 ```bash
-cd code_execution
-uv run pytest tests/
+uv run pytest src/agora_workbench/code_execution/tests/ -m "not live"
 ```

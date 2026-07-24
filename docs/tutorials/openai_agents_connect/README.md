@@ -82,7 +82,7 @@ re-uses it for the entire agent run and closes it on exit.
   `Agent(mcp_servers=[server])`. The `server` is exactly the
   `MCPServerStreamableHttp` you built here.
 - **Inject the workbench skill**: the
-  [workbench runtime skill](../../../skills/agora-workbench/SKILL.md)
+  [workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md)
   is a portable system-prompt block that teaches any agent how to use
   Workbench tools correctly. Append it to your agent's `instructions`.
 - **Authenticate against a real server**: swap the dev bearer for a real

@@ -34,7 +34,10 @@ For a minimal example without any agent framework (raw MCP client or `curl`), se
 
 ## Workbench skill
 
-The repo includes a ready-made **[workbench runtime skill](../../skills/agora-workbench/SKILL.md)** that you can inject into your agent's system prompt (or load via the [Agent Skills](https://agentskills.io) standard). It teaches your agent:
+The repo includes a ready-made
+**[workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md)**
+that you can inject into your agent's system prompt (or load via the
+[Agent Skills](https://agentskills.io) standard). It teaches your agent:
 
 - How to discover tools and skills before using them
 - That domain tools are Python functions called inside `execute_{server}_code`, not standalone MCP tools

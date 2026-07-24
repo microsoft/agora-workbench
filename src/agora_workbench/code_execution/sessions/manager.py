@@ -1142,19 +1142,12 @@ class SessionManager:
             working_dir: Optional working directory for kernel
 
         Returns:
-            Tuple of ``(stdout, stderr, success, displays, artifacts)``:
-
-            * ``displays`` — rich-output payloads emitted by the kernel
-              (e.g. matplotlib figures via ``display_data`` or trailing
-              expressions via ``execute_result``).  Each entry has the
-              shape ``{"mime_type": str, "data": <base64 for image/png;
-              raw for svg/html>, "metadata": dict}``.  Empty when the
-              code produced only text output.
-            * ``artifacts`` — metadata dicts (one per new/modified file
-              under the session's outputs dir) with shape ``{name,
-              size_bytes, mime_type, modified_at, download_token}``.
-              Each ``download_token`` is unguessable and valid for the
-              session's lifetime; the MCP server composes the full URL.
+            Tuple of ``(stdout, stderr, success, displays, artifacts)``.
+            ``displays`` contains rich-output payloads emitted by the kernel,
+            with MIME type, data, and metadata fields. ``artifacts`` contains
+            metadata for each new or modified file under the session output
+            directory, including its name, size, MIME type, modification time,
+            and download token.
         """
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).

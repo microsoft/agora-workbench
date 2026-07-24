@@ -19,9 +19,6 @@ class Session(Generic[T]):
     computation state. Each session is owned by a specific user (identified via JWT token
     claims) and tracks access patterns, status transitions, and cleanup requirements.
 
-    Type Parameters:
-        T: The type of data stored in the session (e.g., PythonExecutionState, dict).
-
     Attributes:
         session_id (str): Unique identifier for the session.
         data (T): The session's payload data, type-parameterized for type safety.
