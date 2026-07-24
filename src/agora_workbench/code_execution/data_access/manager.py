@@ -153,7 +153,7 @@ class DataLakeDataManager:
             if not blob_url:
                 raise ValueError(f"Artifact {artifact_id} has no metadata_storage_path in blob-details index")
 
-            if not blob_url.startswith(("https://", "http://", "abfss://")):
+            if not blob_url.startswith(("https://", "http://", "abfss://", "az://")):
                 raise ValueError(f"Retrieved storage path is not a valid URL: {blob_url!r}")
 
             LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}...")

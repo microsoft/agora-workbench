@@ -336,3 +336,41 @@ class TestCleanup:
         # Cache dir should be cleaned up
         # Note: This test is somewhat non-deterministic due to GC timing
         # but works in practice for testing __del__ implementation
+
+
+class TestBlobUrlResolution:
+    """Scheme handling in ``_get_blob_url_from_artifact_id`` (blob-details resolution)."""
+
+    def _manager_with_stored_path(self, metadata_storage_path: str) -> DataLakeDataManager:
+        manager = DataLakeDataManager()
+        manager._search_client = MagicMock(
+            get_document=AsyncMock(return_value={"metadata_storage_path": metadata_storage_path}),
+            close=AsyncMock(),
+        )
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_resolves_az_scheme_path(self):
+        """az:// is accepted — the catalog indexer emits az:// storage URIs."""
+        manager = self._manager_with_stored_path("az://account/container/path/file.csv")
+
+        url = await manager._get_blob_url_from_artifact_id("artifact_key")
+
+        assert url == "az://account/container/path/file.csv"
+
+    @pytest.mark.asyncio
+    async def test_resolves_https_scheme_path(self):
+        """https:// still resolves."""
+        manager = self._manager_with_stored_path("https://acct.blob.core.windows.net/c/file.csv")
+
+        url = await manager._get_blob_url_from_artifact_id("artifact_key")
+
+        assert url == "https://acct.blob.core.windows.net/c/file.csv"
+
+    @pytest.mark.asyncio
+    async def test_rejects_unsupported_scheme(self):
+        """A non-storage scheme is still rejected."""
+        manager = self._manager_with_stored_path("ftp://host/file.csv")
+
+        with pytest.raises(ValueError, match="not a valid URL"):
+            await manager._get_blob_url_from_artifact_id("artifact_key")
