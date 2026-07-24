@@ -16,14 +16,14 @@ from ...data_access.manager import DataLakeDataManager
 
 
 @pytest.fixture(autouse=True)
-def mock_entra_credential_provider():
-    """Mock EntraCredentialProvider for all tests."""
-    with patch("agora_workbench.code_execution.data_access.manager.EntraCredentialProvider") as mock_provider_cls:
-        mock_provider = MagicMock()
-        mock_provider.get_token = AsyncMock(return_value=MagicMock(token="mock-token", expires_on=9999999999))
-        mock_provider.close = AsyncMock()
-        mock_provider_cls.return_value = mock_provider
-        yield mock_provider
+def mock_storage_credential():
+    """Mock create_storage_credential for all tests (no real MI / az login needed)."""
+    with patch("agora_workbench.code_execution.data_access.manager.create_storage_credential") as mock_factory:
+        mock_credential = MagicMock()
+        mock_credential.get_token = AsyncMock(return_value=MagicMock(token="mock-token", expires_on=9999999999))
+        mock_credential.close = AsyncMock()
+        mock_factory.return_value = mock_credential
+        yield mock_credential
 
 
 def create_mock_fetch_to_file(data: bytes):
@@ -86,7 +86,7 @@ class TestDataLakeDataManagerInit:
     async def test_init_credential_provider_failure_is_deferred(self):
         """Test credential provider init errors are deferred to fetch time."""
         with patch(
-            "agora_workbench.code_execution.data_access.manager.EntraCredentialProvider",
+            "agora_workbench.code_execution.data_access.manager.create_storage_credential",
             side_effect=RuntimeError("missing managed identity"),
         ):
             manager = DataLakeDataManager()
@@ -189,7 +189,7 @@ class TestGetCachePath:
     async def test_blob_lookup_surfaces_credential_init_error(self):
         """Test blob requests surface deferred Azure init errors to the caller."""
         with patch(
-            "agora_workbench.code_execution.data_access.manager.EntraCredentialProvider",
+            "agora_workbench.code_execution.data_access.manager.create_storage_credential",
             side_effect=RuntimeError("missing managed identity"),
         ):
             manager = DataLakeDataManager()

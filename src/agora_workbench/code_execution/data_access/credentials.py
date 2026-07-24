@@ -149,7 +149,7 @@ class MsalCacheCredential:
         await self.close()
 
 
-def create_storage_credential():
+def create_storage_credential(client_id: str | None = None):
     """Create an async credential chain suitable for Azure Storage access.
 
     Returns a ``ChainedTokenCredential`` that tries:
@@ -158,6 +158,13 @@ def create_storage_credential():
 
     The chain raises ``CredentialUnavailableError`` from each link until one
     succeeds, making the credential work transparently in both environments.
+
+    Args:
+        client_id: Optional user-assigned managed identity client ID.  When
+            provided it takes precedence over the ``DEFAULT_IDENTITY_CLIENT_ID``
+            environment variable.  Callers that resolve the MI client id from a
+            different convention (e.g. ``AZURE_CLIENT_ID``) should pass it here
+            so production keeps binding to the same user-assigned identity.
 
     Returns:
         An ``AsyncTokenCredential`` usable with ``BlobPublisher``,
@@ -168,7 +175,7 @@ def create_storage_credential():
         ManagedIdentityCredential,
     )
 
-    managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    managed_identity_client_id = client_id or os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
 
     credentials: list[MsalCacheCredential | ManagedIdentityCredential] = [MsalCacheCredential()]
 
