@@ -29,7 +29,7 @@ Use Agora Workbench to:
 - **Python 3.11+**
 - **Git**
 - **[uv](https://docs.astral.sh/uv/)** for dependency management
-- **Docker** (required for running code execution servers locally)
+- **Docker** (required for the bundled container examples and local Compose workflows)
 
 ### Installation
 
@@ -38,8 +38,7 @@ Use Agora Workbench to:
 ```bash
 git clone https://github.com/microsoft/agora-workbench.git
 cd agora-workbench
-uv sync                # install base dependencies
-uv sync --group dev    # include dev tools (pytest, pre-commit, ruff, jupyter)
+uv sync --group dev  # install the project and dev tools
 ```
 
 **With pip (for using as a library):**
@@ -56,7 +55,7 @@ pip install git+https://github.com/microsoft/agora-workbench.git
 | `copilot-sdk` | GitHub Copilot SDK adapter |
 | `geo` | Geospatial example server dependencies (rasterio, etc.) |
 
-Pick one (not both):
+Use the command for your installation method:
 
 ```bash
 # uv (inside the cloned repo)
@@ -71,16 +70,16 @@ pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/a
 For local testing, no external credentials are required. Use the no-op auth config to skip authentication entirely:
 
 ```python
+from agora_workbench.code_execution import CodeExecutionServer, ServerConfig
 from agora_workbench.code_execution.auth import create_noop_auth_config
-from agora_workbench.code_execution.code_execution_models import ServerConfig
 
 config = ServerConfig(
-    name="my-server",
+    name="myserver",
     description="My local test server",
     type="uv",
-    dependency_file="pyproject.toml",
+    dependency_file="numpy\npandas\n",
 )
-server = MyCodeExecutionServer(
+server = CodeExecutionServer(
     server_config=config,
     auth_config=create_noop_auth_config(),
 )

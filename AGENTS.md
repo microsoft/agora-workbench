@@ -56,14 +56,15 @@ Both expose tools via **FastMCP** over Streamable HTTP with Bearer token auth mi
 
 A `CodeExecutionServer` can declare **sidecars** in `ServerConfig.sidecars` (a list of `SidecarConfig`). A sidecar is a long-lived helper process the server launches at startup and stops on shutdown — used to load an expensive, process-global resource (typically a heavy model) **once per container** and share it across all isolated kernel sessions over loopback HTTP, instead of paying its memory cost inside every session.
 
-Lifecycle is managed in `code_execution/server.py`: `_startup` calls `SidecarManager.start_all()` (after the env is built, before kernels register), `_shutdown` calls `stop_all()`. `warm()` does **not** start sidecars (build-time only). The manager launches each process (with `use_env_python=True`, in the kernel env's Python so it shares the tools' deps), polls `health_path` until ready, and exports the base URL under `url_env_var` on `os.environ` so every spawned kernel inherits it — the same mechanism as `MCP_ASSET_CACHE_DIR`. A sidecar is a plain internal service, **not** an MCP endpoint and invisible to the agent (that's a `ConnectorServer`).
+Lifecycle is managed in `src/agora_workbench/code_execution/server.py`: `_startup` calls `SidecarManager.start_all()` (after the env is built, before kernels register), `_shutdown` calls `stop_all()`. `warm()` does **not** start sidecars (build-time only). The manager launches each process (with `use_env_python=True`, in the kernel env's Python so it shares the tools' deps), polls `health_path` until ready, and exports the base URL under `url_env_var` on `os.environ` so every spawned kernel inherits it — the same mechanism as `MCP_ASSET_CACHE_DIR`. A sidecar is a plain internal service, **not** an MCP endpoint and invisible to the agent (that's a `ConnectorServer`).
 
 Key files:
-- `code_execution/code_execution_models.py` — `SidecarConfig` model, `ServerConfig.sidecars` field
-- `code_execution/sidecar.py` — `SidecarManager` (launch / health-check / stop)
-- `code_execution/server.py` — `_startup` / `_shutdown` wiring
+- `src/agora_workbench/code_execution/code_execution_models.py` — `SidecarConfig` model, `ServerConfig.sidecars` field
+- `src/agora_workbench/code_execution/sidecar.py` — `SidecarManager` (launch / health-check / stop)
+- `src/agora_workbench/code_execution/server.py` — `_startup` / `_shutdown` wiring
 
-See [docs/guide/sidecars.md](docs/guide/sidecars.md) for when and how to use one.
+See the [sidecars guide](https://github.com/microsoft/agora-workbench/blob/main/docs/guide/sidecars.md)
+for when and how to use one.
 
 ### Unified State Graph (Router)
 

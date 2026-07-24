@@ -1,7 +1,6 @@
 # Activity UI sidecar — receives events from MCP servers and serves the UI.
 #
-# Build from src/:
-#   cd src
+# Build from the repository root:
 #   docker build -f activity_ui/Dockerfile -t activity-ui:local .
 
 FROM mcr.microsoft.com/azurelinux/base/python:3.12

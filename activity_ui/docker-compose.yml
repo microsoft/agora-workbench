@@ -21,8 +21,8 @@ services:
       context: ..
       dockerfile: activity_ui/Dockerfile
     ports:
-      # Bind to localhost only — no auth yet, do not expose off-host.
-      - "0.0.0.0:8030:8030"
+      # Local compose disables auth, so expose the UI on loopback only.
+      - "127.0.0.1:8030:8030"
     environment:
       ACTIVITY_UI_HOST: "0.0.0.0"
       ACTIVITY_UI_PORT: "8030"

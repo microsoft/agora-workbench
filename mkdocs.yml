@@ -1,5 +1,5 @@
 site_name: Agora Workbench
-site_description: API documentation for the Agora multi-domain AI agent system.
+site_description: Documentation for building sandboxed MCP servers with Agora Workbench.
 repo_url: https://github.com/microsoft/agora-workbench
 
 theme:

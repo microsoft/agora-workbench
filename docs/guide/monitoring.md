@@ -125,7 +125,10 @@ Refresh the browser — the event appears in a session block.
 These are intentional:
 
 - **No persistence** — the buffer is in-memory (200 events by default, configurable via `ACTIVITY_UI_BUFFER`). Restarting the UI clears history.
-- **No auth** — binds to `127.0.0.1:8030` only. Loopback is the security model. **Do not bind to `0.0.0.0` without putting auth in front** — events contain raw agent code and stdout.
+- **Local compose disables auth** — the provided compose file binds to
+  `127.0.0.1:8030` and sets `ACTIVITY_UI_AUTH_DISABLED=true`. Remote
+  deployments must enable Entra ID authentication or place an authenticating
+  proxy in front; events contain raw agent code and stdout.
 - **No intra-call streaming** — events fire at MCP tool-call boundaries, not while code is running. A long `execute_code` shows nothing until it completes.
 - **No events for poll/housekeeping tools** — `check_job`, `check_batch`, `list_sessions`, `get_session_info` don't publish events. Only lifecycle transitions appear. (Note: `job_finished` events are emitted automatically when a background or promoted job reaches a terminal state — they are not triggered by `check_job` polling.)
 
