@@ -212,3 +212,20 @@ class TestCreateStorageCredential:
             os.environ.pop("DEFAULT_IDENTITY_CLIENT_ID", None)
             create_storage_credential()
             mock_mi.assert_called_once_with()
+
+    def test_explicit_client_id_used_for_managed_identity(self):
+        """Explicit client_id should be passed to ManagedIdentityCredential."""
+        with patch("azure.identity.aio.ManagedIdentityCredential") as mock_mi:
+            create_storage_credential(client_id="explicit-client-id")
+            mock_mi.assert_called_once_with(client_id="explicit-client-id")
+
+    @patch.dict("os.environ", {"DEFAULT_IDENTITY_CLIENT_ID": "env-client-id"})
+    def test_explicit_client_id_overrides_env(self):
+        """Explicit client_id takes precedence over DEFAULT_IDENTITY_CLIENT_ID.
+
+        This is what keeps production bound to the same user-assigned identity:
+        the data manager resolves the id from AZURE_CLIENT_ID and passes it in.
+        """
+        with patch("azure.identity.aio.ManagedIdentityCredential") as mock_mi:
+            create_storage_credential(client_id="explicit-client-id")
+            mock_mi.assert_called_once_with(client_id="explicit-client-id")

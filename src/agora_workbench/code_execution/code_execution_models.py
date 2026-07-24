@@ -39,7 +39,8 @@ class AssetSpec(BaseModel):
     name: str = Field(description="Logical name for the asset (e.g., 'diffusion-weights')")
     source: str = Field(
         description=(
-            "URI to fetch from. Supported schemes: https://, az://<container>/<blob>, "
+            "URI to fetch from. Supported schemes: https://, "
+            "az://<account>/<container>/<blob>, abfss://, "
             "file:///local/path, or a bare filesystem path."
         )
     )

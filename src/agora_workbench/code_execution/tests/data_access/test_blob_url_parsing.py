@@ -52,6 +52,49 @@ class TestBlobURLParsingValidation:
         assert container == "container"
         assert path == ""
 
+    def test_valid_az_url(self, mock_credential):
+        """Test parsing valid az:// URL (the catalog indexer scheme)."""
+        fetcher = BlobFetcher(credential=mock_credential)
+        url = "az://account/container/path/to/file.csv"
+
+        storage, container, path = fetcher._parse_blob_url(url)
+
+        assert storage == "account"
+        assert container == "container"
+        assert path == "path/to/file.csv"
+
+    def test_valid_az_url_nested_path(self, mock_credential):
+        """Test az:// URL with a deeply nested blob path."""
+        fetcher = BlobFetcher(credential=mock_credential)
+        url = "az://account/data/year/month/day/file.parquet"
+
+        storage, container, path = fetcher._parse_blob_url(url)
+
+        assert storage == "account"
+        assert container == "data"
+        assert path == "year/month/day/file.parquet"
+
+    def test_az_missing_container_and_path(self, mock_credential):
+        """Test az:// URL with only an account is rejected."""
+        fetcher = BlobFetcher(credential=mock_credential)
+
+        with pytest.raises(ValueError, match="Malformed az URL"):
+            fetcher._parse_blob_url("az://account")
+
+    def test_az_missing_blob_path(self, mock_credential):
+        """Test az:// URL with account and container but no blob path is rejected."""
+        fetcher = BlobFetcher(credential=mock_credential)
+
+        with pytest.raises(ValueError, match="Malformed az URL"):
+            fetcher._parse_blob_url("az://account/container")
+
+    def test_az_empty_account(self, mock_credential):
+        """Test az:// URL with an empty account segment is rejected."""
+        fetcher = BlobFetcher(credential=mock_credential)
+
+        with pytest.raises(ValueError, match="Malformed az URL"):
+            fetcher._parse_blob_url("az:///container/file.csv")
+
     def test_parse_abfss_with_nested_path(self, mock_credential):
         """Test abfss URL with deeply nested path."""
         fetcher = BlobFetcher(credential=mock_credential)
@@ -171,6 +214,12 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
 
         assert fetcher.can_handle("https://storage.dfs.core.windows.net/container/file.csv")
+
+    def test_can_handle_valid_az(self, mock_credential):
+        """Test can_handle recognizes az:// URLs (catalog indexer scheme)."""
+        fetcher = BlobFetcher(credential=mock_credential)
+
+        assert fetcher.can_handle("az://account/container/file.csv")
 
     def test_can_handle_rejects_non_azure(self, mock_credential):
         """Test can_handle rejects non-Azure URLs."""

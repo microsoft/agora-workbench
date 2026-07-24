@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 from azure.search.documents.aio import SearchClient
 
 from .. import agent_guidance
-from ..auth import CredentialProviderTokenCredential, EntraCredentialProvider
+from .credentials import create_storage_credential
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ..types import AssetId
 
@@ -33,11 +33,13 @@ class DataLakeDataManager:
     to disk in their original format. Tools receive Path objects and handle
     loading the data as needed.
 
-    Authentication is handled via managed identity — the server's identity
-    is used to access downstream Azure resources (Storage, AI Search).
+    Authentication uses a credential chain (``create_storage_credential``):
+    the mounted ``az login`` MSAL cache for local development, falling back to
+    managed identity in production, for downstream Azure resources
+    (Storage, AI Search).
 
     Supports:
-    - Azure Blob Storage (abfss://, https://)
+    - Azure Blob Storage (abfss://, az://, https://)
     - Local filesystem (absolute paths, relative paths, file:// URIs)
     """
 
@@ -49,7 +51,8 @@ class DataLakeDataManager:
         """
         Initialize the data manager.
 
-        Uses managed identity for downstream resource access when Azure
+        Uses a credential chain (``az login`` MSAL cache locally, managed
+        identity in production) for downstream resource access when Azure
         services are configured. Falls back to local-only mode when
         ``DATA_LAKE_SEARCH_ENDPOINT`` is not set.
 
@@ -79,7 +82,10 @@ class DataLakeDataManager:
             self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
             try:
                 mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
-                self._credential = CredentialProviderTokenCredential(EntraCredentialProvider(client_id=mi_client_id))
+                # MSAL cache (mounted az login) locally, managed identity in
+                # production. Pass the AZURE_CLIENT_ID-resolved id through so
+                # prod keeps binding to the same user-assigned identity.
+                self._credential = create_storage_credential(client_id=mi_client_id)
                 self._fetchers.append(BlobFetcher(credential=self._credential))
 
                 self._search_client = SearchClient(
@@ -147,7 +153,7 @@ class DataLakeDataManager:
             if not blob_url:
                 raise ValueError(f"Artifact {artifact_id} has no metadata_storage_path in blob-details index")
 
-            if not blob_url.startswith(("https://", "http://", "abfss://")):
+            if not blob_url.startswith(("https://", "abfss://", "az://")):
                 raise ValueError(f"Retrieved storage path is not a valid URL: {blob_url!r}")
 
             LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}...")
