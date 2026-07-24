@@ -313,9 +313,6 @@ class BlobFetcher(AssetFetcher):
                 storage_account = parts[0]
                 container = parts[1]
                 blob_path = parts[2].lstrip("/")
-                storage_account = parts[0]
-                container = parts[1]
-                blob_path = parts[2]
 
             else:
                 raise ValueError(f"Unsupported blob URL format: {url}")
