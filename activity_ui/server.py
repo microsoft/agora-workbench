@@ -103,8 +103,14 @@ def create_app() -> FastAPI:
     async def issue_stream_token(request: Request) -> Response:
         """Mint a short-lived stream token for browser SSE access.
 
-        This endpoint is NOT in EasyAuth excludedPaths, so the browser must
-        be logged in via EasyAuth. The token is set as an HttpOnly cookie.
+        In production (EasyAuth/proxy), this endpoint is NOT in excludedPaths,
+        so the browser must be logged in via EasyAuth and the identity header
+        ``X-MS-CLIENT-PRINCIPAL-ID`` is set by the proxy.
+
+        In local development, when ``NoOpTokenValidator`` is active, anonymous
+        stream tokens are issued without requiring EasyAuth.
+
+        The token is set as an HttpOnly cookie.
         """
         # Trust this header only behind EasyAuth or a proxy that strips
         # client-supplied identity headers.
