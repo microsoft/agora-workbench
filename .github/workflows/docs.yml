@@ -5,9 +5,26 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - ".github/workflows/docs.yml"
       - "mkdocs.yml"
       - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Documentation version to deploy (for example, 0.1.0)"
+        required: false
+        type: string
+      aliases:
+        description: "Space-separated aliases to update (for example, 0.1 latest)"
+        required: false
+        type: string
+      set_latest_default:
+        description: "Set the latest alias as the site default"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -21,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
@@ -29,5 +48,51 @@ jobs:
       - name: Install docs dependencies
         run: uv sync --group docs
 
-      - name: Build and deploy
-        run: uv run mkdocs gh-deploy --force
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy documentation
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DOCS_VERSION: ${{ inputs.version }}
+          DOCS_ALIASES: ${{ inputs.aliases }}
+          SET_LATEST_DEFAULT: ${{ inputs.set_latest_default }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            version="dev"
+            aliases=()
+          else
+            version="${DOCS_VERSION:-dev}"
+            read -r -a aliases <<< "${DOCS_ALIASES:-}"
+          fi
+
+          validate_name() {
+            if [[ ! "$1" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+              echo "Invalid documentation version or alias: $1" >&2
+              exit 1
+            fi
+          }
+
+          validate_name "$version"
+          for alias in "${aliases[@]}"; do
+            validate_name "$alias"
+          done
+
+          if [[ "${SET_LATEST_DEFAULT:-false}" == "true" ]] && [[ ! " ${aliases[*]} " =~ " latest " ]]; then
+            echo "The latest alias must be included before it can be set as the default." >&2
+            exit 1
+          fi
+
+          if ((${#aliases[@]})); then
+            uv run mike deploy --push --update-aliases "$version" "${aliases[@]}"
+          else
+            uv run mike deploy --push "$version"
+          fi
+
+          if [[ "${SET_LATEST_DEFAULT:-false}" == "true" ]]; then
+            uv run mike set-default --push latest
+          fi

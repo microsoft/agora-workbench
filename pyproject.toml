@@ -60,6 +60,9 @@ geo = [
 
 [project.urls]
 homepage = "https://github.com/microsoft/agora-workbench"
+documentation = "https://microsoft.github.io/agora-workbench"
+repository = "https://github.com/microsoft/agora-workbench"
+changelog = "https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md"
 
 [project.scripts]
 mcp-connector-server = "agora_workbench.connector.cli:main"
@@ -94,6 +97,7 @@ docs = [
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.4",
     "griffelib>=2,<3",
+    "mike>=2.2.0",
 ]
 
 [tool.pytest.ini_options]

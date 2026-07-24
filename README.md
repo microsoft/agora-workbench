@@ -44,8 +44,17 @@ uv sync --group dev  # install the project and dev tools
 **With pip (for using as a library):**
 
 ```bash
-pip install git+https://github.com/microsoft/agora-workbench.git
+pip install "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
 ```
+
+Pinning a release tag gives downstream projects a stable dependency. With uv, add the same release with:
+
+```bash
+uv add "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
+```
+
+See the [changelog](https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md) for release history and
+[release guide](https://github.com/microsoft/agora-workbench/blob/main/RELEASING.md) for the versioning policy.
 
 **Optional extras for examples** — the base package is all you need to build and run MCP servers. Extras pull in dependencies used by the example integrations:
 
@@ -62,7 +71,7 @@ Use the command for your installation method:
 uv sync --extra openai-agents
 
 # pip (consuming as a library)
-pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/agora-workbench.git"
+pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
 ```
 
 ### Configuration
