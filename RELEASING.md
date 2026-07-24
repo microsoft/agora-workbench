@@ -64,7 +64,7 @@ tracks the newest release. The version selector is provided by `mike`.
 To test a versioned documentation build locally without pushing it:
 
 ```bash
-uv run mike deploy --branch docs-preview 0.1.0
+uv run mike deploy --branch docs-preview 0.1.0 -- --strict
 uv run mike serve --branch docs-preview
 ```
 
