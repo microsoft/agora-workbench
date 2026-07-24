@@ -307,9 +307,12 @@ class BlobFetcher(AssetFetcher):
                 # catalog.indexer._parse_blob_path)
                 remainder = url[len("az://") :]
                 parts = remainder.split("/", 2)
-                if len(parts) < 3 or not parts[0] or not parts[1] or not parts[2]:
+                if len(parts) < 3 or not parts[0] or not parts[1] or not parts[2].lstrip("/"):
                     raise ValueError(f"Malformed az URL: '{url}'. Expected format: az://account/container/path")
 
+                storage_account = parts[0]
+                container = parts[1]
+                blob_path = parts[2].lstrip("/")
                 storage_account = parts[0]
                 container = parts[1]
                 blob_path = parts[2]
