@@ -14,7 +14,7 @@ on:
     inputs:
       version:
         description: "Documentation version to deploy (for example, 0.1.0)"
-        required: false
+        required: true
         type: string
       aliases:
         description: "Space-separated aliases to update (for example, 0.1 latest)"
@@ -66,7 +66,11 @@ jobs:
             version="dev"
             aliases=()
           else
-            version="${DOCS_VERSION:-dev}"
+            if [[ -z "$DOCS_VERSION" ]]; then
+              echo "version input is required for manual workflow dispatch." >&2
+              exit 1
+            fi
+            version="$DOCS_VERSION"
             read -r -a aliases <<< "${DOCS_ALIASES:-}"
           fi
 
