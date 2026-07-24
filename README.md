@@ -38,7 +38,7 @@ Use Agora Workbench to:
 ```bash
 git clone https://github.com/microsoft/agora-workbench.git
 cd agora-workbench
-uv sync  # install the project and default dev tools
+uv sync --group dev  # install the project and dev tools
 ```
 
 **With pip (for using as a library):**
