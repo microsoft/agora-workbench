@@ -280,7 +280,7 @@ Recommended handling: close an unused session (`<server>_close_session`) or retr
 The shared base image and server image templates live in
 `src/agora_workbench/deployment/templates/docker/`. The example servers include
 Docker Compose files for local use. See the
-[deployment guide](../../../docs/guide/deploying.md) for local and Azure
+[deployment guide](../../../../docs/guide/deploying.md) for local and Azure
 Container Apps instructions.
 
 ## Object Transfer
