@@ -56,9 +56,9 @@ jobs:
       - name: Deploy documentation
         env:
           EVENT_NAME: ${{ github.event_name }}
-          DOCS_VERSION: ${{ inputs.version }}
-          DOCS_ALIASES: ${{ inputs.aliases }}
-          SET_LATEST_DEFAULT: ${{ inputs.set_latest_default }}
+          DOCS_VERSION: ${{ github.event.inputs.version }}
+          DOCS_ALIASES: ${{ github.event.inputs.aliases }}
+          SET_LATEST_DEFAULT: ${{ github.event.inputs.set_latest_default }}
         run: |
           set -euo pipefail
 
