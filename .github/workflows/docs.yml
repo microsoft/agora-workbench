@@ -56,6 +56,7 @@ jobs:
       - name: Deploy documentation
         env:
           EVENT_NAME: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
           DOCS_VERSION: ${{ github.event.inputs.version }}
           DOCS_ALIASES: ${{ github.event.inputs.aliases }}
           SET_LATEST_DEFAULT: ${{ github.event.inputs.set_latest_default }}
@@ -85,6 +86,14 @@ jobs:
           for alias in "${aliases[@]}"; do
             validate_name "$alias"
           done
+
+          if [[ "$EVENT_NAME" != "push" ]]; then
+            expected_ref="refs/tags/v${version}"
+            if [[ "$SOURCE_REF" != "$expected_ref" ]]; then
+              echo "Release docs for $version must run from $expected_ref, not $SOURCE_REF." >&2
+              exit 1
+            fi
+          fi
 
           if [[ "${SET_LATEST_DEFAULT:-false}" == "true" ]] && [[ ! " ${aliases[*]} " =~ " latest " ]]; then
             echo "The latest alias must be included before it can be set as the default." >&2
