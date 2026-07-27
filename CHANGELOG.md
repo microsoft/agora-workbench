@@ -11,6 +11,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
-- Initial Agora Workbench toolkit for building and deploying MCP servers with sandboxed Python execution.
-- Code execution, connector, deployment, authentication, data access, and activity monitoring components.
-- User guides, tutorials, and API reference documentation.
+- `CodeExecutionServer` for running session-isolated Python kernels with uv, conda, or pip environments.
+- Typed domain tool registration, searchable tool catalogs, reusable agent skills, and state-based workflow planning.
+- Adaptive tool execution, explicit session reconnects, persistent session state, and helpers for publishing large outputs.
+- Data catalogs with keyword and vector search across local files and Azure Blob Storage.
+- File, object, and artifact transfer between kernels, agents, and trusted peer servers.
+- `ConnectorServer` router and gateway modes for composing multiple MCP servers behind a unified endpoint.
+- Unified cross-server state graphs with configurable bridge edges for multi-server workflow discovery.
+- Sidecar process support for sharing expensive models and other process-global resources across kernel sessions.
+- Streamable HTTP hosting with Bearer token middleware, Azure Entra ID authentication, and no-op development auth.
+- `agora-workbench-deploy` scaffolding for Docker and Azure Container Apps deployments.
+- A real-time activity UI with session-grouped events, artifact previews, and output downloads.
+- Reference chemistry, geospatial, and energy-system servers demonstrating domain tools and skills.
+- Tutorials for Microsoft Agent Framework, OpenAI Agents SDK, and GitHub Copilot SDK clients.
+- User guides and generated API reference documentation for server construction, data access, deployment, and extension.
