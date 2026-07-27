@@ -92,9 +92,9 @@ jobs:
           fi
 
           if ((${#aliases[@]})); then
-            uv run mike deploy --push --update-aliases "$version" "${aliases[@]}" -- --strict
+            uv run mike deploy --push --update-aliases "$version" "${aliases[@]}"
           else
-            uv run mike deploy --push "$version" -- --strict
+            uv run mike deploy --push "$version"
           fi
 
           if [[ "${SET_LATEST_DEFAULT:-false}" == "true" ]]; then
