@@ -1,9 +1,15 @@
 site_name: Agora Workbench
 site_description: Documentation for building sandboxed MCP servers with Agora Workbench.
 repo_url: https://github.com/microsoft/agora-workbench
+strict: true
 
 theme:
   name: material
+  features:
+    - navigation.sections
+    - navigation.expand
+    - search.highlight
+    - content.code.copy
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -17,11 +23,10 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  features:
-    - navigation.sections
-    - navigation.expand
-    - search.highlight
-    - content.code.copy
+
+extra:
+  version:
+    provider: mike
 
 plugins:
   - search
