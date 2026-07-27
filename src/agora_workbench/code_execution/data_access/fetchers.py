@@ -127,6 +127,11 @@ class BlobFetcher(AssetFetcher):
         if qualified_name.startswith("abfss://"):
             return True
 
+        if qualified_name.startswith("az://"):
+            # az://account/container/blob — the scheme emitted by the catalog
+            # indexer. Structural validation happens in _parse_blob_url.
+            return True
+
         if qualified_name.startswith("https://"):
             # Properly parse URL and check hostname to avoid substring injection
             try:
@@ -144,6 +149,7 @@ class BlobFetcher(AssetFetcher):
 
         Supports:
         - abfss://container@storage.dfs.core.windows.net/path/to/file
+        - az://account/container/path/to/file
         - https://storage.blob.core.windows.net/container/path/to/file
 
         Args:
@@ -223,7 +229,7 @@ class BlobFetcher(AssetFetcher):
         Parse blob URL to extract storage account, container, and path.
 
         Args:
-            url: Blob URL in abfss:// or https:// format
+            url: Blob URL in abfss://, az://, or https:// format
 
         Returns:
             Tuple of (storage_account, container, blob_path)
@@ -295,6 +301,19 @@ class BlobFetcher(AssetFetcher):
 
                 blob_path = path_parts[1] if len(path_parts) > 1 else ""
 
+            elif url.startswith("az://"):
+                # Format: az://account/container/path
+                # (the scheme emitted by the catalog indexer; mirrors
+                # catalog.indexer._parse_blob_path)
+                remainder = url[len("az://") :]
+                parts = remainder.split("/", 2)
+                if len(parts) < 3 or not parts[0] or not parts[1] or not parts[2].lstrip("/"):
+                    raise ValueError(f"Malformed az URL: '{url}'. Expected format: az://account/container/path")
+
+                storage_account = parts[0]
+                container = parts[1]
+                blob_path = parts[2].lstrip("/")
+
             else:
                 raise ValueError(f"Unsupported blob URL format: {url}")
 
@@ -303,7 +322,8 @@ class BlobFetcher(AssetFetcher):
         except (IndexError, AttributeError) as e:
             raise ValueError(
                 f"Failed to parse blob URL '{url}': {str(e)}. "
-                f"Expected format: abfss://container@storage.dfs.core.windows.net/path "
+                f"Expected format: abfss://container@storage.dfs.core.windows.net/path, "
+                f"az://account/container/path, "
                 f"or https://storage.blob.core.windows.net/container/path"
             ) from e
 
