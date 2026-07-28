@@ -11,6 +11,14 @@ A workbench for wrapping your tooling with MCP
 
 <h2><a href="https://microsoft.github.io/agora-workbench">Documentation</a></h2>
 
+> [!IMPORTANT]
+> **Research software and support**
+>
+> Agora Workbench is research software and is not an officially supported Microsoft product. It is provided
+> as-is and may change without notice. No support, service-level commitments, or compatibility guarantees are
+> provided. Issues and contributions are welcome, but responses, fixes, and continued maintenance are not
+> guaranteed.
+
 ## Overview
 
 Agora Workbench is a toolkit for building MCP (Model Context Protocol) servers that provide sandboxed Python execution with domain-specific packages. It is agent-framework agnostic — any MCP-compatible client can take advantage of the servers created by Agora Workbench.
