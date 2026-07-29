@@ -46,22 +46,36 @@ backward compatible within their minor release.
    ```
 
 The PyPI workflow builds from the immutable release tag, verifies that the tag and package versions match, checks
-the distribution contents, and publishes through PyPI Trusted Publishing. It does not use a long-lived API token.
+the distribution contents, installs the wheel in a clean environment, and publishes through PyPI Trusted Publishing.
+It does not use a long-lived API token. Pull requests that affect packaging run the same build, content validation,
+and installation checks through the `package.yml` workflow.
 
-### PyPI Trusted Publisher configuration
+### Trusted Publisher configuration
 
-The `agora-workbench` PyPI project trusts this repository through the following publisher settings:
+Configure pending publishers on both [TestPyPI](https://test.pypi.org/manage/account/publishing/) and
+[PyPI](https://pypi.org/manage/account/publishing/):
 
-| Setting | Value |
-| --- | --- |
-| Owner | `microsoft` |
-| Repository | `agora-workbench` |
-| Workflow | `publish-pypi.yml` |
-| Environment | `pypi` |
+| Index | Project | Owner | Repository | Workflow | Environment |
+| --- | --- | --- | --- | --- | --- |
+| TestPyPI | `agora-workbench` | `microsoft` | `agora-workbench` | `publish-testpypi.yml` | `testpypi` |
+| PyPI | `agora-workbench` | `microsoft` | `agora-workbench` | `publish-pypi.yml` | `pypi` |
 
-The GitHub `pypi` environment should require approval from a repository maintainer. When bootstrapping an
-unregistered PyPI project, configure these values as a pending publisher in the PyPI account's **Publishing**
-settings before running the workflow.
+The GitHub `testpypi` and `pypi` environments should require approval from a repository maintainer. A pending
+publisher does not reserve the project name until the first successful upload.
+
+### Testing a release candidate
+
+After the release preparation changes merge, run the TestPyPI workflow against `main`:
+
+```bash
+gh workflow run publish-testpypi.yml -f source_ref=main
+```
+
+The workflow appends a unique `.dev<run-id>` suffix to the package version, so it can be rerun after fixes without
+consuming the intended production version. It builds and validates the distributions, publishes them through the
+protected `testpypi` environment, then installs the uploaded wheel from TestPyPI and exercises its imports and CLIs.
+
+Only create the final Git tag and GitHub Release after the TestPyPI workflow succeeds.
 
 The workflow can be started manually for a release whose GitHub Release was published before the workflow existed:
 

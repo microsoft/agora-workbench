@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Trusted Publishing workflow for building validated release distributions and publishing them to PyPI.
+- Pull request packaging checks and repeatable TestPyPI candidate deployments with clean-install smoke tests.
 
 ### Changed
 

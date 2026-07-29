@@ -70,33 +70,10 @@ jobs:
         run: uv build
 
       - name: Verify distribution contents
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import tarfile
-          import zipfile
+        run: python .github/scripts/validate_distribution.py
 
-          distributions = sorted(Path("dist").iterdir())
-          wheels = [path for path in distributions if path.suffix == ".whl"]
-          sdists = [path for path in distributions if path.name.endswith(".tar.gz")]
-          if len(wheels) != 1 or len(sdists) != 1:
-              raise SystemExit(f"Expected one wheel and one sdist, found: {distributions}")
-
-          with zipfile.ZipFile(wheels[0]) as archive:
-              wheel_files = archive.namelist()
-          with tarfile.open(sdists[0]) as archive:
-              sdist_files = archive.getnames()
-
-          forbidden = [
-              name
-              for name in wheel_files + sdist_files
-              if "/tests/" in f"/{name}/"
-              or "/__pycache__/" in f"/{name}/"
-              or name.endswith((".pyc", ".pyo"))
-          ]
-          if forbidden:
-              raise SystemExit("Distribution contains excluded files:\n" + "\n".join(forbidden))
-          PY
+      - name: Smoke-test installed wheel
+        run: .github/scripts/smoke_test_wheel.sh
 
       - name: Upload distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
