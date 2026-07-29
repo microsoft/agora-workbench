@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Trusted Publishing workflow for building validated release distributions and publishing them to PyPI.
+
+### Changed
+
+- Excluded tests, bytecode, and cache artifacts from wheel and source distributions.
+
 ## [0.1.0] - 2026-07-28
 
 ### Added

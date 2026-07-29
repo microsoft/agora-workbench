@@ -32,10 +32,46 @@ backward compatible within their minor release.
    git push origin v0.1.0
    ```
 
-7. Create a GitHub Release from the tag using the matching changelog entry as the release notes.
+7. Create a GitHub Release from the tag using the matching changelog entry as the release notes. Publishing the
+   release triggers the PyPI workflow.
+8. Approve the deployment to the protected `pypi` GitHub environment.
+9. Confirm the release is available and installable:
 
-Do not publish Agora Workbench to PyPI while the repository is private. PyPI publishing will be added
-separately after the repository becomes public.
+   ```bash
+   python -m venv /tmp/agora-workbench-release
+   /tmp/agora-workbench-release/bin/pip install "agora-workbench==0.1.1"
+   /tmp/agora-workbench-release/bin/python -c "import agora_workbench"
+   ```
+
+The PyPI workflow builds from the immutable release tag, verifies that the tag and package versions match, checks
+the distribution contents, and publishes through PyPI Trusted Publishing. It does not use a long-lived API token.
+
+### PyPI Trusted Publisher configuration
+
+The `agora-workbench` PyPI project trusts this repository through the following publisher settings:
+
+| Setting | Value |
+| --- | --- |
+| Owner | `microsoft` |
+| Repository | `agora-workbench` |
+| Workflow | `publish-pypi.yml` |
+| Environment | `pypi` |
+
+The GitHub `pypi` environment should require approval from a repository maintainer. When bootstrapping an
+unregistered PyPI project, configure these values as a pending publisher in the PyPI account's **Publishing**
+settings before running the workflow.
+
+The workflow can be started manually for a release whose GitHub Release was published before the workflow existed:
+
+```bash
+gh workflow run publish-pypi.yml -f tag=v0.1.1
+```
+
+The manual input must name an existing release tag. Published files on PyPI are immutable, so never move or recreate
+a tag after publishing it.
+
+The PyPI workflow and distribution cleanup were introduced after `v0.1.0` was created. The first PyPI release is
+therefore `v0.1.1`; the existing `v0.1.0` tag remains unchanged and installable directly from Git.
 
 ## Publishing versioned documentation
 
@@ -72,12 +108,12 @@ Delete the local `docs-preview` branch after testing if it is no longer needed.
 
 ## Consuming a release
 
-Until PyPI publishing is enabled, downstream projects should pin an immutable release tag:
+Downstream projects should pin a compatible PyPI version:
 
 ```toml
 dependencies = [
-    "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0",
+    "agora-workbench>=0.1.1,<0.2.0",
 ]
 ```
 
-Downstream projects should also commit their `uv.lock` file so the tag resolves to a recorded commit.
+Downstream projects should commit their `uv.lock` file so the selected distribution and hashes remain reproducible.
