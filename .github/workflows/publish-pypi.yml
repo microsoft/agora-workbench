@@ -38,7 +38,7 @@ jobs:
             tag="$INPUT_TAG"
           fi
 
-          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+([a-zA-Z0-9.-]+)?)$ ]]; then
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             echo "Release tag must use the vMAJOR.MINOR.PATCH format: $tag" >&2
             exit 1
           fi

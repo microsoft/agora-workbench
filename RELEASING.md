@@ -38,8 +38,10 @@ backward compatible within their minor release.
 9. Confirm the release is available and installable:
 
    ```bash
+   version=$(python -c \
+     'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
    python -m venv /tmp/agora-workbench-release
-   /tmp/agora-workbench-release/bin/pip install "agora-workbench==0.1.1"
+   /tmp/agora-workbench-release/bin/pip install "agora-workbench==$version"
    /tmp/agora-workbench-release/bin/python -c "import agora_workbench"
    ```
 
@@ -64,7 +66,9 @@ settings before running the workflow.
 The workflow can be started manually for a release whose GitHub Release was published before the workflow existed:
 
 ```bash
-gh workflow run publish-pypi.yml -f tag=v0.1.1
+version=$(python -c \
+  'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+gh workflow run publish-pypi.yml -f tag="v$version"
 ```
 
 The manual input must name an existing release tag. Published files on PyPI are immutable, so never move or recreate
