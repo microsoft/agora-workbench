@@ -24,6 +24,19 @@ class TestScaffoldInit:
         assert (tmp_path / "out" / "azure" / "README.md").exists()
 
     @pytest.mark.unit
+    def test_activity_ui_target(self, tmp_path):
+        created = init(target="activity-ui", output_dir=str(tmp_path / "out"))
+        assert len(created) == len(TEMPLATE_SETS["activity-ui"])
+        assert (tmp_path / "out" / "activity_ui" / "Dockerfile").exists()
+        assert (tmp_path / "out" / "activity_ui" / "docker-compose.yml").exists()
+        assert (tmp_path / "out" / "activity_ui" / "server.py").exists()
+        assert (tmp_path / "out" / "activity_ui" / "static" / "index.html").exists()
+        assert (tmp_path / "out" / "activity_ui" / "README.md").exists()
+        compose = (tmp_path / "out" / "activity_ui" / "docker-compose.yml").read_text()
+        assert "context: .." in compose
+        assert "dockerfile: activity_ui/Dockerfile" in compose
+
+    @pytest.mark.unit
     def test_all_target(self, tmp_path):
         created = init(target="all", output_dir=str(tmp_path / "out"))
         expected_count = sum(len(v) for v in TEMPLATE_SETS.values())

@@ -11,10 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Trusted Publishing workflow for building validated release distributions and publishing them to PyPI.
 - Pull request packaging checks and repeatable TestPyPI candidate deployments with clean-install smoke tests.
+- `agora-workbench-deploy init --target activity-ui` for scaffolding the standalone monitoring service from the
+  installed package.
 
 ### Changed
 
 - Excluded tests, bytecode, and cache artifacts from wheel and source distributions.
+- Updated installation guidance to use the released PyPI package while identifying bundled examples that require a
+  source checkout.
 
 ## [0.1.0] - 2026-07-28
 

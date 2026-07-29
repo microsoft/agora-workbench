@@ -9,6 +9,15 @@ fi
 
 venv="$PWD/.package-venv"
 rm -rf "$venv"
+scaffold=""
+cleanup() {
+  rm -rf "$venv"
+  if [[ -n "$scaffold" ]]; then
+    rm -rf "$scaffold"
+  fi
+}
+trap cleanup EXIT
+
 uv venv "$venv" --python 3.11
 uv pip install --python "$venv/bin/python" "$wheel"
 
@@ -17,9 +26,11 @@ cd /tmp
 from importlib.metadata import entry_points, version
 
 import agora_workbench
+import activity_ui
 
 print(f"agora-workbench {version('agora-workbench')}")
 print(agora_workbench.__file__)
+print(activity_ui.__file__)
 
 scripts = {entry.name: entry for entry in entry_points(group="console_scripts")}
 for name in ("mcp-connector-server", "agora-workbench-deploy"):
@@ -28,3 +39,9 @@ for name in ("mcp-connector-server", "agora-workbench-deploy"):
     if not callable(scripts[name].load()):
         raise SystemExit(f"Console entry point is not callable: {name}")
 PY
+
+scaffold=$(mktemp -d)
+"$venv/bin/agora-workbench-deploy" init --target activity-ui --output-dir "$scaffold"
+test -f "$scaffold/activity_ui/Dockerfile"
+test -f "$scaffold/activity_ui/server.py"
+test -f "$scaffold/activity_ui/static/index.html"

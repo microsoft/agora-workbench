@@ -24,12 +24,15 @@ The UI groups events by session and shows them as expandable cards with the code
 ## Starting the activity UI
 
 ```bash
+# Install the deployment CLI and scaffold the UI:
+python -m pip install "agora-workbench==0.1.1"
+agora-workbench-deploy init --target activity-ui
+
 # Create the shared Docker network (one-time):
 docker network create agora-activity
 
 # Start the UI:
-cd activity_ui/
-docker compose up -d --build
+docker compose -f deployment/activity_ui/docker-compose.yml up -d --build
 
 # Open in browser:
 #   http://127.0.0.1:8030
@@ -38,7 +41,7 @@ docker compose up -d --build
 The UI stays up across MCP server restarts. Stop it when you don't need it:
 
 ```bash
-cd activity_ui/ && docker compose down
+docker compose -f deployment/activity_ui/docker-compose.yml down
 ```
 
 MCP servers' publishes silently no-op after that — tool calls keep working.

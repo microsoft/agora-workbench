@@ -1,7 +1,7 @@
 """CLI entrypoint for deployment scaffolding.
 
 Usage:
-    agora-workbench-deploy init [--target docker|azure|all] [--output-dir DIR]
+    agora-workbench-deploy init [--target docker|azure|activity-ui|all] [--output-dir DIR]
 
 Copies deployment templates into the specified directory so they can be
 customized for the user's server.
@@ -13,7 +13,8 @@ from importlib.resources import files
 from pathlib import Path
 
 
-TEMPLATES = files("agora_workbench.deployment.templates")
+DEPLOYMENT_TEMPLATES = files("agora_workbench.deployment.templates")
+ACTIVITY_UI_TEMPLATES = files("activity_ui")
 
 TEMPLATE_SETS = {
     "docker": [
@@ -35,12 +36,33 @@ TEMPLATE_SETS = {
         "azure/parameters/server.bicepparam",
         "azure/networks/router.yaml",
     ],
+    "activity-ui": [
+        "activity_ui/Dockerfile",
+        "activity_ui/docker-compose.yml",
+        "activity_ui/requirements.txt",
+        "activity_ui/__init__.py",
+        "activity_ui/auth.py",
+        "activity_ui/models.py",
+        "activity_ui/server.py",
+        "activity_ui/static/index.html",
+        "activity_ui/README.md",
+    ],
 }
+
+
+def _template_source(name: str):
+    if not name.startswith("activity_ui/"):
+        return DEPLOYMENT_TEMPLATES.joinpath(name)
+
+    relative_name = name.removeprefix("activity_ui/")
+    if relative_name == "README.md":
+        return DEPLOYMENT_TEMPLATES.joinpath(name)
+    return ACTIVITY_UI_TEMPLATES.joinpath(relative_name)
 
 
 def _copy_template(name: str, dest_dir: Path) -> Path:
     """Copy a single template file to the destination, preserving subdirectories."""
-    source = TEMPLATES.joinpath(name)
+    source = _template_source(name)
     target = dest_dir / name
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -58,7 +80,7 @@ def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
     """Copy deployment templates into the target directory.
 
     Args:
-        target: Which template set to scaffold — "docker", "azure", or "all".
+        target: Which template set to scaffold: "docker", "azure", "activity-ui", or "all".
         output_dir: Destination directory (created if needed).
 
     Returns:
@@ -71,7 +93,8 @@ def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
     elif target in TEMPLATE_SETS:
         sets_to_copy = [target]
     else:
-        raise ValueError(f"Unknown target: {target!r}. Choose from: docker, azure, all")
+        choices = ", ".join([*TEMPLATE_SETS, "all"])
+        raise ValueError(f"Unknown target: {target!r}. Choose from: {choices}")
 
     created = []
     for set_name in sets_to_copy:
@@ -96,7 +119,7 @@ def main() -> None:
     )
     init_parser.add_argument(
         "--target",
-        choices=["docker", "azure", "all"],
+        choices=[*TEMPLATE_SETS, "all"],
         default="all",
         help="Which deployment templates to scaffold (default: all).",
     )
@@ -147,9 +170,14 @@ def main() -> None:
             print("  3. Copy docker/.env.server.example → docker/.env.server and fill in values")
             print("  4. docker compose -f docker/docker-compose.yml up --build")
         if args.target in ("azure", "all"):
-            print("  5. Edit azure/parameters/server.bicepparam for your server")
-            print("  6. Run azure/setup.sh to provision Azure infrastructure")
-            print("  7. Run azure/deploy-server.sh --server <name> to deploy")
+            step = 5 if args.target == "all" else 1
+            print(f"  {step}. Edit azure/parameters/server.bicepparam for your server")
+            print(f"  {step + 1}. Run azure/setup.sh to provision Azure infrastructure")
+            print(f"  {step + 2}. Run azure/deploy-server.sh --server <name> to deploy")
+        if args.target in ("activity-ui", "all"):
+            step = 8 if args.target == "all" else 1
+            print(f"  {step}. Create the shared network: docker network create agora-activity")
+            print(f"  {step + 1}. Start the UI: docker compose -f activity_ui/docker-compose.yml up -d --build")
 
 
 if __name__ == "__main__":

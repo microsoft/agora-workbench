@@ -59,7 +59,14 @@ if forbidden:
     raise SystemExit("Distribution contains excluded files:\n" + "\n".join(forbidden))
 
 required_wheel_files = {
+    "activity_ui/Dockerfile",
+    "activity_ui/auth.py",
+    "activity_ui/docker-compose.yml",
+    "activity_ui/requirements.txt",
+    "activity_ui/server.py",
+    "activity_ui/static/index.html",
     "agora_workbench/__init__.py",
+    "agora_workbench/deployment/templates/activity_ui/README.md",
     "agora_workbench/deployment/templates/docker/Dockerfile",
     "agora_workbench/deployment/templates/azure/main.bicep",
 }

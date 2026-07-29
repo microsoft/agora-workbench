@@ -68,10 +68,15 @@ changelog = "https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md
 mcp-connector-server = "agora_workbench.connector.cli:main"
 agora-workbench-deploy = "agora_workbench.deployment.cli:main"
 
+[tool.setuptools]
+package-dir = {"" = "src", activity_ui = "activity_ui"}
+
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["agora_workbench*"]
+where = ["src", "."]
+include = ["agora_workbench*", "activity_ui*"]
 exclude = [
+    "activity_ui.tests",
+    "activity_ui.tests.*",
     "agora_workbench.code_execution.tests",
     "agora_workbench.code_execution.tests.*",
     "agora_workbench.connector.tests",
@@ -82,6 +87,12 @@ exclude = [
 
 [tool.setuptools.package-data]
 "agora_workbench.deployment.templates" = ["**/*"]
+"activity_ui" = [
+    "Dockerfile",
+    "docker-compose.yml",
+    "requirements.txt",
+    "static/**/*",
+]
 
 [tool.setuptools.exclude-package-data]
 "agora_workbench.deployment.templates" = [

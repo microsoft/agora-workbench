@@ -4,6 +4,14 @@ All connection tutorials use the bundled chemistry server as the local
 Agora Workbench MCP server. Follow these steps once before running any
 tutorial.
 
+The Agora Workbench library is available from PyPI, but this bundled example and its Docker files are repository
+assets. Clone the matching release before continuing:
+
+```bash
+git clone --branch v0.1.1 --depth 1 https://github.com/microsoft/agora-workbench.git
+cd agora-workbench
+```
+
 ## 1. Build the shared MCP base image (once)
 
 From the repository root:
