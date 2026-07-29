@@ -44,7 +44,7 @@ The UI stays up across MCP server restarts. Stop it when you don't need it:
 docker compose -f deployment/activity_ui/docker-compose.yml down
 ```
 
-MCP servers' publishes silently no-op after that — tool calls keep working.
+MCP servers' publishers silently no-op after that — tool calls keep working.
 
 ## Connecting your server to the activity UI
 
