@@ -53,9 +53,7 @@ for label, metadata in (("wheel", wheel_metadata), ("sdist", sdist_metadata)):
 forbidden = [
     name
     for name in wheel_files + sdist_files
-    if "/tests/" in f"/{name}/"
-    or "/__pycache__/" in f"/{name}/"
-    or name.endswith((".pyc", ".pyo"))
+    if "/tests/" in f"/{name}/" or "/__pycache__/" in f"/{name}/" or name.endswith((".pyc", ".pyo"))
 ]
 if forbidden:
     raise SystemExit("Distribution contains excluded files:\n" + "\n".join(forbidden))
