@@ -1,6 +1,6 @@
 [project]
 name = "agora-workbench"
-version = "0.1.0"
+version = "0.1.1"
 description = "A toolkit for building MCP servers that provide sandboxed Python execution with domain-specific packages."
 readme = "README.md"
 license = "MIT"
