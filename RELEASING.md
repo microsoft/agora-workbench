@@ -32,10 +32,64 @@ backward compatible within their minor release.
    git push origin v0.1.0
    ```
 
-7. Create a GitHub Release from the tag using the matching changelog entry as the release notes.
+7. Create a GitHub Release from the tag using the matching changelog entry as the release notes. Publishing the
+   release triggers the PyPI workflow.
+8. Approve the deployment to the protected `pypi` GitHub environment.
+9. Confirm the release is available and installable:
 
-Do not publish Agora Workbench to PyPI while the repository is private. PyPI publishing will be added
-separately after the repository becomes public.
+   ```bash
+   version=$(python -c \
+     'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+   python -m venv /tmp/agora-workbench-release
+   /tmp/agora-workbench-release/bin/pip install "agora-workbench==$version"
+   /tmp/agora-workbench-release/bin/python -c "import agora_workbench"
+   ```
+
+The PyPI workflow builds from the immutable release tag, verifies that the tag and package versions match, checks
+the distribution contents, installs the wheel in a clean environment, and publishes through PyPI Trusted Publishing.
+It does not use a long-lived API token. Pull requests that affect packaging run the same build, content validation,
+and installation checks through the `package.yml` workflow.
+
+### Trusted Publisher configuration
+
+Configure pending publishers on both [TestPyPI](https://test.pypi.org/manage/account/publishing/) and
+[PyPI](https://pypi.org/manage/account/publishing/):
+
+| Index | Project | Owner | Repository | Workflow | Environment |
+| --- | --- | --- | --- | --- | --- |
+| TestPyPI | `agora-workbench` | `microsoft` | `agora-workbench` | `publish-testpypi.yml` | `testpypi` |
+| PyPI | `agora-workbench` | `microsoft` | `agora-workbench` | `publish-pypi.yml` | `pypi` |
+
+The GitHub `testpypi` and `pypi` environments should require approval from a repository maintainer. A pending
+publisher does not reserve the project name until the first successful upload.
+
+### Testing a release candidate
+
+After the release preparation changes merge, run the TestPyPI workflow against `main`:
+
+```bash
+gh workflow run publish-testpypi.yml -f source_ref=main
+```
+
+The workflow appends a unique `.dev<run-id>` suffix to the package version, so it can be rerun after fixes without
+consuming the intended production version. It builds and validates the distributions, publishes them through the
+protected `testpypi` environment, then installs the uploaded wheel from TestPyPI and exercises its imports and CLIs.
+
+Only create the final Git tag and GitHub Release after the TestPyPI workflow succeeds.
+
+The workflow can be started manually for a release whose GitHub Release was published before the workflow existed:
+
+```bash
+version=$(python -c \
+  'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+gh workflow run publish-pypi.yml -f tag="v$version"
+```
+
+The manual input must name an existing release tag. Published files on PyPI are immutable, so never move or recreate
+a tag after publishing it.
+
+The PyPI workflow and distribution cleanup were introduced after `v0.1.0` was created. The first PyPI release is
+therefore `v0.1.1`; the existing `v0.1.0` tag remains unchanged and installable directly from Git.
 
 ## Publishing versioned documentation
 
@@ -72,12 +126,12 @@ Delete the local `docs-preview` branch after testing if it is no longer needed.
 
 ## Consuming a release
 
-Until PyPI publishing is enabled, downstream projects should pin an immutable release tag:
+Downstream projects should pin a compatible PyPI version:
 
 ```toml
 dependencies = [
-    "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0",
+    "agora-workbench>=0.1.1,<0.2.0",
 ]
 ```
 
-Downstream projects should also commit their `uv.lock` file so the tag resolves to a recorded commit.
+Downstream projects should commit their `uv.lock` file so the selected distribution and hashes remain reproducible.

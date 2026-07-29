@@ -1,0 +1,5 @@
+prune src/agora_workbench/code_execution/tests
+prune src/agora_workbench/connector/tests
+prune src/agora_workbench/deployment/tests
+global-exclude *.pyc
+global-exclude *.pyo

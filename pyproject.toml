@@ -71,10 +71,23 @@ agora-workbench-deploy = "agora_workbench.deployment.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["agora_workbench*"]
-exclude = ["tests*", "scripts*", "examples*", "deployment*"]
+exclude = [
+    "agora_workbench.code_execution.tests",
+    "agora_workbench.code_execution.tests.*",
+    "agora_workbench.connector.tests",
+    "agora_workbench.connector.tests.*",
+    "agora_workbench.deployment.tests",
+    "agora_workbench.deployment.tests.*",
+]
 
 [tool.setuptools.package-data]
 "agora_workbench.deployment.templates" = ["**/*"]
+
+[tool.setuptools.exclude-package-data]
+"agora_workbench.deployment.templates" = [
+    "**/__pycache__/**",
+    "**/*.py[co]",
+]
 
 [build-system]
 requires = ["setuptools>=83.0.0", "wheel"]
