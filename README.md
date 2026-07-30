@@ -52,13 +52,19 @@ uv sync --group dev  # install the project and dev tools
 **With pip (for using as a library):**
 
 ```bash
-pip install "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
+pip install "agora-workbench==0.1.1"
 ```
 
-Pinning a release tag gives downstream projects a stable dependency. With uv, add the same release with:
+The installed deployment CLI can also scaffold the standalone Activity UI:
 
 ```bash
-uv add "agora-workbench @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
+agora-workbench-deploy init --target activity-ui
+```
+
+With uv, add the same release to your project with:
+
+```bash
+uv add "agora-workbench==0.1.1"
 ```
 
 See the [changelog](https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md) for release history and
@@ -79,7 +85,7 @@ Use the command for your installation method:
 uv sync --extra openai-agents
 
 # pip (consuming as a library)
-pip install "agora-workbench[openai-agents] @ git+https://github.com/microsoft/agora-workbench.git@v0.1.0"
+pip install "agora-workbench[openai-agents]==0.1.1"
 ```
 
 ### Configuration

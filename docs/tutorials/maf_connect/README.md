@@ -21,11 +21,11 @@ between MAF and the workbench; build the agent itself by following the
 
 ## Prerequisites
 
-- [`uv`](https://github.com/astral-sh/uv) installed.
+- Python 3.11 or later.
 - Docker — the chemistry server runs as a local container.
-- `agent-framework` available in your env:
+- Agora Workbench and Microsoft Agent Framework installed from PyPI:
   ```bash
-  uv pip install agent-framework
+  python -m pip install "agora-workbench==0.1.1" agent-framework
   ```
 
 ## Start the chemistry MCP server

@@ -15,6 +15,16 @@ To see a version of this pattern that leverages the more advanced feature of Ago
 For advanced tool features (state transitions, skills, affordances) see the
 [Tool pattern](../../guide/tool-pattern.md) and [Skill pattern](../../guide/skill-pattern.md) guides.
 
+## Prerequisites
+
+Create a virtual environment and install the released Agora Workbench package:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m pip install "agora-workbench==0.1.1"
+```
+
 ---
 
 ## Step 1 — The minimal server (no tools)

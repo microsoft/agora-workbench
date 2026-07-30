@@ -59,23 +59,32 @@ a small in-memory buffer.
 
 ## Quickstart
 
+Install Agora Workbench from PyPI when using it as a library or deployment CLI:
+
 ```bash
-# Run from the repository root.
+pip install "agora-workbench==0.1.1"
+mkdir agora-monitoring
+cd agora-monitoring
+agora-workbench-deploy init --target activity-ui --output-dir .
+```
+
+```bash
 # One-time per host:
 docker network create agora-activity
 
 # Start the UI (stays up across MCP-server restarts):
 docker compose -f activity_ui/docker-compose.yml up -d --build
+```
 
-# Build the shared server base image once:
+Open <http://127.0.0.1:8030>.
+
+The bundled example servers still require a matching source checkout. For example:
+
+```bash
+git clone --branch v0.1.1 --depth 1 https://github.com/microsoft/agora-workbench.git
+cd agora-workbench
 docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
-
-# Then bring up whichever MCP servers you want.
-# Each one's compose attaches to the same shared network:
 docker compose -f examples/servers/chemistry/docker-compose.yml up -d --build
-
-# Open the UI:
-#   http://127.0.0.1:8030
 ```
 
 Stop the UI when you don't need it:

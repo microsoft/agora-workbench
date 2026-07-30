@@ -2,6 +2,12 @@
 
 Agora Workbench servers are deployed as Docker containers. The repository provides a shared base image and deployment tooling for both local development and Azure Container Apps.
 
+Install the deployment CLI from PyPI:
+
+```bash
+python -m pip install "agora-workbench==0.1.1"
+```
+
 ## Local development with Docker
 
 ### 1. Build the base image
@@ -68,6 +74,18 @@ RUN python -m server.chemistry_server --warm
 ```
 
 This pre-builds the conda/uv/pip environment so it's ready when the container starts.
+
+## Activity UI
+
+The deployment CLI can scaffold the standalone monitoring service without requiring a source checkout:
+
+```bash
+agora-workbench-deploy init --target activity-ui
+docker network create agora-activity
+docker compose -f deployment/activity_ui/docker-compose.yml up -d --build
+```
+
+Open <http://127.0.0.1:8030>. See [Monitoring your servers](monitoring.md) for server wiring and security guidance.
 
 ## Azure Container Apps deployment
 

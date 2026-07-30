@@ -21,11 +21,11 @@ the [OpenAI Agents SDK docs](https://openai.github.io/openai-agents-python/).
 
 ## Prerequisites
 
-- [`uv`](https://github.com/astral-sh/uv) installed.
+- Python 3.11 or later.
 - Docker — the chemistry server runs as a local container.
-- `openai-agents` installed:
+- Agora Workbench and the OpenAI Agents SDK integration installed from PyPI:
   ```bash
-  uv sync --extra openai-agents
+  python -m pip install "agora-workbench[openai-agents]==0.1.1"
   ```
 
 ## Start the chemistry MCP server

@@ -26,11 +26,11 @@ itself by following the [Copilot SDK docs](https://github.com/github/copilot-sdk
 
 ## Prerequisites
 
-- [`uv`](https://github.com/astral-sh/uv) installed.
+- Python 3.11 or later.
 - Docker — the chemistry server runs as a local container.
-- `github-copilot-sdk` installed:
+- Agora Workbench and the GitHub Copilot SDK integration installed from PyPI:
   ```bash
-  uv sync --extra copilot-sdk
+  python -m pip install "agora-workbench[copilot-sdk]==0.1.1"
   ```
 - Copilot auth set up (for when you actually run a session):
   ```bash
