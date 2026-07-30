@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-30
+
 ### Added
 
 - Trusted Publishing workflow for building validated release distributions and publishing them to PyPI.
