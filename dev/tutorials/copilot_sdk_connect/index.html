@@ -1451,10 +1451,10 @@ internally. The integration point is a <strong>config dict</strong> you hand to
 </code></pre></div>
 <h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="https://github.com/astral-sh/uv"><code>uv</code></a> installed.</li>
+<li>Python 3.11 or later.</li>
 <li>Docker — the chemistry server runs as a local container.</li>
-<li><code>github-copilot-sdk</code> installed:
-  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>sync<span class="w"> </span>--extra<span class="w"> </span>copilot-sdk
+<li>Agora Workbench and the GitHub Copilot SDK integration installed from PyPI:
+  <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-m<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;agora-workbench[copilot-sdk]==0.1.1&quot;</span>
 </code></pre></div></li>
 <li>Copilot auth set up (for when you actually run a session):
   <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>copilot<span class="w"> </span>auth<span class="w"> </span>login
