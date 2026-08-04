@@ -2,7 +2,7 @@
 #
 # Prerequisites — build the base image first:
 #   # From the repository root:
-#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 #
 # Then build the earth science server:
 #   docker build -t earthscience-server:local .

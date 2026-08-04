@@ -172,13 +172,30 @@ deploy_node() {
     echo "  Connector:      $is_connector"
 
     if [[ "$DRY_RUN" != true ]]; then
+        # Where the base image gets agora-workbench from. Defaults to the
+        # Dockerfile's own default (the published package); export
+        # AGORA_WORKBENCH_SOURCE=local to build against a workbench checkout.
+        local -a workbench_source_args=()
+        if [[ -n "${AGORA_WORKBENCH_SOURCE:-}" ]]; then
+            workbench_source_args=(--build-arg "AGORA_WORKBENCH_SOURCE=${AGORA_WORKBENCH_SOURCE}")
+        fi
+
         # Build base image if this is a different Dockerfile that may depend on it
         BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
         if [[ "$dockerfile_path" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
-            docker build --file "$BASE_DOCKERFILE" --tag "mcp-server-base:local" "$context_path" --quiet
+            docker build --file "$BASE_DOCKERFILE" "${workbench_source_args[@]}" \
+                --tag "mcp-server-base:local" "$context_path" --quiet
         fi
 
-        docker build --file "$dockerfile_path" --tag "$image_ref" "$context_path"
+        # Only the base Dockerfile consumes AGORA_WORKBENCH_SOURCE; passing it to
+        # a server image (FROM mcp-server-base:local) would be an unused build-arg.
+        local -a node_build_args=()
+        if [[ "$(basename "$dockerfile_path")" == "base.Dockerfile" ]]; then
+            node_build_args=("${workbench_source_args[@]}")
+        fi
+
+        docker build --file "$dockerfile_path" "${node_build_args[@]}" \
+            --tag "$image_ref" "$context_path"
         az acr login --name "$ACR_NAME" --output none
         docker push "$image_ref"
     else

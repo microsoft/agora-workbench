@@ -25,6 +25,24 @@ Then build the base image:
 docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
 ```
 
+The base image installs `agora-workbench` from PyPI, so it builds from your own
+project root — nothing is read from the build context. Pin a specific release
+with `--build-arg AGORA_WORKBENCH_VERSION=0.1.1`.
+
+!!! note "Building against a workbench checkout"
+
+    If you are developing against a clone of this repository rather than the
+    published package, build from the repository root and select the source
+    checkout explicitly:
+
+    ```bash
+    docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile \
+        --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
+    ```
+
+    `deployment/azure/deploy-network.sh` honours the same choice via the
+    `AGORA_WORKBENCH_SOURCE` environment variable.
+
 ### 2. Create your server's Dockerfile
 
 Extend the base image with your domain-specific server:

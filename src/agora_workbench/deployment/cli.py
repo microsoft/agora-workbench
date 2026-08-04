@@ -11,6 +11,7 @@ import argparse
 import sys
 from importlib.resources import files
 from pathlib import Path
+from typing import Optional
 
 
 DEPLOYMENT_TEMPLATES = files("agora_workbench.deployment.templates")
@@ -60,13 +61,27 @@ def _template_source(name: str):
     return ACTIVITY_UI_TEMPLATES.joinpath(relative_name)
 
 
-def _copy_template(name: str, dest_dir: Path) -> Path:
-    """Copy a single template file to the destination, preserving subdirectories."""
+def _copy_template(name: str, dest_dir: Path) -> Optional[Path]:
+    """Copy a single template file to the destination, preserving subdirectories.
+
+    Returns the created path, or ``None`` if the template is missing from the
+    installed package. A missing template is reported as a warning rather than
+    raising, so one absent file cannot abort a scaffold that has already
+    partially written to the user's directory.
+    """
     source = _template_source(name)
+
+    try:
+        content = source.read_text()
+    except OSError:
+        print(
+            f"⚠️  Skipping {name}: template not found in the installed package.",
+            file=sys.stderr,
+        )
+        return None
+
     target = dest_dir / name
     target.parent.mkdir(parents=True, exist_ok=True)
-
-    content = source.read_text()
     target.write_text(content)
 
     # Preserve executable bit for shell scripts
@@ -84,7 +99,8 @@ def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
         output_dir: Destination directory (created if needed).
 
     Returns:
-        List of created file paths (relative to output_dir).
+        List of created file paths (relative to output_dir). Templates missing
+        from the installed package are skipped with a warning and omitted.
     """
     dest = Path(output_dir)
 
@@ -100,7 +116,8 @@ def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
     for set_name in sets_to_copy:
         for template_name in TEMPLATE_SETS[set_name]:
             path = _copy_template(template_name, dest)
-            created.append(str(path))
+            if path is not None:
+                created.append(str(path))
 
     return created
 

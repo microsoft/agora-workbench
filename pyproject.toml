@@ -86,7 +86,9 @@ exclude = [
 ]
 
 [tool.setuptools.package-data]
-"agora_workbench.deployment.templates" = ["**/*"]
+# "**/*" does not match dotfiles (glob never expands a wildcard onto a leading
+# dot), so "**/.*" is required for templates such as docker/.env.server.example.
+"agora_workbench.deployment.templates" = ["**/*", "**/.*"]
 "activity_ui" = [
     "Dockerfile",
     "docker-compose.yml",

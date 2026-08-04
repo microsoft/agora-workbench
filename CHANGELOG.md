@@ -7,6 +7,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Included dotfile templates in the published wheel, so `agora-workbench-deploy init --target docker` no longer
+  fails with `FileNotFoundError` on the missing `docker/.env.server.example` ([#286](https://github.com/microsoft/agora-workbench/issues/286)).
+- Scaffolding now skips a template that is missing from the installed package with a warning instead of aborting
+  partway through and leaving a half-written output directory.
+- Corrected the scaffolded `docker/docker-compose.yml` `env_file` path, which pointed one directory above the
+  `.env.server` the CLI and docs tell you to create.
+
+### Changed
+
+- The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
+  consumer project root instead of requiring a workbench source checkout. Build against a checkout with
+  `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+
 ## [0.1.1] - 2026-07-30
 
 ### Added

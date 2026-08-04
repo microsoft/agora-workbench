@@ -1,10 +1,20 @@
 # Base image for CodeExecutionServer deployments.
 #
-# Contains system dependencies, uv, miniforge, and the code_execution package.
+# Contains system dependencies, uv, miniforge, and the agora-workbench package.
 # User server images should extend the locally built or published base image.
 #
-# Build from the repository root:
-#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+# Build from your project root (installs agora-workbench from PyPI, so the
+# build context does not need a workbench checkout):
+#   docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
+#
+# To pin a specific release:
+#   docker build -f deployment/docker/base.Dockerfile \
+#       --build-arg AGORA_WORKBENCH_VERSION=0.1.1 -t mcp-server-base:local .
+#
+# To build against a workbench source checkout instead of the published
+# package, run from the workbench repository root with:
+#   docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile \
+#       --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 #
 # Then create your own Dockerfile:
 #   FROM mcp-server-base:local
@@ -18,6 +28,10 @@
 # detects the pre-built env and skips building. This step must be in the
 # server-specific Dockerfile (not here) because it requires the server code
 # to already be COPY'd into the image.
+
+# Where agora-workbench comes from: "pypi" (default) or "local" (source checkout).
+ARG AGORA_WORKBENCH_SOURCE=pypi
+ARG AGORA_WORKBENCH_VERSION=0.1.1
 
 # ============================================================================
 # Stage: Base image with common dependencies
@@ -71,6 +85,23 @@ RUN mkdir -p /opt/wheelhouse && \
     "ipykernel>=6.29.0" \
     && chown -R appuser:appuser /opt/wheelhouse
 
+# ============================================================================
+# Stage: agora-workbench from PyPI (default)
+# ============================================================================
+# Self-contained — needs nothing from the build context, so this image builds
+# from any project root without a workbench checkout present.
+FROM base AS workbench-pypi
+
+ARG AGORA_WORKBENCH_VERSION
+RUN python3 -m pip install --no-input "agora-workbench==${AGORA_WORKBENCH_VERSION}"
+
+# ============================================================================
+# Stage: agora-workbench from a source checkout
+# ============================================================================
+# Requires the build context to be a workbench repository root. Select with
+# --build-arg AGORA_WORKBENCH_SOURCE=local.
+FROM base AS workbench-local
+
 # Copy package metadata for dependency resolution, then install runtime deps
 COPY pyproject.toml /app/pyproject.toml
 RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'))['project']['dependencies']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
@@ -80,6 +111,11 @@ RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb
 # Copy shared code (used by all servers)
 # .dockerignore excludes tests/ and dev files from this COPY
 COPY src/agora_workbench /app/agora_workbench
+
+# ============================================================================
+# Stage: final image
+# ============================================================================
+FROM workbench-${AGORA_WORKBENCH_SOURCE} AS final
 
 # Set up remaining appuser directories (no large chown needed — miniforge
 # and wheelhouse were already owned correctly in their install layers)
