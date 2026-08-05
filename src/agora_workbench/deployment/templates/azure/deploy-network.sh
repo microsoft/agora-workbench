@@ -172,18 +172,12 @@ deploy_node() {
     echo "  Connector:      $is_connector"
 
     if [[ "$DRY_RUN" != true ]]; then
-        # Where the base image gets agora-workbench from. Defaults to the
-        # Dockerfile's own default (the published package); export
-        # AGORA_WORKBENCH_SOURCE=local to build against a workbench checkout.
-        local -a workbench_source_args=()
-        if [[ -n "${AGORA_WORKBENCH_SOURCE:-}" ]]; then
-            workbench_source_args=(--build-arg "AGORA_WORKBENCH_SOURCE=${AGORA_WORKBENCH_SOURCE}")
-        fi
+        set_workbench_source_args
 
-        # Build base image if this is a different Dockerfile that may depend on it
-        BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
-        if [[ "$dockerfile_path" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
-            docker build --file "$BASE_DOCKERFILE" "${workbench_source_args[@]}" \
+        # Build the shared base image first when this node builds some other
+        # Dockerfile that may FROM mcp-server-base:local.
+        if resolve_base_dockerfile && [[ "$dockerfile_path" != "$BASE_DOCKERFILE" ]]; then
+            docker build --file "$BASE_DOCKERFILE" "${WORKBENCH_SOURCE_ARGS[@]}" \
                 --tag "mcp-server-base:local" "$context_path" --quiet
         fi
 
@@ -191,7 +185,7 @@ deploy_node() {
         # a server image (FROM mcp-server-base:local) would be an unused build-arg.
         local -a node_build_args=()
         if [[ "$(basename "$dockerfile_path")" == "base.Dockerfile" ]]; then
-            node_build_args=("${workbench_source_args[@]}")
+            node_build_args=("${WORKBENCH_SOURCE_ARGS[@]}")
         fi
 
         docker build --file "$dockerfile_path" "${node_build_args[@]}" \
@@ -378,11 +372,15 @@ for node in "${nodes[@]}"; do
         if [[ -f "$server_df" ]]; then
             dockerfile="$server_df"
         else
-            dockerfile="${REPO_ROOT}/deployment/base.Dockerfile"
+            resolve_base_dockerfile || true
+            dockerfile="$BASE_DOCKERFILE"
         fi
     elif [[ "$dockerfile" != /* ]]; then
         dockerfile="$MANIFEST_DIR/$dockerfile"
     fi
+    # Absolutize so the base-image comparison in deploy_node matches a manifest
+    # path that points at the base Dockerfile via a relative route.
+    dockerfile="$(canonical_path "$dockerfile")"
 
     # Resolve build context (default: repo root; "_" is sentinel for unset)
     if [[ "$context" == "_" || -z "$context" ]]; then
@@ -390,6 +388,7 @@ for node in "${nodes[@]}"; do
     elif [[ "$context" != /* ]]; then
         context="$MANIFEST_DIR/$context"
     fi
+    context="$(canonical_path "$context")"
 
     # Determine ingress visibility
     external_ingress="true"

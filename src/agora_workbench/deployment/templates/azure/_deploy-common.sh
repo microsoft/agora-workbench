@@ -9,6 +9,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# Root of the scaffolded deployment tree (the parent of azure/). Derived from
+# SCRIPT_DIR rather than hardcoded as "deployment", since `init --output-dir`
+# lets the directory be named anything.
+DEPLOYMENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${SCRIPT_DIR}/../.env.server"
 
 # ── Load .env.server ──────────────────────────────────────────────────────────
@@ -52,6 +56,57 @@ validate_infra_vars() {
             exit 1
         fi
     done
+}
+
+# Resolve the base image Dockerfile and store it in BASE_DOCKERFILE.
+#
+# `agora-workbench-deploy init` writes it to <deployment>/docker/base.Dockerfile;
+# older scaffolds kept it at <deployment>/base.Dockerfile, so that path is still
+# accepted as a fallback. Returns 0 when a file was found, or 1 with
+# BASE_DOCKERFILE set to the preferred location when none exists.
+resolve_base_dockerfile() {
+    local candidate
+    for candidate in "${DEPLOYMENT_DIR}/docker/base.Dockerfile" "${DEPLOYMENT_DIR}/base.Dockerfile"; do
+        if [[ -f "$candidate" ]]; then
+            BASE_DOCKERFILE="$candidate"
+            return 0
+        fi
+    done
+
+    BASE_DOCKERFILE="${DEPLOYMENT_DIR}/docker/base.Dockerfile"
+    return 1
+}
+
+# Absolutize a path without requiring realpath (not present by default on macOS).
+# Paths whose parent directory does not exist are returned unchanged.
+canonical_path() {
+    local path="$1" dir base
+
+    if [[ -d "$path" ]]; then
+        (cd "$path" && pwd)
+        return
+    fi
+
+    dir="$(dirname "$path")"
+    base="$(basename "$path")"
+
+    if [[ -d "$dir" ]]; then
+        printf '%s/%s\n' "$(cd "$dir" && pwd)" "$base"
+    else
+        printf '%s\n' "$path"
+    fi
+}
+
+# Build args selecting where the base image gets agora-workbench from. Defaults
+# to the Dockerfile's own default (the published package); export
+# AGORA_WORKBENCH_SOURCE=local to build against a workbench checkout.
+# Sets the WORKBENCH_SOURCE_ARGS array (a function can't return one).
+WORKBENCH_SOURCE_ARGS=()
+set_workbench_source_args() {
+    WORKBENCH_SOURCE_ARGS=()
+    if [[ -n "${AGORA_WORKBENCH_SOURCE:-}" ]]; then
+        WORKBENCH_SOURCE_ARGS=(--build-arg "AGORA_WORKBENCH_SOURCE=${AGORA_WORKBENCH_SOURCE}")
+    fi
 }
 
 resolve_image_tag() {

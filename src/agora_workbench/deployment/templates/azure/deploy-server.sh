@@ -38,7 +38,8 @@ Required:
 
 Optional:
   --dockerfile, -f      PATH    Path to the Dockerfile to build
-                                (default: auto-detected or deployment/base.Dockerfile)
+                                (default: auto-detected, else the scaffolded
+                                docker/base.Dockerfile)
   --context, -c         PATH    Docker build context directory (default: repo root)
   --template            PATH    Bicep template file (default: main.bicep)
   --skip-base-build             Skip building the mcp-server-base image
@@ -86,9 +87,11 @@ if [[ -z "$DOCKERFILE" ]]; then
     if [[ -f "$SERVER_DOCKERFILE" ]]; then
         DOCKERFILE="$SERVER_DOCKERFILE"
     else
-        DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
+        resolve_base_dockerfile || true
+        DOCKERFILE="$BASE_DOCKERFILE"
     fi
 fi
+DOCKERFILE="$(canonical_path "$DOCKERFILE")"
 
 if [[ ! -f "$DOCKERFILE" && "$DRY_RUN" == false ]]; then
     echo "ERROR: Dockerfile not found: $DOCKERFILE" >&2; exit 1
@@ -144,19 +147,29 @@ if [[ "$DRY_RUN" == true ]]; then
     echo ">> [DRY RUN] Skipping Docker build and push."
     IMAGE_REF="${IMAGE_REF:-${ACR_LOGIN_SERVER}/${SERVER_NAME}-server:dry-run}"
 else
-    BASE_DOCKERFILE="${REPO_ROOT}/deployment/base.Dockerfile"
-    if [[ "$SKIP_BASE_BUILD" == false && "$DOCKERFILE" != "$BASE_DOCKERFILE" && -f "$BASE_DOCKERFILE" ]]; then
+    set_workbench_source_args
+
+    if [[ "$SKIP_BASE_BUILD" == false ]] && resolve_base_dockerfile && [[ "$DOCKERFILE" != "$BASE_DOCKERFILE" ]]; then
         echo ">> Building base image (mcp-server-base:local)..."
         docker build \
             --file "$BASE_DOCKERFILE" \
+            "${WORKBENCH_SOURCE_ARGS[@]}" \
             --tag "mcp-server-base:local" \
             "$BUILD_CONTEXT"
         echo ""
     fi
 
+    # Only the base Dockerfile consumes AGORA_WORKBENCH_SOURCE; passing it to a
+    # server image (FROM mcp-server-base:local) would be an unused build-arg.
+    SERVER_BUILD_ARGS=()
+    if [[ "$(basename "$DOCKERFILE")" == "base.Dockerfile" ]]; then
+        SERVER_BUILD_ARGS=("${WORKBENCH_SOURCE_ARGS[@]}")
+    fi
+
     echo ">> Building server image..."
     docker build \
         --file "$DOCKERFILE" \
+        "${SERVER_BUILD_ARGS[@]}" \
         --tag "$IMAGE_REF" \
         "$BUILD_CONTEXT"
 

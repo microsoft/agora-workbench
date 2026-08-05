@@ -11,7 +11,7 @@ connector:
   server: my-router
   params: ../parameters/server.bicepparam
   context: ../../..
-  dockerfile: ../../base.Dockerfile
+  dockerfile: ../../docker/base.Dockerfile
 upstreams:
   - server: my-domain-server
     params: ../parameters/server.bicepparam
