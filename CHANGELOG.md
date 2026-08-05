@@ -19,6 +19,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
   consumer project root instead of requiring a workbench source checkout. Build against a checkout with
   `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+- The scaffolded `docker/base.Dockerfile` installs `uv` from a version-pinned PyPI release rather than piping an
+  unversioned remote install script into a shell, so image builds of a given commit are reproducible and auditable.
+  Override with `--build-arg UV_VERSION=<version>` ([#288](https://github.com/microsoft/agora-workbench/issues/288)).
 
 ### Fixed
 
