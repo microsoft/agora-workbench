@@ -73,7 +73,7 @@ def _copy_template(name: str, dest_dir: Path) -> Optional[Path]:
 
     try:
         content = source.read_text()
-    except OSError:
+    except FileNotFoundError:
         print(
             f"⚠️  Skipping {name}: template not found in the installed package.",
             file=sys.stderr,
