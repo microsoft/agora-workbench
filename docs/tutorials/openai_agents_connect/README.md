@@ -25,7 +25,7 @@ the [OpenAI Agents SDK docs](https://openai.github.io/openai-agents-python/).
 - Docker — the chemistry server runs as a local container.
 - Agora Workbench and the OpenAI Agents SDK integration installed from PyPI:
   ```bash
-  python -m pip install "agora-workbench[openai-agents]==0.1.1"
+  python -m pip install "agora-workbench[openai-agents]==0.1.2"
   ```
 
 ## Start the chemistry MCP server

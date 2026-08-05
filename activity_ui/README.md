@@ -62,7 +62,7 @@ a small in-memory buffer.
 Install Agora Workbench from PyPI when using it as a library or deployment CLI:
 
 ```bash
-pip install "agora-workbench==0.1.1"
+pip install "agora-workbench==0.1.2"
 mkdir agora-monitoring
 cd agora-monitoring
 agora-workbench-deploy init --target activity-ui --output-dir .
@@ -81,7 +81,7 @@ Open <http://127.0.0.1:8030>.
 The bundled example servers still require a matching source checkout. For example:
 
 ```bash
-git clone --branch v0.1.1 --depth 1 https://github.com/microsoft/agora-workbench.git
+git clone --branch v0.1.2 --depth 1 https://github.com/microsoft/agora-workbench.git
 cd agora-workbench
 docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
 docker compose -f examples/servers/chemistry/docker-compose.yml up -d --build
