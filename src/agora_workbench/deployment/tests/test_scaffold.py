@@ -125,14 +125,51 @@ class TestSkillInstall:
             install_skill(name="not-a-skill", output_dir=str(tmp_path / "skills"))
 
     @pytest.mark.unit
-    def test_reinstall_overwrites_cleanly(self, tmp_path):
+    def test_reinstall_requires_force(self, tmp_path):
+        install_skill(output_dir=str(tmp_path / "skills"))
+
+        with pytest.raises(FileExistsError):
+            install_skill(output_dir=str(tmp_path / "skills"))
+
+    @pytest.mark.unit
+    def test_force_reinstall_refreshes_content(self, tmp_path):
         install_skill(output_dir=str(tmp_path / "skills"))
         target = tmp_path / "skills" / DEFAULT_SKILL / "SKILL.md"
         target.write_text("stale")
 
-        install_skill(output_dir=str(tmp_path / "skills"))
+        install_skill(output_dir=str(tmp_path / "skills"), force=True)
 
         assert target.read_text() != "stale"
+
+    @pytest.mark.unit
+    def test_force_reinstall_removes_stale_files(self, tmp_path):
+        """An upgrade must not leave files from the previous version behind.
+
+        Copying over the top would strand skills that a newer package version
+        renamed or dropped, producing a mixed tree the agent still loads.
+        """
+        install_skill(output_dir=str(tmp_path / "skills"))
+        root = tmp_path / "skills" / DEFAULT_SKILL
+        stale_nested = root / "skills" / "removed-in-a-later-version" / "SKILL.md"
+        stale_nested.parent.mkdir(parents=True)
+        stale_nested.write_text("dropped upstream")
+
+        install_skill(output_dir=str(tmp_path / "skills"), force=True)
+
+        assert not stale_nested.exists()
+        assert (root / "SKILL.md").exists()
+
+    @pytest.mark.unit
+    def test_non_ascii_content_survives_the_copy(self, tmp_path):
+        """The skill prose contains em dashes; the copy pins UTF-8 for them."""
+        install_skill(output_dir=str(tmp_path / "skills"))
+        installed = tmp_path / "skills" / DEFAULT_SKILL / "SKILL.md"
+
+        source = Path(str(deploy_cli.SKILLS)) / DEFAULT_SKILL / "SKILL.md"
+        expected = source.read_text(encoding="utf-8")
+
+        assert installed.read_text(encoding="utf-8") == expected
+        assert "—" in expected, "fixture no longer covers the non-ASCII case"
 
 
 class TestSkillPackaging:
@@ -168,7 +205,9 @@ class TestSkillPackaging:
 
         matched = set()
         for pattern in patterns:
-            matched.update(glob.glob(pattern, root_dir=SKILLS_DIR, recursive=True))
+            # glob returns platform separators; normalize so the comparison
+            # against as_posix() paths below holds on Windows too.
+            matched.update(Path(hit).as_posix() for hit in glob.glob(pattern, root_dir=SKILLS_DIR, recursive=True))
 
         uncovered = sorted(
             path.relative_to(SKILLS_DIR).as_posix()

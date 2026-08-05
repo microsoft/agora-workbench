@@ -78,10 +78,11 @@ Useful flags:
 | --- | --- |
 | `--list` | List the skills bundled with the installed package. |
 | `--name NAME` | Install a specific bundled skill (default: `agora-workbench`). |
-| `--force` | Overwrite an existing skill directory (use this to upgrade after a `pip install --upgrade`). |
+| `--force` | Replace an existing skill directory. It is removed first, so files dropped in a newer version are not left behind — use this to upgrade after `pip install --upgrade`. |
 
-Re-running the command after upgrading the package refreshes the installed copy,
-so keep the skill in sync with the workbench version your servers run.
+Re-running the command with `--force` after upgrading the package refreshes the
+installed copy, so keep the skill in sync with the workbench version your
+servers run.
 
 ## What's next
 

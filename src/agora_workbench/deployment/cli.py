@@ -2,7 +2,8 @@
 
 Usage:
     agora-workbench-deploy init [--target docker|azure|activity-ui|all] [--output-dir DIR]
-    agora-workbench-deploy skill [--name NAME] [--output-dir DIR]
+    agora-workbench-deploy skill [--name NAME] [--output-dir DIR] [--force]
+    agora-workbench-deploy skill --list
 
 ``init`` copies deployment templates into the specified directory so they can be
 customized for the user's server. ``skill`` installs a bundled agent skill into
@@ -10,6 +11,7 @@ an agent's skills directory.
 """
 
 import argparse
+import shutil
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -138,7 +140,7 @@ def _skill_files(name: str) -> list[str]:
     return sorted(collected)
 
 
-def install_skill(name: str = DEFAULT_SKILL, output_dir: str = "skills") -> list[str]:
+def install_skill(name: str = DEFAULT_SKILL, output_dir: str = "skills", force: bool = False) -> list[str]:
     """Copy a bundled agent skill into an agent's skills directory.
 
     The skill is written to ``<output_dir>/<name>/`` so the result follows the
@@ -147,23 +149,34 @@ def install_skill(name: str = DEFAULT_SKILL, output_dir: str = "skills") -> list
     Args:
         name: Which bundled skill to install (see :func:`available_skills`).
         output_dir: Skills directory to install into, e.g. ``~/.claude/skills``.
+        force: Replace an existing installation. The destination is removed
+            first, so files dropped or renamed in a newer package version do
+            not linger alongside the current ones.
 
     Returns:
         List of created file paths.
 
     Raises:
         ValueError: If no bundled skill matches ``name``.
+        FileExistsError: If the destination exists and ``force`` is False.
     """
     relative_paths = _skill_files(name)
     skill_root = SKILLS.joinpath(name)
     dest = Path(output_dir).expanduser() / name
+
+    if dest.exists():
+        if not force:
+            raise FileExistsError(f"{dest} already exists. Pass force=True to replace it.")
+        shutil.rmtree(dest)
 
     created = []
     for relative in relative_paths:
         source = skill_root.joinpath(*relative.split("/"))
         target = dest.joinpath(*relative.split("/"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(source.read_text())
+        # Skill prose contains non-ASCII (em dashes), so the encoding is
+        # pinned rather than left to the platform default.
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
         created.append(str(target))
 
     return created
@@ -217,7 +230,7 @@ def main() -> None:
     skill_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing skill directory without prompting.",
+        help="Replace an existing skill directory (removes it first, so stale files are not left behind).",
     )
     skill_parser.add_argument(
         "--list",
@@ -284,7 +297,7 @@ def main() -> None:
             sys.exit(1)
 
         try:
-            created = install_skill(name=args.name, output_dir=args.output_dir)
+            created = install_skill(name=args.name, output_dir=args.output_dir, force=args.force)
         except ValueError as exc:
             print(f"⚠️  {exc}", file=sys.stderr)
             sys.exit(1)
