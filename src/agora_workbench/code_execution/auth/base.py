@@ -182,6 +182,26 @@ class AuthConfig:
     provider-specific knowledge. ``create_entra_auth_config()`` populates this with
     an Entra-shaped document; custom validators should set it explicitly.
 
+    When set, it must be a non-empty mapping containing at least ``resource``, the
+    only field RFC 9728 marks REQUIRED. This is validated on construction, so the
+    endpoint can serve any non-``None`` value as-is rather than silently returning
+    a document that discovery clients cannot use.
+
     When ``None``, servers fall back to composing an Entra document from their
     ``entra_client_id`` / ``entra_tenant_id`` attributes.
     """
+
+    def __post_init__(self) -> None:
+        metadata = self.protected_resource_metadata
+        if metadata is None:
+            return
+        if not isinstance(metadata, dict) or not metadata:
+            raise ValueError(
+                "AuthConfig.protected_resource_metadata must be a non-empty dict when set; "
+                f"got {metadata!r}. Leave it as None to fall back to Entra ID resolution."
+            )
+        if "resource" not in metadata:
+            raise ValueError(
+                "AuthConfig.protected_resource_metadata is missing the 'resource' field, which "
+                "RFC 9728 requires. Serving it would break clients relying on OAuth discovery."
+            )

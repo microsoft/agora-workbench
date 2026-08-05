@@ -8,6 +8,7 @@ WWW-Authenticate headers on 401 responses for MCP OAuth discovery.
 import logging
 from unittest.mock import patch
 
+import pytest
 from starlette.testclient import TestClient
 
 from ... import CodeExecutionServer
@@ -432,3 +433,42 @@ class TestUnresolvableMetadataWarning:
             _create_server_with_noop_auth()
 
         assert WARNING_FRAGMENT not in caplog.text
+
+
+class TestProtectedResourceMetadataValidation:
+    """AuthConfig rejects documents that would be invalid to serve (RFC 9728)."""
+
+    @pytest.mark.parametrize("invalid", [{}, []], ids=["empty_dict", "not_a_dict"])
+    def test_rejects_empty_or_non_dict_metadata(self, invalid):
+        """An empty document is a caller error, not a request to fall back."""
+        with pytest.raises(ValueError, match="non-empty dict"):
+            _custom_idp_auth_config(invalid)
+
+    def test_rejects_metadata_missing_required_resource_field(self):
+        """`resource` is the only field RFC 9728 marks REQUIRED."""
+        with pytest.raises(ValueError, match="'resource' field"):
+            _custom_idp_auth_config({"authorization_servers": ["https://auth.example.com"]})
+
+    def test_accepts_minimal_valid_metadata(self):
+        """A document carrying only the required field is valid and served as-is."""
+        minimal = {"resource": "https://api.example.com"}
+
+        server = _server_with_auth_config(_custom_idp_auth_config(minimal))
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+
+        assert response.status_code == 200
+        assert response.json() == minimal
+
+    def test_none_metadata_still_falls_back(self, monkeypatch):
+        """Only None selects the legacy Entra composition path."""
+        monkeypatch.setenv("ENTRA_CLIENT_ID", "env-client-id")
+        monkeypatch.setenv("ENTRA_TENANT_ID", "env-tenant-id")
+
+        server = _server_with_auth_config(_custom_idp_auth_config(None))
+        client = TestClient(_create_test_app(server))
+
+        data = client.get("/.well-known/oauth-protected-resource").json()
+
+        assert data["resource"] == "api://env-client-id"

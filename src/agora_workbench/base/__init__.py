@@ -60,7 +60,7 @@ class BaseMCPServer(ABC):
         """
         if not self.auth_config.require_authorization_header:
             return
-        if self.auth_config.protected_resource_metadata:
+        if self.auth_config.protected_resource_metadata is not None:
             return
         if self.entra_client_id and self.entra_tenant_id:
             return
@@ -191,9 +191,10 @@ class BaseMCPServer(ABC):
         async def protected_resource_metadata(request: Request):
             # Provider-supplied metadata wins, so any identity provider can
             # describe itself without the server composing a provider-specific
-            # document from its own attributes.
+            # document from its own attributes. AuthConfig validates the document
+            # on construction, so any non-None value is safe to serve as-is.
             configured = server.auth_config.protected_resource_metadata
-            if configured:
+            if configured is not None:
                 return JSONResponse(configured)
             if not server.entra_client_id or not server.entra_tenant_id:
                 # When no Entra IDs are configured (e.g. noop auth), return a
