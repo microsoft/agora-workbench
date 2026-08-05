@@ -15,18 +15,22 @@ connectors:
   - server: science-router
     params: ../parameters/router.bicepparam
     internal: true
-    dockerfile: ../../base.Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../src/agora_workbench/deployment/templates/docker/base.Dockerfile
   - server: science-gateway
     params: ../parameters/gateway.bicepparam
     depends_on: [science-router]
-    dockerfile: ../../base.Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../src/agora_workbench/deployment/templates/docker/base.Dockerfile
 
 upstreams:
   - server: chemistry
     params: ../parameters/chemistry.bicepparam
     internal: true
-    dockerfile: ../../../examples/servers/chemistry/Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../examples/servers/chemistry/Dockerfile
   - server: earthscience
     params: ../parameters/earthscience.bicepparam
     internal: true
-    dockerfile: ../../../examples/servers/earthscience/Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../examples/servers/earthscience/Dockerfile

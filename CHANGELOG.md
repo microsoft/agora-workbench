@@ -16,6 +16,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Moved the `agora-workbench` agent skill from the repository root into the `agora_workbench.skills` package so that
   it ships in the published wheel and source distribution.
+- The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
+  consumer project root instead of requiring a workbench source checkout. Build against a checkout with
+  `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+
+### Fixed
+
+- Included dotfile templates in the published wheel, so `agora-workbench-deploy init --target docker` no longer
+  fails with `FileNotFoundError` on the missing `docker/.env.server.example` ([#286](https://github.com/microsoft/agora-workbench/issues/286)).
+- Scaffolding now skips a template that is missing from the installed package with a warning instead of aborting
+  partway through and leaving a half-written output directory.
+- Corrected the scaffolded `docker/docker-compose.yml` `env_file` path, which pointed one directory above the
+  `.env.server` the CLI and docs tell you to create.
+- The Azure deploy scripts now locate the base image at its scaffolded `docker/base.Dockerfile` path (falling back
+  to the legacy location), instead of silently skipping the base build and failing any server image that extends it.
 
 ## [0.1.1] - 2026-07-30
 

@@ -2,7 +2,7 @@
 #
 # Prerequisites — build the base image first:
 #   # From the repository root:
-#   docker build -f deployment/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 #
 # Then build the chemistry server:
 #   docker build -f examples/servers/chemistry/Dockerfile -t chemistry-server:local .

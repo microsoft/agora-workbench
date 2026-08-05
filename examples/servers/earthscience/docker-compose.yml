@@ -2,7 +2,7 @@
 #
 # Prerequisites — build the base image first:
 #   # From the repository root:
-#   docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
+#   docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 #
 # To see activity events in the shared Activity UI (optional but recommended):
 #   1) docker network create agora-activity     # once per host

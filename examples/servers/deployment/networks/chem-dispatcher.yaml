@@ -14,17 +14,17 @@ name: chem-dispatcher
 connector:
   server: chem-dispatcher
   params: ../parameters/dispatcher.bicepparam
-  context: ../../..
-  dockerfile: ../../base.Dockerfile
+  context: ../../../..
+  dockerfile: ../../../../src/agora_workbench/deployment/templates/docker/base.Dockerfile
 
 upstreams:
   - server: chem-worker-1
     params: ../parameters/chemistry.bicepparam
     internal: true
-    context: ../../..
-    dockerfile: ../../../examples/servers/chemistry/Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../examples/servers/chemistry/Dockerfile
   - server: chem-worker-2
     params: ../parameters/chemistry.bicepparam
     internal: true
-    context: ../../..
-    dockerfile: ../../../examples/servers/chemistry/Dockerfile
+    context: ../../../..
+    dockerfile: ../../../../examples/servers/chemistry/Dockerfile

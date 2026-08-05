@@ -21,7 +21,7 @@ Exposes an `execute_chemistry_code` MCP tool that runs Python code in an isolate
 
 ```bash
 # From the repository root:
-docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
+docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 ```
 
 ### 2. Build and run the chemistry server

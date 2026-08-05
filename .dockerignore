@@ -9,7 +9,7 @@
 docs
 logo_ideas
 
-# Exclude test and dev files from code_execution package image
-src/code_execution/tests
-src/code_execution/README.md
-src/code_execution/catalog.example.yaml
+# Exclude test and dev files from the agora_workbench package image
+src/agora_workbench/**/tests
+src/agora_workbench/code_execution/README.md
+src/agora_workbench/code_execution/catalog.example.yaml

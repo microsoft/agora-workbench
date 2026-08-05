@@ -18,7 +18,7 @@ All servers follow the same two-step pattern:
 
 ```bash
 # 1. Build the shared base image (one-time, from repo root)
-docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile -t mcp-server-base:local .
+docker build -f src/agora_workbench/deployment/templates/docker/base.Dockerfile --build-arg AGORA_WORKBENCH_SOURCE=local -t mcp-server-base:local .
 
 # 2. Build and start the server
 cd examples/servers/<name>
