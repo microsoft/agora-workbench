@@ -22,7 +22,7 @@ Create a virtual environment and install the released Agora Workbench package:
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-python -m pip install "agora-workbench==0.1.1"
+python -m pip install "agora-workbench==0.1.2"
 ```
 
 ---

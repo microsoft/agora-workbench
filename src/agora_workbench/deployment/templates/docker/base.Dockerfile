@@ -9,7 +9,7 @@
 #
 # To pin a specific release:
 #   docker build -f deployment/docker/base.Dockerfile \
-#       --build-arg AGORA_WORKBENCH_VERSION=0.1.1 -t mcp-server-base:local .
+#       --build-arg AGORA_WORKBENCH_VERSION=0.1.2 -t mcp-server-base:local .
 #
 # To build against a workbench source checkout instead of the published
 # package, run from the workbench repository root with:
@@ -31,7 +31,7 @@
 
 # Where agora-workbench comes from: "pypi" (default) or "local" (source checkout).
 ARG AGORA_WORKBENCH_SOURCE=pypi
-ARG AGORA_WORKBENCH_VERSION=0.1.1
+ARG AGORA_WORKBENCH_VERSION=0.1.2
 
 # ============================================================================
 # Stage: Base image with common dependencies
