@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    # Ruff version. Keep in sync with the `ruff` pin in pyproject.toml so local
+    # Ruff version. Keep in sync with the `ruff` requirement in pyproject.toml so local
     # hooks and CI format identically.
     rev: v0.15.12
     hooks:
