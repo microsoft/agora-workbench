@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `agora-workbench-deploy skill` for installing the bundled `agora-workbench` agent skill into an agent's skills
+  directory from the installed package, so consumers no longer need a source checkout to obtain it.
+
+### Changed
+
+- Moved the `agora-workbench` agent skill from the repository root into the `agora_workbench.skills` package so that
+  it ships in the published wheel and source distribution.
+
 ## [0.1.1] - 2026-07-30
 
 ### Added

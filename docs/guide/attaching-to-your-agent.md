@@ -35,7 +35,7 @@ For a minimal example without any agent framework (raw MCP client or `curl`), se
 ## Workbench skill
 
 The repo includes a ready-made
-**[workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md)**
+**[workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/src/agora_workbench/skills/agora-workbench/SKILL.md)**
 that you can inject into your agent's system prompt (or load via the
 [Agent Skills](https://agentskills.io) standard). It teaches your agent:
 
@@ -44,6 +44,44 @@ that you can inject into your agent's system prompt (or load via the
 - How to handle sessions, artifacts, workflow planning, and async execution
 
 Include the skill in your agent's context to significantly improve its first-attempt success rate with Agora Workbench servers. The skill follows the [Agent Skills format](https://agentskills.io/specification) and includes nested sub-skills for advanced topics (artifacts, workflow planning, async execution) that load on demand.
+
+### Installing the skill
+
+The skill ships inside the `agora-workbench` package, so you do not need a
+checkout of this repository to use it. Install it into your agent's skills
+directory with:
+
+```bash
+pip install agora-workbench
+agora-workbench-deploy skill --output-dir ~/.claude/skills
+```
+
+This writes the full skill tree (`SKILL.md` plus its nested sub-skills) to
+`<output-dir>/agora-workbench/`:
+
+```
+~/.claude/skills/agora-workbench/
+├── SKILL.md
+└── skills/
+    ├── artifacts/SKILL.md
+    ├── async-execution/SKILL.md
+    └── workflow-planning/SKILL.md
+```
+
+Point `--output-dir` at whichever directory your agent client loads skills from
+(`~/.claude/skills` for Claude Code, `.github/skills` for a repo-scoped skill, or
+any path your framework scans). The default is `./skills`.
+
+Useful flags:
+
+| Flag | Purpose |
+| --- | --- |
+| `--list` | List the skills bundled with the installed package. |
+| `--name NAME` | Install a specific bundled skill (default: `agora-workbench`). |
+| `--force` | Overwrite an existing skill directory (use this to upgrade after a `pip install --upgrade`). |
+
+Re-running the command after upgrading the package refreshes the installed copy,
+so keep the skill in sync with the workbench version your servers run.
 
 ## What's next
 

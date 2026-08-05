@@ -87,6 +87,9 @@ exclude = [
 
 [tool.setuptools.package-data]
 "agora_workbench.deployment.templates" = ["**/*"]
+# Agent skill trees (SKILL.md plus nested sub-skills). "**/*" does not match
+# dotfiles, so "**/.*" is listed too.
+"agora_workbench.skills" = ["**/*", "**/.*"]
 "activity_ui" = [
     "Dockerfile",
     "docker-compose.yml",
@@ -96,6 +99,10 @@ exclude = [
 
 [tool.setuptools.exclude-package-data]
 "agora_workbench.deployment.templates" = [
+    "**/__pycache__/**",
+    "**/*.py[co]",
+]
+"agora_workbench.skills" = [
     "**/__pycache__/**",
     "**/*.py[co]",
 ]
