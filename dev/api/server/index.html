@@ -1726,7 +1726,7 @@ The server supports two different patterns for injecting assets and handles:</p>
                 <code>auth_config</code>
             </td>
             <td>
-                  <code><span title="typing.Optional">Optional</span>[<a class="autorefs autorefs-internal" title="              AuthConfig(token_validator, identity_extractor, credential_provider_factory=None, www_authenticate_value='', require_authorization_header=True)
+                  <code><span title="typing.Optional">Optional</span>[<a class="autorefs autorefs-internal" title="              AuthConfig(token_validator, identity_extractor, credential_provider_factory=None, www_authenticate_value='', require_authorization_header=True, protected_resource_metadata=None)
 
   
       dataclass
@@ -1997,7 +1997,12 @@ domain's state vocabulary with descriptions and affordances.</p>
 <span class="normal"><a href="#__codelineno-0-294">294</a></span>
 <span class="normal"><a href="#__codelineno-0-295">295</a></span>
 <span class="normal"><a href="#__codelineno-0-296">296</a></span>
-<span class="normal"><a href="#__codelineno-0-297">297</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-144" name="__codelineno-0-144"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+<span class="normal"><a href="#__codelineno-0-297">297</a></span>
+<span class="normal"><a href="#__codelineno-0-298">298</a></span>
+<span class="normal"><a href="#__codelineno-0-299">299</a></span>
+<span class="normal"><a href="#__codelineno-0-300">300</a></span>
+<span class="normal"><a href="#__codelineno-0-301">301</a></span>
+<span class="normal"><a href="#__codelineno-0-302">302</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-144" name="__codelineno-0-144"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
 <a id="__codelineno-0-145" name="__codelineno-0-145"></a>    <span class="bp">self</span><span class="p">,</span>
 <a id="__codelineno-0-146" name="__codelineno-0-146"></a>    <span class="n">server_config</span><span class="p">:</span> <span class="n">ServerConfig</span><span class="p">,</span>
 <a id="__codelineno-0-147" name="__codelineno-0-147"></a>    <span class="n">tool_registry</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ToolRegistry&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -2101,56 +2106,61 @@ domain's state vocabulary with descriptions and affordances.</p>
 <a id="__codelineno-0-245" name="__codelineno-0-245"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">auth_config</span> <span class="o">=</span> <span class="n">auth_config</span>
 <a id="__codelineno-0-246" name="__codelineno-0-246"></a>
 <a id="__codelineno-0-247" name="__codelineno-0-247"></a>    <span class="c1"># Entra client/tenant IDs for RFC 9728 OAuth protected-resource metadata.</span>
-<a id="__codelineno-0-248" name="__codelineno-0-248"></a>    <span class="c1"># Resolution order: auth_config validator → ServerConfig → environment variable.</span>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a>    <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">auth_config</span><span class="o">.</span><span class="n">token_validator</span><span class="p">,</span> <span class="s2">&quot;_client_id&quot;</span><span class="p">):</span>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span> <span class="o">=</span> <span class="n">auth_config</span><span class="o">.</span><span class="n">token_validator</span><span class="o">.</span><span class="n">_client_id</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">auth_config</span><span class="o">.</span><span class="n">token_validator</span><span class="p">,</span> <span class="s2">&quot;_tenant_id&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span><span class="p">:</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">entra_client_id</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ENTRA_CLIENT_ID&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span><span class="p">:</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">entra_tenant_id</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ENTRA_TENANT_ID&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a>
-<a id="__codelineno-0-259" name="__codelineno-0-259"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">max_timeout</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">max_timeout</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">default_timeout</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">default_timeout</span>
+<a id="__codelineno-0-248" name="__codelineno-0-248"></a>    <span class="c1"># Preferred source is auth_config.protected_resource_metadata; these attributes</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a>    <span class="c1"># remain for back-compat and for deployments that configure Entra IDs directly.</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a>    <span class="c1"># Resolution order: auth_config validator → ServerConfig → environment variable.</span>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a>    <span class="c1">#</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a>    <span class="c1"># Reading private validator attributes is a deprecated legacy convention, kept</span>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a>    <span class="c1"># for third-party validators written against it. Probed symmetrically so a</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a>    <span class="c1"># validator exposing only one of the two cannot raise or be partially ignored.</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">auth_config</span><span class="o">.</span><span class="n">token_validator</span><span class="p">,</span> <span class="s2">&quot;_client_id&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">auth_config</span><span class="o">.</span><span class="n">token_validator</span><span class="p">,</span> <span class="s2">&quot;_tenant_id&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span><span class="p">:</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_client_id</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">entra_client_id</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ENTRA_CLIENT_ID&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span><span class="p">:</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">entra_tenant_id</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">entra_tenant_id</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;ENTRA_TENANT_ID&quot;</span><span class="p">)</span>
 <a id="__codelineno-0-261" name="__codelineno-0-261"></a>
-<a id="__codelineno-0-262" name="__codelineno-0-262"></a>    <span class="c1"># Resolution: ServerConfig overrides env var; env var provides deployment default.</span>
-<a id="__codelineno-0-263" name="__codelineno-0-263"></a>    <span class="k">if</span> <span class="n">server_config</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-264" name="__codelineno-0-264"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">output_truncation_threshold</span>
-<a id="__codelineno-0-265" name="__codelineno-0-265"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-266" name="__codelineno-0-266"></a>        <span class="n">env_threshold</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;CODE_OUTPUT_TRUNCATION_THRESHOLD&quot;</span><span class="p">,</span> <span class="s2">&quot;50000&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a>        <span class="n">normalized</span> <span class="o">=</span> <span class="n">env_threshold</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-268" name="__codelineno-0-268"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-269" name="__codelineno-0-269"></a>            <span class="n">parsed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">normalized</span><span class="p">)</span>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>            <span class="k">if</span> <span class="n">parsed</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
-<a id="__codelineno-0-271" name="__codelineno-0-271"></a>                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;threshold must be &gt;= 0&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="n">parsed</span>
-<a id="__codelineno-0-273" name="__codelineno-0-273"></a>        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a>            <span class="n">LOGGER</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
-<a id="__codelineno-0-275" name="__codelineno-0-275"></a>                <span class="s2">&quot;Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=</span><span class="si">%r</span><span class="s2">; using default 50000&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-276" name="__codelineno-0-276"></a>                <span class="n">env_threshold</span><span class="p">,</span>
-<a id="__codelineno-0-277" name="__codelineno-0-277"></a>            <span class="p">)</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="mi">50_000</span>
-<a id="__codelineno-0-279" name="__codelineno-0-279"></a>
-<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">working_dir</span> <span class="o">=</span> <span class="n">working_dir</span>
-<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-282" name="__codelineno-0-282"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span> <span class="o">=</span> <span class="kc">False</span>
-<a id="__codelineno-0-283" name="__codelineno-0-283"></a>
-<a id="__codelineno-0-284" name="__codelineno-0-284"></a>    <span class="c1"># Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).</span>
-<a id="__codelineno-0-285" name="__codelineno-0-285"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">.activity_publisher</span><span class="w"> </span><span class="kn">import</span> <span class="n">ActivityPublisher</span>
-<a id="__codelineno-0-286" name="__codelineno-0-286"></a>
-<a id="__codelineno-0-287" name="__codelineno-0-287"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">activity_publisher</span> <span class="o">=</span> <span class="n">ActivityPublisher</span><span class="p">(</span><span class="n">server_name</span><span class="o">=</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_warn_if_oauth_metadata_unresolvable</span><span class="p">()</span>
+<a id="__codelineno-0-263" name="__codelineno-0-263"></a>
+<a id="__codelineno-0-264" name="__codelineno-0-264"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">max_timeout</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">max_timeout</span>
+<a id="__codelineno-0-265" name="__codelineno-0-265"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">default_timeout</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">default_timeout</span>
+<a id="__codelineno-0-266" name="__codelineno-0-266"></a>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a>    <span class="c1"># Resolution: ServerConfig overrides env var; env var provides deployment default.</span>
+<a id="__codelineno-0-268" name="__codelineno-0-268"></a>    <span class="k">if</span> <span class="n">server_config</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-269" name="__codelineno-0-269"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="n">server_config</span><span class="o">.</span><span class="n">output_truncation_threshold</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-271" name="__codelineno-0-271"></a>        <span class="n">env_threshold</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;CODE_OUTPUT_TRUNCATION_THRESHOLD&quot;</span><span class="p">,</span> <span class="s2">&quot;50000&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a>        <span class="n">normalized</span> <span class="o">=</span> <span class="n">env_threshold</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-273" name="__codelineno-0-273"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a>            <span class="n">parsed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">normalized</span><span class="p">)</span>
+<a id="__codelineno-0-275" name="__codelineno-0-275"></a>            <span class="k">if</span> <span class="n">parsed</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">:</span>
+<a id="__codelineno-0-276" name="__codelineno-0-276"></a>                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;threshold must be &gt;= 0&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-277" name="__codelineno-0-277"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="n">parsed</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a>        <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+<a id="__codelineno-0-279" name="__codelineno-0-279"></a>            <span class="n">LOGGER</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+<a id="__codelineno-0-280" name="__codelineno-0-280"></a>                <span class="s2">&quot;Invalid CODE_OUTPUT_TRUNCATION_THRESHOLD=</span><span class="si">%r</span><span class="s2">; using default 50000&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-281" name="__codelineno-0-281"></a>                <span class="n">env_threshold</span><span class="p">,</span>
+<a id="__codelineno-0-282" name="__codelineno-0-282"></a>            <span class="p">)</span>
+<a id="__codelineno-0-283" name="__codelineno-0-283"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">output_truncation_threshold</span> <span class="o">=</span> <span class="mi">50_000</span>
+<a id="__codelineno-0-284" name="__codelineno-0-284"></a>
+<a id="__codelineno-0-285" name="__codelineno-0-285"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">working_dir</span> <span class="o">=</span> <span class="n">working_dir</span>
+<a id="__codelineno-0-286" name="__codelineno-0-286"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-287" name="__codelineno-0-287"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span> <span class="o">=</span> <span class="kc">False</span>
 <a id="__codelineno-0-288" name="__codelineno-0-288"></a>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">mcp</span> <span class="o">=</span> <span class="n">FastMCP</span><span class="p">(</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a>        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">-executor&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-291" name="__codelineno-0-291"></a>        <span class="n">instructions</span><span class="o">=</span><span class="n">server_config</span><span class="o">.</span><span class="n">server_description</span> <span class="ow">or</span> <span class="n">server_config</span><span class="o">.</span><span class="n">description</span><span class="p">,</span>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>    <span class="p">)</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>    <span class="c1"># Best-effort activity publisher (silent no-op when ACTIVITY_UI_URL is unset).</span>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>    <span class="kn">from</span><span class="w"> </span><span class="nn">.activity_publisher</span><span class="w"> </span><span class="kn">import</span> <span class="n">ActivityPublisher</span>
+<a id="__codelineno-0-291" name="__codelineno-0-291"></a>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">activity_publisher</span> <span class="o">=</span> <span class="n">ActivityPublisher</span><span class="p">(</span><span class="n">server_name</span><span class="o">=</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
 <a id="__codelineno-0-293" name="__codelineno-0-293"></a>
-<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="c1"># AssetResolutionMiddleware resolves tagged asset references before Pydantic validation.</span>
-<a id="__codelineno-0-295" name="__codelineno-0-295"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">mcp</span><span class="o">.</span><span class="n">add_middleware</span><span class="p">(</span><span class="n">AssetResolutionMiddleware</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
-<a id="__codelineno-0-296" name="__codelineno-0-296"></a>
-<a id="__codelineno-0-297" name="__codelineno-0-297"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_setup_tools</span><span class="p">()</span>
+<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">mcp</span> <span class="o">=</span> <span class="n">FastMCP</span><span class="p">(</span>
+<a id="__codelineno-0-295" name="__codelineno-0-295"></a>        <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">-executor&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-296" name="__codelineno-0-296"></a>        <span class="n">instructions</span><span class="o">=</span><span class="n">server_config</span><span class="o">.</span><span class="n">server_description</span> <span class="ow">or</span> <span class="n">server_config</span><span class="o">.</span><span class="n">description</span><span class="p">,</span>
+<a id="__codelineno-0-297" name="__codelineno-0-297"></a>    <span class="p">)</span>
+<a id="__codelineno-0-298" name="__codelineno-0-298"></a>
+<a id="__codelineno-0-299" name="__codelineno-0-299"></a>    <span class="c1"># AssetResolutionMiddleware resolves tagged asset references before Pydantic validation.</span>
+<a id="__codelineno-0-300" name="__codelineno-0-300"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">mcp</span><span class="o">.</span><span class="n">add_middleware</span><span class="p">(</span><span class="n">AssetResolutionMiddleware</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+<a id="__codelineno-0-301" name="__codelineno-0-301"></a>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_setup_tools</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
                   </details>
 
@@ -2191,29 +2201,29 @@ the execution kernel.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-378">378</a></span>
-<span class="normal"><a href="#__codelineno-0-379">379</a></span>
-<span class="normal"><a href="#__codelineno-0-380">380</a></span>
-<span class="normal"><a href="#__codelineno-0-381">381</a></span>
-<span class="normal"><a href="#__codelineno-0-382">382</a></span>
-<span class="normal"><a href="#__codelineno-0-383">383</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-383">383</a></span>
 <span class="normal"><a href="#__codelineno-0-384">384</a></span>
 <span class="normal"><a href="#__codelineno-0-385">385</a></span>
 <span class="normal"><a href="#__codelineno-0-386">386</a></span>
 <span class="normal"><a href="#__codelineno-0-387">387</a></span>
 <span class="normal"><a href="#__codelineno-0-388">388</a></span>
-<span class="normal"><a href="#__codelineno-0-389">389</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-378" name="__codelineno-0-378"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">warm</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-379" name="__codelineno-0-379"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Pre-initialize the execution environment without serving requests.</span>
-<a id="__codelineno-0-380" name="__codelineno-0-380"></a>
-<a id="__codelineno-0-381" name="__codelineno-0-381"></a><span class="sd">    Call this during Docker builds or process startup to avoid cold-start</span>
-<a id="__codelineno-0-382" name="__codelineno-0-382"></a><span class="sd">    latency. It prepares the Python environment, provisions assets according</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a><span class="sd">    to the ServerConfig (e.g. when auto_provision is enabled), and registers</span>
-<a id="__codelineno-0-384" name="__codelineno-0-384"></a><span class="sd">    the execution kernel.</span>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warming environment: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-387" name="__codelineno-0-387"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
-<a id="__codelineno-0-388" name="__codelineno-0-388"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_register_kernel</span><span class="p">(</span><span class="n">kernel_name</span><span class="o">=</span><span class="s2">&quot;tools-py&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-389" name="__codelineno-0-389"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✓ Environment &#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; is warm and ready.&quot;</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-389">389</a></span>
+<span class="normal"><a href="#__codelineno-0-390">390</a></span>
+<span class="normal"><a href="#__codelineno-0-391">391</a></span>
+<span class="normal"><a href="#__codelineno-0-392">392</a></span>
+<span class="normal"><a href="#__codelineno-0-393">393</a></span>
+<span class="normal"><a href="#__codelineno-0-394">394</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-383" name="__codelineno-0-383"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">warm</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-384" name="__codelineno-0-384"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Pre-initialize the execution environment without serving requests.</span>
+<a id="__codelineno-0-385" name="__codelineno-0-385"></a>
+<a id="__codelineno-0-386" name="__codelineno-0-386"></a><span class="sd">    Call this during Docker builds or process startup to avoid cold-start</span>
+<a id="__codelineno-0-387" name="__codelineno-0-387"></a><span class="sd">    latency. It prepares the Python environment, provisions assets according</span>
+<a id="__codelineno-0-388" name="__codelineno-0-388"></a><span class="sd">    to the ServerConfig (e.g. when auto_provision is enabled), and registers</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a><span class="sd">    the execution kernel.</span>
+<a id="__codelineno-0-390" name="__codelineno-0-390"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warming environment: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
+<a id="__codelineno-0-393" name="__codelineno-0-393"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_register_kernel</span><span class="p">(</span><span class="n">kernel_name</span><span class="o">=</span><span class="s2">&quot;tools-py&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-394" name="__codelineno-0-394"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✓ Environment &#39;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; is warm and ready.&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2248,12 +2258,7 @@ server.main()
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-391">391</a></span>
-<span class="normal"><a href="#__codelineno-0-392">392</a></span>
-<span class="normal"><a href="#__codelineno-0-393">393</a></span>
-<span class="normal"><a href="#__codelineno-0-394">394</a></span>
-<span class="normal"><a href="#__codelineno-0-395">395</a></span>
-<span class="normal"><a href="#__codelineno-0-396">396</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-396">396</a></span>
 <span class="normal"><a href="#__codelineno-0-397">397</a></span>
 <span class="normal"><a href="#__codelineno-0-398">398</a></span>
 <span class="normal"><a href="#__codelineno-0-399">399</a></span>
@@ -2295,54 +2300,59 @@ server.main()
 <span class="normal"><a href="#__codelineno-0-435">435</a></span>
 <span class="normal"><a href="#__codelineno-0-436">436</a></span>
 <span class="normal"><a href="#__codelineno-0-437">437</a></span>
-<span class="normal"><a href="#__codelineno-0-438">438</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-391" name="__codelineno-0-391"></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">default_host</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;0.0.0.0&quot;</span><span class="p">,</span> <span class="n">default_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;CLI entrypoint that handles ``--warm``, ``--host``, and ``--port``.</span>
-<a id="__codelineno-0-393" name="__codelineno-0-393"></a>
-<a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="sd">    Call this from your server&#39;s ``if __name__ == &quot;__main__&quot;`` block to get</span>
-<a id="__codelineno-0-395" name="__codelineno-0-395"></a><span class="sd">    standard flag handling without manual ``sys.argv`` parsing::</span>
-<a id="__codelineno-0-396" name="__codelineno-0-396"></a>
-<a id="__codelineno-0-397" name="__codelineno-0-397"></a><span class="sd">        server = MyDomainServer(...)</span>
-<a id="__codelineno-0-398" name="__codelineno-0-398"></a><span class="sd">        server.main()</span>
-<a id="__codelineno-0-399" name="__codelineno-0-399"></a>
-<a id="__codelineno-0-400" name="__codelineno-0-400"></a><span class="sd">    Flags:</span>
-<a id="__codelineno-0-401" name="__codelineno-0-401"></a><span class="sd">        --warm          Pre-initialize the environment and exit (no HTTP server).</span>
-<a id="__codelineno-0-402" name="__codelineno-0-402"></a><span class="sd">        --host HOST     Bind address (default: default_host, or HOST env var).</span>
-<a id="__codelineno-0-403" name="__codelineno-0-403"></a><span class="sd">        --port PORT     Bind port (default: default_port, or PORT env var).</span>
-<a id="__codelineno-0-404" name="__codelineno-0-404"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-405" name="__codelineno-0-405"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
-<a id="__codelineno-0-406" name="__codelineno-0-406"></a>
-<a id="__codelineno-0-407" name="__codelineno-0-407"></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
-<a id="__codelineno-0-408" name="__codelineno-0-408"></a>        <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> — CodeExecutionServer&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-409" name="__codelineno-0-409"></a>    <span class="p">)</span>
-<a id="__codelineno-0-410" name="__codelineno-0-410"></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-<a id="__codelineno-0-411" name="__codelineno-0-411"></a>        <span class="s2">&quot;--warm&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-412" name="__codelineno-0-412"></a>        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-413" name="__codelineno-0-413"></a>        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Pre-initialize the environment and exit without starting the server.&quot;</span><span class="p">,</span>
+<span class="normal"><a href="#__codelineno-0-438">438</a></span>
+<span class="normal"><a href="#__codelineno-0-439">439</a></span>
+<span class="normal"><a href="#__codelineno-0-440">440</a></span>
+<span class="normal"><a href="#__codelineno-0-441">441</a></span>
+<span class="normal"><a href="#__codelineno-0-442">442</a></span>
+<span class="normal"><a href="#__codelineno-0-443">443</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-396" name="__codelineno-0-396"></a><span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">default_host</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;0.0.0.0&quot;</span><span class="p">,</span> <span class="n">default_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-397" name="__codelineno-0-397"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;CLI entrypoint that handles ``--warm``, ``--host``, and ``--port``.</span>
+<a id="__codelineno-0-398" name="__codelineno-0-398"></a>
+<a id="__codelineno-0-399" name="__codelineno-0-399"></a><span class="sd">    Call this from your server&#39;s ``if __name__ == &quot;__main__&quot;`` block to get</span>
+<a id="__codelineno-0-400" name="__codelineno-0-400"></a><span class="sd">    standard flag handling without manual ``sys.argv`` parsing::</span>
+<a id="__codelineno-0-401" name="__codelineno-0-401"></a>
+<a id="__codelineno-0-402" name="__codelineno-0-402"></a><span class="sd">        server = MyDomainServer(...)</span>
+<a id="__codelineno-0-403" name="__codelineno-0-403"></a><span class="sd">        server.main()</span>
+<a id="__codelineno-0-404" name="__codelineno-0-404"></a>
+<a id="__codelineno-0-405" name="__codelineno-0-405"></a><span class="sd">    Flags:</span>
+<a id="__codelineno-0-406" name="__codelineno-0-406"></a><span class="sd">        --warm          Pre-initialize the environment and exit (no HTTP server).</span>
+<a id="__codelineno-0-407" name="__codelineno-0-407"></a><span class="sd">        --host HOST     Bind address (default: default_host, or HOST env var).</span>
+<a id="__codelineno-0-408" name="__codelineno-0-408"></a><span class="sd">        --port PORT     Bind port (default: default_port, or PORT env var).</span>
+<a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-410" name="__codelineno-0-410"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<a id="__codelineno-0-411" name="__codelineno-0-411"></a>
+<a id="__codelineno-0-412" name="__codelineno-0-412"></a>    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">(</span>
+<a id="__codelineno-0-413" name="__codelineno-0-413"></a>        <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2"> — CodeExecutionServer&quot;</span><span class="p">,</span>
 <a id="__codelineno-0-414" name="__codelineno-0-414"></a>    <span class="p">)</span>
-<a id="__codelineno-0-415" name="__codelineno-0-415"></a>    <span class="n">env_host</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;HOST&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-416" name="__codelineno-0-416"></a>    <span class="n">env_port</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;PORT&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-417" name="__codelineno-0-417"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-418" name="__codelineno-0-418"></a>        <span class="n">port_default</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">env_port</span><span class="p">)</span> <span class="k">if</span> <span class="n">env_port</span> <span class="k">else</span> <span class="n">default_port</span>
-<a id="__codelineno-0-419" name="__codelineno-0-419"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-<a id="__codelineno-0-420" name="__codelineno-0-420"></a>        <span class="n">parser</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid PORT env var: </span><span class="si">{</span><span class="n">env_port</span><span class="si">!r}</span><span class="s2"> (must be an integer).&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-421" name="__codelineno-0-421"></a>
-<a id="__codelineno-0-422" name="__codelineno-0-422"></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-<a id="__codelineno-0-423" name="__codelineno-0-423"></a>        <span class="s2">&quot;--host&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-424" name="__codelineno-0-424"></a>        <span class="n">default</span><span class="o">=</span><span class="n">env_host</span> <span class="ow">or</span> <span class="n">default_host</span><span class="p">,</span>
-<a id="__codelineno-0-425" name="__codelineno-0-425"></a>        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Bind address (default: </span><span class="si">{</span><span class="n">default_host</span><span class="si">}</span><span class="s2">, or HOST env var).&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-426" name="__codelineno-0-426"></a>    <span class="p">)</span>
+<a id="__codelineno-0-415" name="__codelineno-0-415"></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+<a id="__codelineno-0-416" name="__codelineno-0-416"></a>        <span class="s2">&quot;--warm&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-417" name="__codelineno-0-417"></a>        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-418" name="__codelineno-0-418"></a>        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Pre-initialize the environment and exit without starting the server.&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-419" name="__codelineno-0-419"></a>    <span class="p">)</span>
+<a id="__codelineno-0-420" name="__codelineno-0-420"></a>    <span class="n">env_host</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;HOST&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-421" name="__codelineno-0-421"></a>    <span class="n">env_port</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;PORT&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-422" name="__codelineno-0-422"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-423" name="__codelineno-0-423"></a>        <span class="n">port_default</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">env_port</span><span class="p">)</span> <span class="k">if</span> <span class="n">env_port</span> <span class="k">else</span> <span class="n">default_port</span>
+<a id="__codelineno-0-424" name="__codelineno-0-424"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+<a id="__codelineno-0-425" name="__codelineno-0-425"></a>        <span class="n">parser</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Invalid PORT env var: </span><span class="si">{</span><span class="n">env_port</span><span class="si">!r}</span><span class="s2"> (must be an integer).&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-426" name="__codelineno-0-426"></a>
 <a id="__codelineno-0-427" name="__codelineno-0-427"></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
-<a id="__codelineno-0-428" name="__codelineno-0-428"></a>        <span class="s2">&quot;--port&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-429" name="__codelineno-0-429"></a>        <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
-<a id="__codelineno-0-430" name="__codelineno-0-430"></a>        <span class="n">default</span><span class="o">=</span><span class="n">port_default</span><span class="p">,</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a>        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Bind port (default: </span><span class="si">{</span><span class="n">default_port</span><span class="si">}</span><span class="s2">, or PORT env var).&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a>    <span class="p">)</span>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
-<a id="__codelineno-0-434" name="__codelineno-0-434"></a>
-<a id="__codelineno-0-435" name="__codelineno-0-435"></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">warm</span><span class="p">:</span>
-<a id="__codelineno-0-436" name="__codelineno-0-436"></a>        <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
-<a id="__codelineno-0-437" name="__codelineno-0-437"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-438" name="__codelineno-0-438"></a>        <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">))</span>
+<a id="__codelineno-0-428" name="__codelineno-0-428"></a>        <span class="s2">&quot;--host&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-429" name="__codelineno-0-429"></a>        <span class="n">default</span><span class="o">=</span><span class="n">env_host</span> <span class="ow">or</span> <span class="n">default_host</span><span class="p">,</span>
+<a id="__codelineno-0-430" name="__codelineno-0-430"></a>        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Bind address (default: </span><span class="si">{</span><span class="n">default_host</span><span class="si">}</span><span class="s2">, or HOST env var).&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a>    <span class="p">)</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a>    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+<a id="__codelineno-0-433" name="__codelineno-0-433"></a>        <span class="s2">&quot;--port&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-434" name="__codelineno-0-434"></a>        <span class="nb">type</span><span class="o">=</span><span class="nb">int</span><span class="p">,</span>
+<a id="__codelineno-0-435" name="__codelineno-0-435"></a>        <span class="n">default</span><span class="o">=</span><span class="n">port_default</span><span class="p">,</span>
+<a id="__codelineno-0-436" name="__codelineno-0-436"></a>        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Bind port (default: </span><span class="si">{</span><span class="n">default_port</span><span class="si">}</span><span class="s2">, or PORT env var).&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-437" name="__codelineno-0-437"></a>    <span class="p">)</span>
+<a id="__codelineno-0-438" name="__codelineno-0-438"></a>    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+<a id="__codelineno-0-439" name="__codelineno-0-439"></a>
+<a id="__codelineno-0-440" name="__codelineno-0-440"></a>    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">warm</span><span class="p">:</span>
+<a id="__codelineno-0-441" name="__codelineno-0-441"></a>        <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
+<a id="__codelineno-0-442" name="__codelineno-0-442"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-443" name="__codelineno-0-443"></a>        <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">host</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">port</span><span class="p">))</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2365,11 +2375,11 @@ server.main()
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-444">444</a></span>
-<span class="normal"><a href="#__codelineno-0-445">445</a></span>
-<span class="normal"><a href="#__codelineno-0-446">446</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-444" name="__codelineno-0-444"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_tool_name</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-445" name="__codelineno-0-445"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the MCP tool name. Override to customize.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-446" name="__codelineno-0-446"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;execute_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">_code&quot;</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-449">449</a></span>
+<span class="normal"><a href="#__codelineno-0-450">450</a></span>
+<span class="normal"><a href="#__codelineno-0-451">451</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-449" name="__codelineno-0-449"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_tool_name</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-450" name="__codelineno-0-450"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the MCP tool name. Override to customize.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-451" name="__codelineno-0-451"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;execute_</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">server_config</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">_code&quot;</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2397,12 +2407,7 @@ var takes precedence wherever this method is consulted.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-448">448</a></span>
-<span class="normal"><a href="#__codelineno-0-449">449</a></span>
-<span class="normal"><a href="#__codelineno-0-450">450</a></span>
-<span class="normal"><a href="#__codelineno-0-451">451</a></span>
-<span class="normal"><a href="#__codelineno-0-452">452</a></span>
-<span class="normal"><a href="#__codelineno-0-453">453</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-453">453</a></span>
 <span class="normal"><a href="#__codelineno-0-454">454</a></span>
 <span class="normal"><a href="#__codelineno-0-455">455</a></span>
 <span class="normal"><a href="#__codelineno-0-456">456</a></span>
@@ -2413,23 +2418,28 @@ var takes precedence wherever this method is consulted.</p>
 <span class="normal"><a href="#__codelineno-0-461">461</a></span>
 <span class="normal"><a href="#__codelineno-0-462">462</a></span>
 <span class="normal"><a href="#__codelineno-0-463">463</a></span>
-<span class="normal"><a href="#__codelineno-0-464">464</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-448" name="__codelineno-0-448"></a><span class="k">def</span><span class="w"> </span><span class="nf">public_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-449" name="__codelineno-0-449"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Best-effort base URL for outbound references (e.g. download links).</span>
-<a id="__codelineno-0-450" name="__codelineno-0-450"></a>
-<a id="__codelineno-0-451" name="__codelineno-0-451"></a><span class="sd">    Falls back to ``http://localhost:&lt;port&gt;`` when called before</span>
-<a id="__codelineno-0-452" name="__codelineno-0-452"></a><span class="sd">    :meth:`run_http` has stashed the bind host/port.  Callers that need</span>
-<a id="__codelineno-0-453" name="__codelineno-0-453"></a><span class="sd">    the real externally-visible URL (containerized deployments behind a</span>
-<a id="__codelineno-0-454" name="__codelineno-0-454"></a><span class="sd">    proxy / Ingress) should set ``SERVER_PUBLIC_URL`` instead — that env</span>
-<a id="__codelineno-0-455" name="__codelineno-0-455"></a><span class="sd">    var takes precedence wherever this method is consulted.</span>
-<a id="__codelineno-0-456" name="__codelineno-0-456"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-457" name="__codelineno-0-457"></a>    <span class="n">host</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_bind_host&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;localhost&quot;</span>
-<a id="__codelineno-0-458" name="__codelineno-0-458"></a>    <span class="n">port</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_bind_port&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">8000</span>
-<a id="__codelineno-0-459" name="__codelineno-0-459"></a>    <span class="c1"># 0.0.0.0 is a bind address, not a reachable one.  Map it back to</span>
-<a id="__codelineno-0-460" name="__codelineno-0-460"></a>    <span class="c1"># localhost for outward-facing URLs; for non-localhost deployments</span>
-<a id="__codelineno-0-461" name="__codelineno-0-461"></a>    <span class="c1"># the operator should set SERVER_PUBLIC_URL explicitly.</span>
-<a id="__codelineno-0-462" name="__codelineno-0-462"></a>    <span class="k">if</span> <span class="n">host</span> <span class="o">==</span> <span class="s2">&quot;0.0.0.0&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a>        <span class="n">host</span> <span class="o">=</span> <span class="s2">&quot;localhost&quot;</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;http://</span><span class="si">{</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span>
+<span class="normal"><a href="#__codelineno-0-464">464</a></span>
+<span class="normal"><a href="#__codelineno-0-465">465</a></span>
+<span class="normal"><a href="#__codelineno-0-466">466</a></span>
+<span class="normal"><a href="#__codelineno-0-467">467</a></span>
+<span class="normal"><a href="#__codelineno-0-468">468</a></span>
+<span class="normal"><a href="#__codelineno-0-469">469</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-453" name="__codelineno-0-453"></a><span class="k">def</span><span class="w"> </span><span class="nf">public_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-454" name="__codelineno-0-454"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Best-effort base URL for outbound references (e.g. download links).</span>
+<a id="__codelineno-0-455" name="__codelineno-0-455"></a>
+<a id="__codelineno-0-456" name="__codelineno-0-456"></a><span class="sd">    Falls back to ``http://localhost:&lt;port&gt;`` when called before</span>
+<a id="__codelineno-0-457" name="__codelineno-0-457"></a><span class="sd">    :meth:`run_http` has stashed the bind host/port.  Callers that need</span>
+<a id="__codelineno-0-458" name="__codelineno-0-458"></a><span class="sd">    the real externally-visible URL (containerized deployments behind a</span>
+<a id="__codelineno-0-459" name="__codelineno-0-459"></a><span class="sd">    proxy / Ingress) should set ``SERVER_PUBLIC_URL`` instead — that env</span>
+<a id="__codelineno-0-460" name="__codelineno-0-460"></a><span class="sd">    var takes precedence wherever this method is consulted.</span>
+<a id="__codelineno-0-461" name="__codelineno-0-461"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-462" name="__codelineno-0-462"></a>    <span class="n">host</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_bind_host&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;localhost&quot;</span>
+<a id="__codelineno-0-463" name="__codelineno-0-463"></a>    <span class="n">port</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="s2">&quot;_bind_port&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="ow">or</span> <span class="mi">8000</span>
+<a id="__codelineno-0-464" name="__codelineno-0-464"></a>    <span class="c1"># 0.0.0.0 is a bind address, not a reachable one.  Map it back to</span>
+<a id="__codelineno-0-465" name="__codelineno-0-465"></a>    <span class="c1"># localhost for outward-facing URLs; for non-localhost deployments</span>
+<a id="__codelineno-0-466" name="__codelineno-0-466"></a>    <span class="c1"># the operator should set SERVER_PUBLIC_URL explicitly.</span>
+<a id="__codelineno-0-467" name="__codelineno-0-467"></a>    <span class="k">if</span> <span class="n">host</span> <span class="o">==</span> <span class="s2">&quot;0.0.0.0&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-468" name="__codelineno-0-468"></a>        <span class="n">host</span> <span class="o">=</span> <span class="s2">&quot;localhost&quot;</span>
+<a id="__codelineno-0-469" name="__codelineno-0-469"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;http://</span><span class="si">{</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2453,19 +2463,19 @@ var takes precedence wherever this method is consulted.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-466">466</a></span>
-<span class="normal"><a href="#__codelineno-0-467">467</a></span>
-<span class="normal"><a href="#__codelineno-0-468">468</a></span>
-<span class="normal"><a href="#__codelineno-0-469">469</a></span>
-<span class="normal"><a href="#__codelineno-0-470">470</a></span>
-<span class="normal"><a href="#__codelineno-0-471">471</a></span>
-<span class="normal"><a href="#__codelineno-0-472">472</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-466" name="__codelineno-0-466"></a><span class="k">def</span><span class="w"> </span><span class="nf">preprocess_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-467" name="__codelineno-0-467"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-468" name="__codelineno-0-468"></a><span class="sd">    Preprocess code before execution.</span>
-<a id="__codelineno-0-469" name="__codelineno-0-469"></a>
-<a id="__codelineno-0-470" name="__codelineno-0-470"></a><span class="sd">    Override to add imports, setup code, or modify the input.</span>
-<a id="__codelineno-0-471" name="__codelineno-0-471"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-472" name="__codelineno-0-472"></a>    <span class="k">return</span> <span class="n">code</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-471">471</a></span>
+<span class="normal"><a href="#__codelineno-0-472">472</a></span>
+<span class="normal"><a href="#__codelineno-0-473">473</a></span>
+<span class="normal"><a href="#__codelineno-0-474">474</a></span>
+<span class="normal"><a href="#__codelineno-0-475">475</a></span>
+<span class="normal"><a href="#__codelineno-0-476">476</a></span>
+<span class="normal"><a href="#__codelineno-0-477">477</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-471" name="__codelineno-0-471"></a><span class="k">def</span><span class="w"> </span><span class="nf">preprocess_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-472" name="__codelineno-0-472"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-473" name="__codelineno-0-473"></a><span class="sd">    Preprocess code before execution.</span>
+<a id="__codelineno-0-474" name="__codelineno-0-474"></a>
+<a id="__codelineno-0-475" name="__codelineno-0-475"></a><span class="sd">    Override to add imports, setup code, or modify the input.</span>
+<a id="__codelineno-0-476" name="__codelineno-0-476"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-477" name="__codelineno-0-477"></a>    <span class="k">return</span> <span class="n">code</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2492,25 +2502,25 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-480">480</a></span>
-<span class="normal"><a href="#__codelineno-0-481">481</a></span>
-<span class="normal"><a href="#__codelineno-0-482">482</a></span>
-<span class="normal"><a href="#__codelineno-0-483">483</a></span>
-<span class="normal"><a href="#__codelineno-0-484">484</a></span>
-<span class="normal"><a href="#__codelineno-0-485">485</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-485">485</a></span>
 <span class="normal"><a href="#__codelineno-0-486">486</a></span>
 <span class="normal"><a href="#__codelineno-0-487">487</a></span>
 <span class="normal"><a href="#__codelineno-0-488">488</a></span>
-<span class="normal"><a href="#__codelineno-0-489">489</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-480" name="__codelineno-0-480"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="s2">&quot;Optional[str]&quot;</span><span class="p">]:</span>
-<a id="__codelineno-0-481" name="__codelineno-0-481"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-482" name="__codelineno-0-482"></a><span class="sd">    Validate user-provided code before execution.</span>
-<a id="__codelineno-0-483" name="__codelineno-0-483"></a><span class="sd">    This is a thin instance-method wrapper around the default implementation</span>
-<a id="__codelineno-0-484" name="__codelineno-0-484"></a><span class="sd">    in `execution_defaults.validate_code`, which expects `self` as its first</span>
-<a id="__codelineno-0-485" name="__codelineno-0-485"></a><span class="sd">    argument.</span>
-<a id="__codelineno-0-486" name="__codelineno-0-486"></a>
-<a id="__codelineno-0-487" name="__codelineno-0-487"></a><span class="sd">    Override to adjust behavior.</span>
-<a id="__codelineno-0-488" name="__codelineno-0-488"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-489" name="__codelineno-0-489"></a>    <span class="k">return</span> <span class="n">execution_defaults</span><span class="o">.</span><span class="n">validate_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-489">489</a></span>
+<span class="normal"><a href="#__codelineno-0-490">490</a></span>
+<span class="normal"><a href="#__codelineno-0-491">491</a></span>
+<span class="normal"><a href="#__codelineno-0-492">492</a></span>
+<span class="normal"><a href="#__codelineno-0-493">493</a></span>
+<span class="normal"><a href="#__codelineno-0-494">494</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-485" name="__codelineno-0-485"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="s2">&quot;Optional[str]&quot;</span><span class="p">]:</span>
+<a id="__codelineno-0-486" name="__codelineno-0-486"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-487" name="__codelineno-0-487"></a><span class="sd">    Validate user-provided code before execution.</span>
+<a id="__codelineno-0-488" name="__codelineno-0-488"></a><span class="sd">    This is a thin instance-method wrapper around the default implementation</span>
+<a id="__codelineno-0-489" name="__codelineno-0-489"></a><span class="sd">    in `execution_defaults.validate_code`, which expects `self` as its first</span>
+<a id="__codelineno-0-490" name="__codelineno-0-490"></a><span class="sd">    argument.</span>
+<a id="__codelineno-0-491" name="__codelineno-0-491"></a>
+<a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="sd">    Override to adjust behavior.</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a>    <span class="k">return</span> <span class="n">execution_defaults</span><span class="o">.</span><span class="n">validate_code</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">code</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2534,19 +2544,19 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-491">491</a></span>
-<span class="normal"><a href="#__codelineno-0-492">492</a></span>
-<span class="normal"><a href="#__codelineno-0-493">493</a></span>
-<span class="normal"><a href="#__codelineno-0-494">494</a></span>
-<span class="normal"><a href="#__codelineno-0-495">495</a></span>
-<span class="normal"><a href="#__codelineno-0-496">496</a></span>
-<span class="normal"><a href="#__codelineno-0-497">497</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-491" name="__codelineno-0-491"></a><span class="k">def</span><span class="w"> </span><span class="nf">postprocess_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">CodeExecutionResult</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CodeExecutionResult</span><span class="p">:</span>
-<a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="sd">    Postprocess execution result.</span>
-<a id="__codelineno-0-494" name="__codelineno-0-494"></a>
-<a id="__codelineno-0-495" name="__codelineno-0-495"></a><span class="sd">    Override to filter output, add metadata, or modify the result.</span>
-<a id="__codelineno-0-496" name="__codelineno-0-496"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-497" name="__codelineno-0-497"></a>    <span class="k">return</span> <span class="n">result</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-496">496</a></span>
+<span class="normal"><a href="#__codelineno-0-497">497</a></span>
+<span class="normal"><a href="#__codelineno-0-498">498</a></span>
+<span class="normal"><a href="#__codelineno-0-499">499</a></span>
+<span class="normal"><a href="#__codelineno-0-500">500</a></span>
+<span class="normal"><a href="#__codelineno-0-501">501</a></span>
+<span class="normal"><a href="#__codelineno-0-502">502</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-496" name="__codelineno-0-496"></a><span class="k">def</span><span class="w"> </span><span class="nf">postprocess_result</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">result</span><span class="p">:</span> <span class="n">CodeExecutionResult</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CodeExecutionResult</span><span class="p">:</span>
+<a id="__codelineno-0-497" name="__codelineno-0-497"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-498" name="__codelineno-0-498"></a><span class="sd">    Postprocess execution result.</span>
+<a id="__codelineno-0-499" name="__codelineno-0-499"></a>
+<a id="__codelineno-0-500" name="__codelineno-0-500"></a><span class="sd">    Override to filter output, add metadata, or modify the result.</span>
+<a id="__codelineno-0-501" name="__codelineno-0-501"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-502" name="__codelineno-0-502"></a>    <span class="k">return</span> <span class="n">result</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2574,12 +2584,7 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-908">908</a></span>
-<span class="normal"><a href="#__codelineno-0-909">909</a></span>
-<span class="normal"><a href="#__codelineno-0-910">910</a></span>
-<span class="normal"><a href="#__codelineno-0-911">911</a></span>
-<span class="normal"><a href="#__codelineno-0-912">912</a></span>
-<span class="normal"><a href="#__codelineno-0-913">913</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-913">913</a></span>
 <span class="normal"><a href="#__codelineno-0-914">914</a></span>
 <span class="normal"><a href="#__codelineno-0-915">915</a></span>
 <span class="normal"><a href="#__codelineno-0-916">916</a></span>
@@ -2588,21 +2593,26 @@ argument.</p>
 <span class="normal"><a href="#__codelineno-0-919">919</a></span>
 <span class="normal"><a href="#__codelineno-0-920">920</a></span>
 <span class="normal"><a href="#__codelineno-0-921">921</a></span>
-<span class="normal"><a href="#__codelineno-0-922">922</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-908" name="__codelineno-0-908"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-909" name="__codelineno-0-909"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-910" name="__codelineno-0-910"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
-<a id="__codelineno-0-911" name="__codelineno-0-911"></a>
-<a id="__codelineno-0-912" name="__codelineno-0-912"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
-<a id="__codelineno-0-913" name="__codelineno-0-913"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-914" name="__codelineno-0-914"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
-<a id="__codelineno-0-915" name="__codelineno-0-915"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-922">922</a></span>
+<span class="normal"><a href="#__codelineno-0-923">923</a></span>
+<span class="normal"><a href="#__codelineno-0-924">924</a></span>
+<span class="normal"><a href="#__codelineno-0-925">925</a></span>
+<span class="normal"><a href="#__codelineno-0-926">926</a></span>
+<span class="normal"><a href="#__codelineno-0-927">927</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-913" name="__codelineno-0-913"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-914" name="__codelineno-0-914"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-915" name="__codelineno-0-915"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
 <a id="__codelineno-0-916" name="__codelineno-0-916"></a>
-<a id="__codelineno-0-917" name="__codelineno-0-917"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
-<a id="__codelineno-0-918" name="__codelineno-0-918"></a>
-<a id="__codelineno-0-919" name="__codelineno-0-919"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
-<a id="__codelineno-0-920" name="__codelineno-0-920"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-917" name="__codelineno-0-917"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
+<a id="__codelineno-0-918" name="__codelineno-0-918"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-919" name="__codelineno-0-919"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
+<a id="__codelineno-0-920" name="__codelineno-0-920"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
 <a id="__codelineno-0-921" name="__codelineno-0-921"></a>
-<a id="__codelineno-0-922" name="__codelineno-0-922"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<a id="__codelineno-0-922" name="__codelineno-0-922"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
+<a id="__codelineno-0-923" name="__codelineno-0-923"></a>
+<a id="__codelineno-0-924" name="__codelineno-0-924"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
+<a id="__codelineno-0-925" name="__codelineno-0-925"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-926" name="__codelineno-0-926"></a>
+<a id="__codelineno-0-927" name="__codelineno-0-927"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
