@@ -82,6 +82,7 @@ class SidecarConfig(BaseModel):
         kernel is spawned, so every kernel inherits it. Tool code reads it::
 
             import os, httpx
+
             base = os.environ["MYMODEL_SERVICE_URL"]
             resp = httpx.post(f"{base}/predict", json={...}, timeout=600)
 
@@ -154,9 +155,7 @@ class SidecarConfig(BaseModel):
         try:
             address = ipaddress.ip_address(value)
         except ValueError as exc:
-            raise ValueError(
-                f"Sidecar host must be a loopback IP address or 'localhost', got {value!r}."
-            ) from exc
+            raise ValueError(f"Sidecar host must be a loopback IP address or 'localhost', got {value!r}.") from exc
         if not address.is_loopback:
             raise ValueError(
                 f"Sidecar host must be loopback (got {value!r}); sidecars are internal and "

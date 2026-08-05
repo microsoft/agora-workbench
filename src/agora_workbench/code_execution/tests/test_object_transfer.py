@@ -546,4 +546,3 @@ class TestValidateTargetUrl:
 
         # A host that satisfies the allow-list passes.
         _validate_target_url("http://earthscience-server:8000", trust_http=True)
-

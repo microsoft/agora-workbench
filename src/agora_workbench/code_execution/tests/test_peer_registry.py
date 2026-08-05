@@ -156,4 +156,3 @@ class TestRegistryHttpPeerIsTrusted:
 
         with pytest.raises(ValueError, match="Plain HTTP"):
             await publisher.publish(local_path=pkl_file, name="my_var", session_id="")
-

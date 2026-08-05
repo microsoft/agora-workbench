@@ -27,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Reading `_client_id` / `_tenant_id` off a `TokenValidator` is deprecated in favour of
   `AuthConfig.protected_resource_metadata`. The fallback is retained for existing validators and is now documented
   on the `TokenValidator` ABC.
+- The scaffolded `docker/base.Dockerfile` installs `uv` from a version-pinned PyPI release rather than piping an
+  unversioned remote install script into a shell, so image builds of a given commit are reproducible and auditable.
+  Override with `--build-arg UV_VERSION=<version>` ([#288](https://github.com/microsoft/agora-workbench/issues/288)).
 
 ### Fixed
 

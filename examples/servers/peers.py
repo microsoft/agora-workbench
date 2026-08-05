@@ -12,7 +12,9 @@ These are **local-dev defaults** (each server on ``localhost`` at the port its
 ``docker-compose.yml`` publishes). For any other deployment (Docker Compose
 internal networking, cloud), override at launch with the ``AGORA_PEER_REGISTRY``
 environment variable — it takes precedence over the values baked in here. For
-example, on a shared Docker network::
+example, on a shared Docker network:
+
+.. code-block:: shell
 
     AGORA_PEER_REGISTRY='{"earthscience":"http://earthscience-server:8000"}'
 
