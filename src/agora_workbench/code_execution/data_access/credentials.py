@@ -175,8 +175,8 @@ def create_storage_credential(client_id: str | None = None):
         ManagedIdentityCredential,
     )
 
-    managed_identity_client_id = (
-        (client_id.strip() if client_id is not None else None) or os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    managed_identity_client_id = (client_id.strip() if client_id is not None else None) or os.getenv(
+        "DEFAULT_IDENTITY_CLIENT_ID"
     )
 
     credentials: list[MsalCacheCredential | ManagedIdentityCredential] = [MsalCacheCredential()]
