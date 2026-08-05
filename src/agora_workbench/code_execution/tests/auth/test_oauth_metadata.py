@@ -5,6 +5,7 @@ Validates that CodeExecutionServer correctly exposes the
 WWW-Authenticate headers on 401 responses for MCP OAuth discovery.
 """
 
+import logging
 from unittest.mock import patch
 
 from starlette.testclient import TestClient
@@ -286,3 +287,148 @@ class TestProtectedResourceMetadataWithAuthConfig:
         assert response.status_code == 400
         assert response.json() == {"success": False, "error": "Invalid JSON body"}
         assert "www-authenticate" not in response.headers
+
+
+class CustomIdPValidator(TokenValidator):
+    """Validator for a non-Entra identity provider."""
+
+    async def validate(self, token: str, *, request_path: str = "/mcp", request_method: str = "POST") -> dict:
+        return {}
+
+
+CUSTOM_METADATA = {
+    "resource": "https://api.example.com",
+    "authorization_servers": ["https://auth.example.com/realms/main"],
+    "scopes_supported": ["read", "write"],
+    "bearer_methods_supported": ["header"],
+}
+
+WARNING_FRAGMENT = "OAuth protected-resource metadata is unresolvable"
+
+
+def _server_with_auth_config(auth_config):
+    config = ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test")
+    return CodeExecutionServer(server_config=config, auth_config=auth_config)
+
+
+def _custom_idp_auth_config(metadata=None):
+    return AuthConfig(
+        token_validator=CustomIdPValidator(),
+        identity_extractor=NoOpIdentityExtractor(),
+        protected_resource_metadata=metadata,
+    )
+
+
+class TestProtectedResourceMetadataFromAuthConfig:
+    """Metadata published through the public AuthConfig contract (RFC 9728)."""
+
+    def test_custom_idp_metadata_served_verbatim(self, monkeypatch):
+        """A non-Entra provider can describe itself without server-side knowledge."""
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        server = _server_with_auth_config(_custom_idp_auth_config(CUSTOM_METADATA))
+        client = TestClient(_create_test_app(server))
+
+        response = client.get("/.well-known/oauth-protected-resource")
+
+        assert response.status_code == 200
+        assert response.json() == CUSTOM_METADATA
+
+    def test_configured_metadata_takes_precedence_over_entra_ids(self, monkeypatch):
+        """Explicit auth-config metadata wins over ambient ENTRA_* environment values."""
+        monkeypatch.setenv("ENTRA_CLIENT_ID", "env-client-id")
+        monkeypatch.setenv("ENTRA_TENANT_ID", "env-tenant-id")
+
+        server = _server_with_auth_config(_custom_idp_auth_config(CUSTOM_METADATA))
+        client = TestClient(_create_test_app(server))
+
+        data = client.get("/.well-known/oauth-protected-resource").json()
+
+        assert data == CUSTOM_METADATA
+        assert "env-client-id" not in str(data)
+
+    def test_entra_factory_populates_metadata(self):
+        """create_entra_auth_config publishes metadata instead of relying on private attrs."""
+        auth_config = create_entra_auth_config(client_id="factory-client", tenant_id="factory-tenant")
+
+        metadata = auth_config.protected_resource_metadata
+
+        assert metadata is not None
+        assert metadata["resource"] == "api://factory-client"
+        assert metadata["authorization_servers"] == ["https://login.microsoftonline.com/factory-tenant/v2.0"]
+        assert metadata["scopes_supported"] == ["api://factory-client/.default"]
+
+    def test_entra_document_unchanged_from_legacy_path(self):
+        """The served Entra document must be identical to the previously composed one."""
+        server = _create_server(entra_client_id="same-client", entra_tenant_id="same-tenant")
+        client = TestClient(_create_test_app(server))
+
+        data = client.get("/.well-known/oauth-protected-resource").json()
+
+        assert data == {
+            "resource": "api://same-client",
+            "authorization_servers": ["https://login.microsoftonline.com/same-tenant/v2.0"],
+            "scopes_supported": ["api://same-client/.default"],
+            "bearer_methods_supported": ["header"],
+        }
+
+    def test_legacy_private_attr_probe_is_symmetric(self, monkeypatch):
+        """A validator exposing only _tenant_id still contributes it."""
+        monkeypatch.setenv("ENTRA_CLIENT_ID", "env-client-id")
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        class TenantOnlyValidator(TokenValidator):
+            def __init__(self) -> None:
+                self._tenant_id = "tenant-only"
+
+            async def validate(self, token: str, *, request_path: str = "/mcp", request_method: str = "POST") -> dict:
+                return {}
+
+        auth_config = AuthConfig(
+            token_validator=TenantOnlyValidator(),
+            identity_extractor=NoOpIdentityExtractor(),
+        )
+
+        server = _server_with_auth_config(auth_config)
+
+        assert server.entra_tenant_id == "tenant-only"
+        assert server.entra_client_id == "env-client-id"
+
+
+class TestUnresolvableMetadataWarning:
+    """Startup diagnostics for the previously silent OAuth discovery failure."""
+
+    def test_warns_when_metadata_unresolvable(self, monkeypatch, caplog):
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        with caplog.at_level(logging.WARNING, logger="agora_workbench.base"):
+            _server_with_auth_config(_custom_idp_auth_config())
+
+        assert WARNING_FRAGMENT in caplog.text
+
+    def test_no_warning_when_metadata_configured(self, monkeypatch, caplog):
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        with caplog.at_level(logging.WARNING, logger="agora_workbench.base"):
+            _server_with_auth_config(_custom_idp_auth_config(CUSTOM_METADATA))
+
+        assert WARNING_FRAGMENT not in caplog.text
+
+    def test_no_warning_when_entra_ids_resolvable(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="agora_workbench.base"):
+            _create_server()
+
+        assert WARNING_FRAGMENT not in caplog.text
+
+    def test_no_warning_when_authorization_not_required(self, monkeypatch, caplog):
+        """Noop auth intentionally serves a minimal document, so it must stay quiet."""
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+
+        with caplog.at_level(logging.WARNING, logger="agora_workbench.base"):
+            _create_server_with_noop_auth()
+
+        assert WARNING_FRAGMENT not in caplog.text

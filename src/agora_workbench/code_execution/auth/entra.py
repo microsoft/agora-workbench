@@ -224,9 +224,19 @@ def create_entra_auth_config(
 
     www_auth = 'Bearer resource_metadata="/.well-known/oauth-protected-resource"'
 
+    # RFC 9728 protected-resource metadata, published through the public
+    # AuthConfig contract rather than read off the validator's private state.
+    protected_resource_metadata = {
+        "resource": f"api://{resolved_client_id}",
+        "authorization_servers": [f"https://login.microsoftonline.com/{resolved_tenant_id}/v2.0"],
+        "scopes_supported": [f"api://{resolved_client_id}/.default"],
+        "bearer_methods_supported": ["header"],
+    }
+
     return AuthConfig(
         token_validator=token_validator,
         identity_extractor=identity_extractor,
         credential_provider_factory=credential_factory,
         www_authenticate_value=www_auth,
+        protected_resource_metadata=protected_resource_metadata,
     )

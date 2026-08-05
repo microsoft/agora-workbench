@@ -44,6 +44,16 @@ class TokenValidator(ABC):
 
     Implementations handle signature verification, expiry checks,
     audience/issuer validation, and any provider-specific logic.
+
+    Implementations do **not** need to publish OAuth discovery metadata. Set
+    ``AuthConfig.protected_resource_metadata`` instead — it is provider-agnostic
+    and part of the public contract.
+
+    .. deprecated::
+        Servers also probe validators for private ``_client_id`` / ``_tenant_id``
+        attributes to compose Entra-shaped metadata. That fallback is retained for
+        validators written against the old convention; new implementations should
+        use ``AuthConfig.protected_resource_metadata``.
     """
 
     @abstractmethod
@@ -163,3 +173,15 @@ class AuthConfig:
 
     require_authorization_header: bool = True
     """Whether protected endpoints require an Authorization header."""
+
+    protected_resource_metadata: Optional[dict] = None
+    """
+    RFC 9728 document served verbatim at ``/.well-known/oauth-protected-resource``.
+
+    Lets any identity provider describe itself without the server needing
+    provider-specific knowledge. ``create_entra_auth_config()`` populates this with
+    an Entra-shaped document; custom validators should set it explicitly.
+
+    When ``None``, servers fall back to composing an Entra document from their
+    ``entra_client_id`` / ``entra_tenant_id`` attributes.
+    """
