@@ -1,0 +1,63 @@
+# CodeQL code scanning (advanced setup).
+#
+# This replaces code scanning "default setup", which never runs on pull requests
+# opened from forks. See:
+# https://docs.github.com/en/code-security/concepts/code-scanning/setup-types
+#
+# Because this workflow is committed to the repository, it is dispatched for fork
+# pull requests like any other workflow (subject to the usual maintainer approval
+# gate for outside contributors), so fork PRs can satisfy the `code_scanning`
+# merge-protection rule on `main`.
+#
+# NOTE: default setup must be disabled in repository settings before this
+# workflow can upload results. Advanced-setup SARIF is rejected while default
+# setup is enabled.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '30 4 * * 1'  # Every Monday at 04:30 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    permissions:
+      actions: read           # github/codeql-action/init reads workflow run info
+      contents: read          # actions/checkout
+      security-events: write  # upload CodeQL results
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors the languages previously analyzed by default setup.
+        language: [actions, python]
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          category: /language:${{ matrix.language }}
