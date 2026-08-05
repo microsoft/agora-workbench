@@ -82,9 +82,7 @@ def test_server_config_sidecars_default_empty():
 
 def test_server_config_accepts_sidecars():
     config = _server_config(
-        sidecars=[
-            SidecarConfig(name="model", command=["-m", "svc"], url_env_var="SVC_URL", port=9100)
-        ],
+        sidecars=[SidecarConfig(name="model", command=["-m", "svc"], url_env_var="SVC_URL", port=9100)],
     )
     assert len(config.sidecars) == 1
     assert config.sidecars[0].name == "model"

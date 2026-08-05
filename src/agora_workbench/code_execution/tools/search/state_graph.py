@@ -430,11 +430,13 @@ class StateGraph:
             if tool.server_name == "(bridge)":
                 for req in tool.state_requires:
                     for prod in tool.state_produces:
-                        bridge_edges.append({
-                            "from": req,
-                            "to": prod,
-                            "description": tool.description,
-                        })
+                        bridge_edges.append(
+                            {
+                                "from": req,
+                                "to": prod,
+                                "description": tool.description,
+                            }
+                        )
 
         response: dict[str, Any] = {"domains": result}
         if bridge_edges:
