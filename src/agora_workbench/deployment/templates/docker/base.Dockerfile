@@ -61,10 +61,15 @@ RUN tdnf install -y \
     gawk \
     && tdnf clean all
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    mv /root/.local/bin/uv /usr/local/bin/uv && \
-    mv /root/.local/bin/uvx /usr/local/bin/uvx
+# Install uv with version pinning. The uv wheel ships the standalone binary
+# itself, so `uv` on PATH is a real executable rather than a Python entry-point
+# shim — invoking it does not start an interpreter.
+#
+# This must stay ahead of the miniforge PATH line below so it installs into the
+# system Python and lands in /usr/bin. Installing it after would place uv inside
+# the conda base environment, where activating another env drops it off PATH.
+ARG UV_VERSION=0.12.2
+RUN python3 -m pip install --no-cache-dir --root-user-action=ignore "uv==${UV_VERSION}"
 
 # Install mamba with version pinning (owned by appuser to avoid chown layer)
 ARG MINIFORGE_VERSION=25.11.0-1
