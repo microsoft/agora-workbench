@@ -1513,9 +1513,11 @@ re-uses it for the entire agent run and closes it on exit.</p>
   <code>Agent(mcp_servers=[server])</code>. The <code>server</code> is exactly the
   <code>MCPServerStreamableHttp</code> you built here.</li>
 <li><strong>Inject the workbench skill</strong>: the
-  <a href="https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md">workbench runtime skill</a>
+  <a href="https://github.com/microsoft/agora-workbench/blob/main/src/agora_workbench/skills/agora-workbench/SKILL.md">workbench runtime skill</a>
   is a portable system-prompt block that teaches any agent how to use
-  Workbench tools correctly. Append it to your agent's <code>instructions</code>.</li>
+  Workbench tools correctly. Append it to your agent's <code>instructions</code>.
+  Get a local copy with
+  <code>agora-workbench-deploy skill --output-dir ./skills</code>.</li>
 <li><strong>Authenticate against a real server</strong>: swap the dev bearer for a real
   token — see <a href="../../guide/authentication/">Authentication</a>.</li>
 </ul>

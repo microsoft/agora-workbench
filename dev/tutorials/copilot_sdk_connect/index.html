@@ -1531,10 +1531,11 @@ create a session:</p>
   and multi-turn chat. The
   <code>mcp_servers</code> block is exactly the one shown above.</li>
 <li><strong>Inject the workbench skill</strong>: the
-  <a href="https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md">workbench runtime skill</a>
+  <a href="https://github.com/microsoft/agora-workbench/blob/main/src/agora_workbench/skills/agora-workbench/SKILL.md">workbench runtime skill</a>
   is a portable system-prompt block that teaches any agent how to use
   Workbench tools correctly. Pass it as the <code>system_message</code> content
-  (with <code>mode="append"</code>).</li>
+  (with <code>mode="append"</code>). Get a local copy with
+  <code>agora-workbench-deploy skill --output-dir ./skills</code>.</li>
 <li><strong>Authenticate against a real server</strong>: swap the dev bearer for a real
   token — see <a href="../../guide/authentication/">Authentication</a>.</li>
 </ul>
