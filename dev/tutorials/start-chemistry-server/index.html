@@ -1371,7 +1371,7 @@ assets. Clone the matching release before continuing:</p>
 </code></pre></div>
 <h2 id="1-build-the-shared-mcp-base-image-once">1. Build the shared MCP base image (once)<a class="headerlink" href="#1-build-the-shared-mcp-base-image-once" title="Permanent link">&para;</a></h2>
 <p>From the repository root:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>src/agora_workbench/deployment/templates/docker/base.Dockerfile<span class="w"> </span>-t<span class="w"> </span>mcp-server-base:local<span class="w"> </span>.
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>src/agora_workbench/deployment/templates/docker/base.Dockerfile<span class="w"> </span>--build-arg<span class="w"> </span><span class="nv">AGORA_WORKBENCH_SOURCE</span><span class="o">=</span><span class="nb">local</span><span class="w"> </span>-t<span class="w"> </span>mcp-server-base:local<span class="w"> </span>.
 </code></pre></div>
 <h2 id="2-bring-the-server-up">2. Bring the server up<a class="headerlink" href="#2-bring-the-server-up" title="Permanent link">&para;</a></h2>
 <blockquote>
