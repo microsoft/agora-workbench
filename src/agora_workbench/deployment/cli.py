@@ -119,11 +119,12 @@ def available_skills() -> list[str]:
 
 def _skill_files(name: str) -> list[str]:
     """Return every file in a bundled skill tree, relative to the skill root."""
-    root = SKILLS.joinpath(name)
-    if not root.is_dir():
-        choices = ", ".join(available_skills()) or "none"
+    choices_list = available_skills()
+    if name not in choices_list:
+        choices = ", ".join(choices_list) or "none"
         raise ValueError(f"Unknown skill: {name!r}. Available: {choices}")
 
+    root = SKILLS.joinpath(name)
     collected: list[str] = []
 
     def walk(node, prefix: str) -> None:
