@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - `agora-workbench-deploy skill` for installing the bundled `agora-workbench` agent skill into an agent's skills
   directory from the installed package, so consumers no longer need a source checkout to obtain it.
+- `AuthConfig.protected_resource_metadata` for publishing RFC 9728 protected-resource metadata through the public
+  auth contract, so any identity provider can describe itself instead of the server composing an Entra-shaped
+  document. `create_entra_auth_config()` populates it automatically.
 
 ### Changed
 
@@ -19,6 +22,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
   consumer project root instead of requiring a workbench source checkout. Build against a checkout with
   `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+- Servers now log a startup warning when authorization is required but no OAuth protected-resource metadata can be
+  resolved, replacing a silent 404 from `/.well-known/oauth-protected-resource`.
+- Reading `_client_id` / `_tenant_id` off a `TokenValidator` is deprecated in favour of
+  `AuthConfig.protected_resource_metadata`. The fallback is retained for existing validators and is now documented
+  on the `TokenValidator` ABC.
 - The scaffolded `docker/base.Dockerfile` installs `uv` from a version-pinned PyPI release rather than piping an
   unversioned remote install script into a shell, so image builds of a given commit are reproducible and auditable.
   Override with `--build-arg UV_VERSION=<version>` ([#288](https://github.com/microsoft/agora-workbench/issues/288)).
@@ -33,6 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `.env.server` the CLI and docs tell you to create.
 - The Azure deploy scripts now locate the base image at its scaffolded `docker/base.Dockerfile` path (falling back
   to the legacy location), instead of silently skipping the base build and failing any server image that extends it.
+- The private `_client_id` / `_tenant_id` probe on `TokenValidator` is now symmetric, so a validator exposing
+  only `_tenant_id` contributes it instead of being silently ignored ([#289](https://github.com/microsoft/agora-workbench/issues/289)).
 
 ## [0.1.1] - 2026-07-30
 

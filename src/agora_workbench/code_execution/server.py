@@ -245,16 +245,21 @@ class CodeExecutionServer(BaseMCPServer):
         self.auth_config = auth_config
 
         # Entra client/tenant IDs for RFC 9728 OAuth protected-resource metadata.
+        # Preferred source is auth_config.protected_resource_metadata; these attributes
+        # remain for back-compat and for deployments that configure Entra IDs directly.
         # Resolution order: auth_config validator → ServerConfig → environment variable.
-        self.entra_client_id: Optional[str] = None
-        self.entra_tenant_id: Optional[str] = None
-        if hasattr(auth_config.token_validator, "_client_id"):
-            self.entra_client_id = auth_config.token_validator._client_id
-            self.entra_tenant_id = getattr(auth_config.token_validator, "_tenant_id", None)
+        #
+        # Reading private validator attributes is a deprecated legacy convention, kept
+        # for third-party validators written against it. Probed symmetrically so a
+        # validator exposing only one of the two cannot raise or be partially ignored.
+        self.entra_client_id: Optional[str] = getattr(auth_config.token_validator, "_client_id", None)
+        self.entra_tenant_id: Optional[str] = getattr(auth_config.token_validator, "_tenant_id", None)
         if not self.entra_client_id:
             self.entra_client_id = server_config.entra_client_id or os.getenv("ENTRA_CLIENT_ID")
         if not self.entra_tenant_id:
             self.entra_tenant_id = server_config.entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
+
+        self._warn_if_oauth_metadata_unresolvable()
 
         self.max_timeout = server_config.max_timeout
         self.default_timeout = server_config.default_timeout

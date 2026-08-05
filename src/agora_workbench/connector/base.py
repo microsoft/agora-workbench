@@ -80,6 +80,8 @@ class ConnectorServer(BaseMCPServer):
         self.entra_client_id = entra_client_id or os.getenv("ENTRA_CLIENT_ID")
         self.entra_tenant_id = entra_tenant_id or os.getenv("ENTRA_TENANT_ID")
 
+        self._warn_if_oauth_metadata_unresolvable()
+
         # FastMCP instance
         self.mcp = FastMCP(
             f"{name}-connector",

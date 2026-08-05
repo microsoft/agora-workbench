@@ -50,6 +50,27 @@ class BaseMCPServer(ABC):
         self._bind_host: str = "0.0.0.0"
         self._bind_port: int = 8000
 
+    def _warn_if_oauth_metadata_unresolvable(self) -> None:
+        """
+        Warn when OAuth discovery will fail despite authorization being required.
+
+        Without this, an unresolvable metadata document is silent at startup and
+        only surfaces as a 404 from ``/.well-known/oauth-protected-resource`` for
+        clients that rely on RFC 9728 discovery.
+        """
+        if not self.auth_config.require_authorization_header:
+            return
+        if self.auth_config.protected_resource_metadata is not None:
+            return
+        if self.entra_client_id and self.entra_tenant_id:
+            return
+        LOGGER.warning(
+            "OAuth protected-resource metadata is unresolvable: authorization is required but neither "
+            "AuthConfig.protected_resource_metadata nor Entra client/tenant IDs are configured. "
+            "/.well-known/oauth-protected-resource will return 404 and OAuth discovery will fail for "
+            "clients that depend on it."
+        )
+
     # ========================================================================
     # Lifecycle (abstract)
     # ========================================================================
@@ -168,6 +189,13 @@ class BaseMCPServer(ABC):
 
         # OAuth 2.0 Protected Resource Metadata (RFC 9728)
         async def protected_resource_metadata(request: Request):
+            # Provider-supplied metadata wins, so any identity provider can
+            # describe itself without the server composing a provider-specific
+            # document from its own attributes. AuthConfig validates the document
+            # on construction, so any non-None value is safe to serve as-is.
+            configured = server.auth_config.protected_resource_metadata
+            if configured is not None:
+                return JSONResponse(configured)
             if not server.entra_client_id or not server.entra_tenant_id:
                 # When no Entra IDs are configured (e.g. noop auth), return a
                 # minimal valid metadata document indicating no authorization is
