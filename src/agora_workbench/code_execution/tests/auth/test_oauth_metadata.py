@@ -10,8 +10,18 @@ from unittest.mock import patch
 from starlette.testclient import TestClient
 
 from ... import CodeExecutionServer
-from ...auth import create_entra_auth_config, create_noop_auth_config
+from ...auth import AuthConfig, NoOpIdentityExtractor, TokenValidator, create_entra_auth_config, create_noop_auth_config
 from ...code_execution_models import ServerConfig
+
+
+class PartialTokenValidator(TokenValidator):
+    """Validator exposing client metadata without a tenant attribute."""
+
+    def __init__(self) -> None:
+        self._client_id = "partial-client-id"
+
+    async def validate(self, token: str, *, request_path: str = "/mcp", request_method: str = "POST") -> dict:
+        return {}
 
 
 def _create_server(entra_client_id="test-client-id", entra_tenant_id="test-tenant-id"):
@@ -238,6 +248,24 @@ class TestProtectedResourceMetadataWithAuthConfig:
         data = response.json()
         assert data["resource"] == "api://my-client-id"
         assert "my-tenant-id" in data["authorization_servers"][0]
+
+    def test_custom_validator_without_tenant_metadata_does_not_crash(self):
+        config = ServerConfig(
+            name="test",
+            type="uv",
+            description="Test",
+            dependency_file="# Test",
+            entra_tenant_id="fallback-tenant-id",
+        )
+        auth_config = AuthConfig(
+            token_validator=PartialTokenValidator(),
+            identity_extractor=NoOpIdentityExtractor(),
+        )
+
+        server = CodeExecutionServer(server_config=config, auth_config=auth_config)
+
+        assert server.entra_client_id == "partial-client-id"
+        assert server.entra_tenant_id == "fallback-tenant-id"
 
     def test_noop_auth_allows_missing_authorization_header(self):
         """No-op auth mode should allow requests without Authorization header."""

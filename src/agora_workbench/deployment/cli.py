@@ -2,12 +2,16 @@
 
 Usage:
     agora-workbench-deploy init [--target docker|azure|activity-ui|all] [--output-dir DIR]
+    agora-workbench-deploy skill [--name NAME] [--output-dir DIR] [--force]
+    agora-workbench-deploy skill --list
 
-Copies deployment templates into the specified directory so they can be
-customized for the user's server.
+``init`` copies deployment templates into the specified directory so they can be
+customized for the user's server. ``skill`` installs a bundled agent skill into
+an agent's skills directory.
 """
 
 import argparse
+import shutil
 import sys
 from importlib.resources import files
 from pathlib import Path
@@ -16,6 +20,9 @@ from typing import Optional
 
 DEPLOYMENT_TEMPLATES = files("agora_workbench.deployment.templates")
 ACTIVITY_UI_TEMPLATES = files("activity_ui")
+SKILLS = files("agora_workbench.skills")
+
+DEFAULT_SKILL = "agora-workbench"
 
 TEMPLATE_SETS = {
     "docker": [
@@ -122,6 +129,77 @@ def init(target: str = "all", output_dir: str = "deployment") -> list[str]:
     return created
 
 
+def available_skills() -> list[str]:
+    """Return the names of the agent skills bundled with the package."""
+    return sorted(entry.name for entry in SKILLS.iterdir() if entry.is_dir() and not entry.name.startswith(("_", ".")))
+
+
+def _skill_files(name: str) -> list[str]:
+    """Return every file in a bundled skill tree, relative to the skill root."""
+    choices_list = available_skills()
+    if name not in choices_list:
+        choices = ", ".join(choices_list) or "none"
+        raise ValueError(f"Unknown skill: {name!r}. Available: {choices}")
+
+    root = SKILLS.joinpath(name)
+    collected: list[str] = []
+
+    def walk(node, prefix: str) -> None:
+        for entry in node.iterdir():
+            if entry.name == "__pycache__" or entry.name.endswith((".pyc", ".pyo")):
+                continue
+            relative = f"{prefix}{entry.name}"
+            if entry.is_dir():
+                walk(entry, f"{relative}/")
+            else:
+                collected.append(relative)
+
+    walk(root, "")
+    return sorted(collected)
+
+
+def install_skill(name: str = DEFAULT_SKILL, output_dir: str = "skills", force: bool = False) -> list[str]:
+    """Copy a bundled agent skill into an agent's skills directory.
+
+    The skill is written to ``<output_dir>/<name>/`` so the result follows the
+    Agent Skills layout (``skills/<name>/SKILL.md`` plus nested sub-skills).
+
+    Args:
+        name: Which bundled skill to install (see :func:`available_skills`).
+        output_dir: Skills directory to install into, e.g. ``~/.claude/skills``.
+        force: Replace an existing installation. The destination is removed
+            first, so files dropped or renamed in a newer package version do
+            not linger alongside the current ones.
+
+    Returns:
+        List of created file paths.
+
+    Raises:
+        ValueError: If no bundled skill matches ``name``.
+        FileExistsError: If the destination exists and ``force`` is False.
+    """
+    relative_paths = _skill_files(name)
+    skill_root = SKILLS.joinpath(name)
+    dest = Path(output_dir).expanduser() / name
+
+    if dest.exists():
+        if not force:
+            raise FileExistsError(f"{dest} already exists. Pass force=True to replace it.")
+        shutil.rmtree(dest)
+
+    created = []
+    for relative in relative_paths:
+        source = skill_root.joinpath(*relative.split("/"))
+        target = dest.joinpath(*relative.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Skill prose contains non-ASCII (em dashes), so the encoding is
+        # pinned rather than left to the platform default.
+        target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+        created.append(str(target))
+
+    return created
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -150,6 +228,32 @@ def main() -> None:
         "--force",
         action="store_true",
         help="Overwrite existing files without prompting.",
+    )
+
+    skill_parser = subparsers.add_parser(
+        "skill",
+        help="Install a bundled agent skill into your agent's skills directory.",
+    )
+    skill_parser.add_argument(
+        "--name",
+        default=DEFAULT_SKILL,
+        help=f"Which bundled skill to install (default: {DEFAULT_SKILL}).",
+    )
+    skill_parser.add_argument(
+        "--output-dir",
+        "-o",
+        default="skills",
+        help="Skills directory to install into (default: ./skills). E.g. ~/.claude/skills.",
+    )
+    skill_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace an existing skill directory (removes it first, so stale files are not left behind).",
+    )
+    skill_parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List the bundled skills and exit.",
     )
 
     args = parser.parse_args()
@@ -195,6 +299,33 @@ def main() -> None:
             step = 8 if args.target == "all" else 1
             print(f"  {step}. Create the shared network: docker network create agora-activity")
             print(f"  {step + 1}. Start the UI: docker compose -f activity_ui/docker-compose.yml up -d --build")
+
+    if args.command == "skill":
+        if args.list:
+            print("Bundled skills:")
+            for skill_name in available_skills():
+                print(f"  {skill_name}")
+            return
+
+        dest = Path(args.output_dir).expanduser() / args.name
+
+        if dest.exists() and not args.force:
+            print(f"⚠️  {dest}/ already exists.", file=sys.stderr)
+            print("\nUse --force to overwrite.", file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            created = install_skill(name=args.name, output_dir=args.output_dir, force=args.force)
+        except ValueError as exc:
+            print(f"⚠️  {exc}", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"✓ Installed skill '{args.name}' ({len(created)} file(s)) into {dest}/:")
+        for path in sorted(created):
+            print(f"  {path}")
+        print("\nNext steps:")
+        print("  1. Point your agent client at the skills directory, or restart it to pick the skill up")
+        print("  2. Connect the agent to your workbench server over Streamable HTTP at /mcp")
 
 
 if __name__ == "__main__":

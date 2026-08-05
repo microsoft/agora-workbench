@@ -250,7 +250,7 @@ class CodeExecutionServer(BaseMCPServer):
         self.entra_tenant_id: Optional[str] = None
         if hasattr(auth_config.token_validator, "_client_id"):
             self.entra_client_id = auth_config.token_validator._client_id
-            self.entra_tenant_id = auth_config.token_validator._tenant_id
+            self.entra_tenant_id = getattr(auth_config.token_validator, "_tenant_id", None)
         if not self.entra_client_id:
             self.entra_client_id = server_config.entra_client_id or os.getenv("ENTRA_CLIENT_ID")
         if not self.entra_tenant_id:

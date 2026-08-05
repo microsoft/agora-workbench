@@ -89,6 +89,8 @@ exclude = [
 # "**/*" does not match dotfiles (glob never expands a wildcard onto a leading
 # dot), so "**/.*" is required for templates such as docker/.env.server.example.
 "agora_workbench.deployment.templates" = ["**/*", "**/.*"]
+# Agent skill trees (SKILL.md plus nested sub-skills), same dotfile caveat.
+"agora_workbench.skills" = ["**/*", "**/.*"]
 "activity_ui" = [
     "Dockerfile",
     "docker-compose.yml",
@@ -98,6 +100,10 @@ exclude = [
 
 [tool.setuptools.exclude-package-data]
 "agora_workbench.deployment.templates" = [
+    "**/__pycache__/**",
+    "**/*.py[co]",
+]
+"agora_workbench.skills" = [
     "**/__pycache__/**",
     "**/*.py[co]",
 ]

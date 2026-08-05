@@ -96,10 +96,11 @@ Other notes:
   and multi-turn chat. The
   `mcp_servers` block is exactly the one shown above.
 - **Inject the workbench skill**: the
-  [workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/skills/agora-workbench/SKILL.md)
+  [workbench runtime skill](https://github.com/microsoft/agora-workbench/blob/main/src/agora_workbench/skills/agora-workbench/SKILL.md)
   is a portable system-prompt block that teaches any agent how to use
   Workbench tools correctly. Pass it as the `system_message` content
-  (with `mode="append"`).
+  (with `mode="append"`). Get a local copy with
+  `agora-workbench-deploy skill --output-dir ./skills`.
 - **Authenticate against a real server**: swap the dev bearer for a real
   token — see [Authentication](../../guide/authentication.md).
 

@@ -7,6 +7,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `agora-workbench-deploy skill` for installing the bundled `agora-workbench` agent skill into an agent's skills
+  directory from the installed package, so consumers no longer need a source checkout to obtain it.
+
+### Changed
+
+- Moved the `agora-workbench` agent skill from the repository root into the `agora_workbench.skills` package so that
+  it ships in the published wheel and source distribution.
+- The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
+  consumer project root instead of requiring a workbench source checkout. Build against a checkout with
+  `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+
 ### Fixed
 
 - Included dotfile templates in the published wheel, so `agora-workbench-deploy init --target docker` no longer
@@ -15,12 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   partway through and leaving a half-written output directory.
 - Corrected the scaffolded `docker/docker-compose.yml` `env_file` path, which pointed one directory above the
   `.env.server` the CLI and docs tell you to create.
-
-### Changed
-
-- The scaffolded `docker/base.Dockerfile` installs `agora-workbench` from PyPI by default, so it builds from a
-  consumer project root instead of requiring a workbench source checkout. Build against a checkout with
-  `--build-arg AGORA_WORKBENCH_SOURCE=local`, and pin a release with `--build-arg AGORA_WORKBENCH_VERSION=<version>`.
+- The Azure deploy scripts now locate the base image at its scaffolded `docker/base.Dockerfile` path (falling back
+  to the legacy location), instead of silently skipping the base build and failing any server image that extends it.
 
 ## [0.1.1] - 2026-07-30
 
