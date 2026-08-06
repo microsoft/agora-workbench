@@ -6,14 +6,33 @@ from unittest.mock import patch
 
 import pytest
 
+from agora_workbench.code_execution.auth import create_noop_auth_config
+
 from agora_workbench.connector import cli
 from agora_workbench.connector.cli import (
     ConfigError,
+    build_auth_config,
     build_config,
     parse_upstreams_from_env,
     parse_workers_from_env,
+    resolve_auth_factory,
     validate_upstream_names,
 )
+
+_SENTINEL_AUTH_CONFIG = create_noop_auth_config()
+"""A real AuthConfig instance used to assert which backend build_auth_config picked."""
+
+_NOT_CALLABLE = "just a string"
+
+
+def _make_sentinel_auth_config():
+    return _SENTINEL_AUTH_CONFIG
+
+
+class _FactoryHolder:
+    @staticmethod
+    def create():
+        return _SENTINEL_AUTH_CONFIG
 
 
 class TestParseUpstreamsFromEnv:
@@ -175,6 +194,135 @@ class TestBuildConfig:
         assert router_config is not None
 
 
+class TestResolveAuthFactory:
+    def test_resolves_module_attribute(self):
+        resolved = resolve_auth_factory("agora_workbench.code_execution.auth:create_noop_auth_config")
+        from agora_workbench.code_execution.auth import create_noop_auth_config
+
+        assert resolved is create_noop_auth_config
+
+    def test_resolves_dotted_attribute_path(self):
+        resolved = resolve_auth_factory(f"{__name__}:_FactoryHolder.create")
+        assert resolved() is _SENTINEL_AUTH_CONFIG
+
+    def test_strips_surrounding_whitespace(self):
+        resolved = resolve_auth_factory("  agora_workbench.code_execution.auth:create_noop_auth_config  ")
+        assert callable(resolved)
+
+    @pytest.mark.parametrize("spec", ["no_colon_here", ":create", "module:", "a:b:c", "   ", ""])
+    def test_rejects_malformed_spec(self, spec):
+        with pytest.raises(ConfigError, match="Invalid auth factory spec"):
+            resolve_auth_factory(spec)
+
+    def test_rejects_unimportable_module(self):
+        with pytest.raises(ConfigError, match="Could not import module 'definitely_not_a_real_pkg'"):
+            resolve_auth_factory("definitely_not_a_real_pkg:create")
+
+    def test_rejects_missing_attribute(self):
+        with pytest.raises(ConfigError, match="has no attribute 'not_there'"):
+            resolve_auth_factory(f"{__name__}:not_there")
+
+    def test_rejects_non_callable_attribute(self):
+        with pytest.raises(ConfigError, match="not callable"):
+            resolve_auth_factory(f"{__name__}:_NOT_CALLABLE")
+
+
+class TestBuildAuthConfig:
+    def test_explicit_factory_takes_precedence_over_env(self, caplog):
+        env = {
+            "CONNECTOR_AUTH_FACTORY": "agora_workbench.code_execution.auth:create_noop_auth_config",
+            "ENTRA_CLIENT_ID": "cid",
+            "ENTRA_TENANT_ID": "tid",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = build_auth_config(lambda: _SENTINEL_AUTH_CONFIG)
+
+        assert result is _SENTINEL_AUTH_CONFIG
+        assert "Ignoring CONNECTOR_AUTH_FACTORY" in caplog.text
+
+    def test_env_factory_takes_precedence_over_entra(self):
+        env = {
+            "CONNECTOR_AUTH_FACTORY": f"{__name__}:_make_sentinel_auth_config",
+            "ENTRA_CLIENT_ID": "cid",
+            "ENTRA_TENANT_ID": "tid",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = build_auth_config()
+
+        assert result is _SENTINEL_AUTH_CONFIG
+
+    def test_env_factory_resolution_failure_is_config_error(self):
+        with patch.dict(os.environ, {"CONNECTOR_AUTH_FACTORY": "nope_not_real:create"}, clear=True):
+            with pytest.raises(ConfigError, match="Could not import module"):
+                build_auth_config()
+
+    def test_factory_exception_is_wrapped_as_config_error(self):
+        def boom():
+            raise RuntimeError("backend unavailable")
+
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ConfigError, match="raised RuntimeError: backend unavailable"):
+                build_auth_config(boom)
+
+    def test_factory_returning_wrong_type_is_config_error(self):
+        def bad_factory():
+            return "not-an-auth-config"
+
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ConfigError, match="returned a str, expected an AuthConfig"):
+                build_auth_config(bad_factory)  # pyright: ignore[reportArgumentType]
+
+    def test_falls_back_to_entra_when_both_vars_set(self):
+        env = {"ENTRA_CLIENT_ID": "cid", "ENTRA_TENANT_ID": "tid"}
+        with patch.dict(os.environ, env, clear=True):
+            with patch(
+                "agora_workbench.code_execution.auth.create_entra_auth_config",
+                return_value=_SENTINEL_AUTH_CONFIG,
+            ) as create_entra:
+                result = build_auth_config()
+
+        assert result is _SENTINEL_AUTH_CONFIG
+        create_entra.assert_called_once_with(client_id="cid", tenant_id="tid")
+
+    @pytest.mark.parametrize(
+        ("env", "missing"),
+        [
+            ({"ENTRA_CLIENT_ID": "cid"}, "ENTRA_TENANT_ID"),
+            ({"ENTRA_TENANT_ID": "tid"}, "ENTRA_CLIENT_ID"),
+        ],
+    )
+    def test_partial_entra_config_is_config_error(self, env, missing):
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(ConfigError, match=f"{missing} is not"):
+                build_auth_config()
+
+    def test_unconfigured_auth_raises_instead_of_silently_using_noop(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(ConfigError, match="No authentication backend is configured"):
+                build_auth_config()
+
+    @pytest.mark.parametrize("flag", ["1", "true", "TRUE", "yes", "on"])
+    def test_noop_requires_explicit_opt_in(self, flag, caplog):
+        from agora_workbench.code_execution.auth import AuthConfig
+
+        with patch.dict(os.environ, {"CONNECTOR_ALLOW_NOOP_AUTH": flag}, clear=True):
+            result = build_auth_config()
+
+        assert isinstance(result, AuthConfig)
+        assert "no-op auth" in caplog.text
+
+    @pytest.mark.parametrize("flag", ["0", "false", "no", "off", ""])
+    def test_falsey_opt_in_still_raises(self, flag):
+        with patch.dict(os.environ, {"CONNECTOR_ALLOW_NOOP_AUTH": flag}, clear=True):
+            with pytest.raises(ConfigError, match="No authentication backend is configured"):
+                build_auth_config()
+
+    def test_ambiguous_opt_in_value_is_rejected(self):
+        with patch.dict(os.environ, {"CONNECTOR_ALLOW_NOOP_AUTH": "maybe"}, clear=True):
+            with pytest.raises(ConfigError, match="Invalid CONNECTOR_ALLOW_NOOP_AUTH='maybe'"):
+                build_auth_config()
+
+
 class TestMain:
     def test_invalid_port_exits_with_config_error(self, caplog):
         with (
@@ -190,6 +338,36 @@ class TestMain:
 
         assert exc_info.value.code == 1
         assert "CONNECTOR_PORT/MCP_SERVER_PORT" in caplog.text
+
+    def test_unconfigured_auth_exits_with_config_error(self, caplog):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "agora_workbench.connector.cli.build_config",
+                return_value=(SimpleNamespace(name="connector", upstreams=[]), None),
+            ),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            cli.main()
+
+        assert exc_info.value.code == 1
+        assert "No authentication backend is configured" in caplog.text
+
+    def test_passes_caller_supplied_factory_through_to_server(self):
+        from agora_workbench.connector.models import RouterConfig, UpstreamConfig
+
+        router_config = RouterConfig(name="connector", upstreams=[UpstreamConfig(name="x", url="http://x:8000")])
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch("agora_workbench.connector.cli.build_config", return_value=(router_config, None)),
+            patch("agora_workbench.connector.router.RouterServer") as router_server,
+            patch("asyncio.run"),
+        ):
+            cli.main(auth_config_factory=_make_sentinel_auth_config)
+
+        _, kwargs = router_server.call_args
+        assert kwargs["auth_config"] is _SENTINEL_AUTH_CONFIG
 
 
 class TestParseWorkersFromEnv:

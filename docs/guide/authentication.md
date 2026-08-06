@@ -125,6 +125,55 @@ my_auth = AuthConfig(
 server = CodeExecutionServer(server_config=config, auth_config=my_auth)
 ```
 
+### Using a custom AuthConfig with the connector CLI
+
+Connector servers (`mcp-connector-server`) select their backend from the environment, so a custom `AuthConfig` can be injected without forking the CLI. Point `CONNECTOR_AUTH_FACTORY` at a `"module.path:factory"` returning an `AuthConfig`:
+
+```python
+# my_pkg/auth.py
+from agora_workbench.code_execution.auth import AuthConfig
+
+def create_auth_config() -> AuthConfig:
+    return AuthConfig(
+        token_validator=MyTokenValidator(),
+        identity_extractor=MyIdentityExtractor(),
+        protected_resource_metadata={"resource": "https://my-connector.example.com"},
+    )
+```
+
+```bash
+export CONNECTOR_AUTH_FACTORY="my_pkg.auth:create_auth_config"
+mcp-connector-server
+```
+
+The attribute may be dotted (`my_pkg.auth:Backend.create`) to reach a classmethod. The package providing it must be installed in the connector's environment; if it can't be imported, the resolved attribute is missing, or the factory returns something other than an `AuthConfig`, the connector fails to start with an explicit error rather than falling back to another backend.
+
+Alternatively, a downstream package can ship its own console script that reuses all of the CLI's environment parsing and server selection:
+
+```python
+# my_pkg/console.py
+from agora_workbench.connector.cli import main
+
+def run() -> None:
+    main(auth_config_factory=create_auth_config)
+```
+
+An explicitly passed `auth_config_factory` takes precedence over `CONNECTOR_AUTH_FACTORY`, which takes precedence over the Entra ID variables.
+
+### Connector auth resolution order
+
+`build_auth_config()` selects a backend in this order:
+
+| Precedence | Backend | Selected by |
+|------------|---------|-------------|
+| 1 | Caller-supplied factory | `main(auth_config_factory=...)` |
+| 2 | Custom factory | `CONNECTOR_AUTH_FACTORY="module.path:factory"` |
+| 3 | Entra ID | `ENTRA_CLIENT_ID` **and** `ENTRA_TENANT_ID` |
+| 4 | No-op | `CONNECTOR_ALLOW_NOOP_AUTH=1` |
+
+!!! warning "Unauthenticated startup is opt-in"
+    If none of the above is configured, the connector **exits with a configuration error** instead of starting with authentication disabled. This means a missing or misspelled `ENTRA_CLIENT_ID` fails the deployment rather than quietly running unprotected. Setting only one of the two Entra variables is also an error. For local development, set `CONNECTOR_ALLOW_NOOP_AUTH=1` to explicitly request no-op auth.
+
 ## Agent-side credentials
 
 On the agent side (client connecting to MCP servers), `auth/auth.py` provides a `ChainedTokenCredential` that tries in order:
