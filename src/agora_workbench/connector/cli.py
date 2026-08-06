@@ -10,6 +10,11 @@ Environment variables:
     WORKER_<NAME>_WEIGHT: (Optional) Routing weight for a worker (default: 1)
     ENTRA_CLIENT_ID: (Optional) Entra ID client ID for auth
     ENTRA_TENANT_ID: (Optional) Entra tenant ID for auth
+    CONNECTOR_AUTH_FACTORY: (Optional) "module.path:factory" returning a custom AuthConfig.
+        Takes precedence over ENTRA_CLIENT_ID/ENTRA_TENANT_ID.
+    CONNECTOR_ALLOW_NOOP_AUTH: (Optional) Set to 1 to start with authentication disabled when no
+        other backend is configured. Local development only; without it an unconfigured
+        connector refuses to start rather than running unprotected.
     CONNECTOR_NAME: (Optional) Server name (defaults to "connector")
     CONNECTOR_PORT: (Optional) HTTP port (defaults to 8000)
     GATEWAY_BLOCKED_TOOLS: (Optional) Comma-separated blocked tool names
@@ -19,10 +24,16 @@ Environment variables:
     DISPATCHER_FAILURE_POLICY: (Optional) "error" (default) or "reroute"
 """
 
+import importlib
 import logging
 import os
 import re
 import sys
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from agora_workbench.code_execution.auth import AuthConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +41,15 @@ _UPSTREAM_URL_PATTERN = re.compile(r"^UPSTREAM_([A-Za-z][A-Za-z0-9_]*)_URL$")
 _WORKER_URL_PATTERN = re.compile(r"^WORKER_([A-Za-z][A-Za-z0-9_]*)_URL$")
 _WORKER_WEIGHT_PATTERN = re.compile(r"^WORKER_([A-Za-z][A-Za-z0-9_]*)_WEIGHT$")
 _SAFE_NAME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*$")
+
+AUTH_FACTORY_ENV_VAR = "CONNECTOR_AUTH_FACTORY"
+"""Environment variable naming a ``"module.path:factory"`` that returns an ``AuthConfig``."""
+
+ALLOW_NOOP_AUTH_ENV_VAR = "CONNECTOR_ALLOW_NOOP_AUTH"
+"""Environment variable that must be truthy to start the connector with authentication disabled."""
+
+_TRUTHY_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSEY_VALUES = frozenset({"", "0", "false", "no", "off"})
 
 
 class ConfigError(Exception):
@@ -222,9 +242,111 @@ def build_config():
         raise ConfigError(f"Invalid CONNECTOR_MODE='{mode}'. Must be 'router', 'gateway', or 'dispatcher'.")
 
 
-def build_auth_config():
-    """Build auth config from environment, defaulting to Entra if credentials present."""
-    from agora_workbench.code_execution.auth import create_entra_auth_config, create_noop_auth_config
+def _env_flag(name: str) -> bool:
+    """Read a boolean environment variable, rejecting values that aren't clearly true or false."""
+    raw = os.getenv(name)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    if value in _TRUTHY_VALUES:
+        return True
+    if value in _FALSEY_VALUES:
+        return False
+    raise ConfigError(f"Invalid {name}='{raw}'. Must be one of: 1/0, true/false, yes/no, on/off.")
+
+
+def resolve_auth_factory(spec: str) -> Callable[[], "AuthConfig"]:
+    """Resolve a ``"module.path:attribute"`` spec to a zero-argument callable.
+
+    The attribute may be dotted (e.g. ``"my_pkg.auth:Backend.create"``) to reach a
+    classmethod or other nested attribute.
+
+    Raises:
+        ConfigError: If the spec is malformed, the module can't be imported, the
+            attribute doesn't exist, or the resolved object isn't callable.
+    """
+    target = spec.strip()
+    module_path, separator, attribute_path = target.partition(":")
+    module_path = module_path.strip()
+    attribute_path = attribute_path.strip()
+
+    if not separator or ":" in attribute_path or not module_path or not attribute_path:
+        raise ConfigError(
+            f"Invalid auth factory spec '{spec}'. Expected 'module.path:factory_name', "
+            "with exactly one ':' separating the module from the attribute."
+        )
+
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        raise ConfigError(
+            f"Could not import module '{module_path}' for auth factory '{spec}': {exc}. "
+            "Ensure the package providing it is installed in the connector's environment."
+        ) from exc
+
+    resolved: object = module
+    traversed = module_path
+    for part in attribute_path.split("."):
+        try:
+            resolved = getattr(resolved, part)
+        except AttributeError as exc:
+            raise ConfigError(f"Auth factory '{spec}' not found: '{traversed}' has no attribute '{part}'.") from exc
+        traversed = f"{traversed}.{part}"
+
+    if not callable(resolved):
+        raise ConfigError(f"Auth factory '{spec}' resolved to a {type(resolved).__name__}, which is not callable.")
+
+    return cast("Callable[[], AuthConfig]", resolved)
+
+
+def build_auth_config(factory: Callable[[], "AuthConfig"] | None = None) -> "AuthConfig":
+    """Build the auth config the connector server runs with.
+
+    Backends are selected in this order:
+
+    1. ``factory``, when the caller passes one (see :func:`main`).
+    2. The ``CONNECTOR_AUTH_FACTORY`` environment variable.
+    3. Entra ID, when ``ENTRA_CLIENT_ID`` and ``ENTRA_TENANT_ID`` are both set.
+    4. No-op auth, but only when ``CONNECTOR_ALLOW_NOOP_AUTH`` is truthy.
+
+    Raises:
+        ConfigError: If no backend is configured, or the configured one is unusable.
+            Running unauthenticated is never the silent default -- it has to be
+            requested explicitly so a missing or misspelled variable fails startup
+            instead of starting the connector unprotected.
+    """
+    from agora_workbench.code_execution.auth import AuthConfig, create_entra_auth_config, create_noop_auth_config
+
+    spec_raw = os.getenv(AUTH_FACTORY_ENV_VAR)
+    spec = spec_raw.strip() if spec_raw else ""
+    source = ""
+
+    if factory is not None:
+        if spec:
+            LOGGER.warning(
+                "Ignoring %s='%s' because an auth config factory was supplied in-process by the caller.",
+                AUTH_FACTORY_ENV_VAR,
+                spec,
+            )
+        source = "the factory supplied by the caller"
+    elif spec:
+        factory = resolve_auth_factory(spec)
+        source = f"{AUTH_FACTORY_ENV_VAR}='{spec}'"
+
+    if factory is not None:
+        LOGGER.info("Configuring auth from %s", source)
+        try:
+            auth_config = factory()
+        except ConfigError:
+            raise
+        except Exception as exc:
+            raise ConfigError(f"Auth factory from {source} raised {type(exc).__name__}: {exc}") from exc
+
+        if not isinstance(auth_config, AuthConfig):
+            raise ConfigError(
+                f"Auth factory from {source} returned a {type(auth_config).__name__}, expected an AuthConfig."
+            )
+        return auth_config
 
     entra_client_id = os.getenv("ENTRA_CLIENT_ID")
     entra_tenant_id = os.getenv("ENTRA_TENANT_ID")
@@ -236,14 +358,39 @@ def build_auth_config():
             tenant_id=entra_tenant_id,
         )
 
-    LOGGER.warning(
-        "No ENTRA_CLIENT_ID/ENTRA_TENANT_ID set — using no-op auth. This is only appropriate for local development."
+    if entra_client_id or entra_tenant_id:
+        missing = "ENTRA_TENANT_ID" if entra_client_id else "ENTRA_CLIENT_ID"
+        present = "ENTRA_CLIENT_ID" if entra_client_id else "ENTRA_TENANT_ID"
+        raise ConfigError(
+            f"{present} is set but {missing} is not. Entra ID auth requires both. "
+            "Set the missing variable, or configure a different backend."
+        )
+
+    if _env_flag(ALLOW_NOOP_AUTH_ENV_VAR):
+        LOGGER.warning(
+            "%s is set — starting with no-op auth. Every request is accepted without token validation. "
+            "This is only appropriate for local development.",
+            ALLOW_NOOP_AUTH_ENV_VAR,
+        )
+        return create_noop_auth_config()
+
+    raise ConfigError(
+        "No authentication backend is configured. Set ENTRA_CLIENT_ID and ENTRA_TENANT_ID to use Entra ID, "
+        f"or {AUTH_FACTORY_ENV_VAR}='module.path:factory' to supply a custom AuthConfig. "
+        f"To run with authentication disabled (local development only), set {ALLOW_NOOP_AUTH_ENV_VAR}=1."
     )
-    return create_noop_auth_config()
 
 
-def main() -> None:
-    """Main entrypoint for the connector server CLI."""
+def main(auth_config_factory: Callable[[], "AuthConfig"] | None = None) -> None:
+    """Main entrypoint for the connector server CLI.
+
+    Args:
+        auth_config_factory: Optional zero-argument callable returning the ``AuthConfig``
+            to run with. Lets a downstream package ship a thin console script that reuses
+            this CLI's environment parsing and server selection instead of forking it.
+            When omitted, the backend is selected from the environment -- see
+            :func:`build_auth_config`.
+    """
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -256,11 +403,10 @@ def main() -> None:
             port = int(port_raw)
         except ValueError as exc:
             raise ConfigError(f"Invalid CONNECTOR_PORT/MCP_SERVER_PORT='{port_raw}'. Must be an integer.") from exc
+        auth_config = build_auth_config(auth_config_factory)
     except ConfigError as exc:
         LOGGER.error("Configuration error: %s", exc)
         sys.exit(1)
-
-    auth_config = build_auth_config()
 
     import asyncio
 

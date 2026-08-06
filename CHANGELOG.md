@@ -5,7 +5,35 @@ All notable changes to Agora Workbench are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+In addition to the standard Keep a Changelog sections, a release may open with a `Breaking` section listing
+changes that require action from existing users. Each entry there states who is affected and how to migrate.
+
 ## [Unreleased]
+
+### Breaking
+
+- The connector CLI no longer falls back to no-op auth when no backend is configured. Starting without
+  authentication is now an explicit opt-in via `CONNECTOR_ALLOW_NOOP_AUTH=1`; otherwise the connector exits with
+  a configuration error, so a missing or misspelled `ENTRA_CLIENT_ID` fails the deployment instead of quietly
+  starting it unprotected. Setting only one of `ENTRA_CLIENT_ID` / `ENTRA_TENANT_ID` is likewise now an error
+  rather than silently selecting no-op auth
+  ([#287](https://github.com/microsoft/agora-workbench/issues/287)).
+
+  **Who is affected:** anyone starting `mcp-connector-server` without both `ENTRA_CLIENT_ID` and
+  `ENTRA_TENANT_ID` set — typically local development and CI. A connector that previously started with a
+  `No ENTRA_CLIENT_ID/ENTRA_TENANT_ID set` warning now exits with status 1.
+
+  **To migrate:** set `CONNECTOR_ALLOW_NOOP_AUTH=1` to keep the old unauthenticated behaviour, or configure a
+  real backend (`ENTRA_CLIENT_ID` + `ENTRA_TENANT_ID`, or `CONNECTOR_AUTH_FACTORY`). Deployments using the
+  bundled Azure scripts are unaffected: `_deploy-common.sh` already requires both Entra variables.
+
+### Added
+
+- `CONNECTOR_AUTH_FACTORY` for pointing the connector CLI at a `"module.path:factory"` that returns a custom
+  `AuthConfig`, and an optional `auth_config_factory` argument on `connector.cli.main()` so a downstream package
+  can ship its own console script that reuses the CLI's environment parsing and server selection. Operators with
+  an identity provider other than Entra ID no longer have to fork the CLI to use
+  `mcp-connector-server` ([#287](https://github.com/microsoft/agora-workbench/issues/287)).
 
 ## [0.1.2] - 2026-08-05
 
