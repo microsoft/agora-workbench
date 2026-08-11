@@ -22,8 +22,6 @@ from agora_workbench.connector.cli import (
 _SENTINEL_AUTH_CONFIG = create_noop_auth_config()
 """A real AuthConfig instance used to assert which backend build_auth_config picked."""
 
-_NOT_CALLABLE = "just a string"
-
 
 def _make_sentinel_auth_config():
     return _SENTINEL_AUTH_CONFIG
