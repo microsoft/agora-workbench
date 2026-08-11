@@ -126,6 +126,12 @@ Connector-specific values are usually declared in `parameters/connector.biceppar
 - `UPSTREAM_<NAME>_URL` — one per upstream server (e.g., `UPSTREAM_CHEMISTRY_URL`)
 - `GATEWAY_*` — optional gateway policy settings such as `GATEWAY_BLOCKED_TOOLS` and `GATEWAY_MAX_CALLS_PER_MINUTE`
 - `OBJECT_TRANSFER_TRUSTED_HTTP_HOSTS` — set on **upstream** servers, not the connector
+- `CONNECTOR_AUTH_FACTORY` — optional `"module.path:factory"` returning a custom `AuthConfig`, for
+  deployments with their own identity provider. Takes precedence over `ENTRA_CLIENT_ID`/`ENTRA_TENANT_ID`.
+
+Note: a connector with no auth backend configured (no `CONNECTOR_AUTH_FACTORY`, and
+`ENTRA_CLIENT_ID`/`ENTRA_TENANT_ID` not both set) fails at startup rather than running
+unauthenticated. `CONNECTOR_ALLOW_NOOP_AUTH=1` opts into disabled auth for local development only.
 
 Note: gateway mode requires exactly one `UPSTREAM_*_URL`; multiple upstreams with
 `CONNECTOR_MODE=gateway` is invalid and will fail at startup.
