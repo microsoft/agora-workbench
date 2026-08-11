@@ -855,6 +855,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Custom auth implementations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-a-custom-authconfig-with-the-connector-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using a custom AuthConfig with the connector CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connector-auth-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector auth resolution order
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1449,6 +1477,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Custom auth implementations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-a-custom-authconfig-with-the-connector-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using a custom AuthConfig with the connector CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#connector-auth-resolution-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Connector auth resolution order
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1617,6 +1673,67 @@
 <a id="__codelineno-4-31" name="__codelineno-4-31" href="#__codelineno-4-31"></a>
 <a id="__codelineno-4-32" name="__codelineno-4-32" href="#__codelineno-4-32"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">my_auth</span><span class="p">)</span>
 </code></pre></div>
+<h3 id="using-a-custom-authconfig-with-the-connector-cli">Using a custom AuthConfig with the connector CLI<a class="headerlink" href="#using-a-custom-authconfig-with-the-connector-cli" title="Permanent link">&para;</a></h3>
+<p>Connector servers (<code>mcp-connector-server</code>) select their backend from the environment, so a custom <code>AuthConfig</code> can be injected without forking the CLI. Point <code>CONNECTOR_AUTH_FACTORY</code> at a <code>"module.path:factory"</code> returning an <code>AuthConfig</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># my_pkg/auth.py</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">AuthConfig</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_auth_config</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AuthConfig</span><span class="p">:</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="k">return</span> <span class="n">AuthConfig</span><span class="p">(</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>        <span class="n">token_validator</span><span class="o">=</span><span class="n">MyTokenValidator</span><span class="p">(),</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>        <span class="n">identity_extractor</span><span class="o">=</span><span class="n">MyIdentityExtractor</span><span class="p">(),</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>        <span class="n">protected_resource_metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;resource&quot;</span><span class="p">:</span> <span class="s2">&quot;https://my-connector.example.com&quot;</span><span class="p">},</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="p">)</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">CONNECTOR_AUTH_FACTORY</span><span class="o">=</span><span class="s2">&quot;my_pkg.auth:create_auth_config&quot;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>mcp-connector-server
+</code></pre></div>
+<p>The attribute may be dotted (<code>my_pkg.auth:Backend.create</code>) to reach a classmethod. The package providing it must be installed in the connector's environment; if it can't be imported, the resolved attribute is missing, or the factory returns something other than an <code>AuthConfig</code>, the connector fails to start with an explicit error rather than falling back to another backend.</p>
+<p>Alternatively, a downstream package can ship its own console script that reuses all of the CLI's environment parsing and server selection:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># my_pkg/console.py</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.connector.cli</span><span class="w"> </span><span class="kn">import</span> <span class="n">main</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">main</span><span class="p">(</span><span class="n">auth_config_factory</span><span class="o">=</span><span class="n">create_auth_config</span><span class="p">)</span>
+</code></pre></div>
+<p>An explicitly passed <code>auth_config_factory</code> takes precedence over <code>CONNECTOR_AUTH_FACTORY</code>, which takes precedence over the Entra ID variables.</p>
+<h3 id="connector-auth-resolution-order">Connector auth resolution order<a class="headerlink" href="#connector-auth-resolution-order" title="Permanent link">&para;</a></h3>
+<p><code>build_auth_config()</code> selects a backend in this order:</p>
+<table>
+<thead>
+<tr>
+<th>Precedence</th>
+<th>Backend</th>
+<th>Selected by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Caller-supplied factory</td>
+<td><code>main(auth_config_factory=...)</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Custom factory</td>
+<td><code>CONNECTOR_AUTH_FACTORY="module.path:factory"</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Entra ID</td>
+<td><code>ENTRA_CLIENT_ID</code> <strong>and</strong> <code>ENTRA_TENANT_ID</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>No-op</td>
+<td><code>CONNECTOR_ALLOW_NOOP_AUTH=1</code></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Unauthenticated startup is opt-in</p>
+<p>If none of the above is configured, the connector <strong>exits with a configuration error</strong> instead of starting with authentication disabled. This means a missing or misspelled <code>ENTRA_CLIENT_ID</code> fails the deployment rather than quietly running unprotected. Setting only one of the two Entra variables is also an error. For local development, set <code>CONNECTOR_ALLOW_NOOP_AUTH=1</code> to explicitly request no-op auth.</p>
+</div>
 <h2 id="agent-side-credentials">Agent-side credentials<a class="headerlink" href="#agent-side-credentials" title="Permanent link">&para;</a></h2>
 <p>On the agent side (client connecting to MCP servers), <code>auth/auth.py</code> provides a <code>ChainedTokenCredential</code> that tries in order:</p>
 <ol>
