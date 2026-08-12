@@ -287,3 +287,61 @@ async def test_cancel_batch_tool_cancels_running_batch(test_server):
     finally:
         _clear_tool_auth_context()
         test_server.session_manager.close_session(parent_session_id)
+
+
+@pytest.mark.asyncio
+async def test_check_batch_tool_rejects_other_users_without_discarding_results(test_server):
+    """An unauthorized check_batch call must not consume the owner's batch.
+
+    Building a status payload retires a terminal batch (closing child sessions
+    and pruning the registries), so authorization has to be settled before the
+    payload is built. Otherwise anyone reaching the tool with a batch id could
+    destroy results they are not allowed to read.
+    """
+    _set_tool_auth_context()
+    parent_session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity=TOOL_USER_IDENTITY,
+        user_token=TOOL_USER_TOKEN,
+        token_claims=TOOL_TOKEN_CLAIMS,
+    )
+    parent = test_server.session_manager.get_session(parent_session_id)
+    check_batch = (await test_server.mcp.get_tool("test_check_batch")).fn
+
+    try:
+        payload = await test_server._parallel_execute_for_session(
+            parent_session=parent,
+            code="result = {'double': value * 2}",
+            inputs=[{"value": 2}, {"value": 3}],
+            timeout=20,
+            result_variable="result",
+        )
+        batch_id = payload["batch_id"]
+        job_ids = [job["job_id"] for job in payload["jobs"]]
+
+        # Wait for the jobs to finish by reading job state directly: polling via
+        # _check_batch_payload would itself retire the batch.
+        for _ in range(MAX_POLL_ATTEMPTS):
+            if all(test_server._parallel_jobs[job_id]["status"] != "running" for job_id in job_ids):
+                break
+            await asyncio.sleep(0.1)
+
+        # A caller from a different tenant/user must be refused.
+        set_current_user_identity("other-user-oid@other-tenant-id")
+        set_current_request_token("other-user-token")
+        set_current_token_claims({"oid": "other-user-oid", "tid": "other-tenant-id"})
+
+        denied = json.loads(await check_batch(None, batch_id))
+        assert denied.get("success") is False
+        assert "Not authorized" in denied["error"]
+
+        # The rightful owner can still retrieve the results.
+        _set_tool_auth_context()
+        status = json.loads(await check_batch(None, batch_id))
+
+        assert status.get("success") is not False, f"owner lost access to the batch: {status.get('error')}"
+        assert status["status"] == "completed"
+        assert status["completed"] == 2
+    finally:
+        _clear_tool_auth_context()
+        test_server.session_manager.close_session(parent_session_id)

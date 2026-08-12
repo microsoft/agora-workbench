@@ -2219,6 +2219,18 @@ else:
                     if job:
                         self._parallel_job_by_session.pop(job["session_id"], None)
 
+    async def _get_batch_parent_session_id(self, batch_id: str) -> Optional[str]:
+        """Return the session that owns a batch, without touching batch state.
+
+        Authorization must be settled before any payload is built, because
+        building one retires a terminal batch (closing child sessions and
+        pruning the registries). Looking the owner up separately keeps an
+        unauthorized caller from destroying results they cannot read.
+        """
+        async with self._parallel_state_lock:
+            batch = self._parallel_batches.get(batch_id)
+            return batch["parent_session_id"] if batch else None
+
     async def _check_batch_payload(self, batch_id: str) -> dict[str, Any]:
         """Build aggregate status for a parallel batch."""
         async with self._parallel_state_lock:
@@ -2446,7 +2458,7 @@ else:
             finally:
                 self._clear_auth_context()
 
-        async def _restore_auth_and_verify_batch_access(ctx: Context, batch_id: str) -> dict[str, Any]:
+        async def _restore_auth_and_verify_batch_access(ctx: Context, batch_id: str) -> str:
             transport_session_id = None
             if ctx:
                 try:
@@ -2455,19 +2467,19 @@ else:
                     pass
 
             self._restore_auth_context_for_mcp_session(transport_session_id)
-            payload = await self._check_batch_payload(batch_id)
-            parent_session_id = payload.get("parent_session_id")
+            parent_session_id = await self._get_batch_parent_session_id(batch_id)
             if not parent_session_id:
                 raise HTTPException(status_code=404, detail=f"Batch '{batch_id}' not found")
             parent_session = self.session_manager.get_session(parent_session_id)
             request_token = get_current_request_token()
             if not await self._verify_session_ownership(parent_session, request_token):
                 raise HTTPException(status_code=403, detail="Not authorized to access this batch")
-            return payload
+            return parent_session_id
 
         async def check_batch(ctx: Context, batch_id: str) -> str:
             try:
-                payload = await _restore_auth_and_verify_batch_access(ctx, batch_id)
+                await _restore_auth_and_verify_batch_access(ctx, batch_id)
+                payload = await self._check_batch_payload(batch_id)
                 return json.dumps(payload, indent=2)
             except Exception as e:
                 LOGGER.error(f"check_batch failed for {batch_id}: {e}", exc_info=True)

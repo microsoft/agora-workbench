@@ -43,6 +43,10 @@ changes that require action from existing users. Each entry there states who is 
   payload is built before the check runs, a finished batch had its results computed and its child sessions and
   batch state cleaned up, then discarded rather than returned — so a second call reported the batch as genuinely
   missing ([#304](https://github.com/microsoft/agora-workbench/pull/304)).
+- `{name}_check_batch` and `{name}_cancel_batch` now settle authorization before building a status payload.
+  Building one retires a terminal batch, so a caller who supplied a batch id they did not own could close its
+  child sessions and prune its state before being refused, destroying results the owner had not yet read
+  ([#304](https://github.com/microsoft/agora-workbench/pull/304)).
 
 ## [0.1.2] - 2026-08-05
 
