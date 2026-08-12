@@ -2226,6 +2226,7 @@ else:
             if not batch:
                 raise ValueError(f"Batch {batch_id} not found")
             jobs = [self._parallel_jobs[job_id].copy() for job_id in batch["job_ids"]]
+            parent_session_id = batch["parent_session_id"]
 
         running = 0
         completed = 0
@@ -2265,6 +2266,7 @@ else:
 
         payload = {
             "batch_id": batch_id,
+            "parent_session_id": parent_session_id,
             "status": batch_status,
             "completed": completed,
             "running": running,
