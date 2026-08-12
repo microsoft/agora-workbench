@@ -15,12 +15,13 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+from azure.core.credentials_async import AsyncTokenCredential
 from azure.search.documents.aio import SearchClient
 
 from .. import agent_guidance
+from ..types import AssetId
 from .credentials import create_storage_credential
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
-from ..types import AssetId
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,14 +48,17 @@ class DataLakeDataManager:
         self,
         allowed_local_roots: list[str] | None = None,
         extra_fetchers: list[AssetFetcher] | None = None,
+        credential: AsyncTokenCredential | None = None,
     ):
         """
         Initialize the data manager.
 
         Uses a credential chain (``az login`` MSAL cache locally, managed
-        identity in production) for downstream resource access when Azure
-        services are configured. Falls back to local-only mode when
-        ``DATA_LAKE_SEARCH_ENDPOINT`` is not set.
+        identity in production) for Azure Blob access unless a credential is
+        provided. Blob URL fetching is available whenever a credential can be
+        initialized. Blob artifact ID resolution additionally requires
+        ``DATA_LAKE_SEARCH_ENDPOINT`` so the manager can query the configured
+        Azure AI Search index.
 
         Args:
             allowed_local_roots: Optional list of directory paths the local
@@ -65,6 +69,10 @@ class DataLakeDataManager:
                 built-in fetchers (local file, blob), allowing custom
                 fetchers to override default handling for specific URL
                 schemes or patterns.
+            credential: Optional async token credential to use for Azure Blob
+                Storage and Azure AI Search access. When omitted, the manager
+                creates the same storage credential chain as before, resolving
+                ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
@@ -72,38 +80,53 @@ class DataLakeDataManager:
 
         search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         self._credential_init_error: str | None = None
+        self._credential: AsyncTokenCredential | None = None
+        self._owns_credential = credential is None
+        self._search_client = None
+        self._blob_details_index = (
+            os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details") if search_endpoint else None
+        )
 
         # Initialize fetchers — custom fetchers take priority over built-ins
         self._fetchers: list[AssetFetcher] = list(extra_fetchers or [])
         self._fetchers.append(LocalFileFetcher(allowed_roots=allowed_local_roots))
 
-        if search_endpoint:
-            # Azure mode: add blob fetcher and search client
-            self._blob_details_index = os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details")
-            try:
+        try:
+            if credential is not None:
+                self._credential = credential
+            else:
                 mi_client_id = (os.getenv("AZURE_CLIENT_ID") or "").strip() or None
                 # MSAL cache (mounted az login) locally, managed identity in
                 # production. Pass the AZURE_CLIENT_ID-resolved id through so
                 # prod keeps binding to the same user-assigned identity.
                 self._credential = create_storage_credential(client_id=mi_client_id)
-                self._fetchers.append(BlobFetcher(credential=self._credential))
+        except (ImportError, RuntimeError, TypeError, ValueError) as e:
+            self._credential_init_error = f"{type(e).__name__}: {e}"
+            LOGGER.warning(f"Failed to initialize Azure storage credential: {e}")
 
-                self._search_client = SearchClient(
-                    endpoint=search_endpoint,
-                    index_name=self._blob_details_index,
-                    credential=self._credential,
-                )
-                LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{self._blob_details_index}")
-            except (ImportError, RuntimeError, TypeError, ValueError) as e:
-                self._credential_init_error = f"{type(e).__name__}: {e}"
-                self._credential = None
-                self._search_client = None
-                LOGGER.warning(f"Failed to initialize Azure data access components: {e}")
+        if self._credential is not None:
+            self._fetchers.append(BlobFetcher(credential=self._credential))
+
+        if search_endpoint:
+            if self._credential is None:
+                LOGGER.warning("Azure Search endpoint configured, but no Azure credential is available")
+            else:
+                blob_details_index = self._blob_details_index
+                assert blob_details_index is not None
+                try:
+                    self._search_client = SearchClient(
+                        endpoint=search_endpoint,
+                        index_name=blob_details_index,
+                        credential=self._credential,
+                    )
+                    LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{blob_details_index}")
+                except (ImportError, RuntimeError, TypeError, ValueError) as e:
+                    self._credential_init_error = f"{type(e).__name__}: {e}"
+                    LOGGER.warning(f"Failed to initialize Azure data access components: {e}")
         else:
-            self._credential = None
-            self._search_client = None
-            self._blob_details_index = None
-            LOGGER.info("DataLakeDataManager running in local-only mode (no Azure Search endpoint configured)")
+            LOGGER.info(
+                "DataLakeDataManager running without Azure Search endpoint; blob artifact ID resolution is disabled"
+            )
 
     async def _get_blob_url_from_artifact_id(self, artifact_id: str) -> str:
         """
@@ -127,7 +150,7 @@ class DataLakeDataManager:
             return self._url_cache[artifact_id]
 
         if not self._search_client:
-            if self._credential_init_error:
+            if self._credential_init_error and self._blob_details_index:
                 init_error_type = self._credential_init_error.split(":", 1)[0]
                 raise ValueError(
                     "Blob artifact resolution is unavailable because Azure data access initialization failed. "
@@ -325,7 +348,7 @@ class DataLakeDataManager:
                     LOGGER.debug(f"Error closing search client: {e}")
 
         # Close managed identity credential
-        if hasattr(self, "_credential") and self._credential is not None:
+        if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
             try:
                 loop = asyncio.get_running_loop()
                 # We're inside a running loop — schedule close as a task
@@ -366,7 +389,7 @@ class DataLakeDataManager:
             except Exception as e:
                 LOGGER.debug(f"Error closing search client: {e}")
 
-        if hasattr(self, "_credential"):
+        if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
             try:
                 await self._credential.close()
             except Exception as e:

@@ -11,8 +11,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ...data_access.fetchers import BlobFetcher
+from ...data_access.fetchers import AssetFetcher, BlobFetcher
 from ...data_access.manager import DataLakeDataManager
+
+
+@pytest.fixture(autouse=True)
+def clear_data_lake_search_endpoint(monkeypatch):
+    """Default tests to no Azure Search endpoint unless explicitly requested."""
+    monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -52,6 +58,28 @@ def _get_blob_fetcher(manager: DataLakeDataManager) -> BlobFetcher:
     raise RuntimeError("BlobFetcher not found in manager._fetchers")
 
 
+class RecordingFetcher(AssetFetcher):
+    """Test fetcher that records calls and writes fixed bytes."""
+
+    def __init__(self, data: bytes = b"extra"):
+        super().__init__()
+        self.data = data
+        self.fetch_to_file_calls: list[str] = []
+
+    def can_handle(self, qualified_name: str) -> bool:
+        return qualified_name.startswith("https://")
+
+    async def fetch(self, qualified_name: str) -> bytes:
+        return self.data
+
+    async def fetch_to_file(self, qualified_name: str, dest_path) -> int:
+        self.fetch_to_file_calls.append(qualified_name)
+        dest_path = Path(dest_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_bytes(self.data)
+        return len(self.data)
+
+
 class TestDataLakeDataManagerInit:
     """Test DataLakeDataManager initialization."""
 
@@ -60,9 +88,19 @@ class TestDataLakeDataManagerInit:
         manager = DataLakeDataManager()
 
         assert manager._credential is not None
+        assert manager._search_client is None
         assert manager._cache_index == {}
         assert len(manager._fetchers) == 2
         assert manager._cache_dir.exists()
+
+    def test_init_creates_search_client_when_endpoint_configured(self, data_lake_search_endpoint):
+        """Test Azure Search is initialized only when an endpoint is configured."""
+        manager = DataLakeDataManager()
+
+        assert manager._credential is not None
+        assert manager._search_client is not None
+        assert manager._blob_details_index == "blob-details"
+        assert len(manager._fetchers) == 2
 
     def test_init_creates_temp_cache_dir(self):
         """Test that initialization creates a temporary cache directory."""
@@ -72,18 +110,18 @@ class TestDataLakeDataManagerInit:
         assert manager._cache_dir.is_dir()
         assert "data_lake_cache_" in manager._cache_dir.name
 
-    def test_init_local_only_mode(self, monkeypatch):
-        """Test initialization without Azure endpoint runs in local-only mode."""
-        monkeypatch.delenv("DATA_LAKE_SEARCH_ENDPOINT", raising=False)
+    def test_init_without_search_endpoint_keeps_blob_fetching_available(self):
+        """Test initialization without Azure Search still registers blob fetching."""
         manager = DataLakeDataManager()
 
-        assert manager._credential is None
+        assert manager._credential is not None
         assert manager._search_client is None
-        assert len(manager._fetchers) == 1
+        assert len(manager._fetchers) == 2
+        assert _get_blob_fetcher(manager).credential is manager._credential
         assert manager._cache_dir.exists()
 
     @pytest.mark.asyncio
-    async def test_init_credential_provider_failure_is_deferred(self):
+    async def test_init_credential_provider_failure_is_deferred(self, data_lake_search_endpoint):
         """Test credential provider init errors are deferred to fetch time."""
         with patch(
             "agora_workbench.code_execution.data_access.manager.create_storage_credential",
@@ -97,6 +135,15 @@ class TestDataLakeDataManagerInit:
         assert manager._credential_init_error == "RuntimeError: missing managed identity"
         with pytest.raises(ValueError, match="Azure data access initialization failed"):
             await manager.get_cache_path("<blob>artifact_id_1</blob>")
+
+    def test_injected_credential_is_used_by_blob_fetcher(self):
+        """Test a caller-supplied credential is used for the built-in BlobFetcher."""
+        injected_credential = MagicMock()
+
+        manager = DataLakeDataManager(credential=injected_credential)
+
+        assert manager._credential is injected_credential
+        assert _get_blob_fetcher(manager).credential is injected_credential
 
 
 class TestGetCachePath:
@@ -186,7 +233,7 @@ class TestGetCachePath:
             await manager.get_cache_path("https://storage.blob.core.windows.net/container/file.nc")
 
     @pytest.mark.asyncio
-    async def test_blob_lookup_surfaces_credential_init_error(self):
+    async def test_blob_lookup_surfaces_credential_init_error(self, data_lake_search_endpoint):
         """Test blob requests surface deferred Azure init errors to the caller."""
         with patch(
             "agora_workbench.code_execution.data_access.manager.create_storage_credential",
@@ -196,6 +243,70 @@ class TestGetCachePath:
 
         with pytest.raises(ValueError, match="Azure data access initialization failed"):
             await manager.get_cache_path("<blob>artifact_id_1</blob>")
+
+    @pytest.mark.asyncio
+    async def test_blob_url_uses_blob_fetcher_without_search_endpoint(self, tmp_path):
+        """Test direct blob URLs use BlobFetcher even without Azure Search configured."""
+        manager = DataLakeDataManager()
+        blob_url = "https://storage.blob.core.windows.net/container/file.bin"
+        dest_path = tmp_path / "file.bin"
+        mock_data = b"blob bytes"
+
+        with patch.object(
+            _get_blob_fetcher(manager), "fetch_to_file", side_effect=create_mock_fetch_to_file(mock_data)
+        ):
+            bytes_written = await manager._fetch_asset_to_file(blob_url, dest_path)
+
+        assert bytes_written == len(mock_data)
+        assert dest_path.read_bytes() == mock_data
+
+    @pytest.mark.asyncio
+    async def test_blob_artifact_resolution_requires_search_endpoint(self):
+        """Test blob artifact ID resolution remains unavailable without Azure Search."""
+        manager = DataLakeDataManager()
+
+        with pytest.raises(
+            ValueError,
+            match="Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs.",
+        ):
+            await manager._get_blob_url_from_artifact_id("artifact_id_1")
+
+    @pytest.mark.asyncio
+    async def test_local_file_fetching_works_when_credential_unavailable(self, tmp_path):
+        """Test local assets still work when Azure credential initialization fails."""
+        source_path = tmp_path / "source.txt"
+        source_path.write_text("local data")
+
+        with patch(
+            "agora_workbench.code_execution.data_access.manager.create_storage_credential",
+            side_effect=RuntimeError("missing managed identity"),
+        ):
+            manager = DataLakeDataManager(allowed_local_roots=[str(tmp_path)])
+
+        cache_path = await manager.get_cache_path(f"<local>{source_path}</local>")
+
+        assert cache_path.read_text() == "local data"
+        assert manager._credential is None
+        assert len(manager._fetchers) == 1
+
+    @pytest.mark.asyncio
+    async def test_extra_fetchers_take_priority_over_builtin_blob_fetcher(self, tmp_path):
+        """Test custom fetchers are checked before the built-in BlobFetcher."""
+        extra_fetcher = RecordingFetcher(data=b"custom")
+        manager = DataLakeDataManager(extra_fetchers=[extra_fetcher])
+        blob_url = "https://storage.blob.core.windows.net/container/file.bin"
+        dest_path = tmp_path / "custom.bin"
+
+        with patch.object(
+            _get_blob_fetcher(manager),
+            "fetch_to_file",
+            side_effect=AssertionError("built-in BlobFetcher should not be used"),
+        ):
+            bytes_written = await manager._fetch_asset_to_file(blob_url, dest_path)
+
+        assert bytes_written == len(b"custom")
+        assert dest_path.read_bytes() == b"custom"
+        assert extra_fetcher.fetch_to_file_calls == [blob_url]
 
 
 class TestFileExtensionPreservation:
