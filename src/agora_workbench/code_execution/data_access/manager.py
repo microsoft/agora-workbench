@@ -150,7 +150,11 @@ class DataLakeDataManager:
             return self._url_cache[artifact_id]
 
         if not self._search_client:
-            if self._credential_init_error and self._blob_details_index:
+            # Keys off whether search was *configured* (the index name is only
+            # set when an endpoint is present), not whether the index name is
+            # non-empty — an empty DATA_LAKE_BLOB_DETAILS_INDEX must still
+            # surface the deferred init error rather than the generic message.
+            if self._credential_init_error and self._blob_details_index is not None:
                 init_error_type = self._credential_init_error.split(":", 1)[0]
                 raise ValueError(
                     "Blob artifact resolution is unavailable because Azure data access initialization failed. "

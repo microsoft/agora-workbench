@@ -245,6 +245,24 @@ class TestGetCachePath:
             await manager.get_cache_path("<blob>artifact_id_1</blob>")
 
     @pytest.mark.asyncio
+    async def test_blob_lookup_surfaces_credential_init_error_with_empty_index_name(
+        self, data_lake_search_endpoint, monkeypatch
+    ):
+        """Test an empty index name still surfaces the deferred Azure init error."""
+        monkeypatch.setenv("DATA_LAKE_BLOB_DETAILS_INDEX", "")
+
+        with patch(
+            "agora_workbench.code_execution.data_access.manager.create_storage_credential",
+            side_effect=RuntimeError("missing managed identity"),
+        ):
+            manager = DataLakeDataManager()
+
+        assert manager._blob_details_index == ""
+
+        with pytest.raises(ValueError, match="Azure data access initialization failed"):
+            await manager.get_cache_path("<blob>artifact_id_1</blob>")
+
+    @pytest.mark.asyncio
     async def test_blob_url_uses_blob_fetcher_without_search_endpoint(self, tmp_path):
         """Test direct blob URLs use BlobFetcher even without Azure Search configured."""
         manager = DataLakeDataManager()
