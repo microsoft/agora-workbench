@@ -35,6 +35,19 @@ changes that require action from existing users. Each entry there states who is 
   an identity provider other than Entra ID no longer have to fork the CLI to use
   `mcp-connector-server` ([#287](https://github.com/microsoft/agora-workbench/issues/287)).
 
+### Fixed
+
+- `{name}_check_batch` and `{name}_cancel_batch` failed with `404: Batch '<id>' not found` for every valid batch,
+  leaving results from `{name}_parallel_execute` unreachable. Both tools resolve the owning session from the batch
+  status payload, which never carried `parent_session_id`, so the ownership check always failed. Because that
+  payload is built before the check runs, a finished batch had its results computed and its child sessions and
+  batch state cleaned up, then discarded rather than returned — so a second call reported the batch as genuinely
+  missing ([#304](https://github.com/microsoft/agora-workbench/pull/304)).
+- `{name}_check_batch` and `{name}_cancel_batch` now settle authorization before building a status payload.
+  Building one retires a terminal batch, so a caller who supplied a batch id they did not own could close its
+  child sessions and prune its state before being refused, destroying results the owner had not yet read
+  ([#304](https://github.com/microsoft/agora-workbench/pull/304)).
+
 ## [0.1.2] - 2026-08-05
 
 ### Added
