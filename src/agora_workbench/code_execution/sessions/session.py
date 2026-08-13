@@ -35,8 +35,8 @@ class SessionContext:
 
     session_id: str
     user_identity: str
-    user_token: str
-    token_claims: Dict = field(default_factory=dict)
+    user_token: str = field(repr=False)
+    token_claims: Dict = field(default_factory=dict, repr=False)
     session_type: str = "default"
     metadata: Dict = field(default_factory=dict)
 
