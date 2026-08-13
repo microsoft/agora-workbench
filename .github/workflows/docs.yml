@@ -25,13 +25,32 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_call:
+    inputs:
+      ref:
+        description: "Release tag to build the documentation from (for example, v0.1.0)"
+        required: true
+        type: string
+      version:
+        description: "Documentation version to deploy (for example, 0.1.0)"
+        required: true
+        type: string
+      aliases:
+        description: "Space-separated aliases to update (for example, 0.1 latest)"
+        required: false
+        type: string
+      set_latest_default:
+        description: "Set the latest alias as the site default"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
 
 concurrency:
   group: docs-deploy
-  cancel-in-progress: true
+  cancel-in-progress: ${{ inputs.version == '' }}
 
 jobs:
   deploy:
@@ -39,6 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
@@ -55,22 +75,17 @@ jobs:
 
       - name: Deploy documentation
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          SOURCE_REF: ${{ github.ref }}
-          DOCS_VERSION: ${{ github.event.inputs.version }}
-          DOCS_ALIASES: ${{ github.event.inputs.aliases }}
-          SET_LATEST_DEFAULT: ${{ github.event.inputs.set_latest_default }}
+          SOURCE_REF: ${{ inputs.ref || github.ref }}
+          DOCS_VERSION: ${{ inputs.version }}
+          DOCS_ALIASES: ${{ inputs.aliases }}
+          SET_LATEST_DEFAULT: ${{ inputs.set_latest_default }}
         run: |
           set -euo pipefail
 
-          if [[ "$EVENT_NAME" == "push" ]]; then
+          if [[ -z "${DOCS_VERSION:-}" ]]; then
             version="dev"
             aliases=()
           else
-            if [[ -z "$DOCS_VERSION" ]]; then
-              echo "version input is required for manual workflow dispatch." >&2
-              exit 1
-            fi
             version="$DOCS_VERSION"
             read -r -a aliases <<< "${DOCS_ALIASES:-}"
           fi
@@ -87,10 +102,14 @@ jobs:
             validate_name "$alias"
           done
 
-          if [[ "$EVENT_NAME" != "push" ]]; then
+          if [[ -n "${DOCS_VERSION:-}" ]]; then
+            source_ref="$SOURCE_REF"
+            if [[ "$source_ref" != refs/* ]]; then
+              source_ref="refs/tags/$source_ref"
+            fi
             expected_ref="refs/tags/v${version}"
-            if [[ "$SOURCE_REF" != "$expected_ref" ]]; then
-              echo "Release docs for $version must run from $expected_ref, not $SOURCE_REF." >&2
+            if [[ "$source_ref" != "$expected_ref" ]]; then
+              echo "Release docs for $version must be built from $expected_ref, not $source_ref." >&2
               exit 1
             fi
           fi

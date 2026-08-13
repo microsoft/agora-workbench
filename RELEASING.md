@@ -45,6 +45,9 @@ backward compatible within their minor release.
    /tmp/agora-workbench-release/bin/python -c "import agora_workbench"
    ```
 
+10. Confirm that the documentation for the new version was published. The PyPI workflow deploys it automatically
+    after the upload succeeds, so no manual step is needed.
+
 The PyPI workflow builds from the immutable release tag, verifies that the tag and package versions match, checks
 the distribution contents, installs the wheel in a clean environment, and publishes through PyPI Trusted Publishing.
 It does not use a long-lived API token. Pull requests that affect packaging run the same build, content validation,
@@ -93,8 +96,23 @@ therefore `v0.1.1`; the existing `v0.1.0` tag remains unchanged and installable 
 
 ## Publishing versioned documentation
 
-The documentation workflow publishes changes from `main` as `dev`. Release documentation must be deployed
-manually from the matching release tag:
+The documentation workflow publishes changes from `main` as `dev`. Release documentation is published
+automatically: after the PyPI upload succeeds, `publish-pypi.yml` calls the documentation workflow with the
+release tag, so `/0.1.2/` and the matching aliases appear without any manual step.
+
+Aliases are resolved from the published GitHub Releases:
+
+- The `MAJOR.MINOR` alias moves to the release only when it is the newest patch in its own series.
+- The `latest` alias, and the site default, move only when the release is the newest release overall.
+
+A patch for an older series therefore publishes its version-specific documentation and updates its `MAJOR.MINOR`
+alias without dragging `latest` backwards. Because the workflow runs from the release tag, the automation only
+applies to tags created after it was introduced.
+
+### Deploying release documentation manually
+
+Manual deployment is still available for backfilling a release that predates the automation, or for repairing an
+alias:
 
 1. Open **Actions > Deploy Documentation > Run workflow**.
 2. Select the matching tag, such as `v0.1.0`, in **Use workflow from**.
@@ -111,6 +129,8 @@ gh workflow run docs.yml \
   -f aliases="0.1 latest" \
   -f set_latest_default=true
 ```
+
+When backfilling several releases, deploy them oldest first so the aliases finish on the newest version.
 
 The resulting documentation is available under version-specific paths such as `/0.1.0/`, while `/latest/`
 tracks the newest release. The version selector is provided by `mike`.
