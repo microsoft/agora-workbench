@@ -178,6 +178,11 @@ class SessionConfig:
 
                 When omitted, each session builds a default
                 ``DataLakeDataManager()``, matching previous behavior.
+
+                A factory that returns ``None`` — or any object without a
+                ``cleanup()`` method — raises ``TypeError`` from
+                ``create_session``, rather than silently falling back to the
+                default manager.
         """
         self.max_sessions = max_sessions
         self.timeout = timedelta(minutes=timeout_minutes)
@@ -266,6 +271,11 @@ class SessionManager:
             When ``SessionConfig.data_manager_factory`` is configured it is
             invoked here, once per session, and the resulting manager is passed
             to the ``Session``. The session owns it and cleans it up.
+
+        Raises:
+            MaxSessionsReachedError: If the session limit has been reached.
+            TypeError: If a configured ``data_manager_factory`` returns
+                something that is not a usable data manager.
         """
         # Run periodic cleanup
         self._maybe_cleanup()
@@ -293,6 +303,18 @@ class SessionManager:
                         metadata=metadata or {},
                     )
                 )
+                # Validate eagerly. A factory returning None is the dangerous
+                # case: Session would fall back to building a default manager,
+                # silently discarding the customization, so the mistake would
+                # surface later as unexplained default behaviour instead of an
+                # error at the point of the bug.
+                if data_manager is None or not callable(getattr(data_manager, "cleanup", None)):
+                    raise TypeError(
+                        "SessionConfig.data_manager_factory must return a data manager instance with a "
+                        f"cleanup() method, but it returned {type(data_manager).__name__}. Returning None "
+                        "would silently fall back to a default DataLakeDataManager and discard the "
+                        "customization the factory exists to provide."
+                    )
 
             # Create session
             session = Session(

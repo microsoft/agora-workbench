@@ -4,6 +4,7 @@ import asyncio
 import threading
 import pytest
 import time
+from typing import Optional, cast
 
 from ...data_access.manager import DataLakeDataManager
 from ...sessions import (
@@ -19,18 +20,25 @@ from ...sessions import (
 )
 
 
-class _FakeDataManager(DataLakeDataManager):
-    """Stand-in for DataLakeDataManager that records cleanup.
+class _FakeDataManager:
+    """Stand-in for a data manager that records cleanup.
 
-    Deliberately does not call ``super().__init__()``, so no temp cache
-    directory is allocated — the tests below assert on temp-dir allocation.
+    Deliberately not a ``DataLakeDataManager`` subclass: the fake must not run
+    the base initializer, which eagerly allocates a temp cache directory that
+    the tests below assert is never created. Injection sites wrap it in
+    :func:`_as_manager` to satisfy the declared parameter type.
     """
 
-    def __init__(self):  # noqa: D107 - intentionally skips the base initializer
+    def __init__(self):
         self.cleanup_calls = 0
 
     def cleanup(self) -> None:
         self.cleanup_calls += 1
+
+
+def _as_manager(fake: _FakeDataManager) -> DataLakeDataManager:
+    """Present the structural fake as a DataLakeDataManager for type checking."""
+    return cast(DataLakeDataManager, fake)
 
 
 class TestSession:
@@ -1116,7 +1124,7 @@ class TestDataManagerInjection:
     """Tests for injecting a custom DataLakeDataManager into sessions."""
 
     @staticmethod
-    def _make_session(data_manager=None):
+    def _make_session(data_manager: Optional[DataLakeDataManager] = None):
         return Session(
             session_id="sess-1",
             data={},
@@ -1132,7 +1140,6 @@ class TestDataManagerInjection:
         session = self._make_session()
         try:
             assert isinstance(session.data_manager, DataLakeDataManager)
-            assert not isinstance(session.data_manager, _FakeDataManager)
         finally:
             session.cleanup()
 
@@ -1148,7 +1155,7 @@ class TestDataManagerInjection:
         )
 
         injected = _FakeDataManager()
-        session = self._make_session(data_manager=injected)
+        session = self._make_session(data_manager=_as_manager(injected))
 
         assert session.data_manager is injected
         assert constructed == [], "default DataLakeDataManager must not be constructed"
@@ -1156,7 +1163,7 @@ class TestDataManagerInjection:
     def test_session_cleanup_cleans_up_injected_manager(self):
         """The session owns its manager, injected or not."""
         injected = _FakeDataManager()
-        session = self._make_session(data_manager=injected)
+        session = self._make_session(data_manager=_as_manager(injected))
 
         session.cleanup()
 
@@ -1166,9 +1173,9 @@ class TestDataManagerInjection:
         """The factory sees the identifying fields of the session being created."""
         seen: list[SessionContext] = []
 
-        def factory(context):
+        def factory(context: SessionContext) -> DataLakeDataManager:
             seen.append(context)
-            return _FakeDataManager()
+            return _as_manager(_FakeDataManager())
 
         session_manager = SessionManager(SessionConfig(data_manager_factory=factory))
         session_id = session_manager.create_session(
@@ -1191,7 +1198,7 @@ class TestDataManagerInjection:
     def test_factory_result_is_attached_to_session(self):
         """The manager returned by the factory is the one the session uses."""
         built = _FakeDataManager()
-        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: built))
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: _as_manager(built)))
 
         session_id = session_manager.create_session(
             {}, user_identity="test_user", user_token="test-token", token_claims={}
@@ -1215,14 +1222,18 @@ class TestDataManagerInjection:
             lambda *a, **k: constructed.append(1),
         )
 
-        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: _FakeDataManager()))
+        session_manager = SessionManager(
+            SessionConfig(data_manager_factory=lambda _ctx: _as_manager(_FakeDataManager()))
+        )
         session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
 
         assert constructed == []
 
     def test_factory_invoked_once_per_session(self):
         """Each session gets its own manager instance from a fresh factory call."""
-        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: _FakeDataManager()))
+        session_manager = SessionManager(
+            SessionConfig(data_manager_factory=lambda _ctx: _as_manager(_FakeDataManager()))
+        )
 
         first = session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
         second = session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
@@ -1249,6 +1260,29 @@ class TestDataManagerInjection:
         session_manager = SessionManager(SessionConfig(data_manager_factory=factory))
 
         with pytest.raises(RuntimeError, match="cannot build manager"):
+            session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+
+        assert session_manager.storage.count() == 0
+
+    def test_factory_returning_none_is_rejected(self):
+        """A factory returning None must fail loudly, not fall back to the default.
+
+        Without validation the Session would build a default manager, so the
+        customization would be silently discarded — a wrong-behaviour bug that
+        is far harder to trace than an error at the point of the mistake.
+        """
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: None))  # type: ignore[arg-type, return-value]
+
+        with pytest.raises(TypeError, match="must return a data manager instance"):
+            session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+
+        assert session_manager.storage.count() == 0
+
+    def test_factory_returning_object_without_cleanup_is_rejected(self):
+        """A manager the session cannot clean up is rejected at creation time."""
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: object()))  # type: ignore[arg-type, return-value]
+
+        with pytest.raises(TypeError, match="cleanup\\(\\) method"):
             session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
 
         assert session_manager.storage.count() == 0
