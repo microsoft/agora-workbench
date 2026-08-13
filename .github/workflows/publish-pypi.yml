@@ -129,8 +129,14 @@ jobs:
           major="${BASH_REMATCH[1]}"
           minor="${BASH_REMATCH[2]}"
 
-          published=$(gh api "repos/$REPOSITORY/releases" --paginate \
-            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' || true)
+          if ! published=$(gh api "repos/$REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'); then
+            echo "Could not list the published releases for $REPOSITORY." >&2
+            echo "Documentation aliases are resolved by comparing $TAG against every published release," >&2
+            echo "so continuing here could move the latest alias onto the wrong version." >&2
+            exit 1
+          fi
+
           tags=$(printf '%s\n%s\n' "$published" "$TAG" \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -u -V)
 
