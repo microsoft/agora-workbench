@@ -37,10 +37,6 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
-- Release documentation is now published automatically. Deploying it was a manual workflow dispatch that was easy
-  to skip after a release, so `0.1.1` and `0.1.2` shipped to PyPI without matching documentation and `/latest/`
-  kept serving `0.1.0`. The PyPI workflow now deploys the docs for the release tag once the upload succeeds, and a
-  failure surfaces on the release run instead of passing silently.
 - `{name}_check_batch` and `{name}_cancel_batch` failed with `404: Batch '<id>' not found` for every valid batch,
   leaving results from `{name}_parallel_execute` unreachable. Both tools resolve the owning session from the batch
   status payload, which never carried `parent_session_id`, so the ownership check always failed. Because that
