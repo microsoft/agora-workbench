@@ -5,16 +5,32 @@ import threading
 import pytest
 import time
 
+from ...data_access.manager import DataLakeDataManager
 from ...sessions import (
     MaxSessionsReachedError,
     Session,
     SessionManager,
     SessionConfig,
+    SessionContext,
     InMemoryStorage,
     get_current_session,
     set_current_session,
     SessionNotFound,
 )
+
+
+class _FakeDataManager(DataLakeDataManager):
+    """Stand-in for DataLakeDataManager that records cleanup.
+
+    Deliberately does not call ``super().__init__()``, so no temp cache
+    directory is allocated — the tests below assert on temp-dir allocation.
+    """
+
+    def __init__(self):  # noqa: D107 - intentionally skips the base initializer
+        self.cleanup_calls = 0
+
+    def cleanup(self) -> None:
+        self.cleanup_calls += 1
 
 
 class TestSession:
@@ -1094,6 +1110,148 @@ class TestBackgroundArtifactPipeline:
         assert captured["code"].index("AGORA_OUTPUT_DIR") < captured["code"].index("print(AGORA_OUTPUT_DIR)")
         # Pre-existing file is in the before-snapshot stored on the job.
         assert "preexisting.txt" in job.outputs_before
+
+
+class TestDataManagerInjection:
+    """Tests for injecting a custom DataLakeDataManager into sessions."""
+
+    @staticmethod
+    def _make_session(data_manager=None):
+        return Session(
+            session_id="sess-1",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+            data_manager=data_manager,
+        )
+
+    def test_session_builds_default_manager_when_none_injected(self):
+        """Default behavior is unchanged: the session constructs its own manager."""
+        session = self._make_session()
+        try:
+            assert isinstance(session.data_manager, DataLakeDataManager)
+            assert not isinstance(session.data_manager, _FakeDataManager)
+        finally:
+            session.cleanup()
+
+    def test_session_uses_injected_manager(self, monkeypatch):
+        """An injected manager is used verbatim, and no default is constructed."""
+        from ...data_access import manager as manager_module
+
+        constructed = []
+        monkeypatch.setattr(
+            manager_module,
+            "DataLakeDataManager",
+            lambda *a, **k: constructed.append(1),
+        )
+
+        injected = _FakeDataManager()
+        session = self._make_session(data_manager=injected)
+
+        assert session.data_manager is injected
+        assert constructed == [], "default DataLakeDataManager must not be constructed"
+
+    def test_session_cleanup_cleans_up_injected_manager(self):
+        """The session owns its manager, injected or not."""
+        injected = _FakeDataManager()
+        session = self._make_session(data_manager=injected)
+
+        session.cleanup()
+
+        assert injected.cleanup_calls == 1
+
+    def test_factory_receives_session_context(self):
+        """The factory sees the identifying fields of the session being created."""
+        seen: list[SessionContext] = []
+
+        def factory(context):
+            seen.append(context)
+            return _FakeDataManager()
+
+        session_manager = SessionManager(SessionConfig(data_manager_factory=factory))
+        session_id = session_manager.create_session(
+            {"payload": 1},
+            user_identity="alice@tenant",
+            user_token="alice-token",
+            token_claims={"oid": "alice"},
+            metadata={"tier": "premium"},
+        )
+
+        assert len(seen) == 1
+        context = seen[0]
+        assert context.session_id == session_id
+        assert context.user_identity == "alice@tenant"
+        assert context.user_token == "alice-token"
+        assert context.token_claims == {"oid": "alice"}
+        assert context.metadata == {"tier": "premium"}
+        assert context.session_type == "default"
+
+    def test_factory_result_is_attached_to_session(self):
+        """The manager returned by the factory is the one the session uses."""
+        built = _FakeDataManager()
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: built))
+
+        session_id = session_manager.create_session(
+            {}, user_identity="test_user", user_token="test-token", token_claims={}
+        )
+
+        assert session_manager.get_session(session_id).data_manager is built
+
+    def test_factory_avoids_constructing_default_manager(self, monkeypatch):
+        """Regression: no throwaway default manager (and no leaked temp dir).
+
+        ``DataLakeDataManager.__init__`` allocates a temp cache dir eagerly, so
+        building one only to replace it leaks a directory per session. The
+        factory must be consulted *before* the Session is constructed.
+        """
+        from ...data_access import manager as manager_module
+
+        constructed = []
+        monkeypatch.setattr(
+            manager_module,
+            "DataLakeDataManager",
+            lambda *a, **k: constructed.append(1),
+        )
+
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: _FakeDataManager()))
+        session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+
+        assert constructed == []
+
+    def test_factory_invoked_once_per_session(self):
+        """Each session gets its own manager instance from a fresh factory call."""
+        session_manager = SessionManager(SessionConfig(data_manager_factory=lambda _ctx: _FakeDataManager()))
+
+        first = session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+        second = session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+
+        first_manager = session_manager.get_session(first).data_manager
+        second_manager = session_manager.get_session(second).data_manager
+        assert first_manager is not second_manager
+
+    def test_no_factory_preserves_default_construction(self):
+        """An unset factory keeps today's semantics end to end."""
+        session_manager = SessionManager(SessionConfig())
+        session_id = session_manager.create_session(
+            {}, user_identity="test_user", user_token="test-token", token_claims={}
+        )
+
+        assert isinstance(session_manager.get_session(session_id).data_manager, DataLakeDataManager)
+
+    def test_factory_failure_propagates_without_storing_session(self):
+        """A raising factory fails session creation rather than half-creating one."""
+
+        def factory(_ctx):
+            raise RuntimeError("cannot build manager")
+
+        session_manager = SessionManager(SessionConfig(data_manager_factory=factory))
+
+        with pytest.raises(RuntimeError, match="cannot build manager"):
+            session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+
+        assert session_manager.storage.count() == 0
 
 
 if __name__ == "__main__":

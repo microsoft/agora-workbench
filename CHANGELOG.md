@@ -29,6 +29,13 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Added
 
+- `SessionConfig.data_manager_factory` for supplying a customized `DataLakeDataManager` per session, and an
+  optional `data_manager` argument on `Session`. A deployment needing a different credential, a custom artifact
+  resolver, extra fetchers, or configuration derived from the session's `user_identity` / `user_token` no longer
+  has to subclass `SessionManager` and replace `session.data_manager` after the fact — a workaround that leaked a
+  temp cache directory per session, since `DataLakeDataManager` allocates one eagerly in its constructor. The
+  factory receives a `SessionContext` and must return a fresh instance per session, because the session owns the
+  manager and cleans it up ([#307](https://github.com/microsoft/agora-workbench/issues/307)).
 - `CONNECTOR_AUTH_FACTORY` for pointing the connector CLI at a `"module.path:factory"` that returns a custom
   `AuthConfig`, and an optional `auth_config_factory` argument on `connector.cli.main()` so a downstream package
   can ship its own console script that reuses the CLI's environment parsing and server selection. Operators with

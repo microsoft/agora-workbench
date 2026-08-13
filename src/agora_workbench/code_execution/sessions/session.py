@@ -1,13 +1,44 @@
 """Generic session container with common functionality."""
 
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, TypeVar, Generic
+from typing import Any, Dict, Optional, TypeVar, Generic, TYPE_CHECKING
 
 from .objects import ObjectStore
 
+if TYPE_CHECKING:
+    from ..data_access.manager import DataLakeDataManager
+
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class SessionContext:
+    """Per-session context handed to a ``data_manager_factory``.
+
+    Carries the identifying fields of the session being created, before the
+    :class:`Session` itself exists. This exists so a factory can derive
+    per-user or per-session configuration (most commonly from
+    ``user_identity`` / ``user_token``) without the circular dependency that
+    passing the not-yet-constructed ``Session`` would require.
+
+    Attributes:
+        session_id: The ID assigned to the session being created.
+        user_identity: Owner's composite identifier from JWT token (``oid@tid``).
+        user_token: User's bearer token for authentication.
+        token_claims: Cached JWT claims for ``user_token``.
+        session_type: Categorizes session type (e.g. ``"python"``).
+        metadata: Optional key-value metadata supplied at creation.
+    """
+
+    session_id: str
+    user_identity: str
+    user_token: str
+    token_claims: Dict = field(default_factory=dict)
+    session_type: str = "default"
+    metadata: Dict = field(default_factory=dict)
 
 
 class Session(Generic[T]):
@@ -32,7 +63,9 @@ class Session(Generic[T]):
         created_at (datetime): Timestamp when session was created.
         last_accessed (datetime): Timestamp of most recent session access.
         status (str): Current session state (e.g., "created", "active", "error").
-        data_manager (DataLakeDataManager): Manager for DataLake asset access.
+        data_manager (DataLakeDataManager): Manager for DataLake asset access. Owned by
+            the session — :meth:`cleanup` tears it down, so an injected manager must not
+            be shared between sessions.
 
     Example:
         >>> from .session import Session
@@ -59,7 +92,26 @@ class Session(Generic[T]):
         user_token: str,
         token_claims: Dict,
         metadata: Optional[Dict] = None,
+        data_manager: Optional["DataLakeDataManager"] = None,
     ):
+        """
+        Initialize a session.
+
+        Args:
+            session_id: Unique identifier for the session.
+            data: The session's payload data.
+            session_type: Categorizes session type (e.g. ``"python"``).
+            user_identity: Owner's composite identifier from JWT token (``oid@tid``).
+            user_token: User's bearer token for authentication.
+            token_claims: Cached JWT claims for the user token.
+            metadata: Optional key-value metadata for session configuration.
+            data_manager: Optional pre-built data manager for DataLake asset
+                access. When omitted, a default :class:`DataLakeDataManager` is
+                constructed. The session takes ownership of whichever manager it
+                ends up with — :meth:`cleanup` calls ``cleanup()`` on it — so a
+                caller supplying one must pass a fresh instance per session
+                rather than a shared singleton.
+        """
         self.session_id = session_id
         self.data = data
         self.created_at = datetime.now()
@@ -73,10 +125,15 @@ class Session(Generic[T]):
         self._asset_counter: int = 0
         self._status_history = [("created", datetime.now())]
 
-        # Initialize data manager for DataLake asset access
-        from ..data_access.manager import DataLakeDataManager
+        # Initialize data manager for DataLake asset access. Constructing the
+        # default lazily matters: DataLakeDataManager.__init__ eagerly allocates
+        # a temp cache dir, so building one only to discard it would leak it.
+        if data_manager is None:
+            from ..data_access.manager import DataLakeDataManager
 
-        self.data_manager = DataLakeDataManager()
+            data_manager = DataLakeDataManager()
+
+        self.data_manager = data_manager
 
         # Initialize object store for asset objects
         self.object_store = ObjectStore()

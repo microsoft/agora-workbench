@@ -13,11 +13,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Any, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
 
 from jupyter_client.manager import AsyncKernelManager
 
-from .session import Session
+from .session import Session, SessionContext
 from .storage import InMemoryStorage, SessionStorageBackend
 
 # Display-data capture: priority of renderable MIME types to extract from
@@ -66,6 +66,8 @@ def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
 
 if TYPE_CHECKING:
     from jupyter_client.asynchronous.client import AsyncKernelClient
+
+    from ..data_access.manager import DataLakeDataManager
 
 
 LOGGER = logging.getLogger(__name__)
@@ -151,11 +153,37 @@ class SessionConfig:
         timeout_minutes: int = 30,
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
+        data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager"]] = None,
     ):
+        """
+        Initialize session manager configuration.
+
+        Args:
+            max_sessions: Maximum number of concurrent sessions.
+            timeout_minutes: Idle time after which a session is cleaned up.
+            cleanup_interval_seconds: Minimum interval between cleanup sweeps.
+            storage_backend: Optional session storage backend.
+            data_manager_factory: Optional callable invoked once per session to
+                build its :class:`DataLakeDataManager`, receiving a
+                :class:`SessionContext` describing the session being created.
+                Use it to supply a customized manager — a different credential,
+                a custom artifact resolver, extra fetchers, or configuration
+                derived from ``user_identity`` / ``user_token``.
+
+                The factory **must return a fresh instance per call**. The
+                session takes ownership of the manager and calls ``cleanup()``
+                on it when the session ends, so returning a shared singleton
+                would let the first session torn down destroy a manager still
+                in use by the others.
+
+                When omitted, each session builds a default
+                ``DataLakeDataManager()``, matching previous behavior.
+        """
         self.max_sessions = max_sessions
         self.timeout = timedelta(minutes=timeout_minutes)
         self.cleanup_interval = timedelta(seconds=cleanup_interval_seconds)
         self.storage_backend = storage_backend or InMemoryStorage()
+        self.data_manager_factory = data_manager_factory
 
 
 class SessionManager:
@@ -233,6 +261,11 @@ class SessionManager:
 
         Returns:
             Session ID string
+
+        Note:
+            When ``SessionConfig.data_manager_factory`` is configured it is
+            invoked here, once per session, and the resulting manager is passed
+            to the ``Session``. The session owns it and cleans it up.
         """
         # Run periodic cleanup
         self._maybe_cleanup()
@@ -245,6 +278,22 @@ class SessionManager:
             if session_id is None:
                 session_id = str(uuid.uuid4())
 
+            # Build a customized data manager when a factory is configured, so
+            # the Session never constructs (and immediately discards) a default
+            # one — DataLakeDataManager allocates a temp cache dir eagerly.
+            data_manager = None
+            if self.config.data_manager_factory is not None:
+                data_manager = self.config.data_manager_factory(
+                    SessionContext(
+                        session_id=session_id,
+                        user_identity=user_identity,
+                        user_token=user_token,
+                        token_claims=token_claims,
+                        session_type="default",
+                        metadata=metadata or {},
+                    )
+                )
+
             # Create session
             session = Session(
                 session_id=session_id,
@@ -254,6 +303,7 @@ class SessionManager:
                 user_token=user_token,
                 token_claims=token_claims,
                 metadata=metadata,
+                data_manager=data_manager,
             )
 
             # Store
