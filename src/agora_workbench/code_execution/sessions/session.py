@@ -29,7 +29,7 @@ class SessionContext:
         user_identity: Owner's composite identifier from JWT token (``oid@tid``).
         user_token: User's bearer token for authentication.
         token_claims: Cached JWT claims for ``user_token``.
-        session_type: Categorizes session type (e.g. ``"python"``).
+        session_type: Categorizes session type (e.g., "python", "database").
         metadata: Optional key-value metadata supplied at creation.
     """
 
