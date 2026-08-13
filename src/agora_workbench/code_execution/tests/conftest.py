@@ -18,9 +18,6 @@ from azure.core.credentials import AccessToken
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-# Set a deterministic test endpoint so DataLakeDataManager can initialize in CI
-# without requiring environment-specific Azure Search configuration.
-os.environ.setdefault("DATA_LAKE_SEARCH_ENDPOINT", "https://test-search.search.windows.net")
 # Provide default Entra ID credentials for tests
 os.environ.setdefault("ENTRA_CLIENT_ID", "test-client-id")
 os.environ.setdefault("ENTRA_TENANT_ID", "test-tenant-id")
@@ -33,6 +30,14 @@ from agora_workbench.code_execution import ToolDefinition, ToolParameter, ToolRe
 
 # Test authentication token for all tests
 TEST_USER_TOKEN = "test-user-token-for-testing"
+
+
+@pytest.fixture
+def data_lake_search_endpoint(monkeypatch):
+    """Opt a test into DataLakeDataManager Azure Search configuration."""
+    endpoint = "https://test-search.search.windows.net"
+    monkeypatch.setenv("DATA_LAKE_SEARCH_ENDPOINT", endpoint)
+    return endpoint
 
 
 @pytest.fixture(autouse=True)

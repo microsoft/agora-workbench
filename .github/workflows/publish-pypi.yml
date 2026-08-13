@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - name: Resolve release tag
@@ -101,3 +102,69 @@ jobs:
 
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
+
+  docs_plan:
+    name: Plan documentation deployment
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      aliases: ${{ steps.plan.outputs.aliases }}
+      set_latest_default: ${{ steps.plan.outputs.set_latest_default }}
+    steps:
+      - name: Resolve documentation aliases
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.[0-9]+$ ]]; then
+            echo "Release tag must use the vMAJOR.MINOR.PATCH format: $TAG" >&2
+            exit 1
+          fi
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+
+          if ! published=$(gh api "repos/$REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'); then
+            echo "Could not list the published releases for $REPOSITORY." >&2
+            echo "Documentation aliases are resolved by comparing $TAG against every published release," >&2
+            echo "so continuing here could move the latest alias onto the wrong version." >&2
+            exit 1
+          fi
+
+          tags=$(printf '%s\n%s\n' "$published" "$TAG" \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -u -V)
+
+          newest=$(printf '%s\n' "$tags" | tail -n 1)
+          newest_in_series=$(printf '%s\n' "$tags" | grep -E "^v${major}\.${minor}\.[0-9]+$" | tail -n 1)
+
+          aliases=""
+          set_latest_default=false
+          if [[ "$newest_in_series" == "$TAG" ]]; then
+            aliases="${major}.${minor}"
+          fi
+          if [[ "$newest" == "$TAG" ]]; then
+            aliases="${aliases:+$aliases }latest"
+            set_latest_default=true
+          fi
+
+          echo "Deploying documentation for $TAG with aliases: ${aliases:-<none>}"
+          echo "aliases=$aliases" >> "$GITHUB_OUTPUT"
+          echo "set_latest_default=$set_latest_default" >> "$GITHUB_OUTPUT"
+
+  docs:
+    name: Publish documentation
+    needs: [build, docs_plan]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.build.outputs.tag }}
+      version: ${{ needs.build.outputs.version }}
+      aliases: ${{ needs.docs_plan.outputs.aliases }}
+      set_latest_default: ${{ needs.docs_plan.outputs.set_latest_default == 'true' }}

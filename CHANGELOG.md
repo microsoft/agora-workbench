@@ -54,6 +54,9 @@ changes that require action from existing users. Each entry there states who is 
   Building one retires a terminal batch, so a caller who supplied a batch id they did not own could close its
   child sessions and prune its state before being refused, destroying results the owner had not yet read
   ([#304](https://github.com/microsoft/agora-workbench/pull/304)).
+- Registered data access blob fetchers independently of Azure AI Search configuration, and allowed callers to
+  provide a storage credential directly, so fully qualified blob URLs can be fetched without configuring artifact
+  ID resolution ([#305](https://github.com/microsoft/agora-workbench/issues/305)).
 
 ## [0.1.2] - 2026-08-05
 
