@@ -30,7 +30,7 @@ Usage:
 """
 
 # Session implementation
-from .session import Session
+from .session import Session, SessionContext
 
 # Storage backends
 from .storage import InMemoryStorage
@@ -68,6 +68,7 @@ from .meta_tools import (
 __all__ = [
     # Session
     "Session",
+    "SessionContext",
     # Storage
     "InMemoryStorage",
     # Manager

@@ -808,8 +808,12 @@ class CodeExecutionServer(BaseMCPServer):
         with the claims from the current request context so that they stay
         consistent with the stored bearer token.
 
-        Note: Since `DataLakeDataManager` uses managed identity (not OBO), it
-        does not depend on the user's bearer token and is not recreated here.
+        Note: The default `DataLakeDataManager` uses managed identity (not OBO),
+        so it does not depend on the user's bearer token and is not recreated
+        here. A custom `SessionConfig.data_manager_factory` may bind a manager to
+        the token captured at session creation; such a manager is likewise not
+        rebuilt on refresh, so a factory needing a current token should read it
+        via `get_current_request_token()` at use time rather than caching it.
         """
         fresh_token = get_current_request_token()
         if fresh_token and fresh_token != session.user_token:
