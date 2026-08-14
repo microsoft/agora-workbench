@@ -11,6 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
@@ -253,6 +254,12 @@ class SessionManager:
         self._kernel_generations: dict[str, int] = {}  # session_id -> generation
         self._kernel_bootstrap_state: dict[int, set[str]] = {}  # generation -> completed keys
 
+        # In-flight kernel teardowns, so concurrent closes coalesce onto one
+        # task instead of racing, callers can await teardown, and the task is
+        # strongly referenced for its lifetime (an unreferenced task may be
+        # garbage-collected mid-flight).
+        self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
+
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
             f"timeout={self.config.timeout.total_seconds() / 60}min"
@@ -406,15 +413,26 @@ class SessionManager:
         session.update_status(status)
         self.storage.store(session_id, session)
 
-    def close_session(self, session_id: str) -> None:
+    def close_session(self, session_id: str) -> "Optional[asyncio.Task[None]]":
         """
         Explicitly close a session.
 
         Attempts to clean up resources first. If cleanup fails, the session
         is still deleted to prevent session accumulation, but the error is logged.
 
+        Kernel teardown is asynchronous. This method schedules it and returns
+        the task, so the session is removed from storage immediately but its
+        kernel process may still be running when the call returns. Callers that
+        need the kernel's resources actually released — GPU memory, for
+        instance — should use :meth:`aclose_session` instead, or await the
+        returned task.
+
         Args:
             session_id: ID of the session to close
+
+        Returns:
+            The teardown task, or ``None`` when there was no kernel to tear
+            down or no running event loop to schedule it on.
         """
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
@@ -426,15 +444,14 @@ class SessionManager:
                 if job.task and not job.task.done():
                     job.task.cancel()
 
-        if session_id in self._kernels:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.create_task(self._shutdown_kernel(session_id))
-                else:
-                    loop.run_until_complete(self._shutdown_kernel(session_id))
-            except Exception as e:
-                LOGGER.error(f"Failed to shutdown kernel for session {session_id}: {e}")
+        shutdown_task = self._schedule_kernel_shutdown(session_id)
+        if shutdown_task is None and session_id in self._kernels:
+            LOGGER.warning(
+                "close_session(%s) could not tear down the kernel: no running event loop. "
+                "The kernel process is still running and its session state has been removed. "
+                "Call aclose_session() from async code, or await close_session()'s returned task.",
+                session_id,
+            )
 
         session = self.storage.retrieve(session_id)
 
@@ -456,6 +473,19 @@ class SessionManager:
                 LOGGER.warning(f"Closed session {session_id} with failed cleanup (remaining={self.storage.count()})")
             else:
                 LOGGER.info(f"Closed session {session_id} (remaining={self.storage.count()})")
+
+        return shutdown_task
+
+    async def aclose_session(self, session_id: str) -> None:
+        """Close a session and wait for its kernel to actually shut down.
+
+        The awaitable counterpart to :meth:`close_session`. Prefer this
+        wherever the kernel's resources must be released before proceeding —
+        freeing GPU memory, tearing down a batch's child sessions, or
+        reclaiming capacity before starting new work.
+        """
+        self.close_session(session_id)
+        await self.await_kernel_shutdown(session_id)
 
     # ========================================================================
     # Jupyter Kernel Management
@@ -479,6 +509,12 @@ class SessionManager:
             user_identity: User identity string to expose as ``USER_IDENTITY``
                 in the kernel environment.
         """
+        # A teardown claims its kernel synchronously, so the registry can only
+        # still hold an entry here if no teardown has started. Waiting for one
+        # already in flight avoids building a replacement alongside a kernel
+        # that is still releasing its resources.
+        await self.await_kernel_shutdown(session_id)
+
         if session_id in self._kernels:
             LOGGER.debug(f"Reusing kernel for session {session_id}")
             self._kernel_last_used[session_id] = time.time()
@@ -1512,7 +1548,37 @@ class SessionManager:
         return stdout, stderr, success, displays, artifacts
 
     async def _shutdown_kernel(self, session_id: str):
-        """Shutdown and remove a kernel."""
+        """Shut down the session's current kernel and drop its registry state.
+
+        The kernel is *claimed* synchronously: the registry entry and every
+        piece of per-kernel state are removed before the first ``await``, and
+        the popped ``(manager, client)`` pair is what this call is responsible
+        for. Two consequences matter:
+
+        - A concurrent :meth:`_get_or_create_kernel` cannot hand out a kernel
+          that is already being torn down, because the entry is gone before
+          this coroutine suspends.
+        - A second teardown for the same session finds nothing to claim and
+          returns immediately, so it can neither double-cancel the job nor
+          evict whatever kernel occupies that session id by the time it runs.
+
+        Idempotent: calling it for a session with no kernel is a no-op.
+        """
+        entry = self._kernels.pop(session_id, None)
+        if entry is None:
+            LOGGER.debug("No kernel to shut down for session %s", session_id)
+            return
+
+        km, kc = entry
+        # Drop the rest of the per-kernel state in the same synchronous step.
+        # Deferring any of it past an await would risk clobbering the state of
+        # a *replacement* kernel started for this session in the meantime.
+        self._kernel_last_used.pop(session_id, None)
+        self._kernel_tokens.pop(session_id, None)
+        self._kernel_execute_locks.pop(session_id, None)
+        self._discard_kernel_generation(session_id)
+        self._cleanup_session_artifacts(session_id)
+
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
             job = self._background_jobs.get(running_job_id)
@@ -1530,23 +1596,67 @@ class SessionManager:
                 job.status = "failed"
                 self._mark_job_finished(job)
 
-        if session_id in self._kernels:
-            km, kc = self._kernels[session_id]
-            LOGGER.info(f"Shutting down kernel for session {session_id}")
+        LOGGER.info(f"Shutting down kernel for session {session_id}")
+        try:
+            kc.stop_channels()
+            await km.shutdown_kernel(now=True)
+            await km.cleanup_resources()
+        except Exception as e:
+            LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
 
-            try:
-                kc.stop_channels()
-                await km.shutdown_kernel(now=True)
-                await km.cleanup_resources()
-            except Exception as e:
-                LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
+    def _schedule_kernel_shutdown(self, session_id: str) -> "Optional[asyncio.Task[None]]":
+        """Start teardown for a session's kernel, or join one already running.
 
-            del self._kernels[session_id]
-            del self._kernel_last_used[session_id]
-            self._kernel_tokens.pop(session_id, None)
-            self._kernel_execute_locks.pop(session_id, None)
-            self._discard_kernel_generation(session_id)
-            self._cleanup_session_artifacts(session_id)
+        Returns the task so callers can await it, or ``None`` when there is no
+        running event loop (see :meth:`close_session`) or nothing to tear down.
+        The task is kept in :attr:`_kernel_shutdown_tasks` for its lifetime so
+        it cannot be garbage-collected mid-flight, and its failures are logged
+        rather than surfacing as an unretrieved task exception.
+        """
+        existing = self._kernel_shutdown_tasks.get(session_id)
+        if existing is not None and not existing.done():
+            return existing
+
+        if session_id not in self._kernels:
+            return None
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
+        task = loop.create_task(self._shutdown_kernel(session_id))
+        self._kernel_shutdown_tasks[session_id] = task
+        task.add_done_callback(partial(self._on_kernel_shutdown_done, session_id))
+        return task
+
+    def _on_kernel_shutdown_done(self, session_id: str, task: "asyncio.Task[None]") -> None:
+        """Release the task reference and surface any failure."""
+        if self._kernel_shutdown_tasks.get(session_id) is task:
+            del self._kernel_shutdown_tasks[session_id]
+        if task.cancelled():
+            LOGGER.warning("Kernel shutdown for session %s was cancelled", session_id)
+            return
+        exc = task.exception()
+        if exc is not None:
+            LOGGER.error("Kernel shutdown for session %s failed: %s", session_id, exc, exc_info=exc)
+
+    async def await_kernel_shutdown(self, session_id: str) -> None:
+        """Wait for any in-flight teardown of this session's kernel to finish.
+
+        No-op when none is running. Shielded, so a cancelled caller does not
+        cancel the teardown itself; failures are already reported by the
+        done-callback, so awaiting is purely for sequencing.
+        """
+        task = self._kernel_shutdown_tasks.get(session_id)
+        if task is None or task.done():
+            return
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.debug("Awaited kernel shutdown for session %s failed", session_id, exc_info=True)
 
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
@@ -1596,15 +1706,7 @@ class SessionManager:
 
         for session_id in expired:
             # Shutdown kernel first
-            if session_id in self._kernels:
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.create_task(self._shutdown_kernel(session_id))
-                    else:
-                        loop.run_until_complete(self._shutdown_kernel(session_id))
-                except Exception as e:
-                    LOGGER.error(f"Failed to shutdown kernel for expired session {session_id}: {e}")
+            self._schedule_kernel_shutdown(session_id)
 
             session = self.storage.retrieve(session_id)
             if session:

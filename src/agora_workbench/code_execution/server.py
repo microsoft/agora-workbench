@@ -2199,7 +2199,12 @@ else:
             )
 
     async def _cleanup_parallel_batch_sessions(self, batch_id: str) -> None:
-        """Close child sessions for a completed/cancelled batch once."""
+        """Close child sessions for a completed/cancelled batch once.
+
+        Waits for each child kernel to actually shut down, so that a batch
+        reported as cleaned up is not still holding N kernels' worth of
+        resources (GPU memory in particular).
+        """
         async with self._parallel_state_lock:
             batch = self._parallel_batches.get(batch_id)
             if not batch or batch.get("cleanup_done"):
@@ -2207,11 +2212,13 @@ else:
             session_ids = [self._parallel_jobs[job_id]["session_id"] for job_id in batch["job_ids"]]
             batch["cleanup_done"] = True
 
-        for session_id in session_ids:
-            try:
-                self.session_manager.close_session(session_id)
-            except Exception:
-                LOGGER.debug("Failed to close parallel child session %s", session_id, exc_info=True)
+        results = await asyncio.gather(
+            *(self.session_manager.aclose_session(session_id) for session_id in session_ids),
+            return_exceptions=True,
+        )
+        for session_id, result in zip(session_ids, results):
+            if isinstance(result, BaseException):
+                LOGGER.debug("Failed to close parallel child session %s", session_id, exc_info=result)
 
     async def _prune_parallel_batch(self, batch_id: str) -> None:
         """Remove a terminal batch and its jobs from the in-memory registries.
