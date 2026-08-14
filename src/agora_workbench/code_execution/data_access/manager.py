@@ -66,7 +66,7 @@ def _resolver_aclose(resolver: object) -> Callable[[], Coroutine[Any, Any, None]
     async def close() -> None:
         result = aclose()
         if inspect.isawaitable(result):
-            await result
+            _ = await result
 
     return close
 
