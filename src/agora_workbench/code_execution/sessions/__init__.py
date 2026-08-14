@@ -36,7 +36,13 @@ from .session import Session, SessionContext
 from .storage import InMemoryStorage
 
 # Session manager
-from .manager import SessionManager, SessionConfig, MaxSessionsReachedError
+from .manager import (
+    SessionManager,
+    SessionConfig,
+    MaxSessionsReachedError,
+    KERNEL_BOOTSTRAP_OUTPUTS,
+    KERNEL_BOOTSTRAP_TOOL_PROXIES,
+)
 
 # Context management
 from .context import (
@@ -75,6 +81,8 @@ __all__ = [
     "SessionManager",
     "SessionConfig",
     "MaxSessionsReachedError",
+    "KERNEL_BOOTSTRAP_OUTPUTS",
+    "KERNEL_BOOTSTRAP_TOOL_PROXIES",
     # Context
     "get_current_session",
     "set_current_session",
