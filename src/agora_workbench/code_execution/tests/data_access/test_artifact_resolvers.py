@@ -119,10 +119,13 @@ class TestUnavailableReason:
         resolver = SearchIndexArtifactResolver(credential=None, endpoint="https://search.example.net")
 
         reason = resolver.unavailable_reason
+
         assert reason is not None
         assert "DATA_LAKE_SEARCH_ENDPOINT" not in reason
-        assert "no Azure credential was available" in reason
-        assert "https://search.example.net" in reason
+        assert reason == (
+            "Blob artifact resolution is unavailable because no Azure credential was available for "
+            "https://search.example.net. Check managed identity configuration."
+        )
 
     def test_reports_closed_state(self):
         """A closed resolver must not report itself as ready."""
