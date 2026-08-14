@@ -2584,11 +2584,7 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-913">913</a></span>
-<span class="normal"><a href="#__codelineno-0-914">914</a></span>
-<span class="normal"><a href="#__codelineno-0-915">915</a></span>
-<span class="normal"><a href="#__codelineno-0-916">916</a></span>
-<span class="normal"><a href="#__codelineno-0-917">917</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-917">917</a></span>
 <span class="normal"><a href="#__codelineno-0-918">918</a></span>
 <span class="normal"><a href="#__codelineno-0-919">919</a></span>
 <span class="normal"><a href="#__codelineno-0-920">920</a></span>
@@ -2598,21 +2594,25 @@ argument.</p>
 <span class="normal"><a href="#__codelineno-0-924">924</a></span>
 <span class="normal"><a href="#__codelineno-0-925">925</a></span>
 <span class="normal"><a href="#__codelineno-0-926">926</a></span>
-<span class="normal"><a href="#__codelineno-0-927">927</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-913" name="__codelineno-0-913"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-914" name="__codelineno-0-914"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-915" name="__codelineno-0-915"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
-<a id="__codelineno-0-916" name="__codelineno-0-916"></a>
-<a id="__codelineno-0-917" name="__codelineno-0-917"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
-<a id="__codelineno-0-918" name="__codelineno-0-918"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-919" name="__codelineno-0-919"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
-<a id="__codelineno-0-920" name="__codelineno-0-920"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
-<a id="__codelineno-0-921" name="__codelineno-0-921"></a>
-<a id="__codelineno-0-922" name="__codelineno-0-922"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
-<a id="__codelineno-0-923" name="__codelineno-0-923"></a>
-<a id="__codelineno-0-924" name="__codelineno-0-924"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
-<a id="__codelineno-0-925" name="__codelineno-0-925"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-926" name="__codelineno-0-926"></a>
-<a id="__codelineno-0-927" name="__codelineno-0-927"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-927">927</a></span>
+<span class="normal"><a href="#__codelineno-0-928">928</a></span>
+<span class="normal"><a href="#__codelineno-0-929">929</a></span>
+<span class="normal"><a href="#__codelineno-0-930">930</a></span>
+<span class="normal"><a href="#__codelineno-0-931">931</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-917" name="__codelineno-0-917"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-918" name="__codelineno-0-918"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-919" name="__codelineno-0-919"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
+<a id="__codelineno-0-920" name="__codelineno-0-920"></a>
+<a id="__codelineno-0-921" name="__codelineno-0-921"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
+<a id="__codelineno-0-922" name="__codelineno-0-922"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-923" name="__codelineno-0-923"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
+<a id="__codelineno-0-924" name="__codelineno-0-924"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<a id="__codelineno-0-925" name="__codelineno-0-925"></a>
+<a id="__codelineno-0-926" name="__codelineno-0-926"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
+<a id="__codelineno-0-927" name="__codelineno-0-927"></a>
+<a id="__codelineno-0-928" name="__codelineno-0-928"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
+<a id="__codelineno-0-929" name="__codelineno-0-929"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-930" name="__codelineno-0-930"></a>
+<a id="__codelineno-0-931" name="__codelineno-0-931"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
