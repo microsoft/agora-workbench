@@ -7,6 +7,7 @@ DataLake-cataloged sources and caching them to disk for tool access.
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import os
 import re
@@ -14,7 +15,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlparse
 
 from azure.core.credentials_async import AsyncTokenCredential
@@ -50,12 +51,24 @@ def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
         )
 
 
-def _resolver_aclose(resolver: object) -> Callable[[], Coroutine[Any, Any, Any]] | None:
-    """Return a resolver's optional ``aclose``, mirroring the fetcher ``close`` convention."""
+def _resolver_aclose(resolver: object) -> Callable[[], Coroutine[Any, Any, None]] | None:
+    """Return a resolver's optional ``aclose``, mirroring the fetcher ``close`` convention.
+
+    The result is normalized to a coroutine function. ``cleanup()`` feeds it to
+    ``loop.create_task``, which rejects a non-awaitable, so a third-party
+    resolver defining ``aclose`` synchronously would otherwise raise a
+    ``TypeError`` out of teardown.
+    """
     aclose = getattr(resolver, "aclose", None)
     if not callable(aclose):
         return None
-    return cast(Callable[[], Coroutine[Any, Any, Any]], aclose)
+
+    async def close() -> None:
+        result = aclose()
+        if inspect.isawaitable(result):
+            await result
+
+    return close
 
 
 class DataLakeDataManager:

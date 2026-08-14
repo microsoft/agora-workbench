@@ -112,6 +112,11 @@ class ManifestArtifactResolver:
         return None if self._manifest else "The asset manifest is empty."
 
 
+manifest = {
+    "abc123": "https://acct.blob.core.windows.net/datasets/hourly_wind.parquet",
+    "def456": "/mnt/data/reference/grid_topology.json",
+}
+
 manager = DataLakeDataManager(artifact_resolver=ManifestArtifactResolver(manifest))
 ```
 

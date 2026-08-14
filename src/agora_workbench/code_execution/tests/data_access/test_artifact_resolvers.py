@@ -6,6 +6,7 @@ caching, scheme validation, and cleanup — which carries the blob-details
 lookup that previously lived inside ``DataLakeDataManager``.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -113,6 +114,27 @@ class TestUnavailableReason:
             "Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
         )
 
+    def test_blames_the_credential_when_the_endpoint_is_configured(self):
+        """A configured endpoint must not be reported as the missing piece."""
+        resolver = SearchIndexArtifactResolver(credential=None, endpoint="https://search.example.net")
+
+        reason = resolver.unavailable_reason
+        assert reason is not None
+        assert "DATA_LAKE_SEARCH_ENDPOINT" not in reason
+        assert "no Azure credential was available" in reason
+        assert "https://search.example.net" in reason
+
+    def test_reports_closed_state(self):
+        """A closed resolver must not report itself as ready."""
+        resolver = SearchIndexArtifactResolver(
+            credential=MagicMock(), endpoint="https://search.example.net", index_name="blob-details"
+        )
+        assert resolver.unavailable_reason is None
+
+        asyncio.run(resolver.aclose())
+
+        assert resolver.unavailable_reason == "The artifact resolver has been closed."
+
 
 class TestResolve:
     """Lookup, caching, and validation behavior."""
@@ -212,3 +234,24 @@ class TestAclose:
         resolver._search_client = MagicMock(close=AsyncMock(side_effect=RuntimeError("boom")))
 
         await resolver.aclose()
+
+    @pytest.mark.asyncio
+    async def test_is_idempotent(self):
+        """A second close must not re-close the already-released client."""
+        resolver = _resolver_with_stored_path("https://acct.blob.core.windows.net/c/file.csv")
+        search_client = resolver._search_client
+
+        await resolver.aclose()
+        await resolver.aclose()
+
+        assert search_client is not None
+        search_client.close.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_resolve_after_close_reports_the_closed_state(self):
+        resolver = _resolver_with_stored_path("https://acct.blob.core.windows.net/c/file.csv")
+
+        await resolver.aclose()
+
+        with pytest.raises(ValueError, match="has been closed"):
+            await resolver.resolve("artifact_key")

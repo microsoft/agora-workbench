@@ -105,6 +105,7 @@ class SearchIndexArtifactResolver:
         self._credential_init_error = credential_init_error
         self._url_cache: dict[str, str] = {}  # Maps artifact_id -> resolved blob URL
         self._search_client: SearchClient | None = None
+        self._closed = False
 
         if not endpoint:
             LOGGER.info("No Azure Search endpoint configured; blob artifact ID resolution is disabled")
@@ -150,13 +151,20 @@ class SearchIndexArtifactResolver:
     @property
     def unavailable_reason(self) -> str | None:
         """Reason blob artifact resolution cannot run, or ``None`` when ready."""
+        if self._closed:
+            return "The artifact resolver has been closed."
+
         if self._search_client is not None:
             return None
 
-        # Keys off whether search was *configured*, not whether the index name
-        # is non-empty — an empty DATA_LAKE_BLOB_DETAILS_INDEX must still
-        # surface the deferred init error rather than the generic message.
-        if self._credential_init_error and self._endpoint:
+        if not self._endpoint:
+            return "Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
+
+        # Past this point an endpoint *is* configured, so pointing the operator
+        # at DATA_LAKE_SEARCH_ENDPOINT would misdirect them. This is also what
+        # keeps an empty DATA_LAKE_BLOB_DETAILS_INDEX from being mistaken for
+        # search being unconfigured.
+        if self._credential_init_error:
             init_error_type = self._credential_init_error.split(":", 1)[0]
             return (
                 "Blob artifact resolution is unavailable because Azure data access initialization failed. "
@@ -164,7 +172,10 @@ class SearchIndexArtifactResolver:
                 "Check managed identity and Azure search endpoint configuration."
             )
 
-        return "Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
+        return (
+            f"Blob artifact resolution is unavailable because no Azure credential was available for "
+            f"{self._endpoint}. Check managed identity configuration."
+        )
 
     async def resolve(self, artifact_id: str) -> str:
         """
@@ -213,11 +224,17 @@ class SearchIndexArtifactResolver:
             raise ValueError(f"Failed to resolve blob artifact {artifact_id}: {e}") from e
 
     async def aclose(self) -> None:
-        """Clear the URL cache and close the search client (never the credential)."""
+        """Clear the URL cache and close the search client (never the credential).
+
+        Idempotent: the client reference is dropped so a second call is a no-op
+        and :attr:`unavailable_reason` stops reporting readiness after shutdown.
+        """
+        self._closed = True
         self._url_cache.clear()
 
-        if self._search_client is not None:
+        search_client, self._search_client = self._search_client, None
+        if search_client is not None:
             try:
-                await self._search_client.close()
+                await search_client.close()
             except Exception as e:
                 LOGGER.debug(f"Error closing search client: {e}")

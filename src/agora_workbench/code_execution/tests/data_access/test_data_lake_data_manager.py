@@ -6,6 +6,7 @@ The manager accepts type-tagged qualified names (<type>id</type>) and
 streams assets directly to disk to avoid high memory usage.
 """
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -536,6 +537,23 @@ class _StubResolver:
         self.aclose_calls += 1
 
 
+class _SyncCloseResolver:
+    """Resolver whose ``aclose`` is synchronous, violating the documented contract."""
+
+    def __init__(self):
+        self.closed = 0
+
+    async def resolve(self, artifact_id: str) -> str:
+        return artifact_id
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        return None
+
+    def aclose(self) -> None:
+        self.closed += 1
+
+
 class TestArtifactResolverInjection:
     """A supplied ArtifactResolver replaces the Azure AI Search lookup."""
 
@@ -619,6 +637,26 @@ class TestArtifactResolverInjection:
         manager = DataLakeDataManager(artifact_resolver=_NoCloseResolver())
 
         await manager.aclose()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_inside_event_loop_tolerates_a_sync_aclose(self):
+        """create_task rejects a non-awaitable, so the close must be normalized."""
+        resolver = _SyncCloseResolver()
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        manager.cleanup()
+        await asyncio.sleep(0)  # let the scheduled close run
+
+        assert resolver.closed == 1
+
+    @pytest.mark.asyncio
+    async def test_aclose_tolerates_a_sync_aclose(self):
+        resolver = _SyncCloseResolver()
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        await manager.aclose()
+
+        assert resolver.closed == 1
 
 
 class TestAssetTagGuidance:
