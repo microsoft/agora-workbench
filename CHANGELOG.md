@@ -35,6 +35,15 @@ changes that require action from existing users. Each entry there states who is 
   an identity provider other than Entra ID no longer have to fork the CLI to use
   `mcp-connector-server` ([#287](https://github.com/microsoft/agora-workbench/issues/287)).
 
+- `artifact_resolver` on `DataLakeDataManager`, plus an `ArtifactResolver` protocol and the built-in
+  `SearchIndexArtifactResolver` it now delegates to. `<blob>id</blob>` tags previously required an Azure AI
+  Search index to resolve, so deployments cataloging assets in a manifest, a database, or a REST service could
+  not use them at all without overriding a private method. Omitting the argument builds the search-backed
+  resolver from the environment exactly as before. The asset-tag guidance shown to the agent now sources its
+  availability note from the resolver's `unavailable_reason` instead of naming `DATA_LAKE_SEARCH_ENDPOINT`
+  unconditionally, so it stays accurate on other backends
+  ([#306](https://github.com/microsoft/agora-workbench/issues/306)).
+
 ### Fixed
 
 - `{name}_check_batch` and `{name}_cancel_batch` failed with `404: Batch '<id>' not found` for every valid batch,

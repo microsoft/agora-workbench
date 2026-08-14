@@ -12,18 +12,50 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Callable, Coroutine
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from azure.core.credentials_async import AsyncTokenCredential
-from azure.search.documents.aio import SearchClient
 
 from .. import agent_guidance
 from ..types import AssetId
+from .artifact_resolvers import ArtifactResolver, SearchIndexArtifactResolver
 from .credentials import create_storage_credential
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
+    """Fail fast on a resolver missing part of the protocol.
+
+    ``unavailable_reason`` is consumed while formatting errors, where a missing
+    attribute would be swallowed rather than reported, so both members are
+    checked up front instead.
+    """
+    missing = [
+        name
+        for name in ("resolve", "unavailable_reason")
+        # Probe the class first so a property is detected as a descriptor rather
+        # than evaluated; a resolver whose property raises is still well-formed,
+        # and validation must not surface that error as a construction failure.
+        if not hasattr(type(resolver), name) and not hasattr(resolver, name)
+    ]
+    if missing:
+        raise TypeError(
+            f"artifact_resolver must implement the ArtifactResolver protocol; "
+            f"{type(resolver).__name__} is missing: {', '.join(missing)}"
+        )
+
+
+def _resolver_aclose(resolver: object) -> Callable[[], Coroutine[Any, Any, Any]] | None:
+    """Return a resolver's optional ``aclose``, mirroring the fetcher ``close`` convention."""
+    aclose = getattr(resolver, "aclose", None)
+    if not callable(aclose):
+        return None
+    return cast(Callable[[], Coroutine[Any, Any, Any]], aclose)
 
 
 class DataLakeDataManager:
@@ -39,6 +71,9 @@ class DataLakeDataManager:
     managed identity in production, for downstream Azure resources
     (Storage, AI Search).
 
+    Blob artifact IDs are resolved through a pluggable ``ArtifactResolver``,
+    defaulting to Azure AI Search; see ``artifact_resolvers.py``.
+
     Supports:
     - Azure Blob Storage (abfss://, az://, https://)
     - Local filesystem (absolute paths, relative paths, file:// URIs)
@@ -49,6 +84,7 @@ class DataLakeDataManager:
         allowed_local_roots: list[str] | None = None,
         extra_fetchers: list[AssetFetcher] | None = None,
         credential: AsyncTokenCredential | None = None,
+        artifact_resolver: ArtifactResolver | None = None,
     ):
         """
         Initialize the data manager.
@@ -56,9 +92,9 @@ class DataLakeDataManager:
         Uses a credential chain (``az login`` MSAL cache locally, managed
         identity in production) for Azure Blob access unless a credential is
         provided. Blob URL fetching is available whenever a credential can be
-        initialized. Blob artifact ID resolution additionally requires
-        ``DATA_LAKE_SEARCH_ENDPOINT`` so the manager can query the configured
-        Azure AI Search index.
+        initialized. Blob artifact ID resolution is delegated to an
+        ``ArtifactResolver``; the default one queries Azure AI Search and so
+        additionally requires ``DATA_LAKE_SEARCH_ENDPOINT``.
 
         Args:
             allowed_local_roots: Optional list of directory paths the local
@@ -73,19 +109,24 @@ class DataLakeDataManager:
                 Storage and Azure AI Search access. When omitted, the manager
                 creates the same storage credential chain as before, resolving
                 ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.
+            artifact_resolver: Optional resolver turning ``<blob>id</blob>``
+                identifiers into fetchable URLs, for deployments whose catalog
+                is not an Azure AI Search index. When omitted, a
+                ``SearchIndexArtifactResolver`` is built from the environment,
+                preserving existing behavior. A supplied resolver is used as-is
+                and is *not* given the manager's credential, so it must arrange
+                its own authentication.
+
+        Raises:
+            TypeError: If ``artifact_resolver`` does not implement the
+                ``ArtifactResolver`` protocol.
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
-        self._url_cache: dict[str, str] = {}  # Maps artifact_id -> resolved blob URL
 
-        search_endpoint = os.getenv("DATA_LAKE_SEARCH_ENDPOINT")
         self._credential_init_error: str | None = None
         self._credential: AsyncTokenCredential | None = None
         self._owns_credential = credential is None
-        self._search_client = None
-        self._blob_details_index = (
-            os.getenv("DATA_LAKE_BLOB_DETAILS_INDEX", "blob-details") if search_endpoint else None
-        )
 
         # Initialize fetchers — custom fetchers take priority over built-ins
         self._fetchers: list[AssetFetcher] = list(extra_fetchers or [])
@@ -107,89 +148,46 @@ class DataLakeDataManager:
         if self._credential is not None:
             self._fetchers.append(BlobFetcher(credential=self._credential))
 
-        if search_endpoint:
-            if self._credential is None:
-                LOGGER.warning("Azure Search endpoint configured, but no Azure credential is available")
-            else:
-                blob_details_index = self._blob_details_index
-                assert blob_details_index is not None
-                try:
-                    self._search_client = SearchClient(
-                        endpoint=search_endpoint,
-                        index_name=blob_details_index,
-                        credential=self._credential,
-                    )
-                    LOGGER.info(f"Initialized blob-details search client: {search_endpoint}/{blob_details_index}")
-                except (ImportError, RuntimeError, TypeError, ValueError) as e:
-                    self._credential_init_error = f"{type(e).__name__}: {e}"
-                    LOGGER.warning(f"Failed to initialize Azure data access components: {e}")
+        if artifact_resolver is not None:
+            _validate_artifact_resolver(artifact_resolver)
+            self._artifact_resolver: ArtifactResolver = artifact_resolver
         else:
-            LOGGER.info(
-                "DataLakeDataManager running without Azure Search endpoint; blob artifact ID resolution is disabled"
+            # The deferred credential error is handed over so the resolver can
+            # explain *why* it is unavailable rather than blaming configuration.
+            self._artifact_resolver = SearchIndexArtifactResolver.from_env(
+                credential=self._credential,
+                credential_init_error=self._credential_init_error,
             )
+
+    def _asset_tag_guidance(self) -> str:
+        """Asset-tag guidance for the agent, annotated by the resolver's readiness."""
+        try:
+            unavailable_reason = self._artifact_resolver.unavailable_reason
+        except Exception as e:
+            # This runs while building an error message; a misbehaving
+            # third-party resolver must not mask the failure being reported.
+            LOGGER.debug(f"Artifact resolver failed to report availability: {e}")
+            unavailable_reason = None
+
+        return agent_guidance.asset_tag_format(unavailable_reason)
 
     async def _get_blob_url_from_artifact_id(self, artifact_id: str) -> str:
         """
-        Retrieve blob storage URL from artifact_id by querying the blob-details index.
+        Retrieve a blob storage URL from an artifact_id via the configured resolver.
 
-        Results are cached so repeated resolutions of the same artifact skip
-        the search round-trip.
+        Retained as a thin delegate for backward compatibility; caching is the
+        resolver's responsibility.
 
         Args:
-            artifact_id: Base64-encoded artifact identifier from blob-details index
+            artifact_id: Opaque artifact identifier from a ``<blob>`` tag
 
         Returns:
             The blob storage URL (e.g. ``https://account.blob.core.windows.net/container/path``)
 
         Raises:
-            ValueError: If the artifact is not found in the index or URL is invalid
+            ValueError: If the artifact cannot be resolved or resolution is unavailable
         """
-        # Return cached URL if available
-        if artifact_id in self._url_cache:
-            LOGGER.debug(f"URL cache hit for artifact {artifact_id[:40]}...")
-            return self._url_cache[artifact_id]
-
-        if not self._search_client:
-            # Keys off whether search was *configured* (the index name is only
-            # set when an endpoint is present), not whether the index name is
-            # non-empty — an empty DATA_LAKE_BLOB_DETAILS_INDEX must still
-            # surface the deferred init error rather than the generic message.
-            if self._credential_init_error and self._blob_details_index is not None:
-                init_error_type = self._credential_init_error.split(":", 1)[0]
-                raise ValueError(
-                    "Blob artifact resolution is unavailable because Azure data access initialization failed. "
-                    f"Error type: {init_error_type}. "
-                    "Check managed identity and Azure search endpoint configuration."
-                )
-
-            raise ValueError(
-                "Search client not initialized. Set DATA_LAKE_SEARCH_ENDPOINT to resolve blob artifact IDs."
-            )
-
-        try:
-            # Query the blob-details index using artifact_id as the document key
-            # The artifact_id field is the unique key in the blob-details index
-            result = await self._search_client.get_document(key=artifact_id)
-
-            if not result:
-                raise ValueError(f"Artifact not found in blob-details index: {artifact_id}")
-
-            # Extract metadata_storage_path and strip any trailing whitespace
-            blob_url = result.get("metadata_storage_path", "").strip()
-
-            if not blob_url:
-                raise ValueError(f"Artifact {artifact_id} has no metadata_storage_path in blob-details index")
-
-            if not blob_url.startswith(("https://", "abfss://", "az://")):
-                raise ValueError(f"Retrieved storage path is not a valid URL: {blob_url!r}")
-
-            LOGGER.info(f"Retrieved blob URL for artifact {artifact_id[:40]}...")
-            self._url_cache[artifact_id] = blob_url
-            return blob_url
-
-        except Exception as e:
-            LOGGER.error(f"Failed to retrieve blob URL for artifact {artifact_id}: {e}")
-            raise ValueError(f"Failed to resolve blob artifact {artifact_id}: {e}") from e
+        return await self._artifact_resolver.resolve(artifact_id)
 
     async def get_cache_path(self, qualified_name: "AssetId") -> Path:
         """
@@ -217,7 +215,7 @@ class DataLakeDataManager:
         if not artifact_match:
             raise ValueError(
                 f"Invalid artifact format - expected <type>id</type>, got: {qualified_name}. "
-                f"{agent_guidance.ASSET_TAG_FORMAT} {agent_guidance.DISCOVER_DATA}"
+                f"{self._asset_tag_guidance()} {agent_guidance.DISCOVER_DATA}"
             )
 
         artifact_type = artifact_match.group(1)
@@ -239,7 +237,7 @@ class DataLakeDataManager:
             # Local artifacts: the artifact_id is the file path itself
             resource_url = artifact_id
         else:
-            raise ValueError(f"Unsupported artifact type: {artifact_type}. {agent_guidance.ASSET_TAG_FORMAT}")
+            raise ValueError(f"Unsupported artifact type: {artifact_type}. {self._asset_tag_guidance()}")
 
         # Fetch and cache the asset
         LOGGER.debug(f"Fetching and caching {artifact_type} asset")
@@ -338,18 +336,19 @@ class DataLakeDataManager:
         # Clear cache index
         self._cache_index.clear()
 
-        # Close search client
-        if hasattr(self, "_search_client") and self._search_client:
+        # Close the artifact resolver (releases any catalog client it owns)
+        resolver_close = _resolver_aclose(getattr(self, "_artifact_resolver", None))
+        if resolver_close is not None:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._search_client.close())
+                loop.create_task(resolver_close())
             except RuntimeError:
                 try:
                     loop = asyncio.new_event_loop()
-                    loop.run_until_complete(self._search_client.close())
+                    loop.run_until_complete(resolver_close())
                     loop.close()
                 except Exception as e:
-                    LOGGER.debug(f"Error closing search client: {e}")
+                    LOGGER.debug(f"Error closing artifact resolver: {e}")
 
         # Close managed identity credential
         if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
@@ -377,7 +376,6 @@ class DataLakeDataManager:
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
         self._cache_index.clear()
-        self._url_cache.clear()
 
         # Close fetchers (releases pooled connections)
         for fetcher in self._fetchers:
@@ -387,11 +385,12 @@ class DataLakeDataManager:
                 except Exception as e:
                     LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
 
-        if hasattr(self, "_search_client") and self._search_client:
+        resolver_close = _resolver_aclose(getattr(self, "_artifact_resolver", None))
+        if resolver_close is not None:
             try:
-                await self._search_client.close()
+                await resolver_close()
             except Exception as e:
-                LOGGER.debug(f"Error closing search client: {e}")
+                LOGGER.debug(f"Error closing artifact resolver: {e}")
 
         if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
             try:

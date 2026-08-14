@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ...data_access.artifact_resolvers import SearchIndexArtifactResolver
 from ...data_access.fetchers import AssetFetcher, BlobFetcher
 from ...data_access.manager import DataLakeDataManager
 
@@ -58,6 +59,13 @@ def _get_blob_fetcher(manager: DataLakeDataManager) -> BlobFetcher:
     raise RuntimeError("BlobFetcher not found in manager._fetchers")
 
 
+def _get_search_resolver(manager: DataLakeDataManager) -> SearchIndexArtifactResolver:
+    """Return the manager's default search-backed resolver."""
+    resolver = manager._artifact_resolver
+    assert isinstance(resolver, SearchIndexArtifactResolver)
+    return resolver
+
+
 class RecordingFetcher(AssetFetcher):
     """Test fetcher that records calls and writes fixed bytes."""
 
@@ -88,7 +96,7 @@ class TestDataLakeDataManagerInit:
         manager = DataLakeDataManager()
 
         assert manager._credential is not None
-        assert manager._search_client is None
+        assert _get_search_resolver(manager)._search_client is None
         assert manager._cache_index == {}
         assert len(manager._fetchers) == 2
         assert manager._cache_dir.exists()
@@ -98,8 +106,8 @@ class TestDataLakeDataManagerInit:
         manager = DataLakeDataManager()
 
         assert manager._credential is not None
-        assert manager._search_client is not None
-        assert manager._blob_details_index == "blob-details"
+        assert _get_search_resolver(manager)._search_client is not None
+        assert _get_search_resolver(manager)._index_name == "blob-details"
         assert len(manager._fetchers) == 2
 
     def test_init_creates_temp_cache_dir(self):
@@ -115,7 +123,7 @@ class TestDataLakeDataManagerInit:
         manager = DataLakeDataManager()
 
         assert manager._credential is not None
-        assert manager._search_client is None
+        assert _get_search_resolver(manager)._search_client is None
         assert len(manager._fetchers) == 2
         assert _get_blob_fetcher(manager).credential is manager._credential
         assert manager._cache_dir.exists()
@@ -130,7 +138,7 @@ class TestDataLakeDataManagerInit:
             manager = DataLakeDataManager()
 
         assert manager._credential is None
-        assert manager._search_client is None
+        assert _get_search_resolver(manager)._search_client is None
         assert len(manager._fetchers) == 1
         assert manager._credential_init_error == "RuntimeError: missing managed identity"
         with pytest.raises(ValueError, match="Azure data access initialization failed"):
@@ -257,7 +265,7 @@ class TestGetCachePath:
         ):
             manager = DataLakeDataManager()
 
-        assert manager._blob_details_index == ""
+        assert _get_search_resolver(manager)._index_name == ""
 
         with pytest.raises(ValueError, match="Azure data access initialization failed"):
             await manager.get_cache_path("<blob>artifact_id_1</blob>")
@@ -472,7 +480,7 @@ class TestBlobUrlResolution:
 
     def _manager_with_stored_path(self, metadata_storage_path: str) -> DataLakeDataManager:
         manager = DataLakeDataManager()
-        manager._search_client = MagicMock(
+        _get_search_resolver(manager)._search_client = MagicMock(
             get_document=AsyncMock(return_value={"metadata_storage_path": metadata_storage_path}),
             close=AsyncMock(),
         )
@@ -503,3 +511,153 @@ class TestBlobUrlResolution:
 
         with pytest.raises(ValueError, match="not a valid URL"):
             await manager._get_blob_url_from_artifact_id("artifact_key")
+
+
+class _StubResolver:
+    """Minimal ArtifactResolver backed by an in-memory mapping."""
+
+    def __init__(self, mapping: dict[str, str] | None = None, unavailable_reason: str | None = None):
+        self._mapping = mapping or {}
+        self._unavailable_reason = unavailable_reason
+        self.resolve_calls: list[str] = []
+        self.aclose_calls = 0
+
+    async def resolve(self, artifact_id: str) -> str:
+        self.resolve_calls.append(artifact_id)
+        if artifact_id not in self._mapping:
+            raise ValueError(f"Unknown artifact: {artifact_id}")
+        return self._mapping[artifact_id]
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        return self._unavailable_reason
+
+    async def aclose(self) -> None:
+        self.aclose_calls += 1
+
+
+class TestArtifactResolverInjection:
+    """A supplied ArtifactResolver replaces the Azure AI Search lookup."""
+
+    def test_defaults_to_search_index_resolver(self):
+        """Omitting the parameter preserves the built-in behavior."""
+        manager = DataLakeDataManager()
+
+        assert isinstance(manager._artifact_resolver, SearchIndexArtifactResolver)
+
+    def test_supplied_resolver_is_used_as_is(self):
+        resolver = _StubResolver()
+
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        assert manager._artifact_resolver is resolver
+
+    @pytest.mark.asyncio
+    async def test_resolver_handles_blob_ids_without_search_endpoint(self, tmp_path):
+        """A custom resolver makes <blob> tags work with no Azure Search configured."""
+        source_path = tmp_path / "catalog_asset.txt"
+        source_path.write_text("resolved by stub")
+        resolver = _StubResolver({"artifact_id_1": str(source_path)})
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        cache_path = await manager.get_cache_path("<blob>artifact_id_1</blob>")
+
+        assert cache_path.read_text() == "resolved by stub"
+        assert resolver.resolve_calls == ["artifact_id_1"]
+
+    @pytest.mark.asyncio
+    async def test_resolver_errors_propagate(self):
+        resolver = _StubResolver()
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        with pytest.raises(ValueError, match="Unknown artifact: missing_id"):
+            await manager.get_cache_path("<blob>missing_id</blob>")
+
+    @pytest.mark.asyncio
+    async def test_delegate_forwards_to_resolver(self):
+        """The private helper is kept as a delegate for backward compatibility."""
+        resolver = _StubResolver({"artifact_id_1": "https://acct.blob.core.windows.net/c/f.csv"})
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        url = await manager._get_blob_url_from_artifact_id("artifact_id_1")
+
+        assert url == "https://acct.blob.core.windows.net/c/f.csv"
+
+    @pytest.mark.parametrize(
+        "resolver, missing",
+        [
+            (object(), "resolve, unavailable_reason"),
+            (MagicMock(spec=["unavailable_reason"]), "resolve"),
+            (MagicMock(spec=["resolve"]), "unavailable_reason"),
+        ],
+    )
+    def test_rejects_resolver_missing_protocol_members(self, resolver, missing):
+        with pytest.raises(TypeError, match=f"missing: {missing}"):
+            DataLakeDataManager(artifact_resolver=resolver)
+
+    @pytest.mark.asyncio
+    async def test_aclose_closes_the_resolver(self):
+        resolver = _StubResolver()
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+
+        await manager.aclose()
+
+        assert resolver.aclose_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_aclose_tolerates_resolver_without_aclose(self):
+        """aclose is optional — a resolver holding no clients need not define it."""
+
+        class _NoCloseResolver:
+            async def resolve(self, artifact_id: str) -> str:
+                return artifact_id
+
+            @property
+            def unavailable_reason(self) -> str | None:
+                return None
+
+        manager = DataLakeDataManager(artifact_resolver=_NoCloseResolver())
+
+        await manager.aclose()
+
+
+class TestAssetTagGuidance:
+    """Agent-facing tag guidance reflects the configured resolver."""
+
+    @pytest.mark.asyncio
+    async def test_guidance_omits_env_var_when_resolution_is_available(self):
+        manager = DataLakeDataManager(artifact_resolver=_StubResolver())
+
+        with pytest.raises(ValueError) as excinfo:
+            await manager.get_cache_path("<sql>artifact_id_1</sql>")
+
+        assert "DATA_LAKE_SEARCH_ENDPOINT" not in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_guidance_reports_the_resolver_reason(self):
+        """The unavailability text comes from the backend in use, not a hardcoded one."""
+        manager = DataLakeDataManager(
+            artifact_resolver=_StubResolver(unavailable_reason="The asset manifest is not mounted.")
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            await manager.get_cache_path("<sql>artifact_id_1</sql>")
+
+        assert "The asset manifest is not mounted." in str(excinfo.value)
+
+    @pytest.mark.asyncio
+    async def test_guidance_survives_a_misbehaving_resolver(self):
+        """A resolver raising in unavailable_reason must not mask the real error."""
+
+        class _AngryResolver:
+            async def resolve(self, artifact_id: str) -> str:
+                return artifact_id
+
+            @property
+            def unavailable_reason(self) -> str | None:
+                raise RuntimeError("bookkeeping exploded")
+
+        manager = DataLakeDataManager(artifact_resolver=_AngryResolver())
+
+        with pytest.raises(ValueError, match="Unsupported artifact type: sql"):
+            await manager.get_cache_path("<sql>artifact_id_1</sql>")

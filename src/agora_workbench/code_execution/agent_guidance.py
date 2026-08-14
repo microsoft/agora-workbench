@@ -51,14 +51,31 @@ DISCOVER_TOOLS = (
     "discover the available tools and skills, then call them by name."
 )
 
-# Only ``local`` and ``blob`` are resolvable by the default DataLakeDataManager
-# (manager.py routes solely on those two; any other type raises "Unsupported
-# artifact type"). Do not advertise types the resolver does not handle.
-ASSET_TAG_FORMAT = (
-    "Asset references use the form <type>id</type>; the resolvable types are "
-    "<local>path</local> (a local file path) and <blob>id</blob> (a data-lake "
-    "artifact, which needs DATA_LAKE_SEARCH_ENDPOINT configured)."
-)
+
+def asset_tag_format(unavailable_reason: str | None = None) -> str:
+    """Describe the asset tag format, noting why blob resolution is unavailable.
+
+    Only ``local`` and ``blob`` are resolvable by the default DataLakeDataManager
+    (manager.py routes solely on those two; any other type raises "Unsupported
+    artifact type"). Do not advertise types the resolver does not handle.
+
+    Args:
+        unavailable_reason: The configured ``ArtifactResolver``'s
+            ``unavailable_reason``, or ``None`` when blob resolution is ready.
+            Sourcing this from the resolver keeps the guidance truthful for
+            deployments backed by something other than Azure AI Search.
+    """
+    text = (
+        "Asset references use the form <type>id</type>; the resolvable types are "
+        "<local>path</local> (a local file path) and <blob>id</blob> (a data-lake artifact)."
+    )
+    if unavailable_reason:
+        text += f" Blob artifact IDs cannot be resolved right now: {unavailable_reason}"
+    return text
+
+
+# Backend-agnostic default for callers without a resolver on hand.
+ASSET_TAG_FORMAT = asset_tag_format()
 
 # Parameterized: the allowed scratch prefixes are server-configurable.
 SCRATCH_ONLY = "Internal scratch only (not visible to the user): {prefixes}."
