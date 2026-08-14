@@ -53,6 +53,20 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Kernel teardown now claims its target atomically and can be awaited, so a session's resources are actually
+  released when a caller says they are. `_shutdown_kernel` removed the session from the kernel registry *after*
+  its awaits and every caller scheduled it as a bare `create_task`, which left four overlapping failures: a
+  concurrent execute could be handed a kernel that was already being destroyed; a second close scheduled a
+  duplicate teardown that died with `KeyError` as an unretrieved task exception; a teardown that resumed late
+  could evict a *replacement* kernel and `rmtree` the live session's outputs directory; and
+  `_cleanup_parallel_batch_sessions` reported a batch cleaned up while still holding every child kernel — and
+  every child kernel's GPU memory. The kernel and all of its per-kernel state are now dropped in one synchronous
+  step before the first await, teardowns coalesce onto a single strongly-referenced task whose failures are
+  logged, `_get_or_create_kernel` waits for a pending teardown before building a replacement, and the new
+  `aclose_session()` lets callers wait for the resources to be freed. `close_session()` keeps its synchronous
+  signature and now returns the teardown task; called with no running event loop it warns naming
+  `aclose_session()` rather than silently leaking the kernel through a `get_event_loop()` fallback that has been
+  dead since Python 3.12 ([#314](https://github.com/microsoft/agora-workbench/issues/314)).
 - Kernel bootstrap state is now keyed to the kernel process rather than the session id, so a session whose
   kernel is rebuilt gets its tool proxies and `AGORA_OUTPUT_DIR` preamble re-injected. Previously a session id
   outliving its kernel — after an idle-kernel cleanup, a request timeout, or an explicit close followed by reuse
