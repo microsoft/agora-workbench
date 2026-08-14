@@ -667,13 +667,17 @@ class SessionManager:
         return _OUTPUTS_BASE_DIR / session_id
 
     def _prepare_outputs_preamble(self, session_id: str) -> str:
-        """Inject AGORA_OUTPUT_DIR setup into the kernel once per session.
+        """Inject AGORA_OUTPUT_DIR setup into the kernel once per kernel.
 
         Sets both the env var (so subprocess and library code see it) and a
         bare ``AGORA_OUTPUT_DIR`` symbol in the kernel namespace (so the
         agent can ``df.to_csv(f"{AGORA_OUTPUT_DIR}/x.csv")`` without an
         ``import os``).  Subsequent executes return empty; the kernel
         already has these set.
+
+        Scoped to the kernel rather than the session because both live in the
+        kernel process: if the session's kernel is rebuilt, the replacement
+        starts with a blank namespace and needs the preamble again.
         """
         if self.is_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_OUTPUTS):
             return ""
