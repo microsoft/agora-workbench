@@ -88,6 +88,46 @@ data = pd.read_parquet("<blob>abc123</blob>")
 # data = pd.read_parquet(Path("/cache/assets/abc123.parquet"))
 ```
 
+### Custom artifact resolution
+
+The `<blob>id</blob>` payload is an opaque catalog identifier. By default it is looked up in an Azure AI Search index (`DATA_LAKE_SEARCH_ENDPOINT` / `DATA_LAKE_BLOB_DETAILS_INDEX`). Deployments whose catalog is a manifest file, a database, a REST service, or an offline test fixture can supply their own resolver instead:
+
+```python
+from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
+
+
+class ManifestArtifactResolver:
+    """Resolve artifact ids from a preloaded manifest."""
+
+    def __init__(self, manifest: dict[str, str]):
+        self._manifest = manifest
+
+    async def resolve(self, artifact_id: str) -> str:
+        if artifact_id not in self._manifest:
+            raise ValueError(f"Unknown artifact: {artifact_id}")
+        return self._manifest[artifact_id]
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        return None if self._manifest else "The asset manifest is empty."
+
+
+manifest = {
+    "abc123": "https://acct.blob.core.windows.net/datasets/hourly_wind.parquet",
+    "def456": "/mnt/data/reference/grid_topology.json",
+}
+
+manager = DataLakeDataManager(artifact_resolver=ManifestArtifactResolver(manifest))
+```
+
+`resolve` returns any qualified name a registered fetcher can handle (`https://`, `abfss://`, `az://`, or a local path). `unavailable_reason` returns `None` when resolution is ready, or a short operator-facing explanation otherwise — it is folded into the asset-tag guidance the agent sees, so the guidance stays truthful for whichever backend is in use.
+
+The `ArtifactResolver` protocol (importable from `agora_workbench.code_execution.data_access` for type annotations) is structural, so a resolver does not need to subclass it.
+
+Resolvers may also define `async def aclose(self)` to release backend clients; the manager calls it during cleanup when present. A resolver you supply is used as-is and is not handed the manager's Azure credential, so it must arrange its own authentication.
+
+Omitting `artifact_resolver` preserves the Azure AI Search behavior exactly.
+
 ## Publishing artifacts
 
 Tools and code execution can produce output files. Configure publishers to make these available:
