@@ -1844,8 +1844,7 @@ domain's state vocabulary with descriptions and affordances.</p>
 
                   <details class="mkdocstrings-source">
                     <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-                    <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-144">144</a></span>
-<span class="normal"><a href="#__codelineno-0-145">145</a></span>
+                    <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-145">145</a></span>
 <span class="normal"><a href="#__codelineno-0-146">146</a></span>
 <span class="normal"><a href="#__codelineno-0-147">147</a></span>
 <span class="normal"><a href="#__codelineno-0-148">148</a></span>
@@ -2002,55 +2001,54 @@ domain's state vocabulary with descriptions and affordances.</p>
 <span class="normal"><a href="#__codelineno-0-299">299</a></span>
 <span class="normal"><a href="#__codelineno-0-300">300</a></span>
 <span class="normal"><a href="#__codelineno-0-301">301</a></span>
-<span class="normal"><a href="#__codelineno-0-302">302</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-144" name="__codelineno-0-144"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-0-145" name="__codelineno-0-145"></a>    <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-146" name="__codelineno-0-146"></a>    <span class="n">server_config</span><span class="p">:</span> <span class="n">ServerConfig</span><span class="p">,</span>
-<a id="__codelineno-0-147" name="__codelineno-0-147"></a>    <span class="n">tool_registry</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ToolRegistry&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-148" name="__codelineno-0-148"></a>    <span class="n">session_manager</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;SessionManager&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-149" name="__codelineno-0-149"></a>    <span class="n">auth_config</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;AuthConfig&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-150" name="__codelineno-0-150"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-151" name="__codelineno-0-151"></a>    <span class="n">tool_search_backend</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ToolSearchBackend&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-152" name="__codelineno-0-152"></a>    <span class="n">publishers</span><span class="p">:</span> <span class="s2">&quot;Optional[list[AssetPublisher]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-153" name="__codelineno-0-153"></a>    <span class="n">skills</span><span class="p">:</span> <span class="s2">&quot;Optional[list[Skill]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-154" name="__codelineno-0-154"></a>    <span class="n">states</span><span class="p">:</span> <span class="s2">&quot;Optional[list[State]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-155" name="__codelineno-0-155"></a><span class="p">):</span>
-<a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="sd">    Initialize the code execution server.</span>
-<a id="__codelineno-0-158" name="__codelineno-0-158"></a>
-<a id="__codelineno-0-159" name="__codelineno-0-159"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-160" name="__codelineno-0-160"></a><span class="sd">        server_config: Server configuration (environment, assets, execution policy, features)</span>
-<a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="sd">        tool_registry: Optional ToolRegistry containing domain-specific tools</span>
-<a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="sd">        session_manager: Optional SessionManager for stateful tool support (auto-created with defaults if None)</span>
-<a id="__codelineno-0-163" name="__codelineno-0-163"></a><span class="sd">        auth_config: Authentication configuration providing token validation,</span>
-<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="sd">            identity extraction, and credential provisioning.</span>
-<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">        working_dir: Working directory for code execution (None = temp dir per execution)</span>
-<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">        tool_search_backend: Optional pre-configured ToolSearchBackend instance.</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">            If provided, this backend is used instead of creating one from config.</span>
-<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">            Enables custom search backends (e.g. vector DB, Elasticsearch) without</span>
-<a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">            modifying the built-in factory.</span>
-<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">        publishers: Optional list of :class:`~.data_access.AssetPublisher` instances</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">            that the ``{name}_send`` MCP tool will dispatch to.</span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">            Publishers are routed by ``destination_name``; the first match wins.</span>
-<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">            A :class:`~.data_access.GuiPublisher` is always prepended (see</span>
-<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">            ``__init__``) so the send tool is registered unconditionally and</span>
-<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">            the ``&quot;user&quot;`` destination works even when this list is ``None``.</span>
-<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">        skills: Optional list of :class:`~.skills.Skill` objects for workflow planning</span>
-<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">            and skill loading. Use :func:`~.skills.discover_skills` to scan a directory.</span>
-<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">        states: Optional list of :class:`~.tool_registry.State` objects defining the</span>
-<a id="__codelineno-0-179" name="__codelineno-0-179"></a><span class="sd">            domain&#39;s state vocabulary with descriptions and affordances.</span>
-<a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-181" name="__codelineno-0-181"></a>    <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
-<a id="__codelineno-0-182" name="__codelineno-0-182"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">server_config</span> <span class="o">=</span> <span class="n">server_config</span>
-<a id="__codelineno-0-183" name="__codelineno-0-183"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">tool_registry</span> <span class="o">=</span> <span class="n">tool_registry</span>
-<a id="__codelineno-0-184" name="__codelineno-0-184"></a>
-<a id="__codelineno-0-185" name="__codelineno-0-185"></a>    <span class="c1"># Sidecar processes (e.g. a shared model service). Lazily started in</span>
-<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># _startup and stopped in _shutdown; no-op when none are declared.</span>
-<a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_sidecar_manager</span> <span class="o">=</span> <span class="n">SidecarManager</span><span class="p">(</span><span class="n">server_config</span><span class="p">)</span>
-<a id="__codelineno-0-188" name="__codelineno-0-188"></a>
-<a id="__codelineno-0-189" name="__codelineno-0-189"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">skills</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="s2">&quot;Skill&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">skills</span> <span class="ow">or</span> <span class="p">[])</span>
-<a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">states</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="s2">&quot;State&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">states</span> <span class="ow">or</span> <span class="p">[])</span>
-<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_state_affordances</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">token</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">affordances</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">states</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">affordances</span><span class="p">}</span>
-<a id="__codelineno-0-192" name="__codelineno-0-192"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_tool_proxies_injected</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+<span class="normal"><a href="#__codelineno-0-302">302</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-145" name="__codelineno-0-145"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+<a id="__codelineno-0-146" name="__codelineno-0-146"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-147" name="__codelineno-0-147"></a>    <span class="n">server_config</span><span class="p">:</span> <span class="n">ServerConfig</span><span class="p">,</span>
+<a id="__codelineno-0-148" name="__codelineno-0-148"></a>    <span class="n">tool_registry</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ToolRegistry&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-149" name="__codelineno-0-149"></a>    <span class="n">session_manager</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;SessionManager&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-150" name="__codelineno-0-150"></a>    <span class="n">auth_config</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;AuthConfig&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-151" name="__codelineno-0-151"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-152" name="__codelineno-0-152"></a>    <span class="n">tool_search_backend</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;ToolSearchBackend&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-153" name="__codelineno-0-153"></a>    <span class="n">publishers</span><span class="p">:</span> <span class="s2">&quot;Optional[list[AssetPublisher]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-154" name="__codelineno-0-154"></a>    <span class="n">skills</span><span class="p">:</span> <span class="s2">&quot;Optional[list[Skill]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-155" name="__codelineno-0-155"></a>    <span class="n">states</span><span class="p">:</span> <span class="s2">&quot;Optional[list[State]]&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-156" name="__codelineno-0-156"></a><span class="p">):</span>
+<a id="__codelineno-0-157" name="__codelineno-0-157"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-158" name="__codelineno-0-158"></a><span class="sd">    Initialize the code execution server.</span>
+<a id="__codelineno-0-159" name="__codelineno-0-159"></a>
+<a id="__codelineno-0-160" name="__codelineno-0-160"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-161" name="__codelineno-0-161"></a><span class="sd">        server_config: Server configuration (environment, assets, execution policy, features)</span>
+<a id="__codelineno-0-162" name="__codelineno-0-162"></a><span class="sd">        tool_registry: Optional ToolRegistry containing domain-specific tools</span>
+<a id="__codelineno-0-163" name="__codelineno-0-163"></a><span class="sd">        session_manager: Optional SessionManager for stateful tool support (auto-created with defaults if None)</span>
+<a id="__codelineno-0-164" name="__codelineno-0-164"></a><span class="sd">        auth_config: Authentication configuration providing token validation,</span>
+<a id="__codelineno-0-165" name="__codelineno-0-165"></a><span class="sd">            identity extraction, and credential provisioning.</span>
+<a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="sd">        working_dir: Working directory for code execution (None = temp dir per execution)</span>
+<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="sd">        tool_search_backend: Optional pre-configured ToolSearchBackend instance.</span>
+<a id="__codelineno-0-168" name="__codelineno-0-168"></a><span class="sd">            If provided, this backend is used instead of creating one from config.</span>
+<a id="__codelineno-0-169" name="__codelineno-0-169"></a><span class="sd">            Enables custom search backends (e.g. vector DB, Elasticsearch) without</span>
+<a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="sd">            modifying the built-in factory.</span>
+<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="sd">        publishers: Optional list of :class:`~.data_access.AssetPublisher` instances</span>
+<a id="__codelineno-0-172" name="__codelineno-0-172"></a><span class="sd">            that the ``{name}_send`` MCP tool will dispatch to.</span>
+<a id="__codelineno-0-173" name="__codelineno-0-173"></a><span class="sd">            Publishers are routed by ``destination_name``; the first match wins.</span>
+<a id="__codelineno-0-174" name="__codelineno-0-174"></a><span class="sd">            A :class:`~.data_access.GuiPublisher` is always prepended (see</span>
+<a id="__codelineno-0-175" name="__codelineno-0-175"></a><span class="sd">            ``__init__``) so the send tool is registered unconditionally and</span>
+<a id="__codelineno-0-176" name="__codelineno-0-176"></a><span class="sd">            the ``&quot;user&quot;`` destination works even when this list is ``None``.</span>
+<a id="__codelineno-0-177" name="__codelineno-0-177"></a><span class="sd">        skills: Optional list of :class:`~.skills.Skill` objects for workflow planning</span>
+<a id="__codelineno-0-178" name="__codelineno-0-178"></a><span class="sd">            and skill loading. Use :func:`~.skills.discover_skills` to scan a directory.</span>
+<a id="__codelineno-0-179" name="__codelineno-0-179"></a><span class="sd">        states: Optional list of :class:`~.tool_registry.State` objects defining the</span>
+<a id="__codelineno-0-180" name="__codelineno-0-180"></a><span class="sd">            domain&#39;s state vocabulary with descriptions and affordances.</span>
+<a id="__codelineno-0-181" name="__codelineno-0-181"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-182" name="__codelineno-0-182"></a>    <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span>
+<a id="__codelineno-0-183" name="__codelineno-0-183"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">server_config</span> <span class="o">=</span> <span class="n">server_config</span>
+<a id="__codelineno-0-184" name="__codelineno-0-184"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">tool_registry</span> <span class="o">=</span> <span class="n">tool_registry</span>
+<a id="__codelineno-0-185" name="__codelineno-0-185"></a>
+<a id="__codelineno-0-186" name="__codelineno-0-186"></a>    <span class="c1"># Sidecar processes (e.g. a shared model service). Lazily started in</span>
+<a id="__codelineno-0-187" name="__codelineno-0-187"></a>    <span class="c1"># _startup and stopped in _shutdown; no-op when none are declared.</span>
+<a id="__codelineno-0-188" name="__codelineno-0-188"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_sidecar_manager</span> <span class="o">=</span> <span class="n">SidecarManager</span><span class="p">(</span><span class="n">server_config</span><span class="p">)</span>
+<a id="__codelineno-0-189" name="__codelineno-0-189"></a>
+<a id="__codelineno-0-190" name="__codelineno-0-190"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">skills</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="s2">&quot;Skill&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">skills</span> <span class="ow">or</span> <span class="p">[])</span>
+<a id="__codelineno-0-191" name="__codelineno-0-191"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">states</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="s2">&quot;State&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">states</span> <span class="ow">or</span> <span class="p">[])</span>
+<a id="__codelineno-0-192" name="__codelineno-0-192"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_state_affordances</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span><span class="n">s</span><span class="o">.</span><span class="n">token</span><span class="p">:</span> <span class="n">s</span><span class="o">.</span><span class="n">affordances</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">states</span> <span class="k">if</span> <span class="n">s</span><span class="o">.</span><span class="n">affordances</span><span class="p">}</span>
 <a id="__codelineno-0-193" name="__codelineno-0-193"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_tool_search_backends</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
 <a id="__codelineno-0-194" name="__codelineno-0-194"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_custom_tool_search_backend</span> <span class="o">=</span> <span class="n">tool_search_backend</span>
 <a id="__codelineno-0-195" name="__codelineno-0-195"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_publishers</span><span class="p">:</span> <span class="s2">&quot;list[AssetPublisher]&quot;</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">publishers</span> <span class="ow">or</span> <span class="p">[])</span>
