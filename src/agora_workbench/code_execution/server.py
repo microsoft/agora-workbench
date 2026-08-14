@@ -37,6 +37,7 @@ from .auth.base import AuthConfig
 from agora_workbench.base import BaseMCPServer
 from .data_access import AssetResolutionMiddleware
 from .sessions import (
+    KERNEL_BOOTSTRAP_TOOL_PROXIES,
     MaxSessionsReachedError,
     SessionConfig,
     SessionManager,
@@ -189,7 +190,6 @@ class CodeExecutionServer(BaseMCPServer):
         self.skills: list["Skill"] = list(skills or [])
         self.states: list["State"] = list(states or [])
         self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
-        self._tool_proxies_injected: set[str] = set()
         self._tool_search_backends: list[Any] = []
         self._custom_tool_search_backend = tool_search_backend
         self._publishers: "list[AssetPublisher]" = list(publishers or [])
@@ -993,14 +993,16 @@ class CodeExecutionServer(BaseMCPServer):
         """
         Inject instrumented tool proxy functions into the kernel for a session.
 
-        This is idempotent — it checks whether proxies have already been injected
-        for the given session and skips if so.
+        This is idempotent — injection state is recorded against the session's
+        current *kernel generation*, so repeated calls against a live kernel
+        are no-ops, while a kernel that has been restarted (idle cleanup,
+        timeout recovery, explicit session close) is re-injected rather than
+        being left without the proxy helpers.
         """
-        if session_id in self._tool_proxies_injected:
+        if not self.tool_registry or not self.tool_registry.tools:
             return
 
-        if not self.tool_registry or not self.tool_registry.tools:
-            self._tool_proxies_injected.add(session_id)
+        if self.session_manager.is_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_TOOL_PROXIES):
             return
 
         LOGGER.info(f"Injecting tool proxies into session {session_id}")
@@ -1026,8 +1028,20 @@ class CodeExecutionServer(BaseMCPServer):
             LOGGER.error(f"Failed to inject list_tools: {list_result.error}")
             raise RuntimeError(f"Tool proxy injection failed (list_tools): {list_result.error}")
 
-        self._tool_proxies_injected.add(session_id)
+        self.session_manager.mark_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_TOOL_PROXIES)
         LOGGER.info(f"Successfully injected {len(self.tool_registry.tools)} tool proxies into session {session_id}")
+
+    def _tool_tracing_active(self, session_id: Optional[str]) -> bool:
+        """Whether the session's current kernel has live, traceable tool proxies.
+
+        Guards the trace-flush step: the kernel-side ``ToolCallLog`` only
+        exists while the proxies injected into *this* kernel generation are
+        still resident, so a rebuilt kernel reports no active tracing until
+        :meth:`_inject_tool_proxies` runs against it again.
+        """
+        if not self.tool_registry or not self.tool_registry.tools or not session_id:
+            return False
+        return self.session_manager.is_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_TOOL_PROXIES)
 
     async def _execute_code(self, code: str, timeout: int) -> CodeExecutionResult:
         """
@@ -1147,12 +1161,7 @@ class CodeExecutionServer(BaseMCPServer):
         execution_result = self.postprocess_result(execution_result)
 
         # Flush tool-call trace records, matching the sync path
-        if (
-            self.tool_registry
-            and self.tool_registry.tools
-            and session
-            and session.session_id in self._tool_proxies_injected
-        ):
+        if self._tool_tracing_active(session.session_id if session else None):
             try:
                 trace_result = await self._execute_code(FLUSH_SNIPPET, timeout=10)
                 if trace_result.success and trace_result.stdout:
@@ -1182,14 +1191,9 @@ class CodeExecutionServer(BaseMCPServer):
         result = await self._execute_code(code, timeout)
 
         # Only attempt trace extraction if the tool registry exists
-        # and proxies were injected (otherwise no tools to trace)
+        # and proxies are live in the current kernel (otherwise no tools to trace)
         session = get_current_session()
-        if (
-            self.tool_registry
-            and self.tool_registry.tools
-            and session
-            and session.session_id in self._tool_proxies_injected
-        ):
+        if self._tool_tracing_active(session.session_id if session else None):
             try:
                 trace_result = await self._execute_code(FLUSH_SNIPPET, timeout=10)
                 if trace_result.success and trace_result.stdout:

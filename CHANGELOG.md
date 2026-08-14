@@ -53,6 +53,15 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Kernel bootstrap state is now keyed to the kernel process rather than the session id, so a session whose
+  kernel is rebuilt gets its tool proxies and `AGORA_OUTPUT_DIR` preamble re-injected. Previously a session id
+  outliving its kernel — after an idle-kernel cleanup, a request timeout, or an explicit close followed by reuse
+  of the same logical id — left the replacement kernel bootstrapped in name only: the injection latch still held
+  the session id, so no proxies were installed and every subsequent call to a tool helper raised `NameError`,
+  while trace flushing tried to read a `ToolCallLog` that no longer existed. `SessionManager` now stamps each
+  kernel with a unique, never-reused generation id and records bootstrap steps against it, so every teardown
+  path — including any added later — invalidates that state without having to know it exists
+  ([#311](https://github.com/microsoft/agora-workbench/issues/311)).
 - `{name}_check_batch` and `{name}_cancel_batch` failed with `404: Batch '<id>' not found` for every valid batch,
   leaving results from `{name}_parallel_execute` unreachable. Both tools resolve the owning session from the batch
   status payload, which never carried `parent_session_id`, so the ownership check always failed. Because that

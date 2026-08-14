@@ -911,13 +911,29 @@ class TestArtifactPipeline:
         assert manager.get_artifact_record(session_id, token) is None
 
     @pytest.mark.unit
-    def test_outputs_preamble_runs_once_per_session(self, tmp_path, monkeypatch):
+    def test_outputs_preamble_runs_once_per_kernel(self, tmp_path, monkeypatch):
         manager = self._make_manager(tmp_path, monkeypatch)
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        # Stand in for a started kernel; _prepare_outputs_preamble is only ever
+        # reached after _get_or_create_kernel has stamped a generation.
+        manager._assign_kernel_generation(session_id)
         first = manager._prepare_outputs_preamble(session_id)
         second = manager._prepare_outputs_preamble(session_id)
         assert "AGORA_OUTPUT_DIR" in first
         assert second == ""
+
+    @pytest.mark.unit
+    def test_outputs_preamble_reruns_after_kernel_restart(self, tmp_path, monkeypatch):
+        """A rebuilt kernel is a blank namespace, so the preamble must be re-emitted."""
+        manager = self._make_manager(tmp_path, monkeypatch)
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager._assign_kernel_generation(session_id)
+        assert "AGORA_OUTPUT_DIR" in manager._prepare_outputs_preamble(session_id)
+        assert manager._prepare_outputs_preamble(session_id) == ""
+
+        # Same session id, new kernel process.
+        manager._assign_kernel_generation(session_id)
+        assert "AGORA_OUTPUT_DIR" in manager._prepare_outputs_preamble(session_id)
 
     @pytest.mark.unit
     def test_cleanup_drops_state_and_removes_dir(self, tmp_path, monkeypatch):

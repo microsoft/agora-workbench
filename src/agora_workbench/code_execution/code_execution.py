@@ -548,7 +548,7 @@ async def _publish_job_finished_when_done(server: "CodeExecutionServer", session
     # Flush tool-call trace from the kernel before publishing the event,
     # so the activity UI can display which domain tools were invoked.
     tool_calls: list[dict] = []
-    if server.tool_registry and server.tool_registry.tools and session_id in server._tool_proxies_injected:
+    if server._tool_tracing_active(session_id):
         from .tool_proxy import FLUSH_SNIPPET
 
         try:
@@ -916,7 +916,7 @@ def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaita
         """
         from .tool_proxy import FLUSH_SNIPPET
 
-        if not (server.tool_registry and server.tool_registry.tools and session_id in server._tool_proxies_injected):
+        if not server._tool_tracing_active(session_id):
             return []
         try:
             trace_result = await server.session_manager.execute_code_for_session(

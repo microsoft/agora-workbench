@@ -76,6 +76,12 @@ LOGGER = logging.getLogger(__name__)
 _MAX_COMPLETED_JOBS = 200
 _COMPLETED_JOB_TTL_SECONDS = 3600.0  # 1 hour
 
+# Well-known keys for :meth:`SessionManager.mark_kernel_bootstrapped`.  Each
+# names a piece of one-time setup that lives in the kernel process and is
+# therefore invalidated whenever the kernel is rebuilt.
+KERNEL_BOOTSTRAP_OUTPUTS = "outputs_preamble"
+KERNEL_BOOTSTRAP_TOOL_PROXIES = "tool_proxies"
+
 # Artifact pipeline: each session gets a dedicated outputs subdirectory inside
 # the container/host.  Files written there during an execute become artifacts:
 # the session manager registers them with a UUID token, the MCP server exposes
@@ -230,12 +236,22 @@ class SessionManager:
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
-        # Artifact pipeline state.  ``_session_artifacts`` is the
-        # token -> record map used by the HTTP download endpoint;
-        # ``_kernel_outputs_initialized`` tracks which kernels have already
-        # received the AGORA_OUTPUT_DIR preamble so we only inject it once.
+        # Artifact pipeline state: the token -> record map used by the HTTP
+        # download endpoint.
         self._session_artifacts: dict[str, dict[str, _ArtifactRecord]] = {}
-        self._kernel_outputs_initialized: set[str] = set()
+
+        # Kernel bootstrap tracking.  Every kernel process gets a globally
+        # unique, monotonically increasing *generation* id when it is started.
+        # One-time bootstrap work (the AGORA_OUTPUT_DIR preamble, tool proxy
+        # injection, ...) is recorded against that generation rather than
+        # against the session id, so a session whose kernel is rebuilt is
+        # re-bootstrapped automatically.  Because generations are never
+        # reused, correctness does not depend on any teardown path
+        # remembering to clear this state -- the entries below are dropped in
+        # :meth:`_shutdown_kernel` purely to bound memory.
+        self._kernel_generation_seq: int = 0
+        self._kernel_generations: dict[str, int] = {}  # session_id -> generation
+        self._kernel_bootstrap_state: dict[int, set[str]] = {}  # generation -> completed keys
 
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
@@ -516,9 +532,66 @@ class SessionManager:
         self._kernels[session_id] = (kernel_manager, kernel_client)
         self._kernel_last_used[session_id] = time.time()
         self._kernel_tokens[session_id] = user_token
+        self._assign_kernel_generation(session_id)
 
         LOGGER.info(f"Kernel started for session {session_id}")
         return kernel_manager, kernel_client
+
+    def _assign_kernel_generation(self, session_id: str) -> int:
+        """Stamp a freshly started kernel with a new, never-reused generation id."""
+        self._kernel_generation_seq += 1
+        generation = self._kernel_generation_seq
+        previous = self._kernel_generations.get(session_id)
+        if previous is not None:
+            self._kernel_bootstrap_state.pop(previous, None)
+        self._kernel_generations[session_id] = generation
+        return generation
+
+    def _discard_kernel_generation(self, session_id: str) -> None:
+        """Forget the session's kernel generation and its bootstrap record.
+
+        Memory hygiene only: generation ids are never reused, so a stale entry
+        can never be mistaken for a live kernel's.
+        """
+        generation = self._kernel_generations.pop(session_id, None)
+        if generation is not None:
+            self._kernel_bootstrap_state.pop(generation, None)
+
+    def get_kernel_generation(self, session_id: str) -> Optional[int]:
+        """Return the generation id of the session's current kernel.
+
+        Generation ids are globally unique and monotonically increasing across
+        the lifetime of this manager: restarting a session's kernel always
+        yields a strictly greater id, and an id is never reused. Callers can
+        therefore cache per-kernel state keyed on this value and detect a
+        rebuilt kernel by comparing against the value they captured.
+
+        Returns ``None`` when the session has no live kernel.
+        """
+        return self._kernel_generations.get(session_id)
+
+    def is_kernel_bootstrapped(self, session_id: str, key: str) -> bool:
+        """Whether ``key`` has been completed against the session's *current* kernel.
+
+        Returns ``False`` when the session has no kernel, or when its kernel
+        has been rebuilt since the bootstrap step ran.
+        """
+        generation = self._kernel_generations.get(session_id)
+        if generation is None:
+            return False
+        return key in self._kernel_bootstrap_state.get(generation, frozenset())
+
+    def mark_kernel_bootstrapped(self, session_id: str, key: str) -> bool:
+        """Record that ``key`` has been completed against the current kernel.
+
+        Returns ``False`` (and records nothing) when the session has no live
+        kernel, so the caller's work will be retried against the next one.
+        """
+        generation = self._kernel_generations.get(session_id)
+        if generation is None:
+            return False
+        self._kernel_bootstrap_state.setdefault(generation, set()).add(key)
+        return True
 
     def _get_running_job_for_session(self, session_id: str) -> Optional[str]:
         """Return a running background job id for the session, if any."""
@@ -594,18 +667,22 @@ class SessionManager:
         return _OUTPUTS_BASE_DIR / session_id
 
     def _prepare_outputs_preamble(self, session_id: str) -> str:
-        """Inject AGORA_OUTPUT_DIR setup into the kernel once per session.
+        """Inject AGORA_OUTPUT_DIR setup into the kernel once per kernel.
 
         Sets both the env var (so subprocess and library code see it) and a
         bare ``AGORA_OUTPUT_DIR`` symbol in the kernel namespace (so the
         agent can ``df.to_csv(f"{AGORA_OUTPUT_DIR}/x.csv")`` without an
         ``import os``).  Subsequent executes return empty; the kernel
         already has these set.
+
+        Scoped to the kernel rather than the session because both live in the
+        kernel process: if the session's kernel is rebuilt, the replacement
+        starts with a blank namespace and needs the preamble again.
         """
-        if session_id in self._kernel_outputs_initialized:
+        if self.is_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_OUTPUTS):
             return ""
         outputs_dir = str(self._get_outputs_dir(session_id))
-        self._kernel_outputs_initialized.add(session_id)
+        self.mark_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_OUTPUTS)
         return (
             "import os as __agora_os__\n"
             f"__agora_os__.environ['AGORA_OUTPUT_DIR'] = {outputs_dir!r}\n"
@@ -744,7 +821,6 @@ class SessionManager:
     def _cleanup_session_artifacts(self, session_id: str) -> None:
         """Drop the token map and remove the on-disk outputs dir."""
         self._session_artifacts.pop(session_id, None)
-        self._kernel_outputs_initialized.discard(session_id)
         outputs_dir = self._get_outputs_dir(session_id)
         if outputs_dir.exists():
             try:
@@ -1469,6 +1545,7 @@ class SessionManager:
             del self._kernel_last_used[session_id]
             self._kernel_tokens.pop(session_id, None)
             self._kernel_execute_locks.pop(session_id, None)
+            self._discard_kernel_generation(session_id)
             self._cleanup_session_artifacts(session_id)
 
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
