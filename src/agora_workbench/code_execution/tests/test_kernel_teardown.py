@@ -448,6 +448,27 @@ class TestNoRunningLoop:
 
         assert not [r for r in caplog.records if "no running event loop" in r.getMessage()]
 
+    def test_leaked_kernel_is_still_reclaimable_from_async_code(self, manager, caplog):
+        """The warning tells operators the kernel is recoverable via
+        ``aclose_session``. That promise is only safe to print because the
+        kernel stays registered under its session id -- teardown pops
+        ``_kernels`` inside ``_shutdown_kernel``, which never ran here. If a
+        future change dropped the registration alongside the session state,
+        the advice would send people after a kernel nothing can reach."""
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+
+        with caplog.at_level(logging.WARNING):
+            manager.close_session(session_id)
+
+        assert session_id in manager._kernels, "the leaked kernel must remain reachable for recovery"
+        assert any(f"aclose_session('{session_id}')" in r.getMessage() for r in caplog.records), (
+            "the warning should name the exact recovery call, not just the method"
+        )
+
+        asyncio.run(manager.aclose_session(session_id))
+        assert session_id not in manager._kernels, "the documented recovery path did not reclaim the kernel"
+
 
 # ---------------------------------------------------------------------------
 # Batch cleanup does not report success while kernels are still resident

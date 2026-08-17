@@ -1628,10 +1628,13 @@ class SessionManager:
         except RuntimeError:
             LOGGER.warning(
                 "%s could not tear down the kernel for session %s: no running event loop. "
-                "The kernel process is still running and its session state has been removed, "
-                "so nothing will reclaim it. Drive SessionManager from async code: "
+                "The kernel process is still running and the session entry is about to be "
+                "dropped, so nothing will reclaim it automatically. It does stay registered "
+                "under that session id, so aclose_session(%r) from async code still tears it "
+                "down. Better, drive SessionManager from async code throughout: "
                 "aclose_session() waits for teardown, and close_session() returns the task to await.",
                 caller,
+                session_id,
                 session_id,
             )
             return None
