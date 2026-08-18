@@ -25,7 +25,7 @@ between MAF and the workbench; build the agent itself by following the
 - Docker — the chemistry server runs as a local container.
 - Agora Workbench and Microsoft Agent Framework installed from PyPI:
   ```bash
-  python -m pip install "agora-workbench==0.1.2" agent-framework
+  python -m pip install "agora-workbench==0.2.0" agent-framework
   ```
 
 ## Start the chemistry MCP server

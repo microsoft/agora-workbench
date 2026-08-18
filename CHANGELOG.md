@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-17
+
 ### Breaking
 
 - The connector CLI no longer falls back to no-op auth when no backend is configured. Starting without
@@ -89,6 +91,11 @@ changes that require action from existing users. Each entry there states who is 
 - Registered data access blob fetchers independently of Azure AI Search configuration, and allowed callers to
   provide a storage credential directly, so fully qualified blob URLs can be fetched without configuring artifact
   ID resolution ([#305](https://github.com/microsoft/agora-workbench/issues/305)).
+- The expired-session sweep now emits the same leaked-kernel warning as `close_session()` when it runs without a
+  running event loop, instead of dropping the kernel silently. Only the scheduling helper can distinguish having
+  nothing to tear down from having no loop to tear it down on, so the warning moved there and names the operation
+  that hit it. It is the background path where silence hurts most, since nothing is watching it
+  ([#317](https://github.com/microsoft/agora-workbench/pull/317)).
 
 ## [0.1.2] - 2026-08-05
 

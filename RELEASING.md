@@ -98,7 +98,7 @@ therefore `v0.1.1`; the existing `v0.1.0` tag remains unchanged and installable 
 
 The documentation workflow publishes changes from `main` as `dev`. Release documentation is published
 automatically: after the PyPI upload succeeds, `publish-pypi.yml` calls the documentation workflow with the
-release tag, so `/0.1.2/` and the matching aliases appear without any manual step.
+release tag, so `/0.2.0/` and the matching aliases appear without any manual step.
 
 Aliases are resolved from the published GitHub Releases:
 
@@ -150,7 +150,7 @@ Downstream projects should pin a compatible PyPI version:
 
 ```toml
 dependencies = [
-    "agora-workbench>=0.1.1,<0.2.0",
+    "agora-workbench>=0.2.0,<0.3.0",
 ]
 ```
 

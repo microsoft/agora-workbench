@@ -30,7 +30,7 @@ itself by following the [Copilot SDK docs](https://github.com/github/copilot-sdk
 - Docker — the chemistry server runs as a local container.
 - Agora Workbench and the GitHub Copilot SDK integration installed from PyPI:
   ```bash
-  python -m pip install "agora-workbench[copilot-sdk]==0.1.2"
+  python -m pip install "agora-workbench[copilot-sdk]==0.2.0"
   ```
 - Copilot auth set up (for when you actually run a session):
   ```bash

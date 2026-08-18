@@ -25,7 +25,7 @@ The UI groups events by session and shows them as expandable cards with the code
 
 ```bash
 # Install the deployment CLI and scaffold the UI:
-python -m pip install "agora-workbench==0.1.2"
+python -m pip install "agora-workbench==0.2.0"
 agora-workbench-deploy init --target activity-ui
 
 # Create the shared Docker network (one-time):
