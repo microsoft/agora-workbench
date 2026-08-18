@@ -19,6 +19,7 @@ See https://github.com/microsoft/agora-workbench/issues/314.
 import asyncio
 import logging
 import time
+from datetime import timedelta
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -414,8 +415,59 @@ class TestNoRunningLoop:
         messages = [r.getMessage() for r in caplog.records]
         assert any("no running event loop" in m for m in messages)
         assert any("aclose_session" in m for m in messages), "the warning should name the supported alternative"
+        assert any("close_session()" in m for m in messages), "the warning should name the operation that failed"
         # The session itself is still removed, as before.
         assert manager.storage.retrieve(session_id) is None
+
+    def test_expired_session_cleanup_outside_a_loop_warns_too(self, manager, caplog):
+        """The expiry sweep leaks a kernel in exactly the same way, and is a
+        *background* path -- nobody is watching it, so silence there
+        accumulates invisibly. It must be as loud as ``close_session``."""
+        manager.config.timeout = timedelta(seconds=-1)  # everything is already expired
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+
+        with caplog.at_level(logging.WARNING):
+            manager._cleanup_expired()
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("no running event loop" in m and session_id in m for m in messages), (
+            "expired-session cleanup silently leaked the kernel"
+        )
+        assert any("Expired-session cleanup" in m for m in messages), (
+            "the warning should name the sweep, not misattribute the leak to close_session()"
+        )
+
+    def test_no_warning_when_there_is_simply_no_kernel(self, manager, caplog):
+        """The benign ``None`` (nothing to tear down) must stay quiet, or the
+        warning becomes noise operators learn to ignore."""
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+
+        with caplog.at_level(logging.WARNING):
+            manager.close_session(session_id)
+
+        assert not [r for r in caplog.records if "no running event loop" in r.getMessage()]
+
+    def test_leaked_kernel_is_still_reclaimable_from_async_code(self, manager, caplog):
+        """The warning tells operators the kernel is recoverable via
+        ``aclose_session``. That promise is only safe to print because the
+        kernel stays registered under its session id -- teardown pops
+        ``_kernels`` inside ``_shutdown_kernel``, which never ran here. If a
+        future change dropped the registration alongside the session state,
+        the advice would send people after a kernel nothing can reach."""
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+
+        with caplog.at_level(logging.WARNING):
+            manager.close_session(session_id)
+
+        assert session_id in manager._kernels, "the leaked kernel must remain reachable for recovery"
+        assert any(f"aclose_session('{session_id}')" in r.getMessage() for r in caplog.records), (
+            "the warning should name the exact recovery call, not just the method"
+        )
+
+        asyncio.run(manager.aclose_session(session_id))
+        assert session_id not in manager._kernels, "the documented recovery path did not reclaim the kernel"
 
 
 # ---------------------------------------------------------------------------

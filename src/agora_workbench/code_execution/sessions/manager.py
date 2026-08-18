@@ -444,14 +444,7 @@ class SessionManager:
                 if job.task and not job.task.done():
                     job.task.cancel()
 
-        shutdown_task = self._schedule_kernel_shutdown(session_id)
-        if shutdown_task is None and session_id in self._kernels:
-            LOGGER.warning(
-                "close_session(%s) could not tear down the kernel: no running event loop. "
-                "The kernel process is still running and its session state has been removed. "
-                "Call aclose_session() from async code, or await close_session()'s returned task.",
-                session_id,
-            )
+        shutdown_task = self._schedule_kernel_shutdown(session_id, caller="close_session()")
 
         session = self.storage.retrieve(session_id)
 
@@ -1604,7 +1597,9 @@ class SessionManager:
         except Exception as e:
             LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
 
-    def _schedule_kernel_shutdown(self, session_id: str) -> "Optional[asyncio.Task[None]]":
+    def _schedule_kernel_shutdown(
+        self, session_id: str, *, caller: str = "close_session()"
+    ) -> "Optional[asyncio.Task[None]]":
         """Start teardown for a session's kernel, or join one already running.
 
         Returns the task so callers can await it, or ``None`` when there is no
@@ -1612,6 +1607,14 @@ class SessionManager:
         The task is kept in :attr:`_kernel_shutdown_tasks` for its lifetime so
         it cannot be garbage-collected mid-flight, and its failures are logged
         rather than surfacing as an unretrieved task exception.
+
+        Args:
+            session_id: Session whose kernel should be torn down.
+            caller: Operation name used in the no-running-loop warning. Only
+                this method can tell the two ``None`` results apart -- nothing
+                to tear down (benign) versus no loop to tear it down on (a
+                leak) -- so it owns the warning rather than each caller
+                re-deriving it.
         """
         existing = self._kernel_shutdown_tasks.get(session_id)
         if existing is not None and not existing.done():
@@ -1623,6 +1626,17 @@ class SessionManager:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            LOGGER.warning(
+                "%s could not tear down the kernel for session %s: no running event loop. "
+                "The kernel process is still running and the session entry is about to be "
+                "dropped, so nothing will reclaim it automatically. It does stay registered "
+                "under that session id, so aclose_session(%r) from async code still tears it "
+                "down. Better, drive SessionManager from async code throughout: "
+                "aclose_session() waits for teardown, and close_session() returns the task to await.",
+                caller,
+                session_id,
+                session_id,
+            )
             return None
 
         task = loop.create_task(self._shutdown_kernel(session_id))
@@ -1706,7 +1720,7 @@ class SessionManager:
 
         for session_id in expired:
             # Shutdown kernel first
-            self._schedule_kernel_shutdown(session_id)
+            self._schedule_kernel_shutdown(session_id, caller="Expired-session cleanup")
 
             session = self.storage.retrieve(session_id)
             if session:
