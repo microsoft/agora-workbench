@@ -8,7 +8,7 @@ The Agora Workbench library is available from PyPI, but this bundled example and
 assets. Clone the matching release before continuing:
 
 ```bash
-git clone --branch v0.1.2 --depth 1 https://github.com/microsoft/agora-workbench.git
+git clone --branch v0.2.0 --depth 1 https://github.com/microsoft/agora-workbench.git
 cd agora-workbench
 ```
 

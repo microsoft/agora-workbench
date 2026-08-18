@@ -5,7 +5,7 @@ Agora Workbench servers are deployed as Docker containers. The repository provid
 Install the deployment CLI from PyPI:
 
 ```bash
-python -m pip install "agora-workbench==0.1.2"
+python -m pip install "agora-workbench==0.2.0"
 ```
 
 ## Local development with Docker
@@ -27,7 +27,7 @@ docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
 
 The base image installs `agora-workbench` from PyPI, so it builds from your own
 project root — nothing is read from the build context. Pin a specific release
-with `--build-arg AGORA_WORKBENCH_VERSION=0.1.2`.
+with `--build-arg AGORA_WORKBENCH_VERSION=0.2.0`.
 
 !!! note "Building against a workbench checkout"
 
