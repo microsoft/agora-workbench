@@ -117,6 +117,19 @@ class TestUserTokenKernelPropagation:
         km.client = MagicMock(return_value=kc)
         return km, kc
 
+    @pytest.mark.asyncio
+    async def test_configured_kernel_name_is_used(self):
+        manager = SessionManager(kernel_name="tools-py-alpha")
+        km, kc = self._make_mock_kernel()
+
+        with patch(
+            "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+            return_value=km,
+        ) as mock_kernel_manager:
+            await manager._get_or_create_kernel("sess-kernel-name")
+
+        mock_kernel_manager.assert_called_once_with(kernel_name="tools-py-alpha")
+
     def _make_mock_kernel_client_with_capture(self):
         """Create a mock kernel client that captures execute() calls and times out on iopub."""
         captured_code: list[str] = []

@@ -122,7 +122,7 @@ async def source_server(
     server = _make_server("source", module_build_dir, module_work_dir / "source", publishers=[target_pub])
     (module_work_dir / "source").mkdir(exist_ok=True)
     await server._ensure_environment()
-    await server._register_kernel(kernel_name="tools-py")
+    await server._register_kernel(kernel_name=server.kernel_name)
     yield server
     try:
         for s in server.session_manager.list_sessions():
@@ -139,7 +139,7 @@ async def target_server(module_build_dir: Path, module_work_dir: Path) -> AsyncG
     server = _make_server("target", module_build_dir, module_work_dir / "target")
     (module_work_dir / "target").mkdir(exist_ok=True)
     await server._ensure_environment()
-    await server._register_kernel(kernel_name="tools-py")
+    await server._register_kernel(kernel_name=server.kernel_name)
     yield server
     try:
         for s in server.session_manager.list_sessions():
