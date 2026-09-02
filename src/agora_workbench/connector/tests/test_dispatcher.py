@@ -12,6 +12,12 @@ from agora_workbench.connector.dispatcher import DispatcherServer, _get_session_
 # Sample catalog that all identical workers return
 WORKER_CATALOG = {
     "server_name": "chemistry",
+    "execution": {
+        "mode": "adaptive",
+        "default_timeout": 21600,
+        "max_timeout": 86400,
+        "promotion_threshold_s": 45,
+    },
     "tools": [
         {
             "name": "execute_code",
@@ -165,6 +171,14 @@ class TestDispatcherCatalogSync:
         assert "worker-1" in server._upstream_catalogs
         assert "worker-2" in server._upstream_catalogs
         assert len(server._upstream_catalogs["worker-1"]) == 2
+        assert server._upstream_execution_settings["worker-2"]["default_timeout"] == 21600
+
+        server._setup_tools()
+        tools = await server.mcp.list_tools()
+        execute_code = next(t for t in tools if t.name == "execute_code")
+        timeout_schema = execute_code.parameters["properties"]["timeout"]
+        assert "configured default of 21600 seconds" in timeout_schema["description"]
+        assert "45-second promotion threshold" in timeout_schema["description"]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_second_worker(self, two_worker_config):

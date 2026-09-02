@@ -12,10 +12,11 @@ import logging
 import os
 import uuid
 from abc import abstractmethod
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 import httpx
 from fastmcp import Context, FastMCP
+from pydantic import Field
 
 from agora_workbench.base import BaseMCPServer
 from agora_workbench.code_execution.activity_publisher import ActivityPublisher
@@ -61,6 +62,7 @@ class ConnectorServer(BaseMCPServer):
         # Upstream state
         self._upstream_catalogs: dict[str, list[ToolDefinition]] = {}
         self._upstream_skills: dict[str, list[dict[str, Any]]] = {}
+        self._upstream_execution_settings: dict[str, dict[str, Any]] = {}
         self._upstream_sessions: dict[str, str] = {}  # upstream_name -> MCP session ID
 
         # Tool search
@@ -188,6 +190,11 @@ class ConnectorServer(BaseMCPServer):
         response = await client.get(base_url)
         response.raise_for_status()
         data = response.json()
+        execution_settings = data.get("execution")
+        if isinstance(execution_settings, dict):
+            self._upstream_execution_settings[upstream.name] = execution_settings
+        else:
+            self._upstream_execution_settings.pop(upstream.name, None)
 
         tools = []
         for tool_data in data.get("tools", []):
@@ -215,6 +222,34 @@ class ConnectorServer(BaseMCPServer):
             skills.append(skill_data)
 
         return tools, skills
+
+    def _annotate_execute_timeout(self, func: Any, upstream_name: str) -> None:
+        """Add discovered upstream timeout guidance to a proxy tool schema."""
+        settings = self._upstream_execution_settings.get(upstream_name, {})
+        default_timeout = settings.get("default_timeout")
+        max_timeout = settings.get("max_timeout")
+        execution_mode = settings.get("mode")
+        promotion_threshold = settings.get("promotion_threshold_s")
+
+        if isinstance(default_timeout, (int, float)):
+            description = (
+                f"Optional execution timeout in seconds. Omit this parameter to use the upstream's configured "
+                f"default of {default_timeout:g} seconds."
+            )
+        else:
+            description = (
+                "Optional execution timeout in seconds. Omit this parameter to use the upstream's configured default."
+            )
+
+        if isinstance(max_timeout, (int, float)):
+            description += f" Explicit values are capped at {max_timeout:g} seconds."
+        if execution_mode == "adaptive" and isinstance(promotion_threshold, (int, float)):
+            description += (
+                f" In adaptive mode, an explicit timeout must be greater than the "
+                f"{promotion_threshold:g}-second promotion threshold."
+            )
+
+        func.__annotations__["timeout"] = Annotated[int | None, Field(description=description)]
 
     @staticmethod
     def _matches_expose_filter(tool_name: str, patterns: list[str]) -> bool:

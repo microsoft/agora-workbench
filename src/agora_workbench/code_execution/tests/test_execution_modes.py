@@ -2,10 +2,12 @@
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from pydantic import ValidationError
 
+from ..code_execution import build_tool
 from ..code_execution_models import ServerConfig
 from ..sessions import set_current_session
 
@@ -79,6 +81,30 @@ class TestExecutionModeConfig:
             promotion_threshold_s=120.0,
         )
         assert config.promotion_threshold_s == 120.0
+
+    def test_adaptive_default_timeout_must_exceed_promotion_threshold(self):
+        with pytest.raises(ValidationError, match="default_timeout must be greater"):
+            ServerConfig(
+                name="t",
+                description="d",
+                type="uv",
+                dependency_file="numpy\n",
+                execution_mode="adaptive",
+                promotion_threshold_s=60,
+                default_timeout=60,
+            )
+
+    def test_adaptive_max_timeout_must_exceed_promotion_threshold(self):
+        with pytest.raises(ValidationError, match="max_timeout must be greater"):
+            ServerConfig(
+                name="t",
+                description="d",
+                type="uv",
+                dependency_file="numpy\n",
+                execution_mode="adaptive",
+                promotion_threshold_s=60,
+                max_timeout=60,
+            )
 
     def test_serialization_includes_execution_mode(self):
         config = ServerConfig(
@@ -167,6 +193,41 @@ async def test_async_only_mode_routes_through_background(test_server):
 # ============================================================================
 # adaptive execution mode — fast path (completes within threshold)
 # ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_adaptive_timeout_at_threshold_is_rejected_before_session_creation(test_server):
+    """A budget consumed at promotion time should fail with actionable guidance."""
+    original_mode = test_server.server_config.execution_mode
+    original_threshold = test_server.server_config.promotion_threshold_s
+    original_get_session = test_server._get_or_create_session
+    mock_get_session = AsyncMock()
+    test_server.server_config.execution_mode = "adaptive"
+    test_server.server_config.promotion_threshold_s = 5
+    test_server._get_or_create_session = mock_get_session
+    try:
+        execute_code = build_tool(test_server)
+        result = json.loads(await execute_code(None, "print('never runs')", timeout=5))
+    finally:
+        test_server.server_config.execution_mode = original_mode
+        test_server.server_config.promotion_threshold_s = original_threshold
+        test_server._get_or_create_session = original_get_session
+
+    assert result["success"] is False
+    assert "must be greater than the adaptive promotion threshold (5s)" in result["error"]
+    assert "Omit timeout to use the configured default" in result["error"]
+    mock_get_session.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_promoted_execution_rejects_impossible_timeout_directly(test_server):
+    with pytest.raises(ValueError, match="must be greater than promotion_threshold_s"):
+        await test_server.session_manager.start_promoted_execution_for_session(
+            session_id="unused",
+            code="print('never runs')",
+            timeout=5,
+            promotion_threshold_s=5,
+        )
 
 
 @pytest.mark.asyncio

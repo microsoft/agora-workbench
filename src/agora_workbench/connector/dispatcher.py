@@ -149,6 +149,10 @@ class DispatcherServer(ConnectorServer):
                     # Store catalog under all worker names (same tools)
                     for w in self.config.workers:
                         self._upstream_catalogs[w.name] = tools
+                        if worker.name in self._upstream_execution_settings:
+                            self._upstream_execution_settings[w.name] = dict(
+                                self._upstream_execution_settings[worker.name]
+                            )
                     self._discover_execute_tool_name(tools)
                     LOGGER.info(
                         "Fetched catalog from worker '%s': %d tools",
@@ -263,6 +267,7 @@ class DispatcherServer(ConnectorServer):
                 async with server._routing_lock:
                     server._active_calls[worker_name] = max(0, server._active_calls.get(worker_name, 1) - 1)
 
+        self._annotate_execute_timeout(execute_code_dispatcher, first_worker)
         self.mcp.tool(name=tool_name, description=desc)(execute_code_dispatcher)
 
     # ========================================================================

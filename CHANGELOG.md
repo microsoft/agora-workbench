@@ -12,6 +12,12 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Adaptive code execution now rejects timeouts at or below the background-promotion threshold with an actionable
+  error before creating a session, and adaptive server configuration rejects defaults or maximums that cannot
+  survive promotion. Code-execution catalogs now publish effective timeout settings so routers, gateways, and
+  dispatchers can tell callers to omit `timeout` for the upstream default and show the applicable maximum and
+  promotion threshold instead of exposing an unexplained nullable value
+  ([#322](https://github.com/microsoft/agora-workbench/issues/322)).
 - Code-execution servers now register and launch a server-specific Jupyter kernelspec instead of sharing the
   global `tools-py` name, preventing servers that share a home directory from silently executing code in each
   other's Python environments. Kernelspec registration checks now use Jupyter's configured search paths, so

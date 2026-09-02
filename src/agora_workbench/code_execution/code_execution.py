@@ -645,7 +645,10 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             code: Python code to execute
             description: One-sentence summary of what the code does (shown in
                 the activity UI). Optional but strongly recommended.
-            timeout: Execution timeout in seconds (max: {max_timeout})
+            timeout: Execution timeout in seconds (max: {max_timeout}). Omit
+                it to use the server's configured default. In adaptive mode,
+                an explicit timeout must be greater than the promotion
+                threshold.
             execution_session_id: Existing execution session to resume. Use the
                 ``session_id`` returned by an earlier execution or session
                 management tool. The caller must own the session. Unknown or
@@ -670,6 +673,19 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
         try:
             # Restore auth ContextVars using the MCP transport session id
             server._restore_auth_context_for_mcp_session(session_id)
+
+            if timeout <= 0:
+                raise ValueError("Timeout must be greater than 0 seconds.")
+            timeout = min(timeout, server.max_timeout)
+
+            execution_mode = server.server_config.execution_mode
+            promotion_threshold_s = server.server_config.promotion_threshold_s
+            if execution_mode == "adaptive" and timeout <= promotion_threshold_s:
+                raise ValueError(
+                    f"Timeout ({timeout}s) must be greater than the adaptive promotion threshold "
+                    f"({promotion_threshold_s}s). Omit timeout to use the configured default "
+                    f"of {server.default_timeout}s."
+                )
 
             if execution_session_id is not None:
                 if not execution_session_id:
@@ -727,18 +743,12 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
 
             LOGGER.info(f"Auto-extraction: {asset_counter} asset(s)")
 
-            # Clamp timeout to max
-            if timeout <= 0:
-                raise ValueError("Timeout must be greater than 0 seconds.")
-            timeout = min(timeout, server.max_timeout)
-
             LOGGER.info(
                 f"Executing code in {server.server_config.name} environment "
                 f"(session={session.session_id[:8]}, timeout={timeout}s, "
                 f"mode={server.server_config.execution_mode})"
             )
 
-            execution_mode = server.server_config.execution_mode
             check_tool_name = f"{server.server_config.name}_check_job"
 
             # --- async_only: always submit as background ---
