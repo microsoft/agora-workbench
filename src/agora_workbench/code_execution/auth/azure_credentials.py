@@ -190,9 +190,14 @@ def is_key_based_auth() -> bool:
 
 def _create_sync_credential_chain() -> ChainedTokenCredential:
     """Create the sync credential chain (Managed Identity -> CLI)."""
-    managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    managed_identity_client_id = _get_managed_identity_client_id()
+    managed_identity = (
+        ManagedIdentityCredential(client_id=managed_identity_client_id)
+        if managed_identity_client_id
+        else ManagedIdentityCredential()
+    )
     credentials = [
-        ManagedIdentityCredential(client_id=managed_identity_client_id),
+        managed_identity,
         AzureCliCredential(),
     ]
     return ChainedTokenCredential(*credentials)
@@ -200,9 +205,22 @@ def _create_sync_credential_chain() -> ChainedTokenCredential:
 
 def _create_async_credential_chain() -> AsyncChainedTokenCredential:
     """Create the async credential chain (Managed Identity -> MSAL cache)."""
-    managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    managed_identity_client_id = _get_managed_identity_client_id()
+    managed_identity = (
+        AsyncManagedIdentityCredential(client_id=managed_identity_client_id)
+        if managed_identity_client_id
+        else AsyncManagedIdentityCredential()
+    )
     credentials = [
-        AsyncManagedIdentityCredential(client_id=managed_identity_client_id),
+        managed_identity,
         MsalCacheCredential(),
     ]
     return AsyncChainedTokenCredential(*credentials)
+
+
+def _get_managed_identity_client_id() -> str | None:
+    """Return the configured managed identity client ID when non-empty."""
+    client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    if client_id is None:
+        return None
+    return client_id.strip() or None
