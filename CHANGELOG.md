@@ -12,6 +12,10 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Connector tools no longer duplicate serialized JSON responses in FastMCP `structuredContent`. Router, gateway,
+  and dispatcher tools now explicitly disable the synthesized scalar output schema, preserving the existing text
+  payload while avoiding a second escaped copy wrapped in a `result` field
+  ([#323](https://github.com/microsoft/agora-workbench/issues/323)).
 - Adaptive code execution now rejects timeouts at or below the background-promotion threshold with an actionable
   error before creating a session, and adaptive server configuration rejects defaults or maximums that cannot
   survive promotion. Code-execution catalogs now publish effective timeout settings so routers, gateways, and
