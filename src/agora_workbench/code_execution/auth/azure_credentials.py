@@ -35,10 +35,11 @@ from azure.identity import (
     get_bearer_token_provider,
 )
 from azure.identity.aio import (
-    AzureCliCredential as AsyncAzureCliCredential,
     ChainedTokenCredential as AsyncChainedTokenCredential,
     ManagedIdentityCredential as AsyncManagedIdentityCredential,
 )
+
+from agora_workbench.code_execution.data_access.credentials import MsalCacheCredential
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,11 +79,11 @@ def get_search_credential() -> SearchCredential:
     Get a credential for Azure AI Search clients.
 
     Checks for an API key first (via AZURE_SEARCH_API_KEY env var), then
-    falls back to Entra ID authentication (CLI -> Managed Identity chain).
+    falls back to Entra ID authentication (Managed Identity -> CLI chain).
 
     Returns:
         AzureKeyCredential if AZURE_SEARCH_API_KEY is set, otherwise a
-        ChainedTokenCredential (AzureCLI -> ManagedIdentity).
+        ChainedTokenCredential (ManagedIdentity -> AzureCLI).
     """
     api_key = os.getenv(AZURE_SEARCH_API_KEY_ENV)
     if api_key:
@@ -98,11 +99,11 @@ def get_search_credential_async() -> AsyncSearchCredential:
     Get an async credential for Azure AI Search clients.
 
     Checks for an API key first (via AZURE_SEARCH_API_KEY env var), then
-    falls back to Entra ID authentication (CLI -> Managed Identity chain).
+    falls back to Entra ID authentication (Managed Identity -> MSAL cache chain).
 
     Returns:
         AzureKeyCredential if AZURE_SEARCH_API_KEY is set, otherwise an
-        async ChainedTokenCredential (AzureCLI -> ManagedIdentity).
+        async ChainedTokenCredential (ManagedIdentity -> MsalCacheCredential).
     """
     api_key = os.getenv(AZURE_SEARCH_API_KEY_ENV)
     if api_key:
@@ -144,9 +145,9 @@ def get_token_provider(scope: str) -> Callable[[], str]:
     """
     Create an Entra ID token provider for Azure service authentication.
 
-    Uses a credential chain that tries Azure CLI first, then Managed Identity.
-    This allows the same code to work in local development (CLI) and deployed
-    environments (Managed Identity).
+    Uses a credential chain that tries Managed Identity first, then Azure CLI.
+    This avoids invoking the Azure CLI in deployed environments while preserving
+    it as a fallback for local development.
 
     Note: This function requires Entra ID authentication and does not support
     API key auth. It is used for services that require bearer tokens (e.g.,
@@ -188,20 +189,38 @@ def is_key_based_auth() -> bool:
 
 
 def _create_sync_credential_chain() -> ChainedTokenCredential:
-    """Create the standard sync credential chain (CLI -> Managed Identity)."""
-    managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    """Create the sync credential chain (Managed Identity -> CLI)."""
+    managed_identity_client_id = _get_managed_identity_client_id()
+    managed_identity = (
+        ManagedIdentityCredential(client_id=managed_identity_client_id)
+        if managed_identity_client_id
+        else ManagedIdentityCredential()
+    )
     credentials = [
+        managed_identity,
         AzureCliCredential(),
-        ManagedIdentityCredential(client_id=managed_identity_client_id),
     ]
     return ChainedTokenCredential(*credentials)
 
 
 def _create_async_credential_chain() -> AsyncChainedTokenCredential:
-    """Create the standard async credential chain (CLI -> Managed Identity)."""
-    managed_identity_client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    """Create the async credential chain (Managed Identity -> MSAL cache)."""
+    managed_identity_client_id = _get_managed_identity_client_id()
+    managed_identity = (
+        AsyncManagedIdentityCredential(client_id=managed_identity_client_id)
+        if managed_identity_client_id
+        else AsyncManagedIdentityCredential()
+    )
     credentials = [
-        AsyncAzureCliCredential(),
-        AsyncManagedIdentityCredential(client_id=managed_identity_client_id),
+        managed_identity,
+        MsalCacheCredential(),
     ]
     return AsyncChainedTokenCredential(*credentials)
+
+
+def _get_managed_identity_client_id() -> str | None:
+    """Return the configured managed identity client ID when non-empty."""
+    client_id = os.getenv("DEFAULT_IDENTITY_CLIENT_ID")
+    if client_id is None:
+        return None
+    return client_id.strip() or None

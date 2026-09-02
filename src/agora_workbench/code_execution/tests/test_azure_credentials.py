@@ -45,7 +45,7 @@ class TestGetSearchCredential:
     @patch("agora_workbench.code_execution.auth.azure_credentials.ManagedIdentityCredential")
     @patch("agora_workbench.code_execution.auth.azure_credentials.ChainedTokenCredential")
     def test_credential_chain_order(self, mock_chained, mock_managed, mock_cli):
-        """Credential chain should be CLI first, then Managed Identity."""
+        """Credential chain should be Managed Identity first, then CLI."""
         mock_cli_instance = MagicMock()
         mock_managed_instance = MagicMock()
         mock_cli.return_value = mock_cli_instance
@@ -54,8 +54,8 @@ class TestGetSearchCredential:
         get_search_credential()
 
         call_args = mock_chained.call_args[0]
-        assert call_args[0] == mock_cli_instance
-        assert call_args[1] == mock_managed_instance
+        assert call_args[0] == mock_managed_instance
+        assert call_args[1] == mock_cli_instance
 
     @pytest.mark.unit
     @patch.dict(
@@ -71,6 +71,16 @@ class TestGetSearchCredential:
         get_search_credential()
         mock_managed.assert_called_once_with(client_id="my-client-id")
 
+    @pytest.mark.unit
+    @patch.dict("os.environ", {"DEFAULT_IDENTITY_CLIENT_ID": "   "}, clear=True)
+    @patch("agora_workbench.code_execution.auth.azure_credentials.AzureCliCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.ManagedIdentityCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.ChainedTokenCredential")
+    def test_ignores_blank_managed_identity_client_id(self, mock_chained, mock_managed, mock_cli):
+        """Blank DEFAULT_IDENTITY_CLIENT_ID uses the system-assigned identity."""
+        get_search_credential()
+        mock_managed.assert_called_once_with()
+
 
 class TestGetSearchCredentialAsync:
     """Tests for get_search_credential_async."""
@@ -85,10 +95,10 @@ class TestGetSearchCredentialAsync:
 
     @pytest.mark.unit
     @patch.dict("os.environ", {}, clear=True)
-    @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncAzureCliCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.MsalCacheCredential")
     @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncManagedIdentityCredential")
     @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncChainedTokenCredential")
-    def test_returns_async_chained_credential_when_no_api_key(self, mock_chained, mock_managed, mock_cli):
+    def test_returns_async_chained_credential_when_no_api_key(self, mock_chained, mock_managed, mock_msal):
         """When no API key is set, returns async ChainedTokenCredential."""
         mock_credential = MagicMock()
         mock_chained.return_value = mock_credential
@@ -97,6 +107,34 @@ class TestGetSearchCredentialAsync:
 
         assert result == mock_credential
         mock_chained.assert_called_once()
+
+    @pytest.mark.unit
+    @patch.dict("os.environ", {}, clear=True)
+    @patch("agora_workbench.code_execution.auth.azure_credentials.MsalCacheCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncManagedIdentityCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncChainedTokenCredential")
+    def test_credential_chain_order(self, mock_chained, mock_managed, mock_msal):
+        """Async credential chain should be Managed Identity first, then MSAL cache."""
+        mock_managed_instance = MagicMock()
+        mock_msal_instance = MagicMock()
+        mock_managed.return_value = mock_managed_instance
+        mock_msal.return_value = mock_msal_instance
+
+        get_search_credential_async()
+
+        call_args = mock_chained.call_args[0]
+        assert call_args[0] == mock_managed_instance
+        assert call_args[1] == mock_msal_instance
+
+    @pytest.mark.unit
+    @patch.dict("os.environ", {"DEFAULT_IDENTITY_CLIENT_ID": " client-id "}, clear=True)
+    @patch("agora_workbench.code_execution.auth.azure_credentials.MsalCacheCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncManagedIdentityCredential")
+    @patch("agora_workbench.code_execution.auth.azure_credentials.AsyncChainedTokenCredential")
+    def test_normalizes_managed_identity_client_id(self, mock_chained, mock_managed, mock_msal):
+        """DEFAULT_IDENTITY_CLIENT_ID is stripped before use."""
+        get_search_credential_async()
+        mock_managed.assert_called_once_with(client_id="client-id")
 
 
 class TestIsKeyBasedAuth:

@@ -10,6 +10,14 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Fixed
+
+- Azure service credential chains now try Managed Identity before local-development credentials, avoiding Azure
+  CLI subprocess delays in deployed containers. The async chain falls back to the existing MSAL token-cache
+  credential instead of invoking `az`, and blank or whitespace-only `DEFAULT_IDENTITY_CLIENT_ID` values now use
+  the system-assigned identity rather than being passed as invalid user-assigned identity client IDs
+  ([#319](https://github.com/microsoft/agora-workbench/issues/319)).
+
 ## [0.2.0] - 2026-08-17
 
 ### Breaking
