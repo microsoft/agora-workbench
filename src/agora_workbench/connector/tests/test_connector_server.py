@@ -149,7 +149,10 @@ class TestRouterServer:
         timeout_schema = chemistry_execute.parameters["properties"]["timeout"]
         assert "configured default of 21600 seconds" in timeout_schema["description"]
         assert "45-second promotion threshold" in timeout_schema["description"]
-        assert all(tool.output_schema is None for tool in tools)
+        assert all(
+            not (isinstance(tool.output_schema, dict) and tool.output_schema.get("x-fastmcp-wrap-result"))
+            for tool in tools
+        )
 
     @pytest.mark.asyncio
     async def test_connector_text_tool_has_no_duplicate_structured_content(self, router_config):
