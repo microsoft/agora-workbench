@@ -265,7 +265,7 @@ class CodeExecutionServer(BaseMCPServer):
         self._warn_if_oauth_metadata_unresolvable()
 
         self.max_timeout = server_config.max_timeout
-        self.default_timeout = server_config.default_timeout
+        self.default_timeout = min(server_config.default_timeout, self.max_timeout)
 
         # Resolution: ServerConfig overrides env var; env var provides deployment default.
         if server_config.output_truncation_threshold is not None:
@@ -2597,6 +2597,12 @@ else:
             "server_name": self.server_config.name,
             "tools": tools_data,
             "skills": skills_data,
+            "execution": {
+                "mode": self.server_config.execution_mode,
+                "default_timeout": self.default_timeout,
+                "max_timeout": self.max_timeout,
+                "promotion_threshold_s": self.server_config.promotion_threshold_s,
+            },
         }
 
     # ========================================================================

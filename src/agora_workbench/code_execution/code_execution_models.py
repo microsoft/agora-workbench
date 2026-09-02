@@ -10,7 +10,7 @@ This module contains Pydantic models used by the code execution server:
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class AssetSpec(BaseModel):
@@ -364,6 +364,19 @@ class ServerConfig(BaseModel):
         default=300,
         description="Default execution timeout in seconds when not specified by the caller.",
     )
+
+    @model_validator(mode="after")
+    def validate_adaptive_timeout_settings(self) -> "ServerConfig":
+        """Ensure adaptive executions have time to promote before timing out."""
+        if self.execution_mode != "adaptive":
+            return self
+
+        if self.default_timeout <= self.promotion_threshold_s:
+            raise ValueError("default_timeout must be greater than promotion_threshold_s in adaptive mode")
+        if self.max_timeout <= self.promotion_threshold_s:
+            raise ValueError("max_timeout must be greater than promotion_threshold_s in adaptive mode")
+        return self
+
     output_truncation_threshold: Optional[int] = Field(
         default=None,
         ge=0,

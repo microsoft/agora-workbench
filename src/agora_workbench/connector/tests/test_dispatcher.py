@@ -12,6 +12,12 @@ from agora_workbench.connector.dispatcher import DispatcherServer, _get_session_
 # Sample catalog that all identical workers return
 WORKER_CATALOG = {
     "server_name": "chemistry",
+    "execution": {
+        "mode": "adaptive",
+        "default_timeout": 21600,
+        "max_timeout": 86400,
+        "promotion_threshold_s": 45,
+    },
     "tools": [
         {
             "name": "execute_code",
@@ -43,10 +49,10 @@ WORKER_CATALOG = {
 }
 
 
-def _mock_catalog_response() -> httpx.Response:
+def _mock_catalog_response(catalog: dict | None = None) -> httpx.Response:
     """Create a mock catalog response."""
     request = httpx.Request("GET", "http://mock/catalog")
-    return httpx.Response(200, json=WORKER_CATALOG, request=request)
+    return httpx.Response(200, json=WORKER_CATALOG if catalog is None else catalog, request=request)
 
 
 def _mock_health_response(healthy: bool = True) -> httpx.Response:
@@ -165,6 +171,14 @@ class TestDispatcherCatalogSync:
         assert "worker-1" in server._upstream_catalogs
         assert "worker-2" in server._upstream_catalogs
         assert len(server._upstream_catalogs["worker-1"]) == 2
+        assert server._upstream_execution_settings["worker-2"]["default_timeout"] == 21600
+
+        server._setup_tools()
+        tools = await server.mcp.list_tools()
+        execute_code = next(t for t in tools if t.name == "execute_code")
+        timeout_schema = execute_code.parameters["properties"]["timeout"]
+        assert "configured default of 21600 seconds" in timeout_schema["description"]
+        assert "45-second promotion threshold" in timeout_schema["description"]
 
     @pytest.mark.asyncio
     async def test_falls_back_to_second_worker(self, two_worker_config):
@@ -190,6 +204,30 @@ class TestDispatcherCatalogSync:
         assert "worker-2" in server._upstream_catalogs
         # worker-1 marked unhealthy
         assert "worker-1" not in server._healthy_workers
+
+    @pytest.mark.asyncio
+    async def test_missing_execution_settings_clear_all_worker_aliases(self, two_worker_config):
+        """A catalog without execution metadata must not retain stale worker guidance."""
+        server = DispatcherServer(two_worker_config)
+        server._upstream_execution_settings = {
+            "worker-1": {"default_timeout": 300},
+            "worker-2": {"default_timeout": 300},
+        }
+        catalog_without_execution = {key: value for key, value in WORKER_CATALOG.items() if key != "execution"}
+
+        async def mock_get(url, **kwargs):
+            return _mock_catalog_response(catalog_without_execution)
+
+        with patch("agora_workbench.connector.dispatcher.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = mock_get
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await server._sync_dispatcher_catalog()
+
+        assert server._upstream_execution_settings == {}
 
     @pytest.mark.asyncio
     async def test_discovers_execute_tool_name(self, two_worker_config):

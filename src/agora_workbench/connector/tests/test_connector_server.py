@@ -14,6 +14,12 @@ from agora_workbench.connector.router import RouterServer
 # Sample catalog responses from mock upstreams
 CHEMISTRY_CATALOG = {
     "server_name": "chemistry",
+    "execution": {
+        "mode": "adaptive",
+        "default_timeout": 21600,
+        "max_timeout": 86400,
+        "promotion_threshold_s": 45,
+    },
     "tools": [
         {
             "name": "compute_descriptors",
@@ -109,6 +115,7 @@ class TestRouterServer:
         assert "gis" in server._upstream_catalogs
         assert len(server._upstream_catalogs["chemistry"]) == 2
         assert len(server._upstream_catalogs["gis"]) == 1
+        assert server._upstream_execution_settings["chemistry"]["default_timeout"] == 21600
 
     @pytest.mark.asyncio
     async def test_registers_proxy_tools(self, router_config):
@@ -136,6 +143,11 @@ class TestRouterServer:
         assert "execute_chemistry_code" in tool_names
         assert "execute_gis_code" in tool_names
         assert "search_science-hub_tools" in tool_names
+
+        chemistry_execute = next(t for t in tools if t.name == "execute_chemistry_code")
+        timeout_schema = chemistry_execute.parameters["properties"]["timeout"]
+        assert "configured default of 21600 seconds" in timeout_schema["description"]
+        assert "45-second promotion threshold" in timeout_schema["description"]
 
     @pytest.mark.asyncio
     async def test_expose_tools_filter(self):
@@ -285,6 +297,11 @@ class TestGatewayServer:
         tools = await server.mcp.list_tools()
         tool_names = [t.name for t in tools]
         assert "execute_chemistry_code" in tool_names
+
+        chemistry_execute = next(t for t in tools if t.name == "execute_chemistry_code")
+        timeout_schema = chemistry_execute.parameters["properties"]["timeout"]
+        assert "configured default of 21600 seconds" in timeout_schema["description"]
+        assert "45-second promotion threshold" in timeout_schema["description"]
 
     def test_rate_limiting(self, gateway_config):
         """Gateway enforces rate limiting."""

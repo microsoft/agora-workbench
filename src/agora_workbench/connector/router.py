@@ -192,5 +192,6 @@ class RouterServer(ConnectorServer):
                 ctx=ctx,
             )
 
+        self._annotate_execute_timeout(execute_code_proxy, upstream_name)
         desc = self._build_catalog_description(upstream_name)
         self.mcp.tool(name=tool_name, description=desc)(execute_code_proxy)

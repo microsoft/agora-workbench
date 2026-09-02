@@ -138,6 +138,7 @@ class GatewayServer(ConnectorServer):
                 ctx=ctx,
             )
 
+        self._annotate_execute_timeout(execute_code_gateway, upstream_name)
         desc = self._build_catalog_description(upstream_name, prefix="via gateway, ")
         self.mcp.tool(name=tool_name, description=desc)(execute_code_gateway)
 

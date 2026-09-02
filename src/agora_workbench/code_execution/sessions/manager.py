@@ -1057,6 +1057,11 @@ class SessionManager:
             when the execution completes within the threshold, or a dict with
             ``job_id``, ``status``, ``session_id``, and ``promoted=True``.
         """
+        if timeout <= promotion_threshold_s:
+            raise ValueError(
+                f"timeout ({timeout}s) must be greater than promotion_threshold_s ({promotion_threshold_s}s)"
+            )
+
         try:
             session = self.get_session(session_id)
             user_token = session.user_token
