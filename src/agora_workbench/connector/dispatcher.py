@@ -269,7 +269,7 @@ class DispatcherServer(ConnectorServer):
                     server._active_calls[worker_name] = max(0, server._active_calls.get(worker_name, 1) - 1)
 
         self._annotate_execute_timeout(execute_code_dispatcher, first_worker)
-        self.mcp.tool(name=tool_name, description=desc)(execute_code_dispatcher)
+        self._register_text_tool(name=tool_name, description=desc, func=execute_code_dispatcher)
 
     # ========================================================================
     # Routing

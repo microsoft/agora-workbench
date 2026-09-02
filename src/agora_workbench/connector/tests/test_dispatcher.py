@@ -179,6 +179,9 @@ class TestDispatcherCatalogSync:
         timeout_schema = execute_code.parameters["properties"]["timeout"]
         assert "configured default of 21600 seconds" in timeout_schema["description"]
         assert "45-second promotion threshold" in timeout_schema["description"]
+        assert not (
+            isinstance(execute_code.output_schema, dict) and execute_code.output_schema.get("x-fastmcp-wrap-result")
+        )
 
     @pytest.mark.asyncio
     async def test_falls_back_to_second_worker(self, two_worker_config):

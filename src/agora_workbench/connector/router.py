@@ -155,7 +155,7 @@ class RouterServer(ConnectorServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=tool_name,
             description=(
                 f"Load the full content of a skill by name. Skills contain step-by-step "
@@ -164,7 +164,8 @@ class RouterServer(ConnectorServer):
                 f"If a skill name exists on multiple upstreams, specify the 'upstream' "
                 f"parameter to disambiguate."
             ),
-        )(load_skill_unified)
+            func=load_skill_unified,
+        )
 
     def _register_execute_code_proxy(self, upstream: UpstreamConfig) -> None:
         """Register an execute_{upstream.name}_code proxy tool."""
@@ -194,4 +195,4 @@ class RouterServer(ConnectorServer):
 
         self._annotate_execute_timeout(execute_code_proxy, upstream_name)
         desc = self._build_catalog_description(upstream_name)
-        self.mcp.tool(name=tool_name, description=desc)(execute_code_proxy)
+        self._register_text_tool(name=tool_name, description=desc, func=execute_code_proxy)

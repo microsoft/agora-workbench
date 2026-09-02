@@ -256,6 +256,10 @@ class ConnectorServer(BaseMCPServer):
 
         func.__annotations__["timeout"] = Annotated[int | None, Field(description=description)]
 
+    def _register_text_tool(self, *, name: str, description: str, func: Any) -> None:
+        """Register a JSON-text tool without FastMCP's redundant scalar wrapper."""
+        self.mcp.tool(name=name, description=description, output_schema=None)(func)
+
     @staticmethod
     def _matches_expose_filter(tool_name: str, patterns: list[str]) -> bool:
         """Check if a tool name matches any of the expose_tools glob patterns."""
@@ -280,10 +284,11 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=f"{prefix}_list_sessions",
             description=f"List all active sessions on the {upstream_name} server.",
-        )(list_sessions_proxy)
+            func=list_sessions_proxy,
+        )
 
         async def inspect_session_proxy(ctx: Context, session_id: str) -> str:
             """Inspect a session on the upstream server."""
@@ -294,10 +299,11 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=f"{prefix}_inspect_session",
             description=f"Inspect a session namespace, variable summaries, and background job status on {upstream_name}.",
-        )(inspect_session_proxy)
+            func=inspect_session_proxy,
+        )
 
         async def close_session_proxy(ctx: Context, session_id: str) -> str:
             """Close a session on the upstream server."""
@@ -308,10 +314,11 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=f"{prefix}_close_session",
             description=f"Close a session on the {upstream_name} server.",
-        )(close_session_proxy)
+            func=close_session_proxy,
+        )
 
     def _register_check_job_proxy(self, upstream: UpstreamConfig) -> None:
         """Register a check_job proxy tool for an upstream's background jobs."""
@@ -328,14 +335,15 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=tool_name,
             description=(
                 f"Check status/output for a background code execution job on {upstream_name}. "
                 f"Jobs are created when the upstream's execution_mode is 'async_only' or when "
                 f"'adaptive' mode promotes a long-running execution to background."
             ),
-        )(check_job_proxy)
+            func=check_job_proxy,
+        )
 
     def _register_parallel_execution_proxies(self, upstream: UpstreamConfig) -> None:
         """Register parallel execution proxy tools for an upstream."""
@@ -383,21 +391,24 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=execute_name,
             description=(
                 f"Execute the same code template across multiple input dictionaries in parallel on "
                 f"{upstream_name}. A dedicated child session/kernel is created per input."
             ),
-        )(parallel_execute_proxy)
-        self.mcp.tool(
+            func=parallel_execute_proxy,
+        )
+        self._register_text_tool(
             name=check_name,
             description=f"Check aggregate status and available results for a parallel batch on {upstream_name}.",
-        )(check_batch_proxy)
-        self.mcp.tool(
+            func=check_batch_proxy,
+        )
+        self._register_text_tool(
             name=cancel_name,
             description=f"Cancel all running jobs in a parallel batch and clean up child sessions on {upstream_name}.",
-        )(cancel_batch_proxy)
+            func=cancel_batch_proxy,
+        )
 
     def _register_send_proxy(self, upstream: UpstreamConfig) -> None:
         """Register a send proxy tool for an upstream."""
@@ -428,7 +439,7 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=tool_name,
             description=(
                 f"Send data from the {upstream_name} server to a destination (peer server, "
@@ -436,7 +447,8 @@ class ConnectorServer(BaseMCPServer):
                 f"The data_ref parameter accepts a kernel variable name or a filename in "
                 f"AGORA_OUTPUT_DIR. The 'to' parameter selects the destination."
             ),
-        )(send_proxy)
+            func=send_proxy,
+        )
 
     def _has_state_annotated_tools(self, upstream_name: str) -> bool:
         """Check if an upstream has any tools with non-empty state transitions."""
@@ -487,14 +499,15 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=plan_name,
             description=(
                 f"Plan and navigate {upstream_name} workflow states. Use 'overview' mode to see "
                 f"the full workflow map, 'next_steps' to explore from a current state, and 'path' "
                 f"to plan a route between two states."
             ),
-        )(plan_workflow_proxy)
+            func=plan_workflow_proxy,
+        )
 
     def _register_load_skill_proxy(self, upstream: UpstreamConfig) -> None:
         """Register a per-upstream load_skill proxy tool.
@@ -520,14 +533,15 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=load_name,
             description=(
                 f"Load the full content of a {upstream_name} skill by name. Skills contain "
                 f"step-by-step instructions for domain workflows. Discover skill names via "
                 f"search tools or plan_{upstream_name}_workflow."
             ),
-        )(load_skill_proxy)
+            func=load_skill_proxy,
+        )
 
     # ========================================================================
     # Search Tool
@@ -602,14 +616,15 @@ class ConnectorServer(BaseMCPServer):
                 LOGGER.error("search_%s_tools failed: %s", connector_name, exc, exc_info=True)
                 return json.dumps({"tools": [], "skills": [], "error": f"{type(exc).__name__}: {exc}"})
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=tool_name,
             description=(
                 f"Search {connector_name} domain tools and skills by name or description. "
                 f"Returns matching results grouped into 'tools' and 'skills' arrays. "
                 f"Use category='skills' to find only skills, or category='tools' for only tools."
             ),
-        )(search_connector_tools)
+            func=search_connector_tools,
+        )
 
     # ========================================================================
     # Unified State Graph
@@ -725,7 +740,7 @@ class ConnectorServer(BaseMCPServer):
                 result = {"error": f"Unknown mode '{mode}'. Use: overview, next_steps, path, tool."}
             return json.dumps(result)
 
-        self.mcp.tool(
+        self._register_text_tool(
             name=plan_tool_name,
             description=(
                 f"Plan and navigate the unified {connector_name} workflow state graph spanning "
@@ -736,7 +751,8 @@ class ConnectorServer(BaseMCPServer):
                 f"Bridge edges (server='(bridge)') are navigation aids — actual data flows "
                 f"as values the agent passes between tool calls."
             ),
-        )(plan_unified_workflow)
+            func=plan_unified_workflow,
+        )
 
         LOGGER.info(
             "Unified state graph registered for '%s': %d tools, %d bridges, %d domains.",

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from fastmcp import Client
 
 from agora_workbench.connector import GatewayConfig, GatewayPolicy, RouterConfig, UpstreamConfig
 from agora_workbench.connector.base import ConnectorServer
@@ -148,6 +149,25 @@ class TestRouterServer:
         timeout_schema = chemistry_execute.parameters["properties"]["timeout"]
         assert "configured default of 21600 seconds" in timeout_schema["description"]
         assert "45-second promotion threshold" in timeout_schema["description"]
+        assert all(
+            not (isinstance(tool.output_schema, dict) and tool.output_schema.get("x-fastmcp-wrap-result"))
+            for tool in tools
+        )
+
+    @pytest.mark.asyncio
+    async def test_connector_text_tool_has_no_duplicate_structured_content(self, router_config):
+        server = RouterServer(router_config)
+
+        async def echo_proxy(value: str) -> str:
+            return f'{{"value": "{value}"}}'
+
+        server._register_text_tool(name="echo_proxy", description="Echo JSON text.", func=echo_proxy)
+
+        async with Client(server.mcp) as client:
+            result = await client.call_tool("echo_proxy", {"value": "hello"})
+
+        assert result.content[0].text == '{"value": "hello"}'
+        assert result.structured_content is None
 
     @pytest.mark.asyncio
     async def test_expose_tools_filter(self):
