@@ -274,9 +274,9 @@ async def test_server(
     # Build environment once for all tests
     await server._ensure_environment()
 
-    # The session manager expects to launch a kernel named "tools-py".
+    # Register the server-specific kernel expected by the session manager.
     # Register it using the environment's Python interpreter.
-    await server._register_kernel(kernel_name="tools-py")
+    await server._register_kernel(kernel_name=server.kernel_name)
 
     # Add helper methods for session-based code execution in tests
 

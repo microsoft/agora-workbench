@@ -12,6 +12,11 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Code-execution servers now register and launch a server-specific Jupyter kernelspec instead of sharing the
+  global `tools-py` name, preventing servers that share a home directory from silently executing code in each
+  other's Python environments. Kernelspec registration checks now use Jupyter's configured search paths, so
+  `JUPYTER_DATA_DIR` is honored consistently by registration and execution
+  ([#320](https://github.com/microsoft/agora-workbench/issues/320)).
 - Azure service credential chains now try Managed Identity before local-development credentials, avoiding Azure
   CLI subprocess delays in deployed containers. The async chain falls back to the existing MSAL token-cache
   credential instead of invoking `az`, and blank or whitespace-only `DEFAULT_IDENTITY_CLIENT_ID` values now use

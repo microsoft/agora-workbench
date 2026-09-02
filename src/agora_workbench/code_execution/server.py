@@ -19,6 +19,7 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
 from fastmcp import Context, FastMCP
+from jupyter_client.kernelspec import KernelSpecManager
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
@@ -181,6 +182,7 @@ class CodeExecutionServer(BaseMCPServer):
         """
         super().__init__()
         self.server_config = server_config
+        self.kernel_name = f"tools-py-{server_config.name}"
         self.tool_registry = tool_registry
 
         # Sidecar processes (e.g. a shared model service). Lazily started in
@@ -235,6 +237,7 @@ class CodeExecutionServer(BaseMCPServer):
             _session_manager = session_manager
 
         self.session_manager = _session_manager
+        self.session_manager.kernel_name = self.kernel_name
 
         # --- Authentication configuration ---
         if auth_config is None:
@@ -390,7 +393,7 @@ class CodeExecutionServer(BaseMCPServer):
         """
         LOGGER.info(f"Warming environment: {self.server_config.name}")
         await self._ensure_environment()
-        await self._register_kernel(kernel_name="tools-py")
+        await self._register_kernel(kernel_name=self.kernel_name)
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
     def main(self, *, default_host: str = "0.0.0.0", default_port: int = 8000) -> None:
@@ -930,19 +933,24 @@ class CodeExecutionServer(BaseMCPServer):
 
         return str(self._python_executable)
 
-    async def _register_kernel(self, kernel_name: str = "tools-py"):
+    async def _register_kernel(self, kernel_name: Optional[str] = None):
         """
         Register the Python environment as a Jupyter kernel.
 
         Args:
-            kernel_name: Name to register the kernel under
+            kernel_name: Name to register the kernel under. Defaults to this
+                server's isolated kernel name.
         """
         if not self._python_executable:
             raise RuntimeError("Python executable not set - build environment first")
 
-        # Check if kernel is already registered with the correct Python executable
-        kernel_dir = Path.home() / ".local" / "share" / "jupyter" / "kernels" / kernel_name
-        if kernel_dir.exists():
+        kernel_name = kernel_name or self.kernel_name
+
+        # Resolve through Jupyter so this check uses the same configured data
+        # directories as installation and kernel startup.
+        kernel_dir_raw = KernelSpecManager().find_kernel_specs().get(kernel_name)
+        if kernel_dir_raw:
+            kernel_dir = Path(kernel_dir_raw)
             kernel_json = kernel_dir / "kernel.json"
             if kernel_json.exists():
                 import shutil
@@ -2633,7 +2641,7 @@ else:
         await self._sidecar_manager.start_all()
 
         # Register the environment as a Jupyter kernel
-        await self._register_kernel(kernel_name="tools-py")
+        await self._register_kernel(kernel_name=self.kernel_name)
 
         await self._initialize_tool_search_backends()
 

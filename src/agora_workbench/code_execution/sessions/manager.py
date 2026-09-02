@@ -219,8 +219,9 @@ class SessionManager:
             self.storage.store(session_id, session_for_keepalive)
             return True
 
-    def __init__(self, config: Optional[SessionConfig] = None):
+    def __init__(self, config: Optional[SessionConfig] = None, kernel_name: str = "tools-py"):
         self.config = config or SessionConfig()
+        self.kernel_name = kernel_name
         self.storage = self.config.storage_backend
         self._last_cleanup = datetime.now()
         self._session_lifecycle_lock = RLock()
@@ -515,7 +516,7 @@ class SessionManager:
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
-        kernel_manager = AsyncKernelManager(kernel_name="tools-py")
+        kernel_manager = AsyncKernelManager(kernel_name=self.kernel_name)
 
         # Ensure executables from the selected Python environment are on PATH.
         # The kernelspec argv points at the environment's python, but PATH is
