@@ -30,6 +30,11 @@ from .models import UpstreamConfig
 LOGGER = logging.getLogger(__name__)
 
 
+def _format_numeric_setting(value: int | float) -> str:
+    """Format JSON numeric settings without adding a decimal to integers."""
+    return str(value) if isinstance(value, int) else format(value, "g")
+
+
 class ConnectorServer(BaseMCPServer):
     """Abstract base for connector servers (router, gateway, etc.).
 
@@ -234,7 +239,7 @@ class ConnectorServer(BaseMCPServer):
         if isinstance(default_timeout, (int, float)):
             description = (
                 f"Optional execution timeout in seconds. Omit this parameter to use the upstream's configured "
-                f"default of {default_timeout:g} seconds."
+                f"default of {_format_numeric_setting(default_timeout)} seconds."
             )
         else:
             description = (
@@ -242,11 +247,11 @@ class ConnectorServer(BaseMCPServer):
             )
 
         if isinstance(max_timeout, (int, float)):
-            description += f" Explicit values are capped at {max_timeout:g} seconds."
+            description += f" Explicit values are capped at {_format_numeric_setting(max_timeout)} seconds."
         if execution_mode == "adaptive" and isinstance(promotion_threshold, (int, float)):
             description += (
                 f" In adaptive mode, an explicit timeout must be greater than the "
-                f"{promotion_threshold:g}-second promotion threshold."
+                f"{_format_numeric_setting(promotion_threshold)}-second promotion threshold."
             )
 
         func.__annotations__["timeout"] = Annotated[int | None, Field(description=description)]

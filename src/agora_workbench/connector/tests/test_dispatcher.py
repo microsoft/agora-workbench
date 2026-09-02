@@ -49,10 +49,10 @@ WORKER_CATALOG = {
 }
 
 
-def _mock_catalog_response(catalog: dict = WORKER_CATALOG) -> httpx.Response:
+def _mock_catalog_response(catalog: dict | None = None) -> httpx.Response:
     """Create a mock catalog response."""
     request = httpx.Request("GET", "http://mock/catalog")
-    return httpx.Response(200, json=catalog, request=request)
+    return httpx.Response(200, json=WORKER_CATALOG if catalog is None else catalog, request=request)
 
 
 def _mock_health_response(healthy: bool = True) -> httpx.Response:
