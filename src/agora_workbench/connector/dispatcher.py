@@ -146,13 +146,14 @@ class DispatcherServer(ConnectorServer):
                 upstream = UpstreamConfig(name=worker.name, url=worker.url)
                 try:
                     tools, _skills = await self._fetch_catalog(client, upstream)
+                    execution_settings = self._upstream_execution_settings.get(worker.name)
                     # Store catalog under all worker names (same tools)
                     for w in self.config.workers:
                         self._upstream_catalogs[w.name] = tools
-                        if worker.name in self._upstream_execution_settings:
-                            self._upstream_execution_settings[w.name] = dict(
-                                self._upstream_execution_settings[worker.name]
-                            )
+                        if execution_settings is not None:
+                            self._upstream_execution_settings[w.name] = dict(execution_settings)
+                        else:
+                            self._upstream_execution_settings.pop(w.name, None)
                     self._discover_execute_tool_name(tools)
                     LOGGER.info(
                         "Fetched catalog from worker '%s': %d tools",
