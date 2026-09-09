@@ -126,8 +126,7 @@ def test_frozen_mapping_fields_are_copied_and_immutable():
     assert artifact.metadata == {"region": "west"}
     with pytest.raises(TypeError):
         context.attributes["tenant"] = "two"  # type: ignore[index]
-    with pytest.raises(TypeError):
-        hash(context)
+    assert type(context).__hash__ is None
     with pytest.raises(FrozenInstanceError):
         request.source_ids = ("other",)  # type: ignore[misc]
 
