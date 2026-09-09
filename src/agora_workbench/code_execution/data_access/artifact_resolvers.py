@@ -15,17 +15,53 @@ resolves *an artifact ID to a storage URL* as one step inside that process.
 
 import logging
 import os
+from typing import Protocol, runtime_checkable
 
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.search.documents.aio import SearchClient
-
-from agora_workbench.data_lake.protocols import ArtifactResolver
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BLOB_DETAILS_INDEX = "blob-details"
 
 __all__ = ["ArtifactResolver", "SearchIndexArtifactResolver"]
+
+
+@runtime_checkable
+class ArtifactResolver(Protocol):
+    """Resolve an opaque artifact ID to a URL that an ``AssetFetcher`` can retrieve.
+
+    ``DataLakeDataManager`` calls :meth:`resolve` on each manager cache miss;
+    implementations are responsible for any backend-result caching. A resolver
+    may additionally define ``async def aclose(self) -> None``. The manager
+    calls that optional method during cleanup, but it is intentionally not a
+    protocol member so runtime structural checks do not require it.
+
+    A supplied resolver owns clients it creates and may close those clients.
+    Credentials and other resources borrowed from its caller remain caller-owned
+    and must not be closed by the resolver.
+
+    Runtime checks only verify member presence, not signatures, async behavior,
+    property types, or return values.
+    """
+
+    async def resolve(self, artifact_id: str) -> str:
+        """Resolve an opaque artifact ID to a fetchable qualified name or URL.
+
+        Raises:
+            ValueError: If the artifact is unknown, the resolved location is
+                invalid, or resolution is unavailable.
+        """
+        ...
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        """Return an operator-facing unavailability reason, or ``None`` when ready.
+
+        The reason is surfaced in agent guidance and should explain required
+        operator configuration without leaking backend internals.
+        """
+        ...
 
 
 class SearchIndexArtifactResolver:

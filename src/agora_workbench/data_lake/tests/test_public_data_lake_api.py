@@ -14,10 +14,13 @@ from agora_workbench.data_lake import (
     ArtifactPresentation,
     ArtifactReference,
     ArtifactResolver,
+    AssetFetcher,
+    AssetPublisher,
     CatalogArtifact,
     CatalogDB,
     CatalogOperation,
     CatalogProvider,
+    DataLakeDataManager,
     InvalidRequestError,
     ListRequest,
     Page,
@@ -155,8 +158,10 @@ def test_resource_lease_makes_cleanup_ownership_explicit():
 
 def test_existing_resolver_protocol_is_the_public_protocol():
     from agora_workbench.code_execution.data_access import ArtifactResolver as LegacyArtifactResolver
+    from agora_workbench.data_lake.protocols import ArtifactResolver as ProtocolModuleArtifactResolver
 
     assert LegacyArtifactResolver is ArtifactResolver
+    assert ProtocolModuleArtifactResolver is ArtifactResolver
     assert isinstance(MemoryResolver(), ArtifactResolver)
 
 
@@ -187,19 +192,26 @@ def test_existing_top_level_imports_remain_available():
     assert CodeExecutionServer is Implementation
 
 
-def test_known_package_attributes_are_lazy_and_order_independent():
+def test_existing_package_initializers_preserve_eager_exports_and_submodule_attributes():
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             (
-                "import agora_workbench; "
+                "import sys; import agora_workbench; "
+                "assert 'agora_workbench.code_execution.server' in sys.modules; "
                 "assert agora_workbench.base.__name__ == 'agora_workbench.base'; "
                 "assert agora_workbench.code_execution.__name__ == 'agora_workbench.code_execution'; "
-                "assert agora_workbench.data_lake.__name__ == 'agora_workbench.data_lake'; "
                 "assert agora_workbench.code_execution.data_access.__name__.endswith('.data_access'); "
-                "assert 'base' in dir(agora_workbench); "
-                "assert 'data_access' in dir(agora_workbench.code_execution)"
+                "from agora_workbench import CodeExecutionServer; "
+                "from agora_workbench.code_execution.server import CodeExecutionServer as Implementation; "
+                "assert CodeExecutionServer is Implementation; "
+                "import agora_workbench.data_lake; "
+                "assert agora_workbench.data_lake.__name__ == 'agora_workbench.data_lake'; "
+                "assert not hasattr(agora_workbench.data_lake, '__getattr__'); "
+                "assert 'agora_workbench.data_lake.catalog' in sys.modules; "
+                "assert 'agora_workbench.data_lake.resolvers' in sys.modules; "
+                "assert agora_workbench.data_lake.CatalogDB.__name__ == 'CatalogDB'"
             ),
         ],
         check=False,
@@ -210,66 +222,18 @@ def test_known_package_attributes_are_lazy_and_order_independent():
     assert result.returncode == 0, result.stderr
 
 
-def test_contract_import_does_not_eagerly_import_execution_or_cloud_modules():
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import sys; import agora_workbench.data_lake.models; "
-                "assert 'agora_workbench.code_execution' not in sys.modules; "
-                "assert 'azure.search.documents.aio' not in sys.modules"
-            ),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
+def test_direct_compatibility_submodules_preserve_object_identity():
+    from agora_workbench.code_execution.data_access.fetchers import AssetFetcher as LegacyAssetFetcher
+    from agora_workbench.code_execution.data_access.manager import DataLakeDataManager as LegacyDataLakeDataManager
+    from agora_workbench.code_execution.data_access.publishers import AssetPublisher as LegacyAssetPublisher
+    from agora_workbench.code_execution.data_access.artifact_resolvers import (
+        SearchIndexArtifactResolver as LegacySearchIndexArtifactResolver,
     )
+    from agora_workbench.data_lake import catalog, resolvers
 
-    assert result.returncode == 0, result.stderr
-
-
-def test_catalog_import_does_not_eagerly_import_server_modules():
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import sys; from agora_workbench.data_lake import CatalogDB; "
-                "assert CatalogDB.__name__ == 'CatalogDB'; "
-                "assert 'agora_workbench.code_execution.server' not in sys.modules; "
-                "assert 'agora_workbench.code_execution.sessions.session' not in sys.modules"
-            ),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-
-def test_direct_compatibility_submodules_are_lazy():
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import sys; "
-                "import agora_workbench.data_lake.catalog as catalog; "
-                "import agora_workbench.data_lake.resolvers as resolvers; "
-                "assert 'agora_workbench.code_execution' not in sys.modules; "
-                "assert 'azure.search.documents.aio' not in sys.modules; "
-                "assert catalog.CatalogDB.__name__ == 'CatalogDB'; "
-                "assert 'agora_workbench.code_execution.server' not in sys.modules; "
-                "assert 'agora_workbench.code_execution.sessions.session' not in sys.modules; "
-                "from agora_workbench.data_lake.protocols import ArtifactResolver; "
-                "assert resolvers.ArtifactResolver is ArtifactResolver"
-            ),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode == 0, result.stderr
+    assert catalog.CatalogDB is CatalogDB
+    assert resolvers.ArtifactResolver is ArtifactResolver
+    assert resolvers.SearchIndexArtifactResolver is LegacySearchIndexArtifactResolver
+    assert AssetFetcher is LegacyAssetFetcher
+    assert AssetPublisher is LegacyAssetPublisher
+    assert DataLakeDataManager is LegacyDataLakeDataManager

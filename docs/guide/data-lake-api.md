@@ -184,27 +184,14 @@ The recipient closes owned resources only. In particular, a resolver or manager
 must not close a credential borrowed from its caller; it may close clients that
 it created with that credential.
 
-## Dependency and import boundary
+## Package imports
 
-```text
-agora_workbench.data_lake.models/errors/protocols
-                    |
-                    | lightweight public contracts
-                    v
-custom providers and catalog-only callers
-
-agora_workbench.data_lake (lazy implementation exports)
-                    |
-                    +--> code_execution.data_access.catalog
-                    +--> code_execution.data_access.artifact_resolvers
-                    +--> code_execution.data_access.manager/fetchers/publishers
-```
-
-Importing the contract modules does not import execution, session, or cloud
-implementation modules. Accessing a concrete compatibility export does not
-initialize the execution server or session stack. This boundary permits
-implementation dependencies to become optional later without changing the
-contracts.
+`agora_workbench.data_lake` is part of the existing Agora Workbench distribution.
+It uses ordinary eager imports, preserving the package's predictable existing
+initialization behavior and object identity with compatibility exports under
+`agora_workbench.code_execution.data_access`. Importing it initializes the
+existing workbench runtime and its current dependencies. This release does not
+redesign optional dependencies or package initialization.
 
 ## Compatibility policy
 
