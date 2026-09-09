@@ -126,7 +126,7 @@ copies. Fetchers and publishers remain defined in their
 `agora_workbench.code_execution.data_access` implementation modules:
 
 ```python
-from agora_workbench.data_lake import (
+from agora_workbench.data_lake.catalog import (
     CatalogConfig,
     CatalogDB,
     CatalogIndexer,
@@ -187,15 +187,23 @@ it created with that credential.
 ## Package imports
 
 `agora_workbench.data_lake` is part of the existing Agora Workbench distribution.
-It uses ordinary eager imports, preserving the package's predictable existing
-initialization behavior and object identity with compatibility exports under
-`agora_workbench.code_execution.data_access`. Importing it initializes the
-existing workbench runtime and its current dependencies. This release does not
-redesign optional dependencies or package initialization.
+Its package root contains only backend-neutral records, protocols, and errors, so
+contract-only callers do not initialize code execution or cloud SDK modules.
+Concrete implementations are available through explicit compatibility modules:
+
+- `agora_workbench.data_lake.catalog` for the SQLite catalog, indexer, and configuration
+- `agora_workbench.data_lake.resolvers` for built-in artifact resolvers
+- `agora_workbench.data_lake.execution` for fetchers, publishers, credentials, and the session data manager
+
+Those modules use ordinary eager imports and expose the same implementation
+objects as `agora_workbench.code_execution.data_access`. The root
+`agora_workbench` package defers only its established compatibility exports so
+importing the contract namespace does not initialize unrelated runtime modules.
 
 ## Compatibility policy
 
-- Imports documented under `agora_workbench.data_lake` are the preferred public API.
+- Contract imports documented under `agora_workbench.data_lake` and implementation
+  imports under its explicit submodules are the preferred public API.
 - Existing `agora_workbench.code_execution.data_access` imports remain supported.
 - Compatibility exports are the same class or protocol objects, not maintained copies.
 - Existing resolver behavior, custom fetchers, custom publishers, and injected

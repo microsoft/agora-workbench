@@ -8,9 +8,13 @@
 
 ::: agora_workbench.data_lake.catalog
 
-## Data Manager
+## Resolver implementations
 
-::: agora_workbench.code_execution.data_access.manager
+::: agora_workbench.data_lake.resolvers
+
+## Execution integrations
+
+::: agora_workbench.data_lake.execution
 
 ## Asset Resolution
 

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from agora_workbench.code_execution.data_access.artifact_resolvers import ArtifactResolver as ArtifactResolver
-
 from .models import (
     ArtifactReference,
     CatalogArtifact,
@@ -16,6 +14,24 @@ from .models import (
     SearchRequest,
     SourceCapabilities,
 )
+
+
+@runtime_checkable
+class ArtifactResolver(Protocol):
+    """Resolve an opaque artifact ID to a fetchable storage location.
+
+    Implementations may define ``async def aclose(self) -> None`` for cleanup,
+    but it is intentionally not required by the protocol.
+    """
+
+    async def resolve(self, artifact_id: str) -> str:
+        """Resolve an artifact ID to a qualified name or URL."""
+        ...
+
+    @property
+    def unavailable_reason(self) -> str | None:
+        """Return an operator-facing unavailability reason, or ``None`` when ready."""
+        ...
 
 
 @runtime_checkable

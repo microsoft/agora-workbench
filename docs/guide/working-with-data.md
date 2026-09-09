@@ -93,7 +93,7 @@ data = pd.read_parquet("<blob>abc123</blob>")
 The `<blob>id</blob>` payload is an opaque catalog identifier. By default it is looked up in an Azure AI Search index (`DATA_LAKE_SEARCH_ENDPOINT` / `DATA_LAKE_BLOB_DETAILS_INDEX`). Deployments whose catalog is a manifest file, a database, a REST service, or an offline test fixture can supply their own resolver instead:
 
 ```python
-from agora_workbench.data_lake import DataLakeDataManager
+from agora_workbench.data_lake.execution import DataLakeDataManager
 
 
 class ManifestArtifactResolver:
@@ -143,8 +143,7 @@ Tools and code execution can produce output files. Configure publishers to make 
 
 ```python
 from agora_workbench.code_execution.auth import create_noop_auth_config
-from agora_workbench.code_execution.data_access import create_storage_credential
-from agora_workbench.data_lake import BlobPublisher, LocalFilePublisher
+from agora_workbench.data_lake.execution import BlobPublisher, LocalFilePublisher, create_storage_credential
 
 publishers = [
     LocalFilePublisher(base_dir="/tmp/artifacts"),

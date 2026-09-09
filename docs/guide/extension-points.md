@@ -128,7 +128,7 @@ server = CodeExecutionServer(
 
 ## Data access: AssetFetcher
 
-Re-exported from `agora_workbench.data_lake`; defined in
+Re-exported from `agora_workbench.data_lake.execution`; defined in
 `agora_workbench.code_execution.data_access.fetchers`:
 
 ### AssetFetcher
@@ -153,7 +153,7 @@ Built-in implementations: `BlobFetcher` (Azure Blob), `LocalFileFetcher`
 ### Custom fetcher example
 
 ```python
-from agora_workbench.data_lake import AssetFetcher
+from agora_workbench.data_lake.execution import AssetFetcher
 
 class S3Fetcher(AssetFetcher):
     def can_handle(self, uri: str) -> bool:
@@ -166,7 +166,7 @@ class S3Fetcher(AssetFetcher):
 
 ## Data access: AssetPublisher
 
-Re-exported from `agora_workbench.data_lake`; defined in
+Re-exported from `agora_workbench.data_lake.execution`; defined in
 `agora_workbench.code_execution.data_access.publishers`:
 
 ### AssetPublisher

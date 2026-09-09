@@ -14,13 +14,9 @@ from agora_workbench.data_lake import (
     ArtifactPresentation,
     ArtifactReference,
     ArtifactResolver,
-    AssetFetcher,
-    AssetPublisher,
     CatalogArtifact,
-    CatalogDB,
     CatalogOperation,
     CatalogProvider,
-    DataLakeDataManager,
     InvalidRequestError,
     ListRequest,
     Page,
@@ -33,6 +29,8 @@ from agora_workbench.data_lake import (
     SourceCapabilities,
     StorageLocator,
 )
+from agora_workbench.data_lake.catalog import CatalogDB
+from agora_workbench.data_lake.execution import AssetFetcher, AssetPublisher, DataLakeDataManager
 from agora_workbench.data_lake.errors import DataLakeError, DataLakeErrorCode
 
 
@@ -192,26 +190,21 @@ def test_existing_top_level_imports_remain_available():
     assert CodeExecutionServer is Implementation
 
 
-def test_existing_package_initializers_preserve_eager_exports_and_submodule_attributes():
+def test_contract_import_does_not_initialize_runtime_or_cloud_modules():
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             (
-                "import sys; import agora_workbench; "
-                "assert 'agora_workbench.code_execution.server' in sys.modules; "
-                "assert agora_workbench.base.__name__ == 'agora_workbench.base'; "
-                "assert agora_workbench.code_execution.__name__ == 'agora_workbench.code_execution'; "
-                "assert agora_workbench.code_execution.data_access.__name__.endswith('.data_access'); "
-                "from agora_workbench import CodeExecutionServer; "
-                "from agora_workbench.code_execution.server import CodeExecutionServer as Implementation; "
-                "assert CodeExecutionServer is Implementation; "
-                "import agora_workbench.data_lake; "
-                "assert agora_workbench.data_lake.__name__ == 'agora_workbench.data_lake'; "
-                "assert not hasattr(agora_workbench.data_lake, '__getattr__'); "
-                "assert 'agora_workbench.data_lake.catalog' in sys.modules; "
-                "assert 'agora_workbench.data_lake.resolvers' in sys.modules; "
-                "assert agora_workbench.data_lake.CatalogDB.__name__ == 'CatalogDB'"
+                "import sys; "
+                "import agora_workbench.data_lake as data_lake; "
+                "assert data_lake.__name__ == 'agora_workbench.data_lake'; "
+                "assert not hasattr(data_lake, '__getattr__'); "
+                "assert 'agora_workbench.code_execution' not in sys.modules; "
+                "assert 'agora_workbench.data_lake.catalog' not in sys.modules; "
+                "assert 'agora_workbench.data_lake.execution' not in sys.modules; "
+                "assert 'agora_workbench.data_lake.resolvers' not in sys.modules; "
+                "assert not any(name == 'azure' or name.startswith('azure.') for name in sys.modules)"
             ),
         ],
         check=False,
@@ -222,18 +215,50 @@ def test_existing_package_initializers_preserve_eager_exports_and_submodule_attr
     assert result.returncode == 0, result.stderr
 
 
-def test_direct_compatibility_submodules_preserve_object_identity():
+@pytest.mark.parametrize(
+    "imports",
+    [
+        (
+            "from agora_workbench import CodeExecutionServer as RootCodeExecutionServer; "
+            "from agora_workbench.code_execution.server import CodeExecutionServer as Implementation; "
+            "assert RootCodeExecutionServer is Implementation"
+        ),
+        (
+            "from agora_workbench.code_execution.server import CodeExecutionServer as Implementation; "
+            "from agora_workbench import CodeExecutionServer as RootCodeExecutionServer; "
+            "assert RootCodeExecutionServer is Implementation"
+        ),
+        (
+            "import agora_workbench.data_lake; "
+            "from agora_workbench import CodeExecutionServer as RootCodeExecutionServer; "
+            "from agora_workbench.code_execution.server import CodeExecutionServer as Implementation; "
+            "assert RootCodeExecutionServer is Implementation"
+        ),
+    ],
+)
+def test_root_compatibility_exports_are_stable_across_import_order(imports):
+    result = subprocess.run(
+        [sys.executable, "-c", imports],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_explicit_compatibility_submodules_preserve_object_identity():
     from agora_workbench.code_execution.data_access.fetchers import AssetFetcher as LegacyAssetFetcher
     from agora_workbench.code_execution.data_access.manager import DataLakeDataManager as LegacyDataLakeDataManager
     from agora_workbench.code_execution.data_access.publishers import AssetPublisher as LegacyAssetPublisher
     from agora_workbench.code_execution.data_access.artifact_resolvers import (
         SearchIndexArtifactResolver as LegacySearchIndexArtifactResolver,
     )
-    from agora_workbench.data_lake import catalog, resolvers
+    from agora_workbench.data_lake import catalog, execution, resolvers
 
     assert catalog.CatalogDB is CatalogDB
     assert resolvers.ArtifactResolver is ArtifactResolver
     assert resolvers.SearchIndexArtifactResolver is LegacySearchIndexArtifactResolver
-    assert AssetFetcher is LegacyAssetFetcher
-    assert AssetPublisher is LegacyAssetPublisher
-    assert DataLakeDataManager is LegacyDataLakeDataManager
+    assert execution.AssetFetcher is AssetFetcher is LegacyAssetFetcher
+    assert execution.AssetPublisher is AssetPublisher is LegacyAssetPublisher
+    assert execution.DataLakeDataManager is DataLakeDataManager is LegacyDataLakeDataManager
