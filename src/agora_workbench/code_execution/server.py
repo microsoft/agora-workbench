@@ -1608,7 +1608,11 @@ class CodeExecutionServer(BaseMCPServer):
             2. Materializer — resolves ``data_ref`` from kernel variable or output file
             3. Calls ``publisher.publish(local_path, name, session_id)``
         """
-        from .data_access.publishers import GuiPublisher as _GuiPub, ServerPublisher as _ServerPub
+        from .data_access.publishers import (
+            GuiPublisher as _GuiPub,
+            ObjectTransferError as _ObjectTransferError,
+            ServerPublisher as _ServerPub,
+        )
 
         server = self
         tool_name = f"{self.server_config.name}_send"
@@ -1910,6 +1914,21 @@ class CodeExecutionServer(BaseMCPServer):
                     indent=2,
                 )
 
+            except _ObjectTransferError as exc:
+                error_payload = exc.to_payload()
+                LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                server.activity_publisher.publish_nowait(
+                    {
+                        **error_payload,
+                        "type": "object_sent",
+                        "description": f"send '{data_ref}' → {to} failed: {type(exc).__name__}",
+                        "transfer_id": transfer_id,
+                        "data_ref": data_ref,
+                        "destination": to,
+                        "session_id": session.session_id if session else mcp_session_id,
+                    }
+                )
+                return _json.dumps(error_payload, indent=2)
             except Exception as exc:
                 LOGGER.error("send tool failed: %s", exc, exc_info=True)
                 event_type = "object_sent" if is_server_destination else "artifact_published"
@@ -2822,7 +2841,11 @@ else:
 
             if not session:
                 return JSONResponse(
-                    {"success": False, "error": "No active session found to receive the object"},
+                    {
+                        "success": False,
+                        "error": "No active session found to receive the object",
+                        "hint": "Initialize the destination server by invoking one of its tools, then retry the transfer.",
+                    },
                     status_code=404,
                 )
 

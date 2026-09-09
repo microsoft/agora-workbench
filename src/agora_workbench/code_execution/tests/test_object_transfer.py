@@ -199,6 +199,52 @@ class TestServerPublisher:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
+    async def test_publish_preserves_structured_error_response(self, tmp_path):
+        """Structured peer errors remain actionable to the send tool."""
+        from unittest.mock import AsyncMock, patch
+
+        import httpx
+
+        from ..data_access.publishers import ObjectTransferError, ServerPublisher
+
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
+        publisher._user_token = "test-token"
+        publisher._source_server = "powergrid"
+        publisher._transfer_id = "abc123"
+
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        request = httpx.Request("POST", "http://localhost:8001/object-transfer/receive")
+        response = httpx.Response(
+            404,
+            request=request,
+            json={
+                "success": False,
+                "error": "No active session found to receive the object",
+                "hint": "Initialize the destination server, then retry.",
+            },
+        )
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=response)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            with pytest.raises(ObjectTransferError) as exc_info:
+                await publisher.publish(local_path=pkl_file, name="result", session_id="")
+
+        assert exc_info.value.to_payload() == {
+            "success": False,
+            "error": "Object transfer to 'gis' failed: No active session found to receive the object",
+            "hint": "Initialize the destination server, then retry.",
+            "status_code": 404,
+        }
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
     async def test_publish_strips_mcp_suffix(self, tmp_path):
         """Test that /mcp suffix is stripped before appending /object-transfer/receive."""
         from unittest.mock import AsyncMock, patch, MagicMock

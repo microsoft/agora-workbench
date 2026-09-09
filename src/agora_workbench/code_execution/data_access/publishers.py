@@ -24,12 +24,34 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
 
 LOGGER = logging.getLogger(__name__)
+
+
+class ObjectTransferError(RuntimeError):
+    """Actionable error returned by a peer server during object transfer."""
+
+    def __init__(self, server_name: str, status_code: int, response_body: dict[str, Any]):
+        receiver_error = response_body.get("error")
+        if not isinstance(receiver_error, str) or not receiver_error.strip():
+            receiver_error = f"Peer returned HTTP {status_code}"
+
+        self.server_name = server_name
+        self.status_code = status_code
+        self.response_body = response_body
+        super().__init__(f"Object transfer to '{server_name}' failed: {receiver_error}")
+
+    def to_payload(self) -> dict[str, Any]:
+        """Return the peer response as an agent-facing send-tool error."""
+        payload = dict(self.response_body)
+        payload["success"] = False
+        payload["error"] = str(self)
+        payload["status_code"] = self.status_code
+        return payload
 
 
 def _validate_artifact_name(name: str) -> None:
@@ -500,6 +522,7 @@ class ServerPublisher(AssetPublisher):
             FileNotFoundError: If *local_path* does not exist.
             RuntimeError: If no user token was set before calling publish.
             ValueError: If the target URL fails validation.
+            ObjectTransferError: On structured non-2xx responses from the target.
             httpx.HTTPStatusError: On non-2xx responses from the target.
             httpx.RequestError: On connection / timeout errors.
         """
@@ -546,7 +569,21 @@ class ServerPublisher(AssetPublisher):
                 json=payload,
                 headers={"Authorization": f"Bearer {user_token}"},
             )
-            response.raise_for_status()
-            result = response.json()
+            try:
+                result = response.json()
+            except ValueError:
+                response.raise_for_status()
+                raise
+
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if isinstance(result, dict):
+                    raise ObjectTransferError(
+                        server_name=self._server_name,
+                        status_code=response.status_code,
+                        response_body=result,
+                    ) from exc
+                raise
 
         return f"Injected '{name}' into {self._server_name} kernel (response: {result})"
