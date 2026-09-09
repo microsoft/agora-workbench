@@ -1,22 +1,55 @@
-# Public data-lake API
+# Data-lake API
 
-`agora_workbench.data_lake` is the supported public boundary for catalog discovery
-and artifact resolution. The namespace contains
-backend-neutral records and structural protocols; it does not require a server,
-kernel, or execution session.
+Use the data-lake API to describe artifacts, search a catalog, resolve artifact
+IDs to storage locations, and connect those artifacts to code execution.
 
-## Contract overview
+Choose the import path that matches your task:
 
-The public records keep four concepts separate:
+| Task | Import from |
+| --- | --- |
+| Define artifact records or implement a catalog/resolver | `agora_workbench.data_lake` |
+| Use the built-in SQLite catalog and indexer | `agora_workbench.data_lake.catalog` |
+| Use the Azure AI Search resolver | `agora_workbench.data_lake.resolvers` |
+| Configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
 
-- `ArtifactReference` is the stable logical identity `(source_id, artifact_id)`.
-- `StorageLocator` is a physical URI understood by a fetcher or storage provider.
-- `ArtifactPresentation` is human-facing metadata.
-- `DownloadInfo` is an optional presentation-layer download link and expiry.
+Importing `agora_workbench.data_lake` does not start a server, create an
+execution session, or load cloud SDK modules.
 
-Catalog providers implement the async `CatalogProvider` protocol for `search`,
-`list`, `get`, and `resolve`. Future mutation contracts will be additive after
-content, precondition, and revision semantics are defined.
+## Represent artifacts
+
+The API separates an artifact's identity, storage location, and display
+metadata:
+
+- `ArtifactReference` identifies an artifact by `source_id` and `artifact_id`.
+- `StorageLocator` contains the physical URI used to retrieve it.
+- `ArtifactPresentation` contains human-facing metadata.
+- `DownloadInfo` optionally provides a user-facing download link and expiry.
+
+For example:
+
+```python
+from agora_workbench.data_lake import (
+    ArtifactPresentation,
+    ArtifactReference,
+    CatalogArtifact,
+    StorageLocator,
+)
+
+artifact = CatalogArtifact(
+    reference=ArtifactReference("hourly-wind", source_id="weather"),
+    presentation=ArtifactPresentation(
+        "hourly-wind.parquet",
+        media_type="application/x-parquet",
+    ),
+    locator=StorageLocator("file:///data/hourly-wind.parquet"),
+)
+```
+
+## Implement a catalog provider
+
+Implement the async `CatalogProvider` protocol when artifacts come from your
+own manifest, database, service, or other catalog. A provider supports
+`search`, `list`, `get`, and `resolve` operations:
 
 ```python
 from agora_workbench.data_lake import (
@@ -92,38 +125,36 @@ catalog: CatalogProvider = MemoryCatalog((artifact,))
 ```
 
 Providers receive the same `RequestContext` on every operation. Its fields are
-copied into immutable mappings for propagation, not authorization or cache-key
-identity. `SearchRequest.source_ids` and `ListRequest.source_ids` select sources
-explicitly; an empty tuple means no source restriction. Pagination cursors are
-opaque provider values, callers must not parse them, and page limits cannot exceed
-the conservative public maximum of 1000.
+copied into immutable mappings so they can be propagated safely. They do not
+define authorization or cache identity.
+
+Use `SearchRequest.source_ids` and `ListRequest.source_ids` to restrict an
+operation to specific sources. An empty tuple means all sources. Treat
+pagination cursors as opaque provider values; callers should not parse them.
+Page limits cannot exceed `MAX_PAGE_LIMIT` (1000).
 
 ## Capabilities and errors
 
-Each `SourceCapabilities` value identifies one `source_id` and its authoritative
-`supported_operations`. Caller policy is separate. A gateway or application may
-compose effective capabilities by intersecting provider support with its permitted
-operations, but the provider protocol neither decides nor reports authorization.
-Do not infer support from method presence.
+Each `SourceCapabilities` value reports the operations supported by one
+`source_id`. Check these values rather than inferring support from method
+presence. Authorization is separate: the application or gateway decides which
+supported operations the current caller may use.
 
-Other stable error categories include `InvalidRequestError`,
+Provider error categories include `InvalidRequestError`,
 `ArtifactNotFoundError`, `UnsupportedOperationError`, `PermissionDeniedError`, and
-`BackendUnavailableError`. Unclassified `DataLakeError` instances use `INTERNAL`;
-generic failures therefore do not imply a retryable backend outage. Provider
-implementations should raise typed errors at the public boundary and may retain
-backend exceptions as their causes.
+`BackendUnavailableError`. Provider implementations should raise these typed
+errors at the public boundary and retain backend exceptions as their causes when
+useful. An unclassified `DataLakeError` uses the `INTERNAL` code and should not
+be treated as a retryable backend outage.
 
 `CatalogProvider` and `ArtifactResolver` are runtime-checkable protocols only for
-basic structural discovery. `isinstance()` checks member presence, not signatures,
-async behavior, return types, or semantic correctness. Capability values remain
-the authority for supported catalog operations.
+basic structural checks. `isinstance()` verifies member presence, not signatures,
+async behavior, return types, or correct behavior.
 
-## Existing catalog and resolver construction
+## Use the built-in SQLite catalog
 
-The current SQLite catalog, indexer, configuration models, resolver, fetchers,
-publishers, and session data manager are compatibility re-exports rather than
-copies. Fetchers and publishers remain defined in their
-`agora_workbench.code_execution.data_access` implementation modules:
+Load catalog configuration from YAML, open a SQLite catalog, index its sources,
+and run a keyword search:
 
 ```python
 from agora_workbench.data_lake.catalog import (
@@ -132,16 +163,32 @@ from agora_workbench.data_lake.catalog import (
     CatalogIndexer,
 )
 
-config = CatalogConfig.from_yaml("catalog.yaml")
-catalog = CatalogDB("catalog.db")
-catalog.open()
-indexer = CatalogIndexer(config=config, db=catalog)
+
+async def search_catalog():
+    config = CatalogConfig.from_yaml("catalog.yaml")
+    catalog = CatalogDB("catalog.db")
+    catalog.open()
+    try:
+        indexer = CatalogIndexer(config=config, db=catalog)
+        indexed_count = await indexer.index()
+        results = catalog.search("hourly wind")
+        return indexed_count, results
+    finally:
+        catalog.close()
 ```
 
-A resolver remains structural and can be constructed without private subclassing:
+See [Working with data](working-with-data.md#data-catalog) for the
+`catalog.yaml` format, source configuration, and search options.
+
+## Provide a custom artifact resolver
+
+An artifact resolver maps an opaque artifact ID, such as the value inside
+`<blob>hourly-wind</blob>`, to a qualified storage name or URL. Resolver
+implementations are structural and do not need to inherit from a base class:
 
 ```python
 from agora_workbench.data_lake import ArtifactResolver
+from agora_workbench.data_lake.execution import DataLakeDataManager
 
 
 class ManifestResolver:
@@ -159,56 +206,35 @@ class ManifestResolver:
 resolver: ArtifactResolver = ManifestResolver(
     {"hourly-wind": "file:///data/hourly-wind.parquet"}
 )
+manager = DataLakeDataManager(artifact_resolver=resolver)
 ```
 
-This resolver shape is intentionally identical to
-`agora_workbench.code_execution.data_access.ArtifactResolver`, so existing
-custom resolvers and `DataLakeDataManager(artifact_resolver=...)` injection
-continue to work.
-
-`DataLakeDataManager` calls `resolve` on every manager cache miss. Implementations
-own any backend-result caching they require. They may define optional
-`async def aclose(self) -> None`; the manager calls it during cleanup. A resolver
-owns and closes clients it creates, but must never close a credential or resource
-borrowed from its caller.
+`DataLakeDataManager` calls `resolve` on each manager cache miss. Add caching
+inside the resolver if the backend requires it. A resolver may also define
+`async def aclose(self) -> None`; the manager calls it during cleanup.
 
 ## Ownership and lifetime
 
-Catalog indexes and their backing clients are normally process-wide resources:
-construct them once, share them across requests, and close them at application
-shutdown. `DataLakeDataManager`, its local cache, and its fetcher clients are
-per-session resources and must be closed when that session ends.
+Create catalog indexes and their backing clients once per process, share them
+across requests, and close them when the application shuts down.
+`DataLakeDataManager`, its local cache, and its fetcher clients belong to one
+execution session and must be closed when that session ends.
 
 `ResourceLease` records whether a supplied resource is `OWNED` or `BORROWED`.
-The recipient closes owned resources only. In particular, a resolver or manager
-must not close a credential borrowed from its caller; it may close clients that
-it created with that credential.
+Close only owned resources. A resolver or manager may close a client it creates,
+but must not close a credential or other resource borrowed from its caller.
 
-## Package imports
+## Import reference
 
-`agora_workbench.data_lake` is part of the existing Agora Workbench distribution.
-Its package root contains only backend-neutral records, protocols, and errors, so
-contract-only callers do not initialize code execution or cloud SDK modules.
-Concrete implementations are available through explicit compatibility modules:
+The public modules are organized by responsibility:
 
-- `agora_workbench.data_lake.catalog` for the SQLite catalog, indexer, and configuration
-- `agora_workbench.data_lake.resolvers` for built-in artifact resolvers
-- `agora_workbench.data_lake.execution` for fetchers, publishers, credentials, and the session data manager
+- `agora_workbench.data_lake`: records, protocols, capabilities, and errors
+- `agora_workbench.data_lake.catalog`: `CatalogConfig`, `CatalogDB`,
+  `CatalogIndexer`, `SearchConfig`, and `SourceConfig`
+- `agora_workbench.data_lake.resolvers`: `SearchIndexArtifactResolver`
+- `agora_workbench.data_lake.execution`: fetchers, publishers, storage
+  credentials, and `DataLakeDataManager`
 
-Those modules use ordinary eager imports and expose the same implementation
-objects as `agora_workbench.code_execution.data_access`. The root
-`agora_workbench` package defers only its established compatibility exports so
-importing the contract namespace does not initialize unrelated runtime modules.
-
-## Compatibility policy
-
-- Contract imports documented under `agora_workbench.data_lake` and implementation
-  imports under its explicit submodules are the preferred public API.
-- Existing `agora_workbench.code_execution.data_access` imports remain supported.
-- Compatibility exports are the same class or protocol objects, not maintained copies.
-- Existing resolver behavior, custom fetchers, custom publishers, and injected
-  data managers retain their current runtime semantics.
-- Future mutation contracts are additive. Other additive record fields and
-  protocols may be introduced compatibly. Removing or
-  renaming public symbols, changing error categories, or changing protocol method
-  signatures requires a normal deprecation cycle.
+Use these paths for new code. Imports under
+`agora_workbench.code_execution.data_access` are also supported for applications
+that already use them.

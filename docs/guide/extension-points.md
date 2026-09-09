@@ -128,8 +128,7 @@ server = CodeExecutionServer(
 
 ## Data access: AssetFetcher
 
-Re-exported from `agora_workbench.data_lake.execution`; defined in
-`agora_workbench.code_execution.data_access.fetchers`:
+Import `AssetFetcher` from `agora_workbench.data_lake.execution`.
 
 ### AssetFetcher
 
@@ -166,8 +165,7 @@ class S3Fetcher(AssetFetcher):
 
 ## Data access: AssetPublisher
 
-Re-exported from `agora_workbench.data_lake.execution`; defined in
-`agora_workbench.code_execution.data_access.publishers`:
+Import `AssetPublisher` from `agora_workbench.data_lake.execution`.
 
 ### AssetPublisher
 
@@ -231,7 +229,7 @@ class MyServer(CodeExecutionServer):
 | `IdentityExtractor` | `agora_workbench.code_execution.auth.base` | Custom identity derivation |
 | `CredentialProvider` | `agora_workbench.code_execution.auth.base` | Custom downstream credentials |
 | `ToolSearchBackend` | `agora_workbench.code_execution.tools.tool_search` | Custom tool search |
-| `AssetFetcher` | `agora_workbench.code_execution.data_access.fetchers` (re-exported from `agora_workbench.data_lake`) | Custom data sources |
-| `AssetPublisher` | `agora_workbench.code_execution.data_access.publishers` (re-exported from `agora_workbench.data_lake`) | Custom artifact output |
+| `AssetFetcher` | `agora_workbench.data_lake.execution` | Custom data sources |
+| `AssetPublisher` | `agora_workbench.data_lake.execution` | Custom artifact output |
 | `ConnectorServer` | `agora_workbench.connector.base` | Custom server composition |
 | `CodeExecutionServer.preprocess_code` | `agora_workbench.code_execution.server` | Code preprocessing |

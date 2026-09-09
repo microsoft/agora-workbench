@@ -1,18 +1,18 @@
 # Data Access
 
-## Public data-lake contracts
+## Records and protocols
 
 ::: agora_workbench.data_lake
 
-## Catalog contracts
+## Catalog
 
 ::: agora_workbench.data_lake.catalog
 
-## Resolver implementations
+## Resolvers
 
 ::: agora_workbench.data_lake.resolvers
 
-## Execution integrations
+## Fetching and publishing
 
 ::: agora_workbench.data_lake.execution
 

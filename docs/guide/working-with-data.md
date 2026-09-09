@@ -122,10 +122,9 @@ manager = DataLakeDataManager(artifact_resolver=ManifestArtifactResolver(manifes
 
 `resolve` returns any qualified name a registered fetcher can handle (`https://`, `abfss://`, `az://`, or a local path). `unavailable_reason` returns `None` when resolution is ready, or a short operator-facing explanation otherwise — it is folded into the asset-tag guidance the agent sees, so the guidance stays truthful for whichever backend is in use.
 
-The `ArtifactResolver` protocol (importable from `agora_workbench.data_lake` for
-type annotations) is structural, so a resolver does not need to subclass it.
-The existing `agora_workbench.code_execution.data_access` import remains
-supported for compatibility.
+The `ArtifactResolver` protocol is available from `agora_workbench.data_lake`
+for type annotations. It is structural, so a resolver does not need to subclass
+it.
 
 The manager calls `resolve` on each manager cache miss; resolver implementations
 own any backend-result caching. Resolvers may also define
@@ -135,7 +134,8 @@ handed the manager's Azure credential, so it must arrange its own authentication
 It may close clients it creates, but must not close credentials or other resources
 borrowed from its caller.
 
-Omitting `artifact_resolver` preserves the Azure AI Search behavior exactly.
+If you omit `artifact_resolver`, the manager uses the built-in Azure AI Search
+resolver.
 
 ## Publishing artifacts
 
