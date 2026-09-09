@@ -10,6 +10,12 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Fixed
+
+- Server-to-server object transfers now preserve structured non-2xx receiver errors, including actionable status
+  and hint information, instead of exposing only a generic HTTP error
+  ([#343](https://github.com/microsoft/agora-workbench/issues/343)).
+
 ## [0.2.1] - 2026-09-09
 
 ### Fixed
