@@ -5,8 +5,10 @@ Pluggable resolution of opaque artifact IDs to fetchable storage URLs.
 an opaque catalog identifier. Turning that identifier into something a fetcher
 can retrieve is deployment-specific: the built-in implementation queries an
 Azure AI Search index, but a manifest file, a database, a REST catalog service,
-or an offline test fixture are all equally valid backends. This module defines
-the protocol that decouples the tag format from the catalog behind it.
+or an offline test fixture are all equally valid backends. The public
+``ArtifactResolver`` protocol lives in ``agora_workbench.data_lake.protocols``
+and is re-exported here for compatibility; this module also provides the Azure
+AI Search implementation.
 
 Note the distinction from the similarly named ``resolution`` module: that one
 resolves *asset tags in tool parameters* to cached local paths, whereas this one
@@ -15,56 +17,17 @@ resolves *an artifact ID to a storage URL* as one step inside that process.
 
 import logging
 import os
-from typing import Protocol
 
 from azure.core.credentials_async import AsyncTokenCredential
 from azure.search.documents.aio import SearchClient
+
+from agora_workbench.data_lake.protocols import ArtifactResolver
 
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BLOB_DETAILS_INDEX = "blob-details"
 
-
-class ArtifactResolver(Protocol):
-    """
-    Resolves an opaque artifact ID to a URL that an ``AssetFetcher`` can retrieve.
-
-    Implementations are responsible for their own caching; ``DataLakeDataManager``
-    calls :meth:`resolve` on every cache miss and does not memoize the result.
-
-    An implementation may additionally define ``async def aclose(self) -> None``
-    to release backend clients. ``DataLakeDataManager`` calls it during cleanup
-    when present, following the same optional-``close`` convention used for
-    fetchers. A resolver must not close a credential it did not create.
-    """
-
-    async def resolve(self, artifact_id: str) -> str:
-        """
-        Resolve an opaque artifact ID to a fetchable qualified name or URL.
-
-        Args:
-            artifact_id: The identifier carried by a ``<blob>id</blob>`` tag.
-
-        Returns:
-            A qualified name a registered fetcher can handle (e.g. an
-            ``https://``, ``abfss://``, or ``az://`` URL).
-
-        Raises:
-            ValueError: If the artifact is unknown, the resolved location is
-                invalid, or resolution is unavailable. When unavailable, prefer
-                raising with :attr:`unavailable_reason` as the message.
-        """
-        ...
-
-    @property
-    def unavailable_reason(self) -> str | None:
-        """
-        Human-readable reason resolution is unavailable, or ``None`` if ready.
-
-        This is surfaced to the agent in asset-tag guidance, so it should state
-        what an operator would need to configure rather than leaking internals.
-        """
-        ...
+__all__ = ["ArtifactResolver", "SearchIndexArtifactResolver"]
 
 
 class SearchIndexArtifactResolver:

@@ -93,7 +93,7 @@ data = pd.read_parquet("<blob>abc123</blob>")
 The `<blob>id</blob>` payload is an opaque catalog identifier. By default it is looked up in an Azure AI Search index (`DATA_LAKE_SEARCH_ENDPOINT` / `DATA_LAKE_BLOB_DETAILS_INDEX`). Deployments whose catalog is a manifest file, a database, a REST service, or an offline test fixture can supply their own resolver instead:
 
 ```python
-from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
+from agora_workbench.data_lake.execution import DataLakeDataManager
 
 
 class ManifestArtifactResolver:
@@ -122,11 +122,20 @@ manager = DataLakeDataManager(artifact_resolver=ManifestArtifactResolver(manifes
 
 `resolve` returns any qualified name a registered fetcher can handle (`https://`, `abfss://`, `az://`, or a local path). `unavailable_reason` returns `None` when resolution is ready, or a short operator-facing explanation otherwise — it is folded into the asset-tag guidance the agent sees, so the guidance stays truthful for whichever backend is in use.
 
-The `ArtifactResolver` protocol (importable from `agora_workbench.code_execution.data_access` for type annotations) is structural, so a resolver does not need to subclass it.
+The `ArtifactResolver` protocol is available from `agora_workbench.data_lake`
+for type annotations. It is structural, so a resolver does not need to subclass
+it.
 
-Resolvers may also define `async def aclose(self)` to release backend clients; the manager calls it during cleanup when present. A resolver you supply is used as-is and is not handed the manager's Azure credential, so it must arrange its own authentication.
+The manager calls `resolve` on each manager cache miss; resolver implementations
+own any backend-result caching. Resolvers may also define
+`async def aclose(self)` to release backend clients, and the manager calls it
+during cleanup when present. A resolver you supply is used as-is and is not
+handed the manager's Azure credential, so it must arrange its own authentication.
+It may close clients it creates, but must not close credentials or other resources
+borrowed from its caller.
 
-Omitting `artifact_resolver` preserves the Azure AI Search behavior exactly.
+If you omit `artifact_resolver`, the manager uses the built-in Azure AI Search
+resolver.
 
 ## Publishing artifacts
 
@@ -134,7 +143,7 @@ Tools and code execution can produce output files. Configure publishers to make 
 
 ```python
 from agora_workbench.code_execution.auth import create_noop_auth_config
-from agora_workbench.code_execution.data_access import LocalFilePublisher, BlobPublisher
+from agora_workbench.data_lake.execution import BlobPublisher, LocalFilePublisher, create_storage_credential
 
 publishers = [
     LocalFilePublisher(base_dir="/tmp/artifacts"),

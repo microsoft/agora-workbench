@@ -1,0 +1,61 @@
+"""Backend-neutral public contracts for data-lake access."""
+
+from .errors import (
+    ArtifactNotFoundError,
+    BackendUnavailableError,
+    DataLakeError,
+    DataLakeErrorCode,
+    InvalidRequestError,
+    PermissionDeniedError,
+    UnsupportedOperationError,
+)
+from .models import (
+    MAX_PAGE_LIMIT,
+    READ_OPERATIONS,
+    ArtifactPresentation,
+    ArtifactReference,
+    CatalogArtifact,
+    CatalogOperation,
+    DownloadInfo,
+    ListRequest,
+    Page,
+    PageRequest,
+    RequestContext,
+    ResolvedArtifact,
+    ResourceLease,
+    ResourceOwnership,
+    SearchRequest,
+    SourceCapabilities,
+    StorageLocator,
+)
+from .protocols import ArtifactResolver, CatalogProvider
+
+
+__all__ = [
+    "ArtifactNotFoundError",
+    "ArtifactPresentation",
+    "ArtifactReference",
+    "ArtifactResolver",
+    "BackendUnavailableError",
+    "CatalogArtifact",
+    "CatalogOperation",
+    "CatalogProvider",
+    "DataLakeError",
+    "DataLakeErrorCode",
+    "DownloadInfo",
+    "InvalidRequestError",
+    "ListRequest",
+    "MAX_PAGE_LIMIT",
+    "Page",
+    "PageRequest",
+    "PermissionDeniedError",
+    "READ_OPERATIONS",
+    "RequestContext",
+    "ResolvedArtifact",
+    "ResourceLease",
+    "ResourceOwnership",
+    "SearchRequest",
+    "SourceCapabilities",
+    "StorageLocator",
+    "UnsupportedOperationError",
+]
