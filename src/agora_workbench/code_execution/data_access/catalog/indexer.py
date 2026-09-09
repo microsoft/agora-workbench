@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import mimetypes
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+
+from .identity import (
+    azure_uri_from_blob_name,
+    canonicalize_azure_uri,
+    logical_artifact_id,
+    normalize_logical_path,
+    parse_azure_uri,
+    sanitize_uri_for_display,
+    stable_source_id,
+)
 
 from .config import CatalogConfig, SourceConfig
 from .db import CatalogDB, artifact_id_from_uri
@@ -45,36 +58,34 @@ def _infer_content_type(filename: str) -> Optional[str]:
     return content_type
 
 
+def _source_id(source: SourceConfig) -> str:
+    """Return the configured logical source ID or a compatibility fallback."""
+    root = canonicalize_azure_uri(source.path) if source.source_type == "blob" else str(Path(source.path).resolve())
+    return source.source_id or stable_source_id(source.source_type, root)
+
+
+def _revision_digest(parts: object) -> str:
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _configured_id_alias(custom_id: str) -> str:
+    return custom_id if ":" in custom_id else f"artifact-id:{custom_id}"
+
+
 def _parse_blob_path(path: str) -> tuple[str, str, str]:
     """Parse a blob storage path into (account, container, prefix).
 
-    Supports:
-      - az://account/container/prefix
-      - https://<account>.blob.core.windows.net/container/prefix
+    Supports az://, Blob/DFS HTTPS, and abfss:// forms.
     """
-    if path.startswith("az://"):
-        parts = path[len("az://") :].split("/", 2)
-        account = parts[0]
-        container = parts[1] if len(parts) > 1 else ""
-        prefix = parts[2] if len(parts) > 2 else ""
-        return account, container, prefix
+    if "://" not in path:
+        raise ValueError("Not a blob source.")
+    return parse_azure_uri(path)
 
-    from urllib.parse import urlparse
 
-    parsed = urlparse(path)
-    hostname = parsed.hostname or ""
-    if parsed.scheme == "https" and (
-        hostname == "blob.core.windows.net" or hostname.endswith(".blob.core.windows.net")
-    ):
-        # hostname: <account>.blob.core.windows.net
-        account = hostname.split(".")[0] if hostname else ""
-        # path: /container/prefix/...
-        path_parts = parsed.path.lstrip("/").split("/", 1)
-        container = path_parts[0] if path_parts else ""
-        prefix = path_parts[1] if len(path_parts) > 1 else ""
-        return account, container, prefix
-
-    raise ValueError(f"Not a blob source: {path}")
+@dataclass
+class _EnumerationResult:
+    artifacts: list[dict]
+    successful_source_ids: set[str]
 
 
 class CatalogIndexer:
@@ -138,25 +149,36 @@ class CatalogIndexer:
         Returns:
             Number of artifacts indexed (new + updated).
         """
-        all_artifacts = await self._enumerate_all_sources()
+        enumeration = await self._enumerate_all_sources()
+        all_artifacts = enumeration.artifacts
 
-        if not all_artifacts:
-            LOGGER.info("No artifacts found in configured sources.")
-            return 0
+        discovered_by_source: dict[str, set[str]] = {
+            source_id: set() for source_id in enumeration.successful_source_ids
+        }
+        for artifact in all_artifacts:
+            discovered_by_source[artifact["source_id"]].add(artifact["logical_path"])
 
-        # Diff against existing entries
-        existing_uris = self._db.get_existing_uris()
-        new_uris = {a["storage_uri"] for a in all_artifacts}
-
-        # Remove artifacts no longer in sources
-        stale_uris = existing_uris - new_uris
-        if stale_uris:
-            stale_ids = [artifact_id_from_uri(uri) for uri in stale_uris]
+        stale_ids: list[str] = []
+        for source_id, discovered_paths in discovered_by_source.items():
+            current = self._db.current_paths(source_id)
+            stale_ids.extend(artifact_id for path, artifact_id in current.items() if path not in discovered_paths)
+        if stale_ids:
             self._db.delete_artifacts(stale_ids)
-            LOGGER.info("Removed %d stale artifacts.", len(stale_ids))
+            LOGGER.info("Tombstoned %d stale artifacts.", len(stale_ids))
 
-        # Determine which artifacts need (re-)indexing
-        to_index = [a for a in all_artifacts if a["storage_uri"] not in existing_uris]
+        to_index = []
+        for artifact in all_artifacts:
+            existing = self._db.find_by_source_path(
+                artifact["source_id"], artifact["logical_path"], include_deleted=True
+            )
+            if (
+                existing is None
+                or existing.deleted_at is not None
+                or existing.storage_uri != artifact["storage_uri"]
+                or existing.content_revision != artifact["content_revision"]
+                or existing.metadata_revision != artifact["metadata_revision"]
+            ):
+                to_index.append(artifact)
 
         if not to_index:
             LOGGER.info("Catalog up to date (%d artifacts).", len(all_artifacts))
@@ -176,24 +198,29 @@ class CatalogIndexer:
         LOGGER.info("Indexed %d new artifacts (%d total).", len(to_index), len(all_artifacts))
         return len(to_index)
 
-    async def _enumerate_all_sources(self) -> list[dict]:
-        """Enumerate files from all configured sources (local sync, blob async concurrent)."""
+    async def _enumerate_all_sources(self) -> _EnumerationResult:
+        """Enumerate sources while retaining which sources completed successfully."""
         artifacts: list[dict] = []
+        successful_source_ids: set[str] = set()
         blob_sources: list[SourceConfig] = []
 
         for source in self._config.sources:
             if source.source_type == "local":
-                artifacts.extend(self._enumerate_local(source))
+                source_artifacts, succeeded = self._enumerate_local(source)
+                artifacts.extend(source_artifacts)
+                if succeeded:
+                    successful_source_ids.add(_source_id(source))
             elif source.source_type == "blob":
                 blob_sources.append(source)
 
         if blob_sources:
-            blob_artifacts = await self._enumerate_blob_sources_concurrent(blob_sources)
-            artifacts.extend(blob_artifacts)
+            blob_result = await self._enumerate_blob_sources_concurrent(blob_sources)
+            artifacts.extend(blob_result.artifacts)
+            successful_source_ids.update(blob_result.successful_source_ids)
 
-        return artifacts
+        return _EnumerationResult(artifacts, successful_source_ids)
 
-    async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> list[dict]:
+    async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> _EnumerationResult:
         """Enumerate multiple blob sources concurrently with shared credential."""
         try:
             from azure.storage.blob.aio import BlobServiceClient
@@ -231,12 +258,18 @@ class CatalogIndexer:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             artifacts: list[dict] = []
+            successful_source_ids: set[str] = set()
             for source, result in zip(sources, results):
                 if isinstance(result, BaseException):
-                    LOGGER.error("Failed to enumerate blob source '%s': %s", source.path, result)
+                    LOGGER.error(
+                        "Failed to enumerate blob source '%s' (%s)",
+                        sanitize_uri_for_display(source.path),
+                        type(result).__name__,
+                    )
                 else:
                     artifacts.extend(result)
-            return artifacts
+                    successful_source_ids.add(_source_id(source))
+            return _EnumerationResult(artifacts, successful_source_ids)
         finally:
             for client in clients.values():
                 await client.close()
@@ -258,6 +291,8 @@ class CatalogIndexer:
         from azure.storage.blob.aio import BlobServiceClient
 
         account, container, prefix = _parse_blob_path(source.path)
+        source_id = _source_id(source)
+        source_root = canonicalize_azure_uri(source.path).rstrip("/")
         service_url = f"https://{account}.blob.core.windows.net"
 
         # Reuse BlobServiceClient per account
@@ -270,29 +305,57 @@ class CatalogIndexer:
 
         container_client = client.get_container_client(container)
         async for blob in container_client.list_blobs(name_starts_with=prefix):
+            if prefix and not blob.name.startswith(prefix):
+                continue
             if blob.name.endswith("/"):
                 continue
             filename = blob.name.split("/")[-1]
             if filename.startswith("."):
                 continue
 
-            storage_uri = f"az://{account}/{container}/{blob.name}"
-            artifact_id = artifact_id_from_uri(storage_uri)
+            storage_uri = azure_uri_from_blob_name(account, container, blob.name)
+            logical_path = normalize_logical_path(blob.name[len(prefix) :].lstrip("/") if prefix else blob.name)
 
             description = source.description
             domain = source.domain
+            custom_id = None
+            custom_aliases: list[str] = []
             if source.files:
-                rel = blob.name[len(prefix) :].lstrip("/") if prefix else blob.name
-                override = source.files.get(rel) or source.files.get(filename)
+                override = source.files.get(logical_path) or source.files.get(filename)
                 if override:
                     if override.description:
                         description = override.description
                     if override.domain:
                         domain = override.domain
+                    custom_id = override.artifact_id
+                    custom_aliases = override.aliases
+
+            legacy_id = artifact_id_from_uri(storage_uri)
+            artifact_id = (
+                (self._db.resolve_scan_alias(custom_id, source_id) if custom_id else None)
+                or self._db.resolve_scan_alias(legacy_id, source_id)
+                or custom_id
+                or logical_artifact_id(source_id, logical_path)
+            )
+            content_revision = str(blob.etag or _revision_digest([blob.size, blob.last_modified]))
+            metadata_revision = _revision_digest(
+                [
+                    filename,
+                    description,
+                    domain,
+                    "blob",
+                    _infer_content_type(filename) or blob.content_settings.content_type,
+                    custom_id,
+                    custom_aliases,
+                ]
+            )
 
             artifacts.append(
                 {
                     "artifact_id": artifact_id,
+                    "source_id": source_id,
+                    "logical_path": logical_path,
+                    "source_root": source_root,
                     "name": filename,
                     "storage_uri": storage_uri,
                     "description": description,
@@ -301,61 +364,122 @@ class CatalogIndexer:
                     "content_type": _infer_content_type(filename) or blob.content_settings.content_type,
                     "size_bytes": blob.size,
                     "indexed_at": now,
+                    "content_revision": content_revision,
+                    "metadata_revision": metadata_revision,
+                    "aliases": [
+                        f"artifact-id:{legacy_id}",
+                        f"blob:{legacy_id}",
+                        f"storage-uri:{storage_uri}",
+                        *([_configured_id_alias(custom_id)] if custom_id else []),
+                        *custom_aliases,
+                    ],
                 }
             )
 
         return artifacts
 
-    def _enumerate_local(self, source: SourceConfig) -> list[dict]:
+    def _enumerate_local(self, source: SourceConfig) -> tuple[list[dict], bool]:
         """Walk a local directory and produce artifact records."""
         source_path = Path(source.path).resolve()
+        source_id = _source_id(source)
         if not source_path.exists():
             LOGGER.warning("Source path does not exist: %s", source_path)
-            return []
+            return [], False
 
         artifacts: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
+        errors: list[OSError] = []
+        try:
+            if source_path.is_file():
+                artifacts.append(
+                    self._make_local_artifact(
+                        source_path,
+                        source_path.name,
+                        source_path.parent,
+                        source_id,
+                        source,
+                        now,
+                    )
+                )
+            else:
+                for root, _dirs, files in os.walk(source_path, onerror=errors.append):
+                    for filename in files:
+                        if filename.startswith("."):
+                            continue
+                        filepath = Path(root) / filename
+                        artifacts.append(
+                            self._make_local_artifact(filepath, filename, source_path, source_id, source, now)
+                        )
+        except OSError as exc:
+            errors.append(exc)
+        if errors:
+            LOGGER.error("Failed to enumerate local source '%s' (%s)", source_path, type(errors[0]).__name__)
+            return [], False
+        return artifacts, True
 
-        if source_path.is_file():
-            artifacts.append(self._make_local_artifact(source_path, source_path.name, source, now))
-        else:
-            for root, _dirs, files in os.walk(source_path):
-                for filename in files:
-                    if filename.startswith("."):
-                        continue
-                    filepath = Path(root) / filename
-                    artifacts.append(self._make_local_artifact(filepath, filename, source, now))
-
-        return artifacts
-
-    def _make_local_artifact(self, filepath: Path, filename: str, source: SourceConfig, indexed_at: str) -> dict:
+    def _make_local_artifact(
+        self,
+        filepath: Path,
+        filename: str,
+        source_root: Path,
+        source_id: str,
+        source: SourceConfig,
+        indexed_at: str,
+    ) -> dict:
         """Build an artifact dict from a local file."""
         storage_uri = str(filepath)
-        artifact_id = artifact_id_from_uri(storage_uri)
+        logical_path = normalize_logical_path(str(filepath.relative_to(source_root)))
         rel_name = filename
 
         # Check for per-file overrides
         description = source.description
         domain = source.domain
+        custom_id = None
+        custom_aliases: list[str] = []
         if source.files:
-            relative = str(filepath.relative_to(Path(source.path).resolve()))
-            override = source.files.get(relative) or source.files.get(filename)
+            override = source.files.get(logical_path) or source.files.get(filename)
             if override:
                 if override.description:
                     description = override.description
                 if override.domain:
                     domain = override.domain
+                custom_id = override.artifact_id
+                custom_aliases = override.aliases
+
+        stat = filepath.stat()
+        content_type = _infer_content_type(filename)
+        legacy_id = artifact_id_from_uri(storage_uri)
+        artifact_id = (
+            (self._db.resolve_scan_alias(custom_id, source_id) if custom_id else None)
+            or self._db.resolve_scan_alias(legacy_id, source_id)
+            or custom_id
+            or logical_artifact_id(source_id, logical_path)
+        )
 
         return {
             "artifact_id": artifact_id,
+            "source_id": source_id,
+            "logical_path": logical_path,
+            "source_root": str(source_root),
             "name": rel_name,
             "storage_uri": storage_uri,
             "description": description,
             "domain": domain,
             "source_type": "local",
-            "content_type": _infer_content_type(filename),
-            "size_bytes": filepath.stat().st_size,
+            "content_type": content_type,
+            "size_bytes": stat.st_size,
             "indexed_at": indexed_at,
+            "content_revision": _revision_digest([stat.st_size, stat.st_mtime_ns]),
+            "metadata_revision": _revision_digest(
+                [rel_name, description, domain, "local", content_type, custom_id, custom_aliases]
+            ),
+            "aliases": [
+                f"artifact-id:{legacy_id}",
+                f"local:{legacy_id}",
+                f"storage-uri:{storage_uri}",
+                *([_configured_id_alias(custom_id)] if custom_id else []),
+                *custom_aliases,
+            ],
         }
 
     async def _compute_and_store(self, artifacts: list[dict]) -> None:
@@ -386,8 +510,7 @@ class CatalogIndexer:
                         )
                 all_embeddings.extend(embeddings)
 
-        # Upsert all artifacts within a single transaction for efficiency
-        with self._db.conn:
-            for artifact, embedding in zip(artifacts, all_embeddings):
-                artifact["embedding"] = embedding
-                self._db.upsert_artifact(**artifact)
+        rows = []
+        for artifact, embedding in zip(artifacts, all_embeddings):
+            rows.append({**artifact, "embedding": embedding})
+        self._db.upsert_artifacts_batch(rows)

@@ -157,8 +157,13 @@ def register_catalog_tools(
         goes beyond what search_data provides.
 
         Available tables:
-          - artifacts (id, name, storage_uri, description, domain,
-                       source_type, content_type, size_bytes, indexed_at)
+          - artifacts (id, source_id, logical_path, name, storage_uri,
+                       description, domain, source_type, content_type,
+                       size_bytes, indexed_at, current_revision,
+                       content_revision, metadata_revision, checksum_sha256,
+                       deleted_at)
+          - artifact_revisions (retained historical records and tombstones)
+          - artifact_aliases (namespaced compatibility/import aliases)
           - artifacts_fts (FTS5 virtual table: name, description, domain)
             Usage: SELECT * FROM artifacts_fts WHERE artifacts_fts MATCH 'query'
 
@@ -195,8 +200,10 @@ def register_catalog_tools(
             "Run a read-only SQL query against the data catalog. "
             "Use for structured filtering (e.g., by content_type, size_bytes), "
             "aggregations, or exploration beyond natural language search. "
-            "Table: artifacts (id, name, storage_uri, description, domain, "
-            "source_type, content_type, size_bytes, indexed_at). "
+            "Table: artifacts (id, source_id, logical_path, name, storage_uri, "
+            "description, domain, source_type, content_type, size_bytes, indexed_at, "
+            "current_revision, content_revision, metadata_revision, checksum_sha256, deleted_at). "
+            "History: artifact_revisions. Compatibility mappings: artifact_aliases. "
             "FTS5 table: artifacts_fts (MATCH queries on name, description, domain). "
             "Legacy unscoped surface: read-only mode prevents writes but does not authorize callers "
             "or filter metadata."

@@ -201,7 +201,8 @@ Create a `catalog.yaml` file in your server's directory:
 # catalog.yaml
 sources:
   # Local filesystem directory
-  - path: /data/weather/
+  - source_id: weather
+    path: /data/weather/
     domain: earthscience
     description: "NOAA daily weather observations for Pacific Northwest"
     files:

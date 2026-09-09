@@ -28,6 +28,10 @@ from agora_workbench.data_lake import (
     SearchRequest,
     SourceCapabilities,
     StorageLocator,
+    azure_uri_from_blob_name,
+    canonicalize_azure_uri,
+    normalize_logical_path,
+    sanitize_uri_for_display,
 )
 from agora_workbench.data_lake.catalog import CatalogDB
 from agora_workbench.data_lake.execution import AssetFetcher, AssetPublisher, DataLakeDataManager
@@ -140,6 +144,70 @@ def test_page_request_uses_pagination_operation_and_conservative_limit():
         PageRequest(limit=MAX_PAGE_LIMIT + 1)
     assert too_small.value.operation == "pagination"
     assert too_large.value.operation == "pagination"
+
+
+def test_artifact_reference_can_follow_current_or_pin_revision():
+    current = ArtifactReference("wind-hourly", source_id="weather")
+    pinned = ArtifactReference("wind-hourly", source_id="weather", revision=3)
+
+    assert current.is_current
+    assert not pinned.is_current
+
+
+def test_azure_uri_canonicalization_strips_credentials_and_preserves_object_case():
+    expected = "az://account/container/Folder/File~Name.csv"
+    assert (
+        canonicalize_azure_uri(
+            "https://ACCOUNT.blob.core.windows.net/container/Folder/File%7EName.csv?sv=secret#fragment"
+        )
+        == expected
+    )
+    assert (
+        canonicalize_azure_uri("abfss://container@account.dfs.core.windows.net/Folder/File~Name.csv?sig=secret")
+        == expected
+    )
+    assert canonicalize_azure_uri("az://account/container/Folder/File~Name.csv?sig=secret") == expected
+    assert canonicalize_azure_uri("az://account/container/folder/File~Name.csv") != expected
+
+
+def test_sdk_decoded_blob_names_are_quoted_exactly_once():
+    literal_escape = azure_uri_from_blob_name("account", "container", "literal%41.csv")
+    decoded_name = azure_uri_from_blob_name("account", "container", "literalA.csv")
+    assert literal_escape == "az://account/container/literal%2541.csv"
+    assert decoded_name == "az://account/container/literalA.csv"
+    assert literal_escape != decoded_name
+    assert canonicalize_azure_uri("az://account/container/literal%2541.csv") == literal_escape
+    assert canonicalize_azure_uri("az://account/container/literal%41.csv") == decoded_name
+
+
+def test_abfss_display_sanitization_drops_passwords():
+    assert (
+        sanitize_uri_for_display(
+            "abfss://container:DO_NOT_LOG@account123.dfs.core.windows.net/path?sig=DO_NOT_LOG#fragment"
+        )
+        == "abfss://container@account123.dfs.core.windows.net/path"
+    )
+
+
+@pytest.mark.parametrize("container", ["$root", "$web", "$logs"])
+def test_azure_system_containers_are_canonicalized(container):
+    assert canonicalize_azure_uri(f"https://account.blob.core.windows.net/{container}/File.csv") == (
+        f"az://account/{container}/File.csv"
+    )
+
+
+def test_abfss_container_is_decoded_exactly_once():
+    assert canonicalize_azure_uri("abfss://%24root@account.dfs.core.windows.net/File.csv") == (
+        "az://account/$root/File.csv"
+    )
+    with pytest.raises(InvalidRequestError):
+        canonicalize_azure_uri("abfss://%2524root@account.dfs.core.windows.net/File.csv")
+
+
+def test_logical_path_normalization_is_relative_and_safe():
+    assert normalize_logical_path(r"folder\child\..\file.csv") == "folder/file.csv"
+    with pytest.raises(InvalidRequestError):
+        normalize_logical_path("../../outside.csv")
 
 
 def test_generic_data_lake_error_is_internal_not_backend_unavailable():

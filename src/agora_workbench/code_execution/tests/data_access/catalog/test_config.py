@@ -24,6 +24,56 @@ class TestSourceConfig:
     def test_blob_https_source_type(self):
         source = SourceConfig(path="https://orfb0eastus.blob.core.windows.net/fingerprints/.amltconfig")
         assert source.source_type == "blob"
+        assert source.path == "az://orfb0eastus/fingerprints/.amltconfig/"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "https://account123.dfs.core.windows.net/container/path",
+            "abfss://container@account123.dfs.core.windows.net/path",
+        ],
+    )
+    def test_adls_source_forms_are_supported(self, path):
+        source = SourceConfig(path=path)
+        assert source.source_type == "blob"
+        assert source.path == "az://account123/container/path/"
+
+    @pytest.mark.parametrize("container", ["$root", "$web", "$logs"])
+    def test_azure_system_containers_are_supported(self, container):
+        source = SourceConfig(path=f"az://account123/{container}")
+        assert source.path == f"az://account123/{container}"
+
+    def test_blob_prefix_forms_normalize_to_same_directory_boundary(self):
+        without_slash = SourceConfig(path="az://account123/container/data")
+        with_slash = SourceConfig(path="az://account123/container/data/")
+        assert without_slash.path == with_slash.path == "az://account123/container/data/"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "https://blob.core.windows.net/container/path",
+            "https://dfs.core.windows.net/container/path",
+            "az://ab/container/path",
+            "az://account123/ab/path",
+            "az://account123/Bad_Container/path",
+            "https://account123.blob.core.windows.net:8443/container/path",
+        ],
+    )
+    def test_malformed_azure_sources_are_rejected(self, path):
+        with pytest.raises(Exception):
+            SourceConfig(path=path)
+
+    def test_validation_error_does_not_include_sas_or_userinfo(self):
+        secret = "DO_NOT_LOG"
+        with pytest.raises(Exception, match="must not contain user information") as exc_info:
+            SourceConfig(path=f"https://user:{secret}@account123.blob.core.windows.net/container/path?sig={secret}")
+        assert secret not in str(exc_info.value)
+
+    def test_abfss_validation_error_does_not_include_password(self):
+        secret = "DO_NOT_LOG"
+        with pytest.raises(Exception) as exc_info:
+            SourceConfig(path=f"abfss://container:{secret}@account123.dfs.core.windows.net/path?sig={secret}")
+        assert secret not in str(exc_info.value)
 
     def test_relative_path_is_local(self):
         source = SourceConfig(path="./data/weather/")

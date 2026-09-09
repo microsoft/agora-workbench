@@ -9,6 +9,16 @@ from .errors import (
     PermissionDeniedError,
     UnsupportedOperationError,
 )
+from .identity import (
+    azure_uri_from_blob_name,
+    canonicalize_azure_uri,
+    logical_artifact_id,
+    normalize_logical_path,
+    parse_azure_uri,
+    sanitize_uri_for_display,
+    split_alias,
+    stable_source_id,
+)
 from .models import (
     MAX_PAGE_LIMIT,
     READ_OPERATIONS,
@@ -38,7 +48,6 @@ from .protocols import (
     CatalogProvider,
     PolicyEnforcedCatalog,
 )
-
 
 __all__ = [
     "ArtifactNotFoundError",
@@ -75,4 +84,12 @@ __all__ = [
     "SourceCapabilities",
     "StorageLocator",
     "UnsupportedOperationError",
+    "azure_uri_from_blob_name",
+    "canonicalize_azure_uri",
+    "logical_artifact_id",
+    "normalize_logical_path",
+    "parse_azure_uri",
+    "sanitize_uri_for_display",
+    "split_alias",
+    "stable_source_id",
 ]
