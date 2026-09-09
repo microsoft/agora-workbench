@@ -81,6 +81,8 @@ exclude = [
     "agora_workbench.code_execution.tests.*",
     "agora_workbench.connector.tests",
     "agora_workbench.connector.tests.*",
+    "agora_workbench.data_lake.tests",
+    "agora_workbench.data_lake.tests.*",
     "agora_workbench.deployment.tests",
     "agora_workbench.deployment.tests.*",
 ]
