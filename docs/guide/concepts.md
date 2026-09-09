@@ -98,8 +98,10 @@ caller, and rejects unknown or expired IDs rather than creating a new kernel.
 - **Asset provisioning** — large, static files declared in `ServerConfig.assets`
   and fetched into the environment cache at startup.
 - **Data catalog** *(optional)* — a searchable index of datasets. When
-  configured, it adds the `search_data` / `get_artifact` / `list_domains` /
-  `query_catalog` tools (these names are **not** server-prefixed).
+  configured, the legacy unscoped surface adds `search_data` / `get_artifact` /
+  `list_domains` / `query_catalog` (these names are **not** server-prefixed).
+  It is appropriate only when the whole catalog is authorized to all callers;
+  raw SQL may also be mounted as a separate administrative extension.
 - **Asset tags** — the agent embeds references like `<blob>id</blob>` or
   `<local>/path</local>` as string literals; the server resolves them to local
   `Path` objects before the code runs, handling download and auth for you.

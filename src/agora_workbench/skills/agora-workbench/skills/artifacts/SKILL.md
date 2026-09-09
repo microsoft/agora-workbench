@@ -23,9 +23,12 @@ query_catalog(sql="SELECT name, domain, description FROM artifacts WHERE domain 
 `list_domains`, `get_artifact`, `query_catalog`) are registered only when the
 server is configured with one — and unlike most tools they are **not** prefixed
 with the server name. If they are not in the server's tool list, the server has
-no catalog: skip them and use the data references the user provides directly.
-Configuring a catalog is a server-author/deployment task, not something you can
-do from the client side.
+no caller-visible catalog: skip them and use the data references the user
+provides directly. These legacy tools are unscoped: their presence means the
+server operator has chosen to expose the entire catalog to callers with tool
+access. Read-only `query_catalog` prevents writes but is not caller
+authorization. Configuring and protecting a catalog is a server-author/deployment
+task, not something you can do from the client side.
 
 When present, results include the artifact's `storage_uri`, `domain`,
 `source_type` (local or blob), `description`, and `content_type`. Use these

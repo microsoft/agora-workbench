@@ -302,16 +302,17 @@ The catalog is stored as a SQLite database on disk, so it persists across server
 
 ### MCP tools exposed
 
-Once configured, the catalog registers four tools on your MCP server (these
-tool names are **not** prefixed with the server name, and they appear only when
-a catalog is configured):
+The synchronous SQLite catalog is not yet caller-aware. Its legacy registration
+surface is unscoped and should be used only when every catalog entry is already
+authorized to every caller with tool access, such as public development data.
+These tool names are **not** prefixed with the server name:
 
 | Tool | Description |
 |------|-------------|
 | `search_data` | Hybrid keyword + vector search over the catalog. Supports filters by domain and source type. |
 | `get_artifact` | Get full metadata for a specific artifact by ID |
 | `list_domains` | List all unique domain labels in the catalog |
-| `query_catalog` | Run arbitrary read-only SQL against the catalog database |
+| `query_catalog` | Legacy unscoped read-only SQL over all catalog metadata |
 
 ### Example: agent using search_data
 
@@ -327,17 +328,26 @@ import pandas as pd
 df = pd.read_parquet("/data/weather/hourly_wind.parquet")
 ```
 
-### Example: agent using query_catalog
+### Privileged SQL administration
 
-For structured queries beyond natural language search:
+For v0.2.x compatibility, `query_catalog` remains part of
+`register_catalog_tools`. That does not make it authorized: read-only SQLite
+prevents writes but does not enforce caller, source, row, or artifact policy.
+Use the legacy function only when the entire catalog is already visible to every
+caller.
+
+New applications may instead register SQL separately with
+`register_catalog_admin_tools` on a separately authenticated and authorized
+administrative MCP surface:
 
 ```python
-# Find all parquet files larger than 100MB
-results = query_catalog(
-    sql="SELECT name, domain, size_bytes FROM artifacts WHERE content_type = 'application/x-parquet' AND size_bytes > 100000000",
-    max_rows=50,
-)
+from agora_workbench.code_execution.catalog_tools import register_catalog_admin_tools
+
+register_catalog_admin_tools(admin_mcp, catalog_context)
 ```
+
+The administrative helper is an exposure seam, not an authorization mechanism;
+the host remains responsible for protecting that surface.
 
 ### Catalog database schema
 

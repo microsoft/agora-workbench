@@ -12,8 +12,10 @@ from .models import (
     READ_OPERATIONS,
     ArtifactPresentation,
     ArtifactReference,
+    CatalogAuthorizationRequest,
     CatalogArtifact,
     CatalogOperation,
+    CatalogPolicyMode,
     DownloadInfo,
     ListRequest,
     Page,
@@ -24,23 +26,32 @@ from .models import (
     SourceCapabilities,
     StorageLocator,
 )
-from .protocols import CatalogProvider
+from .policy import AuthorizedCatalogProvider, DenyAllCatalogAuthorizer, DevelopmentAllowAllCatalogAuthorizer
+from .protocols import CatalogAuthorizer, CatalogPolicyEnforcer, CatalogProvider, PolicyEnforcedCatalog
 
 
 __all__ = [
     "ArtifactPresentation",
     "ArtifactReference",
+    "AuthorizedCatalogProvider",
+    "CatalogAuthorizationRequest",
+    "CatalogAuthorizer",
     "CatalogArtifact",
     "CatalogConfig",
     "CatalogDB",
     "CatalogIndexer",
     "CatalogOperation",
+    "CatalogPolicyEnforcer",
+    "CatalogPolicyMode",
     "CatalogProvider",
+    "DenyAllCatalogAuthorizer",
+    "DevelopmentAllowAllCatalogAuthorizer",
     "DownloadInfo",
     "ListRequest",
     "MAX_PAGE_LIMIT",
     "Page",
     "PageRequest",
+    "PolicyEnforcedCatalog",
     "READ_OPERATIONS",
     "RequestContext",
     "ResolvedArtifact",

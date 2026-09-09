@@ -27,12 +27,24 @@ class CatalogToolsContext:
     config: CatalogConfig
 
 
-def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_publisher: Any = None) -> None:
+def register_catalog_tools(
+    mcp: "FastMCP",
+    ctx: CatalogToolsContext,
+    activity_publisher: Any = None,
+) -> None:
     """Register catalog search tools on a FastMCP server instance.
 
     When *activity_publisher* is provided, ``search_data`` emits a
     ``data_searched`` activity event so the search step shows up in the GUI.
+
+    The synchronous ``CatalogDB`` is not yet a caller-aware ``CatalogProvider``
+    adapter. This compatibility surface is unscoped and is appropriate only
+    where every registered artifact is already authorized to every caller.
     """
+    LOGGER.warning(
+        "Registering legacy unscoped catalog tools. All catalog metadata, including raw read-only SQL, "
+        "will be visible to every caller with tool access; read-only SQL is not caller authorization."
+    )
 
     async def search_data(
         query: str,
@@ -150,6 +162,9 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
           - artifacts_fts (FTS5 virtual table: name, description, domain)
             Usage: SELECT * FROM artifacts_fts WHERE artifacts_fts MATCH 'query'
 
+        This legacy surface is unscoped. Read-only mode prevents writes but
+        does not provide row-, source-, artifact-, or caller-level authorization.
+
         Args:
             sql: A SELECT query to execute. Write operations are rejected.
             max_rows: Maximum number of rows to return (default 100).
@@ -159,8 +174,8 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
         """
         try:
             return ctx.db.execute_readonly(sql, max_rows=max_rows)
-        except (ValueError, Exception) as e:
-            return {"error": str(e)}
+        except Exception as exc:
+            return {"error": str(exc)}
 
     mcp.tool(
         name="search_data",
@@ -182,7 +197,9 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
             "aggregations, or exploration beyond natural language search. "
             "Table: artifacts (id, name, storage_uri, description, domain, "
             "source_type, content_type, size_bytes, indexed_at). "
-            "FTS5 table: artifacts_fts (MATCH queries on name, description, domain)."
+            "FTS5 table: artifacts_fts (MATCH queries on name, description, domain). "
+            "Legacy unscoped surface: read-only mode prevents writes but does not authorize callers "
+            "or filter metadata."
         ),
     )(query_catalog)
 
@@ -200,3 +217,25 @@ def register_catalog_tools(mcp: "FastMCP", ctx: CatalogToolsContext, activity_pu
     )(list_domains)
 
     LOGGER.info("Registered catalog tools: search_data, query_catalog, get_artifact, list_domains")
+
+
+def register_catalog_admin_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> None:
+    """Register privileged catalog administration tools.
+
+    Mount this extension only on an administrative MCP surface with independent
+    access control. SQLite read-only mode prevents writes; it does not enforce
+    row-, artifact-, source-, or caller-level authorization.
+    """
+
+    async def query_catalog(sql: str, max_rows: int = 100) -> list[dict]:
+        """Run raw read-only SQL against catalog metadata."""
+        return ctx.db.execute_readonly(sql, max_rows=max_rows)
+
+    mcp.tool(
+        name="query_catalog",
+        description=(
+            "Administrative extension: run raw read-only SQL against the catalog. "
+            "This tool must be exposed only on a separately authorized administrative surface."
+        ),
+    )(query_catalog)
+    LOGGER.info("Registered privileged catalog tool: query_catalog")

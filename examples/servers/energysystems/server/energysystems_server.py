@@ -151,8 +151,8 @@ if __name__ == "__main__":
     if "--warm" in sys.argv:
         asyncio.run(server.warm())
     else:
-        # Index the local data catalog and register search_data / query_catalog /
-        # get_artifact / list_domains before serving.
+        # Index the public local data catalog and register the legacy unscoped
+        # search_data / query_catalog / get_artifact / list_domains tools.
         setup_catalog(server, _ENERGYSYSTEMS_DIR)
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
