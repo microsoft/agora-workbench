@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-09
+
 ### Fixed
 
 - Connector tools no longer duplicate serialized JSON responses in FastMCP `structuredContent`. Router, gateway,
