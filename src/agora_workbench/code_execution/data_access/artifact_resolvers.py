@@ -5,8 +5,10 @@ Pluggable resolution of opaque artifact IDs to fetchable storage URLs.
 an opaque catalog identifier. Turning that identifier into something a fetcher
 can retrieve is deployment-specific: the built-in implementation queries an
 Azure AI Search index, but a manifest file, a database, a REST catalog service,
-or an offline test fixture are all equally valid backends. This module defines
-the protocol that decouples the tag format from the catalog behind it.
+or an offline test fixture are all equally valid backends. The public
+``ArtifactResolver`` protocol lives in ``agora_workbench.data_lake.protocols``
+and is re-exported here for compatibility; this module also provides the Azure
+AI Search implementation.
 
 Note the distinction from the similarly named ``resolution`` module: that one
 resolves *asset tags in tool parameters* to cached local paths, whereas this one
