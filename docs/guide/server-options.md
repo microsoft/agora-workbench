@@ -205,7 +205,7 @@ Configure publishers to allow the agent to publish artifacts (files, plots) from
 
 ```python
 from agora_workbench.code_execution.auth import create_noop_auth_config
-from agora_workbench.code_execution.data_access import LocalFilePublisher, BlobPublisher
+from agora_workbench.data_lake import BlobPublisher, LocalFilePublisher
 
 publishers = [
     LocalFilePublisher(base_dir="/tmp/artifacts"),
