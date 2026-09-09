@@ -11,7 +11,8 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .artifact_resolvers import ArtifactResolver, SearchIndexArtifactResolver
+    from agora_workbench.data_lake.protocols import ArtifactResolver
+    from .artifact_resolvers import SearchIndexArtifactResolver
     from .credentials import MsalCacheCredential, create_storage_credential
     from .publishers import (
         AssetPublisher,
