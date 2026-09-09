@@ -44,6 +44,7 @@ class TestSearchConfig:
     def test_defaults(self):
         cfg = SearchConfig()
         assert cfg.embedding_model == "none"
+        assert cfg.embedding_dimensions is None
         assert cfg.hybrid_alpha == 0.5
         assert cfg.azure_openai_endpoint is None
 
@@ -56,6 +57,12 @@ class TestSearchConfig:
             SearchConfig(hybrid_alpha=1.5)
         with pytest.raises(Exception):
             SearchConfig(hybrid_alpha=-0.1)
+
+    def test_embedding_dimensions_are_optional_and_positive(self):
+        assert SearchConfig(embedding_dimensions=None).embedding_dimensions is None
+        assert SearchConfig(embedding_dimensions=1536).embedding_dimensions == 1536
+        with pytest.raises(Exception):
+            SearchConfig(embedding_dimensions=0)
 
 
 class TestCatalogConfig:
@@ -84,6 +91,7 @@ class TestCatalogConfig:
             "    domain: powergrid\n"
             "search:\n"
             "  embedding_model: all-MiniLM-L6-v2\n"
+            "  embedding_dimensions: 384\n"
             "  hybrid_alpha: 0.7\n"
         )
         cfg = CatalogConfig.from_yaml(config_file)
@@ -91,6 +99,7 @@ class TestCatalogConfig:
         assert cfg.sources[0].files["daily_obs.csv"].description == "Daily observations"
         assert cfg.sources[1].source_type == "blob"
         assert cfg.search.embedding_model == "all-MiniLM-L6-v2"
+        assert cfg.search.embedding_dimensions == 384
         assert cfg.search.hybrid_alpha == 0.7
 
     def test_from_yaml_not_found(self):

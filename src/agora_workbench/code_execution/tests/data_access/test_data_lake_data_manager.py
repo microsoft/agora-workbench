@@ -145,6 +145,19 @@ class TestDataLakeDataManagerInit:
         with pytest.raises(ValueError, match="Azure data access initialization failed"):
             await manager.get_cache_path("<blob>artifact_id_1</blob>")
 
+    @pytest.mark.asyncio
+    async def test_missing_azure_extra_is_deferred_and_actionable(self, data_lake_search_endpoint):
+        with patch(
+            "agora_workbench.code_execution.data_access.manager.create_storage_credential",
+            side_effect=ModuleNotFoundError("No module named 'azure'", name="azure"),
+        ):
+            manager = DataLakeDataManager()
+
+        assert manager._credential is None
+        assert len(manager._fetchers) == 1
+        with pytest.raises(ValueError, match=r"agora-workbench\[azure\]"):
+            await manager.get_cache_path("<blob>artifact_id_1</blob>")
+
     def test_injected_credential_is_used_by_blob_fetcher(self):
         """Test a caller-supplied credential is used for the built-in BlobFetcher."""
         injected_credential = MagicMock()

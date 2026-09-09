@@ -9,7 +9,7 @@
 #
 # To pin a specific release:
 #   docker build -f deployment/docker/base.Dockerfile \
-#       --build-arg AGORA_WORKBENCH_VERSION=0.2.1 -t mcp-server-base:local .
+#       --build-arg AGORA_WORKBENCH_VERSION=0.3.0 -t mcp-server-base:local .
 #
 # To build against a workbench source checkout instead of the published
 # package, run from the workbench repository root with:
@@ -31,7 +31,7 @@
 
 # Where agora-workbench comes from: "pypi" (default) or "local" (source checkout).
 ARG AGORA_WORKBENCH_SOURCE=pypi
-ARG AGORA_WORKBENCH_VERSION=0.2.1
+ARG AGORA_WORKBENCH_VERSION=0.3.0
 
 # ============================================================================
 # Stage: Base image with common dependencies
@@ -98,7 +98,7 @@ RUN mkdir -p /opt/wheelhouse && \
 FROM base AS workbench-pypi
 
 ARG AGORA_WORKBENCH_VERSION
-RUN python3 -m pip install --no-input "agora-workbench==${AGORA_WORKBENCH_VERSION}"
+RUN python3 -m pip install --no-input "agora-workbench[azure,catalog-vector]==${AGORA_WORKBENCH_VERSION}"
 
 # ============================================================================
 # Stage: agora-workbench from a source checkout
@@ -109,7 +109,7 @@ FROM base AS workbench-local
 
 # Copy package metadata for dependency resolution, then install runtime deps
 COPY pyproject.toml /app/pyproject.toml
-RUN python3 -c "import tomllib; deps=tomllib.load(open('/app/pyproject.toml','rb'))['project']['dependencies']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
+RUN python3 -c "import tomllib; p=tomllib.load(open('/app/pyproject.toml','rb'))['project']; deps=p['dependencies']+p['optional-dependencies']['azure']+p['optional-dependencies']['catalog-vector']; open('/tmp/reqs.txt','w').write('\n'.join(deps))" && \
     python3 -m pip install --no-input -r /tmp/reqs.txt && \
     rm /tmp/reqs.txt
 

@@ -1,18 +1,27 @@
-"""SQLite catalog database with FTS5 and sqlite-vec for hybrid search."""
+"""SQLite catalog database with FTS5 keyword search and optional vectors."""
 
 from __future__ import annotations
 
 import hashlib
+from importlib import import_module
 import logging
+import re
 import sqlite3
 import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import sqlite_vec
-
 LOGGER = logging.getLogger(__name__)
+
+_VECTOR_EXTRA = "agora-workbench[catalog-vector]"
+_VECTOR_TABLE_NAME = "artifacts_vec"
+_VECTOR_DIMENSIONS_RE = re.compile(r"embedding\s+float\[(\d+)\]", re.IGNORECASE)
+_SQL_IGNORED_RE = re.compile(r"'(?:''|[^'])*'|--[^\r\n]*|/\*.*?\*/", re.DOTALL)
+_VECTOR_TABLE_REFERENCE_RE = re.compile(
+    r'(?<![A-Za-z0-9_])(?:artifacts_vec|"artifacts_vec"|`artifacts_vec`|\[artifacts_vec\])(?![A-Za-z0-9_])',
+    re.IGNORECASE,
+)
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -99,35 +108,47 @@ def _serialize_vector(vec: list[float]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
 
 
-class CatalogDB:
-    """SQLite-backed catalog with FTS5 keyword search and sqlite-vec vector search."""
+def _references_vector_table(sql: str) -> bool:
+    """Return whether SQL references the vector table outside literals/comments."""
+    searchable_sql = _SQL_IGNORED_RE.sub(" ", sql)
+    return _VECTOR_TABLE_REFERENCE_RE.search(searchable_sql) is not None
 
-    def __init__(self, db_path: str | Path = ":memory:", vec_dimensions: int = 768):
+
+class CatalogDB:
+    """SQLite-backed catalog with mandatory FTS5 and on-demand vector search."""
+
+    def __init__(self, db_path: str | Path = ":memory:", vec_dimensions: int | None = 768):
+        if vec_dimensions is not None and vec_dimensions <= 0:
+            raise ValueError("vec_dimensions must be greater than zero")
         self._db_path = str(db_path)
         self._vec_dimensions = vec_dimensions
         self._conn: Optional[sqlite3.Connection] = None
+        self._vector_loaded = False
 
     def open(self) -> None:
-        """Open the database connection and initialize schema."""
+        """Open the database connection and initialize the keyword-search schema."""
         self._conn = sqlite3.connect(self._db_path)
         self._conn.row_factory = sqlite3.Row
-        self._conn.enable_load_extension(True)
-        sqlite_vec.load(self._conn)
-        self._conn.enable_load_extension(False)
-        self._conn.executescript(_SCHEMA_SQL)
-        # Create vec table for vector search
-        self._conn.execute(
-            f"CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_vec USING vec0("
-            f"  id TEXT PRIMARY KEY, embedding float[{self._vec_dimensions}]"
-            f")"
-        )
-        self._conn.commit()
+        try:
+            self._probe_fts5()
+            self._conn.executescript(_SCHEMA_SQL)
+            self._conn.commit()
+        except Exception:
+            self._conn.close()
+            self._conn = None
+            raise
 
     def close(self) -> None:
         """Close the database connection."""
         if self._conn:
             self._conn.close()
             self._conn = None
+            self._vector_loaded = False
+
+    @property
+    def vec_dimensions(self) -> int | None:
+        """Configured or inferred vector dimensions for this catalog."""
+        return self._vec_dimensions
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -160,11 +181,10 @@ class CatalogDB:
         # Open a separate read-only connection
         read_conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
         read_conn.row_factory = sqlite3.Row
-        read_conn.enable_load_extension(True)
-        sqlite_vec.load(read_conn)
-        read_conn.enable_load_extension(False)
 
         try:
+            if _references_vector_table(sql):
+                self._ensure_vector_capability(read_conn, create_table=False)
             cursor = read_conn.execute(sql)
             rows = cursor.fetchmany(max_rows)
             return [{k: row[k] for k in row.keys()} for row in rows]
@@ -185,13 +205,17 @@ class CatalogDB:
         embedding: Optional[list[float]] = None,
     ) -> None:
         """Insert or update an artifact record and its embedding."""
+        if embedding is not None:
+            self._validate_vector_dimensions(embedding, "artifact embedding")
+            self._ensure_vector_capability(self.conn)
+
         self.conn.execute(
             """INSERT OR REPLACE INTO artifacts
                (id, name, storage_uri, description, domain, source_type, content_type, size_bytes, indexed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (artifact_id, name, storage_uri, description, domain, source_type, content_type, size_bytes, indexed_at),
         )
-        if embedding:
+        if embedding is not None:
             # Delete existing vec entry if present, then insert
             self.conn.execute("DELETE FROM artifacts_vec WHERE id = ?", (artifact_id,))
             self.conn.execute(
@@ -222,8 +246,12 @@ class CatalogDB:
         if not artifact_ids:
             return
         placeholders = ",".join("?" * len(artifact_ids))
+        has_vector_table = self._vector_loaded or self._has_vector_table(self.conn)
+        if has_vector_table:
+            self._ensure_vector_capability(self.conn)
         self.conn.execute(f"DELETE FROM artifacts WHERE id IN ({placeholders})", artifact_ids)
-        self.conn.execute(f"DELETE FROM artifacts_vec WHERE id IN ({placeholders})", artifact_ids)
+        if has_vector_table:
+            self.conn.execute(f"DELETE FROM artifacts_vec WHERE id IN ({placeholders})", artifact_ids)
         self.conn.commit()
 
     def list_domains(self) -> list[str]:
@@ -277,7 +305,9 @@ class CatalogDB:
                     fts_scores[row[0]] = 1.0 - (row[1] - min_rank) / range_rank
 
         # Vector search
-        if query_embedding:
+        if query_embedding is not None:
+            self._validate_vector_dimensions(query_embedding, "query embedding")
+            self._ensure_vector_capability(self.conn)
             vec_rows = self.conn.execute(
                 """SELECT id, distance
                    FROM artifacts_vec
@@ -340,3 +370,101 @@ class CatalogDB:
             params + [top],
         ).fetchall()
         return [ArtifactRecord(**{k: row[k] for k in row.keys()}) for row in rows]
+
+    def _probe_fts5(self) -> None:
+        """Verify that the active Python SQLite build supports FTS5."""
+        try:
+            self.conn.execute("CREATE VIRTUAL TABLE temp.__agora_fts5_probe USING fts5(value)")
+            self.conn.execute("DROP TABLE temp.__agora_fts5_probe")
+        except sqlite3.OperationalError as exc:
+            raise RuntimeError(
+                "Catalog keyword search requires SQLite with FTS5 support. "
+                "Install a Python build whose sqlite3 module includes FTS5."
+            ) from exc
+
+    def _ensure_vector_capability(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        create_table: bool = True,
+    ) -> None:
+        """Load sqlite-vec and validate/create the vector table on demand."""
+        if conn is self._conn and self._vector_loaded:
+            return
+
+        try:
+            sqlite_vec = import_module("sqlite_vec")
+        except ImportError as exc:
+            raise RuntimeError(
+                "Catalog vector search requires sqlite-vec. "
+                f"Install the '{_VECTOR_EXTRA}' extra and reopen the catalog."
+            ) from exc
+
+        try:
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+        except (AttributeError, sqlite3.Error) as exc:
+            raise RuntimeError(
+                "Catalog vector search could not load the sqlite-vec extension. "
+                f"Reinstall the '{_VECTOR_EXTRA}' extra for this Python platform."
+            ) from exc
+        finally:
+            try:
+                conn.enable_load_extension(False)
+            except (AttributeError, sqlite3.Error):
+                pass
+
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (_VECTOR_TABLE_NAME,),
+        ).fetchone()
+        if row is None:
+            if not create_table:
+                raise RuntimeError("Catalog vector table does not exist. Index artifacts with embeddings first.")
+            if self._vec_dimensions is None:
+                raise ValueError(
+                    "Catalog vector dimensions are unknown. Supply vec_dimensions or write an embedding first."
+                )
+            conn.execute(
+                f"CREATE VIRTUAL TABLE {_VECTOR_TABLE_NAME} USING vec0("
+                f"  id TEXT PRIMARY KEY, embedding float[{self._vec_dimensions}]"
+                f")"
+            )
+        else:
+            table_sql = row[0] or ""
+            match = _VECTOR_DIMENSIONS_RE.search(table_sql)
+            if match is None:
+                raise RuntimeError("Could not determine the dimensions of the existing catalog vector table.")
+            stored_dimensions = int(match.group(1))
+            if self._vec_dimensions is None:
+                self._vec_dimensions = stored_dimensions
+            elif stored_dimensions != self._vec_dimensions:
+                raise ValueError(
+                    "Catalog vector dimension mismatch: "
+                    f"database uses {stored_dimensions}, but CatalogDB is configured for {self._vec_dimensions}."
+                )
+
+        if create_table:
+            conn.execute(f"DELETE FROM {_VECTOR_TABLE_NAME} WHERE id NOT IN (SELECT id FROM artifacts)")
+            conn.commit()
+        if conn is self._conn:
+            self._vector_loaded = True
+
+    def _validate_vector_dimensions(self, vector: list[float], label: str) -> None:
+        if not vector:
+            raise ValueError(f"{label.capitalize()} must not be empty.")
+        if self._vec_dimensions is None:
+            self._vec_dimensions = len(vector)
+            return
+        if len(vector) != self._vec_dimensions:
+            raise ValueError(
+                f"{label.capitalize()} dimension mismatch: expected {self._vec_dimensions}, got {len(vector)}."
+            )
+
+    @staticmethod
+    def _has_vector_table(conn: sqlite3.Connection) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (_VECTOR_TABLE_NAME,),
+        ).fetchone()
+        return row is not None

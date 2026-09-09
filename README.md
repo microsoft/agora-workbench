@@ -70,10 +70,16 @@ uv add "agora-workbench==0.2.1"
 See the [changelog](https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md) for release history and
 [release guide](https://github.com/microsoft/agora-workbench/blob/main/RELEASING.md) for the versioning policy.
 
-**Optional extras for examples** — the base package is all you need to build and run MCP servers. Extras pull in dependencies used by the example integrations:
+The base install supports local code-execution servers, connectors, and local
+catalogs with SQLite FTS5 keyword search. It does not install Azure SDKs,
+sqlite-vec, or the OpenAI client.
 
-| Extra | Example integration |
-|-------|---------------------|
+**Optional extras:**
+
+| Extra | Capability |
+|-------|------------|
+| `azure` | Entra credentials, Azure Blob Storage, Azure AI Search, and Azure deployment runtime integrations |
+| `catalog-vector` | sqlite-vec plus the OpenAI client used by Azure OpenAI catalog embeddings |
 | `openai-agents` | OpenAI Agents SDK adapter |
 | `copilot-sdk` | GitHub Copilot SDK adapter |
 | `geo` | Geospatial example server dependencies (rasterio, etc.) |
@@ -87,6 +93,24 @@ uv sync --extra openai-agents
 # pip (consuming as a library)
 pip install "agora-workbench[openai-agents]==0.2.1"
 ```
+
+For the previously bundled Azure plus hybrid-catalog feature set, install both
+runtime extras:
+
+```bash
+pip install "agora-workbench[azure,catalog-vector]>=0.3.0"
+```
+
+Installing Azure dependencies does not require cloud configuration: local
+no-op auth and local sources still work without credentials or endpoints.
+Conversely, a base-only installation means the Azure SDKs are not installed at
+all; selecting an Azure or vector capability reports the required extra.
+
+The base distribution continues to include the existing execution, session,
+kernel, MCP, and connector dependencies. Its eager public root API means
+`import agora_workbench.data_lake` loads the standard Agora Workbench runtime;
+the extras above isolate cloud/vector dependencies, not the data-lake namespace
+into a standalone lightweight distribution.
 
 ### Configuration
 

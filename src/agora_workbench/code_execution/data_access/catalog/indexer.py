@@ -23,12 +23,6 @@ _EMBEDDING_BATCH_SIZE = 64
 _MAX_BLOB_CONCURRENCY = 8
 
 
-# Avoid hard import cycle — auth module is optional at import time
-try:
-    from ...auth import CredentialProviderTokenCredential as _CredentialProviderTokenCredential
-except ImportError:  # pragma: no cover
-    _CredentialProviderTokenCredential = None  # type: ignore[assignment,misc]
-
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
 
@@ -124,6 +118,15 @@ class CatalogIndexer:
                 azure_openai_endpoint=search_cfg.azure_openai_endpoint,
                 azure_openai_deployment=search_cfg.azure_openai_deployment,
                 credential_provider=self._credential_provider,
+                dimensions=search_cfg.embedding_dimensions,
+            )
+        provider_dimensions = self._embedding_provider.dimensions if self._embedding_provider is not None else None
+        db_dimensions = self._db.vec_dimensions
+        if provider_dimensions is not None and db_dimensions is not None and provider_dimensions != db_dimensions:
+            raise ValueError(
+                "Embedding provider dimension mismatch: "
+                f"provider returns {provider_dimensions}, but CatalogDB expects {db_dimensions}. "
+                "Construct CatalogDB with vec_dimensions=config.search.embedding_dimensions."
             )
         return self._embedding_provider
 
@@ -192,15 +195,25 @@ class CatalogIndexer:
 
     async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> list[dict]:
         """Enumerate multiple blob sources concurrently with shared credential."""
-        from azure.storage.blob.aio import BlobServiceClient
+        try:
+            from azure.storage.blob.aio import BlobServiceClient
+        except ImportError as exc:
+            raise RuntimeError("Azure Blob catalog sources require the 'agora-workbench[azure]' extra.") from exc
 
         # Use the shared auth CredentialProvider if available, else fall back
         credential: AsyncTokenCredential
         owns_credential = False
-        if self._credential_provider is not None and _CredentialProviderTokenCredential is not None:
-            credential = _CredentialProviderTokenCredential(self._credential_provider)
+        if self._credential_provider is not None:
+            try:
+                from ...auth import CredentialProviderTokenCredential
+            except ImportError as exc:
+                raise RuntimeError("Azure Blob catalog sources require the 'agora-workbench[azure]' extra.") from exc
+            credential = CredentialProviderTokenCredential(self._credential_provider)
         else:
-            from azure.identity.aio import DefaultAzureCredential
+            try:
+                from azure.identity.aio import DefaultAzureCredential
+            except ImportError as exc:
+                raise RuntimeError("Azure Blob catalog sources require the 'agora-workbench[azure]' extra.") from exc
 
             credential = DefaultAzureCredential()
             owns_credential = True
@@ -354,9 +367,24 @@ class CatalogIndexer:
         else:
             texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in artifacts]
             all_embeddings = []
+            resolved_dimensions = self._db.vec_dimensions or provider.dimensions
             for i in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
                 batch = texts[i : i + _EMBEDDING_BATCH_SIZE]
-                all_embeddings.extend(await provider.embed(batch))
+                embeddings = await provider.embed(batch)
+                if len(embeddings) != len(batch):
+                    raise ValueError(
+                        f"Embedding provider returned {len(embeddings)} vectors for a batch of {len(batch)} texts."
+                    )
+                for embedding in embeddings:
+                    if resolved_dimensions is None:
+                        resolved_dimensions = len(embedding)
+                    if len(embedding) != resolved_dimensions:
+                        raise ValueError(
+                            "Embedding provider dimension mismatch: "
+                            f"CatalogDB expects {resolved_dimensions}, got {len(embedding)}. "
+                            "Construct CatalogDB with vec_dimensions=config.search.embedding_dimensions."
+                        )
+                all_embeddings.extend(embeddings)
 
         # Upsert all artifacts within a single transaction for efficiency
         with self._db.conn:

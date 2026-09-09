@@ -1,65 +1,81 @@
-"""Tool search module."""
+"""Tool search exports with an optional Azure AI Search backend."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib import import_module
 
-from .azure_ai_tool_search import AzureAIToolSearchBackend
+from agora_workbench.code_execution.tools.tool_search import ToolSearchBackend
+
 from .bm25_tool_search import BM25ToolSearchBackend
 from .state_graph import StateGraph
 from .state_graph_tools import (
-    PlanWorkflowInput,
     LoadSkillInput,
-    create_plan_workflow_descriptor,
+    PlanWorkflowInput,
     create_load_skill_descriptor,
+    create_plan_workflow_descriptor,
 )
 
-if TYPE_CHECKING:
-    from agora_workbench.code_execution.tools.tool_search import ToolSearchBackend
+_AZURE_AVAILABLE = False
+
+try:
+    from .azure_ai_tool_search import AzureAIToolSearchBackend
+except ModuleNotFoundError as exc:
+    if exc.name != "azure" and not (exc.name or "").startswith("azure."):
+        raise
+else:
+    _AZURE_AVAILABLE = True
+
+
+def _missing_azure_extra() -> ImportError:
+    return ImportError("Azure AI tool search requires the 'agora-workbench[azure]>=0.3.0' extra.")
+
+
+def __getattr__(name: str) -> object:
+    if name == "azure_ai_tool_search":
+        if not _AZURE_AVAILABLE:
+            raise _missing_azure_extra()
+        value = import_module(f"{__name__}.{name}")
+        globals()[name] = value
+        return value
+    if name == "AzureAIToolSearchBackend":
+        if not _AZURE_AVAILABLE:
+            raise _missing_azure_extra()
+        value = getattr(import_module(f"{__name__}.azure_ai_tool_search"), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | {"AzureAIToolSearchBackend", "azure_ai_tool_search"})
+
 
 __all__ = [
-    "AzureAIToolSearchBackend",
     "BM25ToolSearchBackend",
     "StateGraph",
-    # Framework-agnostic descriptor factories and input models
     "PlanWorkflowInput",
     "LoadSkillInput",
     "create_plan_workflow_descriptor",
     "create_load_skill_descriptor",
-    # Factory
     "create_tool_search_backend",
 ]
+
+if _AZURE_AVAILABLE:
+    __all__.append("AzureAIToolSearchBackend")
 
 
 def create_tool_search_backend(
     backend_type: str,
     **kwargs,
 ) -> ToolSearchBackend:
-    """Instantiate a tool search backend by type identifier.
-
-    Args:
-        backend_type: Backend selection key (``"bm25"`` or ``"azure_ai_search"``).
-        **kwargs: Backend-specific keyword arguments.  For ``"azure_ai_search"``,
-            accepts ``index_name`` (str) and ``endpoint`` (str).
-
-    Returns:
-        A :class:`~code_execution.tools.tool_search.ToolSearchBackend` instance.
-        The caller must invoke :meth:`~ToolSearchBackend.index` to populate the
-        catalog before use.
-
-    Raises:
-        ValueError: If *backend_type* is not recognized.
-    """
+    """Instantiate a tool search backend by type identifier."""
     if backend_type == "bm25":
-        from .bm25_tool_search import BM25ToolSearchBackend
-
         return BM25ToolSearchBackend()
-    elif backend_type == "azure_ai_search":
-        from .azure_ai_tool_search import AzureAIToolSearchBackend
-
+    if backend_type == "azure_ai_search":
+        if not _AZURE_AVAILABLE:
+            raise RuntimeError(str(_missing_azure_extra()))
         return AzureAIToolSearchBackend(
             index_name=kwargs.get("index_name"),
             endpoint=kwargs.get("endpoint"),
         )
-    else:
-        raise ValueError(f"Unknown tool search backend: {backend_type!r}. Available: 'bm25', 'azure_ai_search'")
+    raise ValueError(f"Unknown tool search backend: {backend_type!r}. Available: 'bm25', 'azure_ai_search'")

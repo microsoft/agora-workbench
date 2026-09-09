@@ -238,3 +238,7 @@ The public modules are organized by responsibility:
 Use these paths for new code. Imports under
 `agora_workbench.code_execution.data_access` are also supported for applications
 that already use them.
+
+Azure-backed implementations require the `azure` extra. Vector catalog
+operations require the `catalog-vector` extra, while keyword-only SQLite FTS5
+catalog operations remain available in the base installation.

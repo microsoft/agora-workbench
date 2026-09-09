@@ -14,11 +14,14 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from azure.core.credentials_async import AsyncTokenCredential
-from azure.storage.blob.aio import BlobServiceClient
+if TYPE_CHECKING:
+    from azure.core.credentials_async import AsyncTokenCredential
+    from azure.storage.blob.aio import BlobServiceClient as AzureBlobServiceClient
+
+BlobServiceClient: Any = None
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +37,7 @@ _BLOB_MAX_SINGLE_GET = int(os.getenv("MCP_BLOB_MAX_SINGLE_GET", str(64 * 1024 * 
 class AssetFetcher(ABC):
     """Base class for asset fetchers."""
 
-    def __init__(self, credential: AsyncTokenCredential | None = None):
+    def __init__(self, credential: "AsyncTokenCredential | None" = None):
         """
         Initialize fetcher with an optional async token credential.
 
@@ -100,15 +103,21 @@ class BlobFetcher(AssetFetcher):
     # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
 
-    def __init__(self, credential: AsyncTokenCredential | None = None):
+    def __init__(self, credential: "AsyncTokenCredential | None" = None):
         super().__init__(credential=credential)
         # Cache of account_url -> BlobServiceClient for connection reuse
-        self._clients: dict[str, BlobServiceClient] = {}
+        self._clients: dict[str, "AzureBlobServiceClient"] = {}
 
-    def _get_client(self, account_url: str) -> BlobServiceClient:
+    def _get_client(self, account_url: str) -> "AzureBlobServiceClient":
         """Get or create a long-lived BlobServiceClient for the given account."""
         if account_url not in self._clients:
-            self._clients[account_url] = BlobServiceClient(
+            client_class = BlobServiceClient
+            if client_class is None:
+                try:
+                    from azure.storage.blob.aio import BlobServiceClient as client_class
+                except ImportError as exc:
+                    raise RuntimeError("Azure Blob fetching requires the 'agora-workbench[azure]' extra.") from exc
+            self._clients[account_url] = client_class(
                 account_url=account_url,
                 credential=self.credential,
                 max_single_get_size=_BLOB_MAX_SINGLE_GET,

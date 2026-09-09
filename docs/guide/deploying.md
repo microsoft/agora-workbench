@@ -5,8 +5,14 @@ Agora Workbench servers are deployed as Docker containers. The repository provid
 Install the deployment CLI from PyPI:
 
 ```bash
-python -m pip install "agora-workbench==0.2.1"
+python -m pip install "agora-workbench>=0.3.0"
 ```
+
+The deployment CLI itself is available in the base package. The generated
+code-execution base image installs `agora-workbench[azure,catalog-vector]` to
+preserve the full Azure and hybrid-catalog runtime. For a direct Python
+installation used to run an Azure-backed server, install the `azure` extra (and
+`catalog-vector` as well when using vector catalog search).
 
 ## Local development with Docker
 
@@ -27,7 +33,7 @@ docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
 
 The base image installs `agora-workbench` from PyPI, so it builds from your own
 project root — nothing is read from the build context. Pin a specific release
-with `--build-arg AGORA_WORKBENCH_VERSION=0.2.1`.
+with `--build-arg AGORA_WORKBENCH_VERSION=0.3.0`.
 
 !!! note "Building against a workbench checkout"
 

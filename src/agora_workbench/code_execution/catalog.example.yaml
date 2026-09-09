@@ -39,8 +39,13 @@ search:
   embedding_model: none
 
   # Required only when embedding_model is "azure-openai":
-  # azure_openai_endpoint: https://your-resource.cognitiveservices.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15
+  # azure_openai_endpoint: https://your-resource.openai.azure.com
   # azure_openai_deployment: text-embedding-3-large
+  #
+  # Optional: request a shortened vector size only when the deployment supports
+  # it. Omit this to use and infer the service-default dimensions. When set,
+  # construct CatalogDB with vec_dimensions=config.search.embedding_dimensions.
+  # embedding_dimensions: 1536
 
   # Weight for keyword (FTS5) score in hybrid ranking (only used with vectors).
   # 0.0 = pure vector search, 1.0 = pure keyword search.

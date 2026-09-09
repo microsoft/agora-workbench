@@ -44,6 +44,12 @@ server = CodeExecutionServer(
 
 Full production auth with JWT validation, user identity extraction, and downstream credential provisioning:
 
+Install the Azure SDK extra first:
+
+```bash
+python -m pip install "agora-workbench[azure]>=0.3.0"
+```
+
 ```python
 from agora_workbench.code_execution.auth.entra import create_entra_auth_config
 
