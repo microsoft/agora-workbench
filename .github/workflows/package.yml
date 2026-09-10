@@ -45,5 +45,10 @@ jobs:
       - name: Verify distribution contents
         run: python .github/scripts/validate_distribution.py
 
-      - name: Smoke-test installed wheel
+      - name: Smoke-test base installed wheel
+        run: .github/scripts/smoke_test_wheel.sh
+
+      - name: Smoke-test full installed wheel
+        env:
+          AGORA_WORKBENCH_SMOKE_EXTRAS: azure,catalog-vector
         run: .github/scripts/smoke_test_wheel.sh

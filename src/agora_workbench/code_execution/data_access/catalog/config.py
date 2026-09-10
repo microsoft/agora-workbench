@@ -63,6 +63,14 @@ class SearchConfig(BaseModel):
     azure_openai_deployment: Optional[str] = Field(
         None, description="Azure OpenAI deployment name (required if embedding_model is 'azure-openai')"
     )
+    embedding_dimensions: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Optional embedding dimensions. None uses the deployment's service default; "
+            "when set, the value must be supported by the deployment and match CatalogDB.vec_dimensions."
+        ),
+    )
     hybrid_alpha: float = Field(
         default=0.5,
         ge=0.0,

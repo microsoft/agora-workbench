@@ -15,10 +15,8 @@ import shutil
 import tempfile
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from urllib.parse import urlparse
-
-from azure.core.credentials_async import AsyncTokenCredential
 
 from .. import agent_guidance
 from ..types import AssetId
@@ -27,6 +25,9 @@ from .credentials import create_storage_credential
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 
 LOGGER = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from azure.core.credentials_async import AsyncTokenCredential
 
 
 def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
@@ -96,7 +97,7 @@ class DataLakeDataManager:
         self,
         allowed_local_roots: list[str] | None = None,
         extra_fetchers: list[AssetFetcher] | None = None,
-        credential: AsyncTokenCredential | None = None,
+        credential: "AsyncTokenCredential | None" = None,
         artifact_resolver: ArtifactResolver | None = None,
     ):
         """
@@ -138,7 +139,7 @@ class DataLakeDataManager:
         self._cache_index = {}  # Maps artifact_id -> cache file path
 
         self._credential_init_error: str | None = None
-        self._credential: AsyncTokenCredential | None = None
+        self._credential: "AsyncTokenCredential | None" = None
         self._owns_credential = credential is None
 
         # Initialize fetchers — custom fetchers take priority over built-ins
@@ -154,7 +155,13 @@ class DataLakeDataManager:
                 # production. Pass the AZURE_CLIENT_ID-resolved id through so
                 # prod keeps binding to the same user-assigned identity.
                 self._credential = create_storage_credential(client_id=mi_client_id)
-        except (ImportError, RuntimeError, TypeError, ValueError) as e:
+        except ImportError as e:
+            self._credential_init_error = f"{type(e).__name__}: {e}"
+            LOGGER.info(
+                "Azure SDK is not installed; cloud data access is disabled. "
+                "Install the 'agora-workbench[azure]' extra to enable it."
+            )
+        except (RuntimeError, TypeError, ValueError) as e:
             self._credential_init_error = f"{type(e).__name__}: {e}"
             LOGGER.warning(f"Failed to initialize Azure storage credential: {e}")
 

@@ -103,6 +103,15 @@ class TestCatalogIndexerLocal:
         count = await indexer.index()
         assert count == 2  # daily_obs.csv + hourly_wind.parquet (not .hidden_file)
 
+    def test_rejects_provider_dimension_mismatch(self, config, db):
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.dimensions = 3
+        indexer._embedding_provider = mock_provider
+
+        with pytest.raises(ValueError, match="provider returns 3, but CatalogDB expects 4"):
+            _ = indexer.embedding_provider
+
     @pytest.mark.asyncio
     async def test_skips_hidden_files(self, config, db, data_dir):
         indexer = CatalogIndexer(config, db)
@@ -195,3 +204,61 @@ class TestCatalogIndexerLocal:
         record = db.get_artifact(artifact_id_from_uri(uri))
         assert record.description == "Override description"
         assert record.domain == "custom"
+
+    @pytest.mark.asyncio
+    async def test_rejects_provider_result_count_mismatch(self, config, db):
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]])
+        mock_provider.dimensions = 4
+        indexer._embedding_provider = mock_provider
+
+        with pytest.raises(ValueError, match="1 vectors for a batch of 2 texts"):
+            await indexer.index()
+
+    @pytest.mark.asyncio
+    async def test_configured_non_default_dimensions_construct_database(self, data_dir, tmp_path):
+        config = CatalogConfig(
+            sources=[SourceConfig(path=str(data_dir / "weather"))],
+            search=SearchConfig(embedding_model="test-model", embedding_dimensions=3),
+        )
+        catalog_db = CatalogDB(
+            db_path=tmp_path / "catalog.db",
+            vec_dimensions=config.search.embedding_dimensions,
+        )
+        catalog_db.open()
+        indexer = CatalogIndexer(config, catalog_db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3]] * 2)
+        mock_provider.dimensions = 3
+        indexer._embedding_provider = mock_provider
+
+        try:
+            assert await indexer.index() == 2
+            assert catalog_db.vec_dimensions == 3
+            assert len(catalog_db.search("", query_embedding=[0.1, 0.2, 0.3])) == 2
+        finally:
+            catalog_db.close()
+
+    @pytest.mark.asyncio
+    async def test_service_default_dimensions_are_inferred(self, data_dir, tmp_path):
+        config = CatalogConfig(
+            sources=[SourceConfig(path=str(data_dir / "weather"))],
+            search=SearchConfig(embedding_model="test-model"),
+        )
+        catalog_db = CatalogDB(
+            db_path=tmp_path / "catalog.db",
+            vec_dimensions=config.search.embedding_dimensions,
+        )
+        catalog_db.open()
+        indexer = CatalogIndexer(config, catalog_db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4, 0.5]] * 2)
+        mock_provider.dimensions = None
+        indexer._embedding_provider = mock_provider
+
+        try:
+            assert await indexer.index() == 2
+            assert catalog_db.vec_dimensions == 5
+        finally:
+            catalog_db.close()

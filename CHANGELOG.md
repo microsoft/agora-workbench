@@ -10,6 +10,29 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Breaking
+
+- Azure SDKs and catalog vector dependencies are no longer installed by the
+  base package in v0.3. Install `agora-workbench[azure]` for Entra, Blob
+  Storage, and Azure AI Search integrations; install
+  `agora-workbench[catalog-vector]` for sqlite-vec and the Azure OpenAI client,
+  or install both extras for the previously bundled cloud/hybrid feature set.
+  The unused `azure-data-tables` dependency was removed after confirming that
+  no package code or deployment template imports it.
+
+### Changed
+
+- Keyword-only catalogs now require only SQLite FTS5: sqlite-vec is loaded and
+  its vector table is created only when vector indexing, search, deletion, or
+  direct vector-table SQL is selected. Existing vector rows are reconciled and
+  deleted correctly after database reopen.
+- Azure OpenAI catalog embeddings now use stable API version `2024-02-01`.
+  `embedding_dimensions` is optional and omitted from requests by default so
+  deployments that do not support shortened embeddings retain their service
+  default. When explicitly configured, the same dimension must be supplied to
+  `CatalogDB`; otherwise dimensions are inferred from the first embedding or
+  an existing vector table.
+
 ### Fixed
 
 - Server-to-server object transfers now preserve structured non-2xx receiver errors, including actionable status

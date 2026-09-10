@@ -36,11 +36,6 @@ name = "agora-workbench"
 version = "0.2.1"
 source = { editable = "." }
 dependencies = [
-    { name = "azure-core" },
-    { name = "azure-data-tables" },
-    { name = "azure-identity" },
-    { name = "azure-search-documents" },
-    { name = "azure-storage-blob", extra = ["aio"] },
     { name = "cryptography" },
     { name = "dill" },
     { name = "fastapi" },
@@ -56,7 +51,6 @@ dependencies = [
     { name = "pyjwt", extra = ["crypto"] },
     { name = "pyyaml" },
     { name = "pyzmq" },
-    { name = "sqlite-vec" },
     { name = "sse-starlette" },
     { name = "starlette" },
     { name = "typeguard" },
@@ -66,6 +60,16 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+azure = [
+    { name = "azure-core" },
+    { name = "azure-identity" },
+    { name = "azure-search-documents" },
+    { name = "azure-storage-blob", extra = ["aio"] },
+]
+catalog-vector = [
+    { name = "openai" },
+    { name = "sqlite-vec" },
+]
 copilot-sdk = [
     { name = "github-copilot-sdk" },
     { name = "python-dotenv" },
@@ -81,16 +85,22 @@ openai-agents = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "azure-core" },
+    { name = "azure-identity" },
+    { name = "azure-search-documents" },
+    { name = "azure-storage-blob", extra = ["aio"] },
     { name = "ipython", version = "9.10.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "ipython", version = "9.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "ipywidgets" },
     { name = "jupyter" },
+    { name = "openai" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-json-report" },
     { name = "pytest-timeout" },
     { name = "ruff" },
+    { name = "sqlite-vec" },
 ]
 docs = [
     { name = "griffelib" },
@@ -102,11 +112,10 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "azure-core", specifier = ">=1.38.0" },
-    { name = "azure-data-tables", specifier = ">=12.7.0" },
-    { name = "azure-identity", specifier = ">=1.25.0" },
-    { name = "azure-search-documents", specifier = ">=11.4.0" },
-    { name = "azure-storage-blob", extras = ["aio"], specifier = ">=12.28.0" },
+    { name = "azure-core", marker = "extra == 'azure'", specifier = ">=1.38.0" },
+    { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25.0" },
+    { name = "azure-search-documents", marker = "extra == 'azure'", specifier = ">=11.4.0" },
+    { name = "azure-storage-blob", extras = ["aio"], marker = "extra == 'azure'", specifier = ">=12.28.0" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "dill", specifier = ">=0.3.8" },
     { name = "fastapi", specifier = ">=0.115" },
@@ -117,6 +126,7 @@ requires-dist = [
     { name = "jupyter-client", specifier = ">=8.6.0" },
     { name = "mcp", specifier = ">=1.28.1" },
     { name = "msal", specifier = ">=1.28.0" },
+    { name = "openai", marker = "extra == 'catalog-vector'", specifier = ">=2.0.0" },
     { name = "openai-agents", marker = "extra == 'openai-agents'", specifier = ">=0.15.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pyarrow", specifier = ">=22.0.0" },
@@ -126,7 +136,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "pyzmq", specifier = ">=26.0.0" },
     { name = "rasterio", marker = "extra == 'geo'", specifier = ">=1.4.0" },
-    { name = "sqlite-vec", specifier = ">=0.1.9" },
+    { name = "sqlite-vec", marker = "extra == 'catalog-vector'", specifier = ">=0.1.9" },
     { name = "sse-starlette", specifier = ">=3.3.0" },
     { name = "starlette", specifier = ">=1.3.1" },
     { name = "titiler-core", marker = "extra == 'geo'", specifier = ">=0.19.0" },
@@ -135,19 +145,25 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.34" },
     { name = "wsproto", specifier = ">=1.3.2" },
 ]
-provides-extras = ["openai-agents", "copilot-sdk", "geo"]
+provides-extras = ["azure", "catalog-vector", "openai-agents", "copilot-sdk", "geo"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "azure-core", specifier = ">=1.38.0" },
+    { name = "azure-identity", specifier = ">=1.25.0" },
+    { name = "azure-search-documents", specifier = ">=11.4.0" },
+    { name = "azure-storage-blob", extras = ["aio"], specifier = ">=12.28.0" },
     { name = "ipython", specifier = ">=9.5.0" },
     { name = "ipywidgets", specifier = ">=8.1.7" },
     { name = "jupyter", specifier = ">=1.1.1" },
+    { name = "openai", specifier = ">=2.0.0" },
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.2.0" },
     { name = "pytest-json-report", specifier = ">=1.5.0" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "ruff", specifier = ">=0.15.12" },
+    { name = "sqlite-vec", specifier = ">=0.1.9" },
 ]
 docs = [
     { name = "griffelib", specifier = ">=2,<3" },
@@ -469,21 +485,6 @@ wheels = [
 [package.optional-dependencies]
 aio = [
     { name = "aiohttp" },
-]
-
-[[package]]
-name = "azure-data-tables"
-version = "12.7.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "azure-core" },
-    { name = "isodate" },
-    { name = "typing-extensions" },
-    { name = "yarl" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/b8/e76cfa7f5f847722664c6f8108c391deadcb9d9aad579650c128affd4669/azure_data_tables-12.7.0.tar.gz", hash = "sha256:b14fc94a3223a2835ff5688e17d8e107b27c7cd7c4114138f2ac81373723705d", size = 258650, upload-time = "2025-05-06T17:51:06.323Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/3e/2b8da274b49402659cd732def2ae217f2e86312278feb56b55ccbffbbc26/azure_data_tables-12.7.0-py3-none-any.whl", hash = "sha256:24ed9b5690aa46c213182e32bb1b39a68dd9f526d84f447c287e3a401b437c10", size = 133178, upload-time = "2025-05-06T17:51:07.65Z" },
 ]
 
 [[package]]

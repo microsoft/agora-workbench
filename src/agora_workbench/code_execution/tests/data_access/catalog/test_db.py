@@ -1,6 +1,7 @@
 """Tests for catalog SQLite database."""
 
 import pytest
+import sqlite3
 
 from ....data_access.catalog.db import (
     CatalogDB,
@@ -102,6 +103,33 @@ class TestCatalogDBBasicOps:
         domains = db.list_domains()
         assert domains == ["energy", "weather"]
 
+    def test_open_reports_missing_fts5(self, monkeypatch):
+        real_connect = sqlite3.connect
+
+        class ConnectionWithoutFts5:
+            def __init__(self):
+                self._conn = real_connect(":memory:")
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+            def __setattr__(self, name, value):
+                if name == "_conn":
+                    object.__setattr__(self, name, value)
+                else:
+                    setattr(self._conn, name, value)
+
+            def execute(self, sql, parameters=()):
+                if "__agora_fts5_probe" in sql:
+                    raise sqlite3.OperationalError("no such module: fts5")
+                return self._conn.execute(sql, parameters)
+
+        monkeypatch.setattr(sqlite3, "connect", lambda *_args, **_kwargs: ConnectionWithoutFts5())
+
+        catalog_db = CatalogDB(":memory:")
+        with pytest.raises(RuntimeError, match="requires SQLite with FTS5 support"):
+            catalog_db.open()
+
 
 class TestCatalogDBSearch:
     """Tests for hybrid search."""
@@ -168,6 +196,20 @@ class TestCatalogDBSearch:
         assert len(results) >= 1
         assert results[0].id == "a"
 
+    def test_rejects_wrong_artifact_embedding_dimensions(self, db):
+        with pytest.raises(ValueError, match="expected 4, got 2"):
+            db.upsert_artifact(
+                artifact_id="a",
+                name="a.csv",
+                storage_uri="/a.csv",
+                indexed_at="2026-01-01T00:00:00Z",
+                embedding=[1.0, 0.0],
+            )
+
+    def test_rejects_wrong_query_embedding_dimensions(self, db):
+        with pytest.raises(ValueError, match="expected 4, got 2"):
+            db.search(query="", query_embedding=[1.0, 0.0])
+
     def test_empty_query_returns_all(self, db):
         db.upsert_artifact(
             artifact_id="a",
@@ -192,6 +234,90 @@ class TestCatalogDBSearch:
         assert d["id"] == "a"
         assert d["name"] == "test.csv"
         assert "score" not in d  # No score unless from search
+
+    def test_delete_vectors_after_close_and_reopen_preserves_top_k(self, tmp_path):
+        db_path = tmp_path / "catalog.db"
+        catalog_db = CatalogDB(db_path, vec_dimensions=4)
+        catalog_db.open()
+        for artifact_id, embedding in (
+            ("a", [1.0, 0.0, 0.0, 0.0]),
+            ("b", [0.9, 0.1, 0.0, 0.0]),
+            ("c", [0.8, 0.2, 0.0, 0.0]),
+        ):
+            catalog_db.upsert_artifact(
+                artifact_id=artifact_id,
+                name=f"{artifact_id}.csv",
+                storage_uri=f"/{artifact_id}.csv",
+                indexed_at="2026-01-01T00:00:00Z",
+                embedding=embedding,
+            )
+        catalog_db.close()
+
+        reopened = CatalogDB(db_path, vec_dimensions=None)
+        reopened.open()
+        reopened.delete_artifacts(["a"])
+        assert reopened.vec_dimensions == 4
+        results = reopened.search("", query_embedding=[1.0, 0.0, 0.0, 0.0], top=2, hybrid_alpha=0.0)
+        assert [result.id for result in results] == ["b", "c"]
+        assert reopened.conn.execute("SELECT COUNT(*) FROM artifacts_vec").fetchone()[0] == 2
+        reopened.close()
+
+        verified = CatalogDB(db_path, vec_dimensions=None)
+        verified.open()
+        assert verified.execute_readonly("SELECT COUNT(*) AS count FROM artifacts_vec")[0]["count"] == 2
+        assert verified.vec_dimensions == 4
+        verified.close()
+
+    def test_orphan_reconciliation_is_committed(self, tmp_path):
+        db_path = tmp_path / "catalog.db"
+        catalog_db = CatalogDB(db_path, vec_dimensions=2)
+        catalog_db.open()
+        catalog_db.upsert_artifact(
+            artifact_id="a",
+            name="a.csv",
+            storage_uri="/a.csv",
+            indexed_at="2026-01-01T00:00:00Z",
+            embedding=[1.0, 0.0],
+        )
+        catalog_db.conn.execute("DELETE FROM artifacts WHERE id = 'a'")
+        catalog_db.conn.commit()
+        catalog_db.close()
+
+        reconciled = CatalogDB(db_path, vec_dimensions=None)
+        reconciled.open()
+        assert reconciled.search("", query_embedding=[1.0, 0.0]) == []
+        reconciled.close()
+
+        verified = CatalogDB(db_path, vec_dimensions=None)
+        verified.open()
+        assert verified.execute_readonly("SELECT COUNT(*) AS count FROM artifacts_vec")[0]["count"] == 0
+        verified.close()
+
+    def test_vector_capability_does_not_commit_active_transaction(self, tmp_path):
+        db_path = tmp_path / "catalog.db"
+        catalog_db = CatalogDB(db_path, vec_dimensions=2)
+        catalog_db.open()
+        catalog_db.conn.execute(
+            """INSERT INTO artifacts
+               (id, name, storage_uri, indexed_at)
+               VALUES ('pending', 'pending.csv', '/pending.csv', '2026-01-01T00:00:00Z')"""
+        )
+
+        catalog_db._ensure_vector_capability(catalog_db.conn)
+
+        assert catalog_db.conn.in_transaction is True
+        catalog_db.conn.rollback()
+        assert catalog_db.get_artifact("pending") is None
+
+        catalog_db.upsert_artifact(
+            artifact_id="committed",
+            name="committed.csv",
+            storage_uri="/committed.csv",
+            indexed_at="2026-01-01T00:00:00Z",
+            embedding=[1.0, 0.0],
+        )
+        assert catalog_db.search("", query_embedding=[1.0, 0.0])[0].id == "committed"
+        catalog_db.close()
 
 
 class TestCatalogDBReadonlyQuery:
@@ -277,3 +403,8 @@ class TestCatalogDBReadonlyQuery:
         )
         assert len(results) == 1
         assert results[0]["name"] == "weather.csv"
+
+    def test_vector_table_name_in_literals_and_comments_does_not_load_extension(self, file_db):
+        results = file_db.execute_readonly("SELECT 'artifacts_vec' AS value /* artifacts_vec */ -- artifacts_vec\n")
+        assert results == [{"value": "artifacts_vec"}]
+        assert file_db._vector_loaded is False

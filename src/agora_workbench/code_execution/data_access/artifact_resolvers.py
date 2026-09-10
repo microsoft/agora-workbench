@@ -17,9 +17,10 @@ resolves *an artifact ID to a storage URL* as one step inside that process.
 
 import logging
 import os
+from typing import TYPE_CHECKING, Any
 
-from azure.core.credentials_async import AsyncTokenCredential
-from azure.search.documents.aio import SearchClient
+if TYPE_CHECKING:
+    from azure.core.credentials_async import AsyncTokenCredential
 
 from agora_workbench.data_lake.protocols import ArtifactResolver
 
@@ -44,7 +45,7 @@ class SearchIndexArtifactResolver:
 
     def __init__(
         self,
-        credential: AsyncTokenCredential | None,
+        credential: "AsyncTokenCredential | None",
         endpoint: str | None = None,
         index_name: str | None = None,
         credential_init_error: str | None = None,
@@ -67,7 +68,7 @@ class SearchIndexArtifactResolver:
         self._index_name = index_name
         self._credential_init_error = credential_init_error
         self._url_cache: dict[str, str] = {}  # Maps artifact_id -> resolved blob URL
-        self._search_client: SearchClient | None = None
+        self._search_client: Any = None
         self._closed = False
 
         if not endpoint:
@@ -79,6 +80,8 @@ class SearchIndexArtifactResolver:
             return
 
         try:
+            from azure.search.documents.aio import SearchClient
+
             self._search_client = SearchClient(
                 endpoint=endpoint,
                 index_name=index_name or "",
@@ -92,7 +95,7 @@ class SearchIndexArtifactResolver:
     @classmethod
     def from_env(
         cls,
-        credential: AsyncTokenCredential | None,
+        credential: "AsyncTokenCredential | None",
         credential_init_error: str | None = None,
     ) -> "SearchIndexArtifactResolver":
         """
@@ -129,6 +132,8 @@ class SearchIndexArtifactResolver:
         # search being unconfigured.
         if self._credential_init_error:
             init_error_type = self._credential_init_error.split(":", 1)[0]
+            if init_error_type in {"ImportError", "ModuleNotFoundError"}:
+                return "Blob artifact resolution requires the Azure SDK. Install the 'agora-workbench[azure]' extra."
             return (
                 "Blob artifact resolution is unavailable because Azure data access initialization failed. "
                 f"Error type: {init_error_type}. "

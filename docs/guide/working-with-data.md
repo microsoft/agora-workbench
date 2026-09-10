@@ -169,7 +169,29 @@ Publishers are checked in order via `can_handle()`. The first match wins. A `Gui
 
 ## Data catalog
 
-The data catalog provides server-side data discovery — the agent can search for files by natural-language query, browse by domain, or run SQL against the catalog metadata. It's backed by SQLite with FTS5 (keyword search) and sqlite-vec (vector similarity).
+The data catalog provides server-side data discovery — the agent can search for files by natural-language query, browse by domain, or run SQL against the catalog metadata. SQLite FTS5 keyword search is always available; sqlite-vec vector similarity is loaded only when vector search is selected.
+
+### Catalog installation options
+
+| Installation | Catalog capabilities |
+|--------------|----------------------|
+| `agora-workbench` | Local sources and FTS5 keyword search; no Azure SDK, OpenAI client, or sqlite-vec installation |
+| `agora-workbench[azure]` | Azure Blob sources, Entra credentials, and Azure AI Search, still without vector dependencies |
+| `agora-workbench[catalog-vector]` | sqlite-vec and the OpenAI client; use an injected credential provider for Azure OpenAI |
+| `agora-workbench[azure,catalog-vector]` | Built-in Azure sources and Azure OpenAI hybrid search |
+
+These are installation boundaries, not configuration modes. Installing the
+`azure` extra does not contact Azure or require credentials during a local
+keyword-only catalog import. A base-only installation is different: the cloud
+SDKs are absent, and selecting a cloud capability reports that the `azure`
+extra is required.
+
+The base distribution still includes the existing MCP, execution, session, and
+kernel runtime dependencies. Importing the backend-neutral
+`agora_workbench.data_lake` contracts does not initialize execution or cloud
+modules. Import concrete catalog, resolver, and execution implementations from
+their documented public submodules; optional extras determine whether cloud
+and vector backends are available.
 
 ### Setting up the catalog
 
@@ -207,11 +229,30 @@ sources:
 search:
   # Only Azure OpenAI embeddings are currently supported for vector search
   embedding_model: azure-openai
-  azure_openai_endpoint: https://your-resource.cognitiveservices.azure.com/openai/deployments/text-embedding-3-large/embeddings?api-version=2023-05-15
+  azure_openai_endpoint: https://your-resource.openai.azure.com
   azure_openai_deployment: text-embedding-3-large
+  # Optional: request a supported shortened vector size. Omit this for the
+  # deployment's service-default dimensions.
+  # embedding_dimensions: 1536
 
   # Hybrid ranking weight: 0.0 = pure vector, 1.0 = pure keyword
   hybrid_alpha: 0.5
+```
+
+Construct the database from the same search configuration so an explicit
+dimension is applied consistently. When `embedding_dimensions` is omitted,
+`CatalogDB` infers the service-default size from the first embedding and, on
+reopen, from the existing vector table:
+
+```python
+from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB
+
+config = CatalogConfig.from_yaml("catalog.yaml")
+catalog = CatalogDB(
+    "catalog.db",
+    vec_dimensions=config.search.embedding_dimensions,
+)
+catalog.open()
 ```
 
 ### Source configuration
@@ -234,13 +275,18 @@ Source type is inferred automatically from the path:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `embedding_model` | `"azure-openai"` | Embedding provider (only `"azure-openai"` is currently supported) |
-| `azure_openai_endpoint` | — | Azure OpenAI embeddings endpoint URL |
+| `embedding_model` | `"none"` | `"none"` for keyword-only search or `"azure-openai"` for vector search |
+| `azure_openai_endpoint` | — | Azure OpenAI resource endpoint, such as `https://my-resource.openai.azure.com` |
 | `azure_openai_deployment` | — | Deployment name (e.g. `text-embedding-3-large`) |
+| `embedding_dimensions` | service default | Optional requested vector size. Set only when the deployed model supports shortening; pass the same value to `CatalogDB` |
 | `hybrid_alpha` | `0.5` | Blend weight: 0.0 = pure vector search, 1.0 = pure keyword search |
 
 !!! note "Keyword-only search"
-    If you don't have an Azure OpenAI embeddings endpoint, you can still use the catalog with keyword search (FTS5) by omitting the `search` section entirely. The `search_data` tool will use FTS5-only ranking.
+    If you don't have an Azure OpenAI embeddings endpoint, you can use the base
+    package with keyword search (FTS5) by omitting the `search` section entirely.
+    Catalog creation, refresh, search, and reopen do not import or load
+    sqlite-vec, create a vector table, or initialize Azure credentials and
+    clients.
 
 ### How indexing works
 
@@ -249,7 +295,8 @@ At server startup, the catalog indexer:
 1. Reads `catalog.yaml` and discovers files from each source (local directory listing or blob enumeration)
 2. Computes a stable artifact ID for each file based on its storage URI
 3. Inserts metadata into the SQLite `artifacts` table (with FTS5 triggers for keyword indexing)
-4. Computes embeddings in batches and stores them in the sqlite-vec virtual table for vector search
+4. When `embedding_model` is selected, computes embeddings in batches and
+   stores them in an on-demand sqlite-vec virtual table
 
 The catalog is stored as a SQLite database on disk, so it persists across server restarts. Re-indexing only adds new files — existing entries are skipped.
 
@@ -313,5 +360,5 @@ CREATE TABLE artifacts (
 -- FTS5 virtual table (keyword search)
 CREATE VIRTUAL TABLE artifacts_fts USING fts5(name, description, domain);
 
--- sqlite-vec virtual table (vector search, created by indexer)
+-- sqlite-vec virtual table (created lazily only when vectors are indexed/searched)
 ```

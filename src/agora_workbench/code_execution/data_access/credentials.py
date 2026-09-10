@@ -29,10 +29,10 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from azure.core.credentials import AccessToken
-from azure.identity import CredentialUnavailableError
+if TYPE_CHECKING:
+    from azure.core.credentials import AccessToken
 
 LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class MsalCacheCredential:
         self._username = username
         self._authority = authority
 
-    async def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+    async def get_token(self, *scopes: str, **kwargs: Any) -> "AccessToken":
         """Acquire a token for the requested scopes from the MSAL cache.
 
         Args:
@@ -95,6 +95,12 @@ class MsalCacheCredential:
                 to the next credential in the chain.
         """
         import msal
+
+        try:
+            from azure.core.credentials import AccessToken
+            from azure.identity import CredentialUnavailableError
+        except ImportError as exc:
+            raise RuntimeError("Azure storage credentials require the 'agora-workbench[azure]' extra.") from exc
 
         if not self._cache_path.is_file():
             raise CredentialUnavailableError(message=f"MSAL token cache not found at {self._cache_path}")
@@ -170,10 +176,13 @@ def create_storage_credential(client_id: str | None = None):
         An ``AsyncTokenCredential`` usable with ``BlobPublisher``,
         ``BlobFetcher``, ``BlobServiceClient``, etc.
     """
-    from azure.identity.aio import (
-        ChainedTokenCredential,
-        ManagedIdentityCredential,
-    )
+    try:
+        from azure.identity.aio import (
+            ChainedTokenCredential,
+            ManagedIdentityCredential,
+        )
+    except ImportError as exc:
+        raise RuntimeError("Azure storage credentials require the 'agora-workbench[azure]' extra.") from exc
 
     managed_identity_client_id = (client_id.strip() if client_id is not None else None) or os.getenv(
         "DEFAULT_IDENTITY_CLIENT_ID"

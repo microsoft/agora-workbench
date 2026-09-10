@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from importlib.util import find_spec
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -10,13 +11,15 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+_AZURE_OPENAI_API_VERSION = "2024-02-01"
+
 
 class EmbeddingProvider(Protocol):
     """Protocol for embedding computation."""
 
     @property
-    def dimensions(self) -> int:
-        """Dimensionality of the output vectors."""
+    def dimensions(self) -> int | None:
+        """Configured or observed dimensionality of the output vectors."""
         ...
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -38,7 +41,7 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
         endpoint: str,
         deployment: str,
         credential_provider: CredentialProvider,
-        dimensions: int = 3072,
+        dimensions: int | None = None,
     ):
         self._endpoint = endpoint
         self._deployment = deployment
@@ -47,18 +50,23 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
         self._client = None
 
     @property
-    def dimensions(self) -> int:
+    def dimensions(self) -> int | None:
         return self._dimensions
 
     def _ensure_client(self):
         """Lazy-initialize the OpenAI client (once)."""
         if self._client is None:
-            from openai import AsyncAzureOpenAI
+            try:
+                from openai import AsyncAzureOpenAI
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Azure OpenAI catalog embeddings require the 'agora-workbench[catalog-vector]' extra."
+                ) from exc
 
             self._client = AsyncAzureOpenAI(
                 azure_endpoint=self._endpoint,
                 azure_ad_token_provider=self._get_token,
-                api_version="2023-05-15",
+                api_version=_AZURE_OPENAI_API_VERSION,
             )
 
     async def _get_token(self) -> str:
@@ -69,12 +77,30 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self._ensure_client()
 
-        response = await self._client.embeddings.create(
-            input=texts,
-            model=self._deployment,
-        )
+        request = {
+            "input": texts,
+            "model": self._deployment,
+        }
+        if self._dimensions is not None:
+            request["dimensions"] = self._dimensions
+        response = await self._client.embeddings.create(**request)
 
-        return [item.embedding for item in response.data]
+        embeddings = [item.embedding for item in response.data]
+        if not embeddings:
+            return embeddings
+
+        observed_dimensions = len(embeddings[0])
+        if self._dimensions is None:
+            self._dimensions = observed_dimensions
+        for embedding in embeddings:
+            if len(embedding) != observed_dimensions:
+                raise ValueError("Azure OpenAI returned embeddings with inconsistent dimensions.")
+            if self._dimensions is not None and len(embedding) != self._dimensions:
+                raise ValueError(
+                    "Azure OpenAI embedding dimension mismatch: "
+                    f"requested {self._dimensions}, received {len(embedding)}."
+                )
+        return embeddings
 
     async def close(self) -> None:
         """Release client resources."""
@@ -88,6 +114,7 @@ def create_embedding_provider(
     azure_openai_endpoint: str | None = None,
     azure_openai_deployment: str | None = None,
     credential_provider: CredentialProvider | None = None,
+    dimensions: int | None = None,
 ) -> EmbeddingProvider | None:
     """Factory to create an embedding provider from config.
 
@@ -106,12 +133,29 @@ def create_embedding_provider(
         raise ValueError(
             "azure_openai_endpoint and azure_openai_deployment are required when embedding_model is 'azure-openai'"
         )
+    if dimensions is not None and dimensions <= 0:
+        raise ValueError("Embedding dimensions must be greater than zero.")
+    if find_spec("openai") is None:
+        raise RuntimeError("Azure OpenAI catalog embeddings require the 'agora-workbench[catalog-vector]' extra.")
     if credential_provider is None:
-        from ...auth import EntraCredentialProvider
+        try:
+            from ...auth import EntraCredentialProvider
+        except ImportError as exc:
+            raise RuntimeError(
+                "Azure OpenAI catalog embeddings require Azure credentials. "
+                "Install the 'agora-workbench[azure,catalog-vector]' extras."
+            ) from exc
 
-        credential_provider = EntraCredentialProvider()
+        try:
+            credential_provider = EntraCredentialProvider()
+        except ImportError as exc:
+            raise RuntimeError(
+                "Azure OpenAI catalog embeddings require Azure credentials. "
+                "Install the 'agora-workbench[azure,catalog-vector]' extras."
+            ) from exc
     return AzureOpenAIEmbeddingProvider(
         endpoint=azure_openai_endpoint,
         deployment=azure_openai_deployment,
         credential_provider=credential_provider,
+        dimensions=dimensions,
     )
