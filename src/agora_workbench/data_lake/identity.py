@@ -23,7 +23,9 @@ def _invalid_identity(message: str) -> InvalidRequestError:
 
 def normalize_logical_path(path: str) -> str:
     """Return a portable, source-relative POSIX path."""
-    candidate = path.replace("\\", "/").lstrip("/")
+    candidate = path.replace("\\", "/")
+    if candidate.startswith("/") or re.match(r"^[a-zA-Z]:[\\/]", path):
+        raise _invalid_identity("Artifact path must be source-relative.")
     normalized = posixpath.normpath(candidate)
     if normalized in {"", "."}:
         raise _invalid_identity("Artifact path must identify an object.")

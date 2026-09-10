@@ -308,8 +308,8 @@ class CatalogIndexer:
         now = datetime.now(timezone.utc).isoformat()
 
         container_client = client.get_container_client(container)
+        prefix_boundary = prefix if prefix.endswith("/") else f"{prefix}/"
         async for blob in container_client.list_blobs(name_starts_with=prefix):
-            prefix_boundary = prefix if prefix.endswith("/") else f"{prefix}/"
             if prefix and blob.name != prefix and not blob.name.startswith(prefix_boundary):
                 continue
             if blob.name.endswith("/"):
