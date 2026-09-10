@@ -5,6 +5,7 @@ import struct
 
 import pytest
 
+from ....data_access.catalog import db as db_module
 from ....data_access.catalog.db import (
     SCHEMA_VERSION,
     CatalogDB,
@@ -80,6 +81,26 @@ class TestCatalogDBBasicOps:
         db.upsert_artifact(artifact_id="b", name="b.csv", storage_uri="/b.csv", indexed_at="2026-01-01T00:00:00Z")
         uris = db.get_existing_uris()
         assert uris == {"/a.csv", "/b.csv"}
+
+    def test_upsert_without_source_root_preserves_existing_root(self, db):
+        db.upsert_artifact(
+            artifact_id="a",
+            source_id="weather",
+            source_type="local",
+            source_root="/data/weather",
+            name="a.csv",
+            storage_uri="/data/weather/a.csv",
+        )
+        db.upsert_artifact(
+            artifact_id="b",
+            source_id="weather",
+            source_type="local",
+            name="b.csv",
+            storage_uri="/data/weather/b.csv",
+        )
+
+        source = db.conn.execute("SELECT root_uri FROM catalog_sources WHERE source_id = 'weather'").fetchone()
+        assert source["root_uri"] == "/data/weather"
 
     def test_delete_artifacts(self, db):
         db.upsert_artifact(artifact_id="a", name="a.csv", storage_uri="/a.csv", indexed_at="2026-01-01T00:00:00Z")
@@ -637,6 +658,26 @@ class TestCatalogDBReadonlyQuery:
             indexed_at="2026-01-02T00:00:00Z",
         )
         assert db.get_artifact("b") is not None
+
+    def test_in_memory_vector_query_loads_capability_lazily(self, db, monkeypatch):
+        db.upsert_artifact(
+            artifact_id="a",
+            name="weather.csv",
+            storage_uri="/data/weather.csv",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        db._vector_loaded = False
+        imported = []
+        original_import_module = db_module.import_module
+
+        def tracked_import_module(name):
+            imported.append(name)
+            return original_import_module(name)
+
+        monkeypatch.setattr(db_module, "import_module", tracked_import_module)
+
+        assert db.execute_readonly("SELECT COUNT(*) AS count FROM artifacts_vec") == [{"count": 1}]
+        assert imported == ["sqlite_vec"]
 
     def test_fts_match_query(self, file_db):
         results = file_db.execute_readonly(

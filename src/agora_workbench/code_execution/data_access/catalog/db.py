@@ -421,6 +421,8 @@ class CatalogDB:
         if any(stripped.startswith(keyword) for keyword in write_keywords):
             raise ValueError(f"Write operations are not permitted. Query starts with: {stripped.split()[0]}")
         if self._db_path == ":memory:":
+            if _references_vector_table(sql):
+                self._ensure_vector_capability(self.conn, create_table=False)
             previous_query_only = self.conn.execute("PRAGMA query_only").fetchone()[0]
             self.conn.execute("PRAGMA query_only = ON")
             try:
@@ -447,7 +449,8 @@ class CatalogDB:
         self.conn.execute(
             """INSERT INTO catalog_sources(source_id, source_type, root_uri, created_at)
                VALUES (?, ?, ?, ?)
-               ON CONFLICT(source_id) DO UPDATE SET root_uri=excluded.root_uri""",
+               ON CONFLICT(source_id) DO UPDATE
+               SET root_uri=COALESCE(excluded.root_uri, catalog_sources.root_uri)""",
             (source_id, source_type, root_uri, created_at),
         )
 
