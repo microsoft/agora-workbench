@@ -28,6 +28,13 @@ class CatalogOperation(StrEnum):
     RESOLVE = "resolve"
 
 
+class CatalogPolicyMode(StrEnum):
+    """Granularity at which caller policy is enforced."""
+
+    HOMOGENEOUS_SOURCE = "homogeneous_source"
+    PER_ARTIFACT = "per_artifact"
+
+
 READ_OPERATIONS = frozenset(
     {
         CatalogOperation.SEARCH,
@@ -40,7 +47,7 @@ READ_OPERATIONS = frozenset(
 
 @dataclass(frozen=True)
 class RequestContext:
-    """Mutable-caller metadata copied for propagation, not cache identity."""
+    """Request-scoped caller metadata copied for safe propagation."""
 
     request_id: str | None = None
     caller_id: str | None = None
@@ -85,6 +92,22 @@ class ArtifactReference:
 
     artifact_id: str
     source_id: str
+
+
+@dataclass(frozen=True)
+class CatalogAuthorizationRequest:
+    """One source- or artifact-scoped authorization check."""
+
+    operation: CatalogOperation
+    source_id: str
+    reference: ArtifactReference | None = None
+
+    def __post_init__(self) -> None:
+        if self.reference is not None and self.reference.source_id != self.source_id:
+            raise InvalidRequestError(
+                "Authorization source and artifact reference must match.",
+                operation=self.operation.value,
+            )
 
 
 @dataclass(frozen=True)

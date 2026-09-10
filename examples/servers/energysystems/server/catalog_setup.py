@@ -1,8 +1,8 @@
 """Local data-catalog wiring for the energysystems server.
 
-Indexes the synthetic grid datasets under ``data/`` into a SQLite catalog and
-registers the catalog search tools (``search_data`` / ``query_catalog`` /
-``get_artifact`` / ``list_domains``) on the MCP server.
+Indexes the public synthetic grid datasets under ``data/`` into a SQLite catalog
+and registers the legacy unscoped catalog tools (``search_data`` /
+``query_catalog`` / ``get_artifact`` / ``list_domains``) on the MCP server.
 
 The catalog runs keyword-only (SQLite FTS5 / BM25) — no embedding model, no
 Azure, no extra setup. ``catalog.yaml`` sets ``embedding_model: none``; switch
@@ -51,7 +51,7 @@ def setup_catalog(server, energysystems_dir: Path) -> Optional[CatalogDB]:
     config = CatalogConfig.from_yaml(catalog_yaml)
     _resolve_local_sources(config, energysystems_dir)
 
-    # File-backed DB so the read-only query_catalog connection sees indexed rows.
+    # File-backed DB so the legacy read-only query_catalog connection sees indexed rows.
     db_path = Path(tempfile.mkdtemp(prefix="energysystems_catalog_")) / "catalog.db"
     db = CatalogDB(db_path=str(db_path))
     db.open()

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from ....data_access.catalog.config import CatalogConfig, SearchConfig
 from ....data_access.catalog.db import CatalogDB
-from ....catalog_tools import CatalogToolsContext, register_catalog_tools
+from ....catalog_tools import CatalogToolsContext, register_catalog_admin_tools, register_catalog_tools
 
 
 @pytest.fixture
@@ -116,7 +116,7 @@ class TestListDomains:
 
 
 class TestQueryCatalog:
-    """Tests for the query_catalog tool."""
+    """Tests for the privileged query_catalog extension."""
 
     @pytest.fixture
     def file_db(self, tmp_path):
@@ -153,7 +153,7 @@ class TestQueryCatalog:
 
     @pytest.fixture
     def file_tools(self, file_db):
-        """Register tools with on-disk DB."""
+        """Register legacy tools with an on-disk DB."""
         mock_provider = MagicMock()
         mock_provider.embed = AsyncMock(return_value=[[0.9, 0.1, 0.0, 0.0]])
         mock_provider.dimensions = 4
@@ -172,6 +172,25 @@ class TestQueryCatalog:
 
         mock_mcp.tool = capture_tool
         register_catalog_tools(mock_mcp, ctx)
+        return captured
+
+    @pytest.fixture
+    def admin_file_tools(self, file_db):
+        """Register the privileged SQL extension with an on-disk DB."""
+        config = CatalogConfig(search=SearchConfig(embedding_model="none"))
+        ctx = CatalogToolsContext(db=file_db, embedding_provider=None, config=config)
+        captured = {}
+        mock_mcp = MagicMock()
+
+        def capture_tool(name, description):
+            def decorator(fn):
+                captured[name] = fn
+                return fn
+
+            return decorator
+
+        mock_mcp.tool = capture_tool
+        register_catalog_admin_tools(mock_mcp, ctx)
         return captured
 
     @pytest.mark.asyncio
@@ -200,3 +219,53 @@ class TestQueryCatalog:
     async def test_max_rows(self, file_tools):
         results = await file_tools["query_catalog"]("SELECT * FROM artifacts", max_rows=1)
         assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_admin_query_catalog_selects_rows(self, admin_file_tools):
+        results = await admin_file_tools["query_catalog"](
+            "SELECT name, domain FROM artifacts ORDER BY name",
+        )
+        assert results == [
+            {"name": "daily_obs.csv", "domain": "earthscience"},
+            {"name": "transmission_lines.geojson", "domain": "powergrid"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_admin_query_catalog_rejects_writes(self, admin_file_tools):
+        with pytest.raises(ValueError, match="Write operations are not permitted"):
+            await admin_file_tools["query_catalog"]("DELETE FROM artifacts")
+
+
+def test_legacy_registration_preserves_all_v02_catalog_tools(ctx, caplog):
+    captured = {}
+    mock_mcp = MagicMock()
+
+    def capture_tool(name, description):
+        def decorator(fn):
+            captured[name] = fn
+            return fn
+
+        return decorator
+
+    mock_mcp.tool = capture_tool
+    register_catalog_tools(mock_mcp, ctx)
+
+    assert set(captured) == {"search_data", "query_catalog", "get_artifact", "list_domains"}
+    assert "legacy unscoped catalog tools" in caplog.text
+
+
+def test_admin_registration_exposes_only_query_catalog(ctx):
+    captured = {}
+    mock_mcp = MagicMock()
+
+    def capture_tool(name, description):
+        def decorator(fn):
+            captured[name] = fn
+            return fn
+
+        return decorator
+
+    mock_mcp.tool = capture_tool
+    register_catalog_admin_tools(mock_mcp, ctx)
+
+    assert set(captured) == {"query_catalog"}

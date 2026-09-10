@@ -133,12 +133,100 @@ operation to specific sources. An empty tuple means all sources. Treat
 pagination cursors as opaque provider values; callers should not parse them.
 Page limits cannot exceed `MAX_PAGE_LIMIT` (1000).
 
-## Capabilities and errors
+## Caller-aware policy composition
 
 Each `SourceCapabilities` value reports the operations supported by one
-`source_id`. Check these values rather than inferring support from method
-presence. Authorization is separate: the application or gateway decides which
-supported operations the current caller may use.
+`source_id`; check these values rather than inferring support from method
+presence. Provider support is not caller authorization. Compose an
+application-defined `CatalogAuthorizer` outside the provider with
+`AuthorizedCatalogProvider`; its caller-aware `capabilities(context)` result is
+the intersection of provider support and policy.
+
+```python
+from agora_workbench.data_lake import (
+    AuthorizedCatalogProvider,
+    CatalogAuthorizationRequest,
+    CatalogPolicyMode,
+    RequestContext,
+)
+
+
+class TenantPolicy:
+    async def authorize(
+        self,
+        request: CatalogAuthorizationRequest,
+        context: RequestContext,
+    ) -> bool:
+        tenant = context.attributes.get("tenant")
+        allowed_sources = {
+            "public": {"weather"},
+            "research": {"weather", "experiments"},
+        }.get(tenant, set())
+        return request.source_id in allowed_sources
+
+
+authorized_catalog = AuthorizedCatalogProvider(
+    catalog,
+    TenantPolicy(),
+    mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+)
+```
+
+Policy mode is always explicit:
+
+- `HOMOGENEOUS_SOURCE` grants or denies an operation for an entire source. The
+  wrapper constrains `search` and `list` before provider ranking/pagination and
+  validates that provider results remain inside the authorized sources.
+- `PER_ARTIFACT` requires a backend-specific `CatalogPolicyEnforcer`. That
+  adapter must apply artifact policy before ranking, pagination, aggregations,
+  alias resolution, and lookup errors. The wrapper refuses this mode without an
+  enforcer; it never silently falls back to filtering one top-k page.
+
+`DenyAllCatalogAuthorizer` is an explicit fail-closed baseline.
+`DevelopmentAllowAllCatalogAuthorizer` is an explicit development-only choice;
+`AuthorizedCatalogProvider` has no implicit allow policy.
+
+Denied `get` and `resolve` calls are reported as a generic not-found result, so
+backend error differences and resource identifiers do not disclose artifact
+existence. Returned references must exactly match the requested logical identity
+`(source_id, artifact_id)`; a provider or enforcer that substitutes another
+artifact fails closed. Alias resolution must therefore preserve the requested
+logical reference at this boundary or be modeled as a separate, policy-aware
+lookup operation. Search and list requests silently omit unauthorized sources
+before the provider is called. A provider remains responsible for honoring
+ordinary source and cursor constraints, but it does not receive authority to
+decide which callers are allowed.
+
+### Request state, caches, and revocation
+
+Treat `RequestContext` attributes as request-scoped and potentially sensitive.
+Do not retain credentials, bearer tokens, session objects, or the context itself
+in process-wide provider caches or logs. Cache only non-sensitive provider data,
+or partition caller-visible caches by an application-defined authorization scope
+that cannot collide across principals.
+
+The policy wrapper re-evaluates authorization on every operation and does not
+cache decisions. Applications that cache policy decisions must define bounded
+TTL and explicit invalidation semantics; otherwise revocation cannot take effect
+promptly. Pagination cursors and backend query caches must remain bound to the
+current authorization constraints and must fail closed if those constraints
+cannot be reapplied. `AuthorizedCatalogProvider` rejects a non-null cursor when
+authorization narrows the request's source set. When the set is unchanged, the
+provider remains responsible for validating that its opaque cursor was minted
+for the same source and query constraints.
+
+### Raw SQL
+
+Raw catalog SQL is not part of `CatalogProvider` or `PolicyEnforcedCatalog`.
+SQLite read-only mode prevents writes; it is not row-, artifact-, source-, or
+caller-level authorization. For v0.2.x compatibility, the legacy
+`register_catalog_tools` function still includes `query_catalog`, but that whole
+surface is unscoped and is safe only when every artifact and metadata row is
+already authorized to every caller with tool access. New applications should
+prefer the explicit `register_catalog_admin_tools` extension on a separately
+authenticated and authorized administrative surface.
+
+## Errors
 
 Provider error categories include `InvalidRequestError`,
 `ArtifactNotFoundError`, `UnsupportedOperationError`, `PermissionDeniedError`, and
@@ -220,6 +308,16 @@ across requests, and close them when the application shuts down.
 `DataLakeDataManager`, its local cache, and its fetcher clients belong to one
 execution session and must be closed when that session ends.
 
+The synchronous `CatalogDB` compatibility API is not a `CatalogProvider` adapter
+and cannot correctly apply per-artifact policy after its existing top-k search.
+Its existing `register_catalog_tools(mcp, context, activity_publisher=None)`
+signature and four tools remain available for v0.2.x compatibility, with a
+security warning at registration. This unscoped surface is appropriate only
+when the entire catalog is already authorized to all callers, such as public
+development data. Production mixed-trust deployments must use a caller-aware
+provider adapter and policy composition rather than treating tool access or
+SQLite read-only access as authorization.
+
 `ResourceLease` records whether a supplied resource is `OWNED` or `BORROWED`.
 Close only owned resources. A resolver or manager may close a client it creates,
 but must not close a credential or other resource borrowed from its caller.
@@ -228,7 +326,8 @@ but must not close a credential or other resource borrowed from its caller.
 
 The public modules are organized by responsibility:
 
-- `agora_workbench.data_lake`: records, protocols, capabilities, and errors
+- `agora_workbench.data_lake`: records, protocols, policy composition,
+  capabilities, and errors
 - `agora_workbench.data_lake.catalog`: `CatalogConfig`, `CatalogDB`,
   `CatalogIndexer`, `SearchConfig`, and `SourceConfig`
 - `agora_workbench.data_lake.resolvers`: `SearchIndexArtifactResolver`
