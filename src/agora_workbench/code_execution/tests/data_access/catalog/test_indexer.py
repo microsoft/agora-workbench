@@ -306,6 +306,24 @@ class TestCatalogIndexerLocal:
         assert db.resolve_artifact_id("configured-id", "weather") == canonical
 
     @pytest.mark.asyncio
+    async def test_unchanged_scan_preloads_source_records(self, db, tmp_path, monkeypatch):
+        root = tmp_path / "weather"
+        root.mkdir()
+        for name in ("daily.csv", "hourly.csv", "monthly.csv"):
+            (root / name).write_text(name)
+        indexer = CatalogIndexer(
+            CatalogConfig(sources=[SourceConfig(source_id="weather", path=str(root))]),
+            db,
+        )
+        assert await indexer.index() == 3
+
+        def unexpected_per_artifact_lookup(*_args, **_kwargs):
+            raise AssertionError("index() must preload source records")
+
+        monkeypatch.setattr(db, "find_by_source_path", unexpected_per_artifact_lookup)
+        assert await indexer.index() == 0
+
+    @pytest.mark.asyncio
     async def test_adding_namespaced_configured_id_preserves_namespace(self, db, tmp_path):
         root = tmp_path / "weather"
         root.mkdir()

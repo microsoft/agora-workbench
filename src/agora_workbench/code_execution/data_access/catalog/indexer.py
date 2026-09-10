@@ -24,7 +24,7 @@ from .identity import (
 )
 
 from .config import CatalogConfig, SourceConfig
-from .db import CatalogDB, artifact_id_from_uri
+from .db import ArtifactRecord, CatalogDB, artifact_id_from_uri
 from .embeddings import EmbeddingProvider, create_embedding_provider
 
 LOGGER = logging.getLogger(__name__)
@@ -158,19 +158,23 @@ class CatalogIndexer:
         for artifact in all_artifacts:
             discovered_by_source[artifact["source_id"]].add(artifact["logical_path"])
 
+        records_by_source: dict[str, dict[str, ArtifactRecord]] = {}
         stale_ids: list[str] = []
         for source_id, discovered_paths in discovered_by_source.items():
-            current = self._db.current_paths(source_id)
-            stale_ids.extend(artifact_id for path, artifact_id in current.items() if path not in discovered_paths)
+            current = self._db.records_by_source_path(source_id, include_deleted=True)
+            records_by_source[source_id] = current
+            stale_ids.extend(
+                record.id
+                for path, record in current.items()
+                if record.deleted_at is None and path not in discovered_paths
+            )
         if stale_ids:
             self._db.delete_artifacts(stale_ids)
             LOGGER.info("Tombstoned %d stale artifacts.", len(stale_ids))
 
         to_index = []
         for artifact in all_artifacts:
-            existing = self._db.find_by_source_path(
-                artifact["source_id"], artifact["logical_path"], include_deleted=True
-            )
+            existing = records_by_source[artifact["source_id"]].get(artifact["logical_path"])
             if (
                 existing is None
                 or existing.deleted_at is not None

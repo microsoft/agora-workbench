@@ -862,6 +862,15 @@ class CatalogDB:
         ).fetchall()
         return {row["logical_path"]: row["id"] for row in rows}
 
+    def records_by_source_path(self, source_id: str, *, include_deleted: bool = False) -> dict[str, ArtifactRecord]:
+        """Return one source's records keyed by normalized logical path."""
+        deleted_filter = "" if include_deleted else " AND deleted_at IS NULL"
+        rows = self.conn.execute(
+            f"SELECT * FROM artifacts WHERE source_id=?{deleted_filter}",
+            (source_id,),
+        ).fetchall()
+        return {row["logical_path"]: _record_from_row(row) for row in rows}
+
     def delete_artifacts(self, artifact_ids: list[str], *, deleted_at: str | None = None) -> None:
         """Create tombstone revisions; history is retained until explicit purge."""
         timestamp = deleted_at or datetime.now(timezone.utc).isoformat()
