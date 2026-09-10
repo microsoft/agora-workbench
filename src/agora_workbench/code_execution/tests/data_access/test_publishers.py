@@ -12,6 +12,7 @@ import pytest
 from ...data_access.publishers import (
     BlobPublisher,
     LocalFilePublisher,
+    ObjectTransferError,
     ServerPublisher,
     _validate_artifact_name,
     parse_destination_tag,
@@ -596,6 +597,72 @@ class TestSendTool:
         set_current_user_identity(None)
         set_current_request_token(None)
         set_current_token_claims(None)
+
+    @pytest.mark.asyncio
+    async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch):
+        """The send result exposes actionable fields returned by a peer."""
+        from ... import sessions as sessions_pkg
+        from ...sessions import (
+            SessionConfig,
+            SessionManager,
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        session_manager = SessionManager(SessionConfig())
+        publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
+        server = _make_server_with_publishers([publisher])
+        server.session_manager = session_manager
+
+        session_id = session_manager.create_session(
+            data={},
+            user_identity="u@t",
+            user_token="tok",
+            token_claims={"oid": "u", "tid": "t"},
+        )
+        outputs = session_manager._get_outputs_dir(session_id)
+        artifact = outputs / "result"
+        artifact.write_bytes(b"serialized")
+        session_manager._register_artifacts_from_diff(session_id, {}, session_manager._snapshot_outputs_dir(session_id))
+
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
+        server._restore_auth_context_for_mcp_session = MagicMock()
+        session_manager.execute_code_for_session = AsyncMock(
+            return_value=("", "NameError: name 'result' is not defined", False, [], [])
+        )
+        publisher.publish = AsyncMock(
+            side_effect=ObjectTransferError(
+                server_name="gis",
+                status_code=404,
+                response_body={
+                    "success": False,
+                    "error": "No active session found to receive the object",
+                    "hint": "Initialize the destination server, then retry.",
+                },
+            )
+        )
+
+        mock_ctx = MagicMock()
+        mock_ctx.session_id = session_id
+
+        try:
+            mcp_tool = await server.mcp.get_tool("test_send")
+            result_json = await mcp_tool.fn(ctx=mock_ctx, data_ref="result", to="gis")
+        finally:
+            set_current_user_identity(None)
+            set_current_request_token(None)
+            set_current_token_claims(None)
+
+        assert json.loads(result_json) == {
+            "success": False,
+            "error": "Object transfer to 'gis' failed: No active session found to receive the object",
+            "hint": "Initialize the destination server, then retry.",
+            "status_code": 404,
+        }
 
     @pytest.mark.asyncio
     async def test_send_destination_names_in_description(self, tmp_path):
