@@ -8,7 +8,7 @@ import json
 import logging
 import mimetypes
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -60,8 +60,12 @@ def _infer_content_type(filename: str) -> Optional[str]:
 
 def _source_id(source: SourceConfig) -> str:
     """Return the configured logical source ID or a compatibility fallback."""
-    root = canonicalize_azure_uri(source.path) if source.source_type == "blob" else str(Path(source.path).resolve())
-    return source.source_id or stable_source_id(source.source_type, root)
+    return source.source_id or stable_source_id(source.source_type, _source_root(source))
+
+
+def _source_root(source: SourceConfig) -> str:
+    """Return the credential-free canonical root used for refresh ownership."""
+    return canonicalize_azure_uri(source.path) if source.source_type == "blob" else str(Path(source.path).resolve())
 
 
 def _revision_digest(parts: object) -> str:
@@ -70,6 +74,14 @@ def _revision_digest(parts: object) -> str:
 
 def _configured_id_alias(custom_id: str) -> str:
     return custom_id if ":" in custom_id else f"artifact-id:{custom_id}"
+
+
+def _embedding_model_id(config: CatalogConfig) -> str:
+    """Return a stable non-secret identifier for stored vector semantics."""
+    model = config.search.embedding_model
+    if model == "azure-openai":
+        return f"{model}:{config.search.azure_openai_deployment}"
+    return model
 
 
 def _parse_blob_path(path: str) -> tuple[str, str, str]:
@@ -86,6 +98,7 @@ def _parse_blob_path(path: str) -> tuple[str, str, str]:
 class _EnumerationResult:
     artifacts: list[dict]
     successful_source_ids: set[str]
+    errors: dict[str, str] = field(default_factory=dict)
 
 
 class CatalogIndexer:
@@ -149,14 +162,16 @@ class CatalogIndexer:
         Returns:
             Number of artifacts indexed (new + updated).
         """
-        enumeration = await self._enumerate_all_sources()
+        sources = self._validated_sources()
+        enumeration = await self._enumerate_all_sources(sources)
         all_artifacts = enumeration.artifacts
+        attempted_at = datetime.now(timezone.utc).isoformat()
 
         discovered_by_source: dict[str, set[str]] = {
             source_id: set() for source_id in enumeration.successful_source_ids
         }
         for artifact in all_artifacts:
-            discovered_by_source[artifact["source_id"]].add(artifact["logical_path"])
+            discovered_by_source.setdefault(artifact["source_id"], set()).add(artifact["logical_path"])
 
         records_by_source: dict[str, dict[str, ArtifactRecord]] = {}
         stale_ids: list[str] = []
@@ -168,28 +183,73 @@ class CatalogIndexer:
                 for path, record in current.items()
                 if record.deleted_at is None and path not in discovered_paths
             )
-        if stale_ids:
-            self._db.delete_artifacts(stale_ids)
-            LOGGER.info("Tombstoned %d stale artifacts.", len(stale_ids))
 
-        to_index = []
+        provider = self.embedding_provider
+        existing_live_ids = [
+            record.id
+            for records in records_by_source.values()
+            for record in records.values()
+            if record.deleted_at is None
+        ]
+        missing_vector_ids = (
+            self._db.missing_vectors(existing_live_ids) if provider is not None and existing_live_ids else set()
+        )
+        to_index: list[tuple[dict, bool]] = []
         for artifact in all_artifacts:
             existing = records_by_source[artifact["source_id"]].get(artifact["logical_path"])
+            needs_vector = (
+                existing is not None
+                and existing.deleted_at is None
+                and provider is not None
+                and existing.id in missing_vector_ids
+            )
             if (
                 existing is None
                 or existing.deleted_at is not None
                 or existing.storage_uri != artifact["storage_uri"]
                 or existing.content_revision != artifact["content_revision"]
                 or existing.metadata_revision != artifact["metadata_revision"]
+                or needs_vector
             ):
-                to_index.append(artifact)
+                searchable_change = (
+                    existing is None
+                    or existing.deleted_at is not None
+                    or existing.name != artifact["name"]
+                    or existing.description != artifact["description"]
+                    or existing.domain != artifact["domain"]
+                    or needs_vector
+                )
+                to_index.append((artifact, provider is not None and searchable_change))
 
-        if not to_index:
-            LOGGER.info("Catalog up to date (%d artifacts).", len(all_artifacts))
-            return 0
+        rows = await self._compute_rows(to_index)
+        artifact_counts: dict[str, int] = {}
+        for artifact in all_artifacts:
+            artifact_counts[artifact["source_id"]] = artifact_counts.get(artifact["source_id"], 0) + 1
+        source_results = []
+        for source, source_id in sources:
+            succeeded = source_id in enumeration.successful_source_ids
+            source_results.append(
+                {
+                    "source_id": source_id,
+                    "source_type": source.source_type,
+                    "root_uri": (
+                        canonicalize_azure_uri(source.path)
+                        if source.source_type == "blob"
+                        else str(Path(source.path).resolve())
+                    ),
+                    "attempted_at": attempted_at,
+                    "succeeded": succeeded,
+                    "artifact_count": artifact_counts.get(source_id, 0) if succeeded else None,
+                    "error": None if succeeded else enumeration.errors.get(source_id, "Source enumeration failed"),
+                }
+            )
 
-        # Compute embeddings in batches and upsert within a transaction
-        await self._compute_and_store(to_index)
+        vector_model_id = (
+            _embedding_model_id(self._config) if provider is not None and self._db.vec_dimensions is not None else None
+        )
+        self._db.apply_refresh_batch(rows, stale_ids, source_results, vector_model_id)
+        if stale_ids:
+            LOGGER.info("Tombstoned %d stale artifacts.", len(stale_ids))
 
         # Log warning for artifacts without descriptions
         no_desc_count = sum(1 for a in all_artifacts if not a.get("description"))
@@ -199,21 +259,56 @@ class CatalogIndexer:
                 no_desc_count,
             )
 
-        LOGGER.info("Indexed %d new artifacts (%d total).", len(to_index), len(all_artifacts))
+        if not to_index:
+            if enumeration.errors:
+                LOGGER.warning(
+                    "Catalog refresh preserved last valid state for %d failed source(s).",
+                    len(enumeration.errors),
+                )
+            else:
+                LOGGER.info("Catalog up to date (%d artifacts).", len(all_artifacts))
+            return 0
+        LOGGER.info("Indexed %d new or updated artifacts (%d total).", len(to_index), len(all_artifacts))
         return len(to_index)
 
-    async def _enumerate_all_sources(self) -> _EnumerationResult:
+    def _validated_sources(self) -> list[tuple[SourceConfig, str]]:
+        """Resolve normalized source identities and reject ambiguous duplicate refresh ownership."""
+        sources: list[tuple[SourceConfig, str]] = []
+        seen_ids: set[str] = set()
+        seen_roots: set[tuple[str, str]] = set()
+        for source in self._config.sources:
+            source_id = _source_id(source)
+            if source_id in seen_ids:
+                raise ValueError(
+                    f"Duplicate effective catalog source_id {source_id!r}; each configured source must be unique"
+                )
+            source_root = (source.source_type, _source_root(source))
+            if source_root in seen_roots:
+                raise ValueError(
+                    f"Duplicate effective catalog source root {source_root[1]!r}; "
+                    "each configured source must have unique refresh ownership"
+                )
+            seen_ids.add(source_id)
+            seen_roots.add(source_root)
+            sources.append((source, source_id))
+        return sources
+
+    async def _enumerate_all_sources(self, sources: list[tuple[SourceConfig, str]] | None = None) -> _EnumerationResult:
         """Enumerate sources while retaining which sources completed successfully."""
+        sources = sources if sources is not None else self._validated_sources()
         artifacts: list[dict] = []
         successful_source_ids: set[str] = set()
+        errors: dict[str, str] = {}
         blob_sources: list[SourceConfig] = []
 
-        for source in self._config.sources:
+        for source, source_id in sources:
             if source.source_type == "local":
-                source_artifacts, succeeded = self._enumerate_local(source)
+                source_artifacts, error = self._enumerate_local(source)
                 artifacts.extend(source_artifacts)
-                if succeeded:
-                    successful_source_ids.add(_source_id(source))
+                if error is None:
+                    successful_source_ids.add(source_id)
+                else:
+                    errors[source_id] = error
             elif source.source_type == "blob":
                 blob_sources.append(source)
 
@@ -221,8 +316,9 @@ class CatalogIndexer:
             blob_result = await self._enumerate_blob_sources_concurrent(blob_sources)
             artifacts.extend(blob_result.artifacts)
             successful_source_ids.update(blob_result.successful_source_ids)
+            errors.update(blob_result.errors)
 
-        return _EnumerationResult(artifacts, successful_source_ids)
+        return _EnumerationResult(artifacts, successful_source_ids, errors)
 
     async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> _EnumerationResult:
         """Enumerate multiple blob sources concurrently with shared credential."""
@@ -263,17 +359,21 @@ class CatalogIndexer:
 
             artifacts: list[dict] = []
             successful_source_ids: set[str] = set()
+            errors: dict[str, str] = {}
             for source, result in zip(sources, results):
+                source_id = _source_id(source)
                 if isinstance(result, BaseException):
+                    error = f"{type(result).__name__}: source enumeration failed"
                     LOGGER.error(
-                        "Failed to enumerate blob source '%s' (%s)",
+                        "Failed to enumerate blob source '%s': %s",
                         sanitize_uri_for_display(source.path),
-                        type(result).__name__,
+                        error,
                     )
+                    errors[source_id] = error
                 else:
                     artifacts.extend(result)
-                    successful_source_ids.add(_source_id(source))
-            return _EnumerationResult(artifacts, successful_source_ids)
+                    successful_source_ids.add(source_id)
+            return _EnumerationResult(artifacts, successful_source_ids, errors)
         finally:
             for client in clients.values():
                 await client.close()
@@ -390,13 +490,13 @@ class CatalogIndexer:
 
         return artifacts
 
-    def _enumerate_local(self, source: SourceConfig) -> tuple[list[dict], bool]:
+    def _enumerate_local(self, source: SourceConfig) -> tuple[list[dict], str | None]:
         """Walk a local directory and produce artifact records."""
         source_path = Path(source.path).resolve()
         source_id = _source_id(source)
         if not source_path.exists():
             LOGGER.warning("Source path does not exist: %s", source_path)
-            return [], False
+            return [], "FileNotFoundError: source path does not exist"
 
         artifacts: list[dict] = []
         now = datetime.now(timezone.utc).isoformat()
@@ -425,9 +525,10 @@ class CatalogIndexer:
         except OSError as exc:
             errors.append(exc)
         if errors:
-            LOGGER.error("Failed to enumerate local source '%s' (%s)", source_path, type(errors[0]).__name__)
-            return [], False
-        return artifacts, True
+            error = f"{type(errors[0]).__name__}: source enumeration failed"
+            LOGGER.error("Failed to enumerate local source '%s': %s", source_path, error)
+            return [], error
+        return artifacts, None
 
     def _make_local_artifact(
         self,
@@ -494,24 +595,24 @@ class CatalogIndexer:
             ],
         }
 
-    async def _compute_and_store(self, artifacts: list[dict]) -> None:
-        """Compute embeddings and upsert artifacts into the database in a transaction."""
+    async def _compute_rows(self, artifacts: list[tuple[dict, bool]]) -> list[dict]:
+        """Compute only required embeddings before the atomic database refresh."""
         provider = self.embedding_provider
+        reembed_artifacts = [artifact for artifact, reembed in artifacts if reembed]
         if provider is None:
-            # Keyword-only (BM25) catalog — no vector embeddings.
-            all_embeddings: list[Optional[list[float]]] = [None] * len(artifacts)
+            embeddings: list[Optional[list[float]]] = [None] * len(reembed_artifacts)
         else:
-            texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in artifacts]
-            all_embeddings = []
+            texts = [_build_indexable_text(a["name"], a.get("description"), a.get("domain")) for a in reembed_artifacts]
+            embeddings = []
             resolved_dimensions = self._db.vec_dimensions or provider.dimensions
             for i in range(0, len(texts), _EMBEDDING_BATCH_SIZE):
                 batch = texts[i : i + _EMBEDDING_BATCH_SIZE]
-                embeddings = await provider.embed(batch)
-                if len(embeddings) != len(batch):
+                batch_embeddings = await provider.embed(batch)
+                if len(batch_embeddings) != len(batch):
                     raise ValueError(
-                        f"Embedding provider returned {len(embeddings)} vectors for a batch of {len(batch)} texts."
+                        f"Embedding provider returned {len(batch_embeddings)} vectors for a batch of {len(batch)} texts."
                     )
-                for embedding in embeddings:
+                for embedding in batch_embeddings:
                     if resolved_dimensions is None:
                         resolved_dimensions = len(embedding)
                     if len(embedding) != resolved_dimensions:
@@ -520,9 +621,16 @@ class CatalogIndexer:
                             f"CatalogDB expects {resolved_dimensions}, got {len(embedding)}. "
                             "Construct CatalogDB with vec_dimensions=config.search.embedding_dimensions."
                         )
-                all_embeddings.extend(embeddings)
+                embeddings.extend(batch_embeddings)
+            if resolved_dimensions is not None:
+                self._db.validate_vector_state(_embedding_model_id(self._config), resolved_dimensions)
 
         rows = []
-        for artifact, embedding in zip(artifacts, all_embeddings):
-            rows.append({**artifact, "embedding": embedding})
-        self._db.upsert_artifacts_batch(rows)
+        embedding_index = 0
+        for artifact, reembed in artifacts:
+            row = {**artifact, "_replace_embedding": reembed}
+            if reembed:
+                row["embedding"] = embeddings[embedding_index]
+                embedding_index += 1
+            rows.append(row)
+        return rows

@@ -9,7 +9,8 @@ import logging
 import re
 import sqlite3
 import struct
-from contextlib import nullcontext
+import threading
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,24 @@ CREATE TABLE IF NOT EXISTS catalog_sources (
     source_type TEXT NOT NULL,
     root_uri TEXT,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS catalog_source_refreshes (
+    source_id TEXT PRIMARY KEY,
+    attempt_generation INTEGER NOT NULL DEFAULT 0,
+    successful_generation INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    artifact_count INTEGER,
+    last_attempt_at TEXT NOT NULL,
+    last_success_at TEXT,
+    error TEXT,
+    FOREIGN KEY(source_id) REFERENCES catalog_sources(source_id)
+);
+
+CREATE TABLE IF NOT EXISTS catalog_vector_state (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    dimensions INTEGER NOT NULL,
+    model_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS artifacts (
@@ -100,6 +119,12 @@ CREATE TABLE IF NOT EXISTS artifact_aliases (
 
 CREATE INDEX IF NOT EXISTS artifact_aliases_target_idx
 ON artifact_aliases(source_id, artifact_id);
+
+CREATE INDEX IF NOT EXISTS artifacts_live_domain_idx
+ON artifacts(domain) WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS artifacts_live_source_type_idx
+ON artifacts(source_type) WHERE deleted_at IS NULL;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS artifacts_fts USING fts5(
     name, description, domain,
@@ -185,6 +210,20 @@ class ArtifactRecord:
         return result
 
 
+@dataclass(frozen=True)
+class SourceRefreshState:
+    """Most recent attempted and successful refresh state for one source."""
+
+    source_id: str
+    attempt_generation: int
+    successful_generation: int
+    status: str
+    artifact_count: int | None
+    last_attempt_at: str
+    last_success_at: str | None
+    error: str | None
+
+
 def artifact_id_from_uri(uri: str) -> str:
     """Return the legacy URI-derived artifact ID.
 
@@ -250,11 +289,13 @@ class CatalogDB:
         self._vec_dimensions = vec_dimensions
         self._conn: Optional[sqlite3.Connection] = None
         self._vector_loaded = False
+        self._write_lock = threading.RLock()
 
     def open(self) -> None:
         """Open the database and migrate known older schemas atomically."""
-        connection = sqlite3.connect(self._db_path)
+        connection = sqlite3.connect(self._db_path, timeout=5.0, check_same_thread=False)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute("PRAGMA foreign_keys = ON")
         version = connection.execute("PRAGMA user_version").fetchone()[0]
         if version > SCHEMA_VERSION:
@@ -263,6 +304,13 @@ class CatalogDB:
                 f"Catalog schema version {version} is newer than supported version {SCHEMA_VERSION}; "
                 "the database was not modified."
             )
+        if self._db_path != ":memory:":
+            try:
+                journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                if journal_mode.lower() != "wal":
+                    LOGGER.warning("WAL mode is unavailable for the catalog database")
+            except sqlite3.DatabaseError:
+                LOGGER.warning("WAL mode is unavailable for the catalog database")
 
         self._conn = connection
         try:
@@ -414,31 +462,71 @@ class CatalogDB:
             raise RuntimeError("Database not opened. Call open() first.")
         return self._conn
 
+    @contextmanager
+    def _write_transaction(self):
+        """Serialize writers and roll back every catalog index surface together."""
+        with self._write_lock:
+            if self.conn.in_transaction:
+                self.conn.execute("SAVEPOINT catalog_write")
+                try:
+                    yield
+                except Exception:
+                    self.conn.execute("ROLLBACK TO catalog_write")
+                    self.conn.execute("RELEASE catalog_write")
+                    raise
+                else:
+                    self.conn.execute("RELEASE catalog_write")
+                return
+            self.conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield
+            except Exception:
+                self.conn.rollback()
+                raise
+            else:
+                self.conn.commit()
+
+    @contextmanager
+    def _read_snapshot(self, *, vectors: bool = False):
+        """Yield one committed read snapshot, serializing safely for in-memory databases."""
+        if self._db_path == ":memory:":
+            with self._write_lock:
+                if vectors:
+                    self._ensure_vector_capability(self.conn)
+                yield self.conn
+            return
+
+        if vectors:
+            with self._write_lock:
+                self._ensure_vector_capability(self.conn)
+        uri = f"{Path(self._db_path).resolve().as_uri()}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=5.0)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout = 5000")
+        if vectors:
+            self._ensure_vector_capability(connection, create_table=False)
+        connection.execute("BEGIN")
+        connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone()
+        try:
+            yield connection
+        finally:
+            connection.rollback()
+            connection.close()
+
     def execute_readonly(self, sql: str, max_rows: int = 100) -> list[dict]:
-        """Execute a SELECT using a separate read-only connection."""
+        """Execute a SELECT from one committed snapshot."""
         stripped = sql.strip().upper()
         write_keywords = ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "REPLACE")
         if any(stripped.startswith(keyword) for keyword in write_keywords):
             raise ValueError(f"Write operations are not permitted. Query starts with: {stripped.split()[0]}")
-        if self._db_path == ":memory:":
-            if _references_vector_table(sql):
-                self._ensure_vector_capability(self.conn, create_table=False)
-            previous_query_only = self.conn.execute("PRAGMA query_only").fetchone()[0]
-            self.conn.execute("PRAGMA query_only = ON")
+        with self._read_snapshot(vectors=_references_vector_table(sql)) as connection:
+            previous_query_only = connection.execute("PRAGMA query_only").fetchone()[0]
+            connection.execute("PRAGMA query_only = ON")
             try:
-                cursor = self.conn.execute(sql)
+                cursor = connection.execute(sql)
                 return [dict(row) for row in cursor.fetchmany(max_rows)]
             finally:
-                self.conn.execute(f"PRAGMA query_only = {int(previous_query_only)}")
-
-        read_conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        read_conn.row_factory = sqlite3.Row
-        try:
-            if _references_vector_table(sql):
-                self._ensure_vector_capability(read_conn, create_table=False)
-            return [dict(row) for row in read_conn.execute(sql).fetchmany(max_rows)]
-        finally:
-            read_conn.close()
+                connection.execute(f"PRAGMA query_only = {int(previous_query_only)}")
 
     def _ensure_source(self, source_id: str, source_type: str, root_uri: str | None, created_at: str) -> None:
         existing = self.conn.execute(
@@ -531,6 +619,7 @@ class CatalogDB:
         metadata_revision: str | None = None,
         checksum_sha256: str | None = None,
         aliases: tuple[str, ...] | list[str] = (),
+        _replace_embedding: bool = False,
         _commit: bool = True,
     ) -> str:
         """Insert or update an artifact and return its persisted logical ID."""
@@ -540,6 +629,29 @@ class CatalogDB:
             raise ValueError("Source ID must be non-empty")
         if artifact_id == "":
             raise ValueError("Artifact ID must be non-empty")
+        if _commit:
+            with self._write_transaction():
+                return self.upsert_artifact(
+                    artifact_id,
+                    name,
+                    storage_uri,
+                    description,
+                    domain,
+                    source_type,
+                    content_type,
+                    size_bytes,
+                    indexed_at,
+                    embedding,
+                    source_id=source_id,
+                    logical_path=logical_path,
+                    source_root=source_root,
+                    content_revision=content_revision,
+                    metadata_revision=metadata_revision,
+                    checksum_sha256=checksum_sha256,
+                    aliases=aliases,
+                    _replace_embedding=_replace_embedding,
+                    _commit=False,
+                )
         if embedding is not None:
             self._validate_vector_dimensions(embedding, "artifact embedding")
             self._ensure_vector_capability(self.conn)
@@ -558,7 +670,7 @@ class CatalogDB:
         )
         metadata_revision = metadata_revision or _digest([name, description, domain, source_type, content_type])
 
-        with self.conn if _commit else nullcontext():
+        with nullcontext():
             self._ensure_source(source_id, source_type, source_root, now)
             existing_by_path = self.conn.execute(
                 "SELECT * FROM artifacts WHERE source_id = ? AND logical_path = ?",
@@ -682,8 +794,20 @@ class CatalogDB:
             if configured_alias is not None:
                 namespace, value = split_alias(configured_alias)
                 self.add_alias(namespace, value, source_id, chosen_id, commit=False)
-            if embedding is not None:
+            if _replace_embedding or embedding is not None:
+                self._ensure_vector_capability(self.conn)
                 self.conn.execute("DELETE FROM artifacts_vec WHERE id = ?", (chosen_id,))
+            if embedding is not None:
+                vector_state = self.conn.execute(
+                    "SELECT model_id FROM catalog_vector_state WHERE singleton=1"
+                ).fetchone()
+                if vector_state["model_id"] is None:
+                    vector_count = self.conn.execute("SELECT COUNT(*) FROM artifacts_vec").fetchone()[0]
+                    if vector_count:
+                        raise ValueError(
+                            "Catalog contains vectors with unknown model identity; rebuild vectors before writing"
+                        )
+                    self.conn.execute("UPDATE catalog_vector_state SET model_id='manual' WHERE singleton=1")
                 self.conn.execute(
                     "INSERT INTO artifacts_vec (id, embedding) VALUES (?, ?)",
                     (chosen_id, _serialize_vector(embedding)),
@@ -692,9 +816,150 @@ class CatalogDB:
 
     def upsert_artifacts_batch(self, artifacts: list[dict]) -> None:
         """Atomically upsert a batch of artifacts."""
-        with self.conn:
+        with self._write_transaction():
             for artifact in artifacts:
                 self.upsert_artifact(**artifact, _commit=False)
+
+    def apply_refresh_batch(
+        self,
+        artifacts: list[dict],
+        stale_artifact_ids: list[str],
+        source_results: list[dict],
+        vector_model_id: str | None = None,
+    ) -> None:
+        """Apply one refresh generation atomically across rows, search indexes, and vectors."""
+        with self._write_transaction():
+            if vector_model_id is not None:
+                self._ensure_vector_capability(self.conn)
+                dimensions = self._vec_dimensions
+                if dimensions is None:
+                    raise ValueError("Catalog vector dimensions are unknown after vector capability initialization")
+                self._validate_vector_state(self.conn, vector_model_id, dimensions)
+                self.conn.execute(
+                    "UPDATE catalog_vector_state SET model_id=? WHERE singleton=1",
+                    (vector_model_id,),
+                )
+            for result in source_results:
+                self._ensure_source(
+                    result["source_id"],
+                    result["source_type"],
+                    result.get("root_uri"),
+                    result["attempted_at"],
+                )
+            refresh_timestamp = source_results[0]["attempted_at"] if source_results else None
+            self._delete_artifacts(stale_artifact_ids, deleted_at=refresh_timestamp)
+            for artifact in artifacts:
+                self.upsert_artifact(**artifact, _commit=False)
+            for result in source_results:
+                self._record_source_refresh(**result)
+
+    def _record_source_refresh(
+        self,
+        *,
+        source_id: str,
+        source_type: str,
+        attempted_at: str,
+        succeeded: bool,
+        artifact_count: int | None,
+        error: str | None,
+        root_uri: str | None = None,
+    ) -> None:
+        del source_type, root_uri
+        existing = self.conn.execute(
+            "SELECT attempt_generation, successful_generation, last_success_at "
+            "FROM catalog_source_refreshes WHERE source_id=?",
+            (source_id,),
+        ).fetchone()
+        attempt_generation = (existing["attempt_generation"] if existing else 0) + 1
+        successful_generation = (
+            attempt_generation if succeeded else (existing["successful_generation"] if existing else 0)
+        )
+        last_success_at = attempted_at if succeeded else (existing["last_success_at"] if existing else None)
+        self.conn.execute(
+            """INSERT INTO catalog_source_refreshes(
+                   source_id, attempt_generation, successful_generation, status, artifact_count,
+                   last_attempt_at, last_success_at, error
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(source_id) DO UPDATE SET
+                   attempt_generation=excluded.attempt_generation,
+                   successful_generation=excluded.successful_generation,
+                   status=excluded.status,
+                   artifact_count=excluded.artifact_count,
+                   last_attempt_at=excluded.last_attempt_at,
+                   last_success_at=excluded.last_success_at,
+                   error=excluded.error""",
+            (
+                source_id,
+                attempt_generation,
+                successful_generation,
+                "success" if succeeded else "error",
+                artifact_count,
+                attempted_at,
+                last_success_at,
+                error,
+            ),
+        )
+
+    def get_source_refresh_state(self, source_id: str) -> SourceRefreshState | None:
+        """Return the latest observable refresh state for a source."""
+        with self._read_snapshot() as connection:
+            row = connection.execute(
+                "SELECT * FROM catalog_source_refreshes WHERE source_id=?", (source_id,)
+            ).fetchone()
+        return SourceRefreshState(**dict(row)) if row is not None else None
+
+    def list_source_refresh_states(self) -> list[SourceRefreshState]:
+        """Return latest refresh states in deterministic source order."""
+        with self._read_snapshot() as connection:
+            rows = connection.execute("SELECT * FROM catalog_source_refreshes ORDER BY source_id").fetchall()
+        return [SourceRefreshState(**dict(row)) for row in rows]
+
+    def validate_vector_state(self, model_id: str, dimensions: int) -> None:
+        """Reject incompatible vector model/dimension reuse instead of mixing embeddings."""
+        with self._write_lock:
+            if self._vec_dimensions is None:
+                self._vec_dimensions = dimensions
+        with self._read_snapshot(vectors=True) as connection:
+            self._validate_vector_state(connection, model_id, dimensions)
+
+    def _validate_vector_state(self, connection: sqlite3.Connection, model_id: str, dimensions: int) -> None:
+        if dimensions != self._vec_dimensions:
+            raise ValueError(
+                f"Embedding provider dimension mismatch: database expects {self._vec_dimensions}, got {dimensions}"
+            )
+        row = connection.execute("SELECT dimensions, model_id FROM catalog_vector_state WHERE singleton=1").fetchone()
+        if row["dimensions"] != dimensions:
+            raise ValueError(f"Catalog vector dimension mismatch: database uses {row['dimensions']}, got {dimensions}")
+        vector_count = connection.execute("SELECT COUNT(*) FROM artifacts_vec").fetchone()[0]
+        if row["model_id"] is None and vector_count:
+            raise ValueError("Catalog contains vectors with unknown model identity; rebuild vectors before searching")
+        if row["model_id"] not in (None, model_id):
+            if vector_count:
+                raise ValueError(
+                    f"Catalog vector model changed from {row['model_id']!r} to {model_id!r}; "
+                    "rebuild vectors before searching"
+                )
+
+    def has_vector(self, artifact_id: str) -> bool:
+        """Return whether the current artifact has an indexed embedding."""
+        return artifact_id not in self.missing_vectors([artifact_id])
+
+    def missing_vectors(self, artifact_ids: list[str]) -> set[str]:
+        """Return artifact IDs without vectors using one operation-scoped snapshot."""
+        unique_ids = list(dict.fromkeys(artifact_ids))
+        if not unique_ids:
+            return set()
+        present_ids: set[str] = set()
+        with self._read_snapshot(vectors=True) as connection:
+            for offset in range(0, len(unique_ids), 500):
+                batch = unique_ids[offset : offset + 500]
+                placeholders = ",".join("?" for _ in batch)
+                rows = connection.execute(
+                    f"SELECT id FROM artifacts_vec WHERE id IN ({placeholders})",
+                    batch,
+                ).fetchall()
+                present_ids.update(row["id"] for row in rows)
+        return set(unique_ids) - present_ids
 
     def add_alias(
         self,
@@ -706,6 +971,10 @@ class CatalogDB:
         commit: bool = True,
     ) -> None:
         """Add an unambiguous namespaced alias."""
+        if commit:
+            with self._write_transaction():
+                self.add_alias(namespace, alias, source_id, artifact_id, commit=False)
+            return
         if not namespace or not alias:
             raise ValueError("Alias namespace and value must be non-empty")
         canonical_candidates = (
@@ -729,12 +998,15 @@ class CatalogDB:
                VALUES (?, ?, ?, ?, ?)""",
             (namespace, alias, source_id, artifact_id, datetime.now(timezone.utc).isoformat()),
         )
-        if commit:
-            self.conn.commit()
 
     def resolve_artifact_id(self, value: str, source_id: str | None = None) -> str | None:
         """Resolve a canonical ID or namespaced compatibility alias."""
-        direct = self.conn.execute(
+        with self._read_snapshot() as connection:
+            return self._resolve_artifact_id(connection, value, source_id)
+
+    @staticmethod
+    def _resolve_artifact_id(connection: sqlite3.Connection, value: str, source_id: str | None = None) -> str | None:
+        direct = connection.execute(
             "SELECT id FROM artifacts WHERE id=? AND (? IS NULL OR source_id=?)",
             (value, source_id, source_id),
         ).fetchone()
@@ -743,7 +1015,7 @@ class CatalogDB:
         namespace, alias = split_alias(value)
         if namespace == "storage-uri":
             alias = _canonical_storage_alias(alias)
-        rows = self.conn.execute(
+        rows = connection.execute(
             """SELECT DISTINCT artifact_id FROM artifact_aliases
                WHERE namespace=? AND alias=? AND (? IS NULL OR source_id=?)""",
             (namespace, alias, source_id, source_id),
@@ -754,41 +1026,43 @@ class CatalogDB:
 
     def resolve_scan_alias(self, value: str, source_id: str) -> str | None:
         """Resolve a scan alias within its source or against one unadopted migration record."""
-        resolved = self.resolve_artifact_id(value, source_id)
-        if resolved is not None:
-            return resolved
-        namespace, alias = split_alias(value)
-        rows = self.conn.execute(
-            """SELECT DISTINCT a.id FROM artifact_aliases aa
-               JOIN artifacts a ON a.id=aa.artifact_id
-               WHERE aa.namespace=? AND aa.alias=?
-                 AND a.source_id LIKE 'legacy-%'
-                 AND a.logical_path LIKE 'imported/%'""",
-            (namespace, alias),
-        ).fetchall()
-        if len(rows) > 1:
-            raise ValueError(f"Ambiguous migrated artifact alias: {namespace}:{alias}")
-        return rows[0]["id"] if rows else None
+        with self._read_snapshot() as connection:
+            resolved = self._resolve_artifact_id(connection, value, source_id)
+            if resolved is not None:
+                return resolved
+            namespace, alias = split_alias(value)
+            rows = connection.execute(
+                """SELECT DISTINCT a.id FROM artifact_aliases aa
+                   JOIN artifacts a ON a.id=aa.artifact_id
+                   WHERE aa.namespace=? AND aa.alias=?
+                     AND a.source_id LIKE 'legacy-%'
+                     AND a.logical_path LIKE 'imported/%'""",
+                (namespace, alias),
+            ).fetchall()
+            if len(rows) > 1:
+                raise ValueError(f"Ambiguous migrated artifact alias: {namespace}:{alias}")
+            return rows[0]["id"] if rows else None
 
     def export_v0_json(self, destination: str | Path | None = None) -> str:
         """Export current live artifacts as a deterministic v0-compatible JSON array."""
-        rows = self.conn.execute(
-            """SELECT id, name, storage_uri, description, domain, source_type,
-                      content_type, size_bytes, indexed_at
-               FROM artifacts WHERE deleted_at IS NULL ORDER BY source_id, logical_path, id"""
-        ).fetchall()
-        records = []
-        for row in rows:
-            legacy_id = artifact_id_from_uri(row["storage_uri"])
-            legacy_alias = self.conn.execute(
-                """SELECT alias FROM artifact_aliases
-                   WHERE artifact_id=? AND namespace='artifact-id'
-                   ORDER BY CASE WHEN alias=? THEN 0 ELSE 1 END, alias LIMIT 1""",
-                (row["id"], legacy_id),
-            ).fetchone()
-            record = dict(row)
-            record["id"] = legacy_alias["alias"] if legacy_alias is not None else row["id"]
-            records.append(record)
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                """SELECT id, name, storage_uri, description, domain, source_type,
+                          content_type, size_bytes, indexed_at
+                   FROM artifacts WHERE deleted_at IS NULL ORDER BY source_id, logical_path, id"""
+            ).fetchall()
+            records = []
+            for row in rows:
+                legacy_id = artifact_id_from_uri(row["storage_uri"])
+                legacy_alias = connection.execute(
+                    """SELECT alias FROM artifact_aliases
+                       WHERE artifact_id=? AND namespace='artifact-id'
+                       ORDER BY CASE WHEN alias=? THEN 0 ELSE 1 END, alias LIMIT 1""",
+                    (row["id"], legacy_id),
+                ).fetchone()
+                record = dict(row)
+                record["id"] = legacy_alias["alias"] if legacy_alias is not None else row["id"]
+                records.append(record)
         payload = json.dumps(records, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         if destination is not None:
             Path(destination).write_text(payload, encoding="utf-8")
@@ -803,126 +1077,135 @@ class CatalogDB:
         include_deleted: bool = False,
     ) -> Optional[ArtifactRecord]:
         """Retrieve a current or revision-qualified record by ID or alias."""
-        resolved_id = self.resolve_artifact_id(artifact_id, source_id)
-        if resolved_id is None:
-            return None
-        if revision is None:
-            row = self.conn.execute("SELECT * FROM artifacts WHERE id = ?", (resolved_id,)).fetchone()
-        else:
-            row = self.conn.execute(
-                """SELECT artifact_id AS id, source_id, logical_path, name, storage_uri,
-                          description, domain, source_type, content_type, size_bytes,
-                          indexed_at, revision, content_revision, metadata_revision,
-                          checksum_sha256, deleted_at
-                   FROM artifact_revisions WHERE artifact_id=? AND revision=?""",
-                (resolved_id, revision),
-            ).fetchone()
-        if row is None or (row["deleted_at"] is not None and not include_deleted):
-            return None
-        return _record_from_row(row)
+        with self._read_snapshot() as connection:
+            resolved_id = self._resolve_artifact_id(connection, artifact_id, source_id)
+            if resolved_id is None:
+                return None
+            if revision is None:
+                row = connection.execute("SELECT * FROM artifacts WHERE id = ?", (resolved_id,)).fetchone()
+            else:
+                row = connection.execute(
+                    """SELECT artifact_id AS id, source_id, logical_path, name, storage_uri,
+                              description, domain, source_type, content_type, size_bytes,
+                              indexed_at, revision, content_revision, metadata_revision,
+                              checksum_sha256, deleted_at
+                       FROM artifact_revisions WHERE artifact_id=? AND revision=?""",
+                    (resolved_id, revision),
+                ).fetchone()
+            if row is None or (row["deleted_at"] is not None and not include_deleted):
+                return None
+            return _record_from_row(row)
 
     def find_by_source_path(
         self, source_id: str, logical_path: str, *, include_deleted: bool = False
     ) -> Optional[ArtifactRecord]:
-        row = self.conn.execute(
-            "SELECT * FROM artifacts WHERE source_id=? AND logical_path=?",
-            (source_id, normalize_logical_path(logical_path)),
-        ).fetchone()
-        if row is None or (row["deleted_at"] is not None and not include_deleted):
-            return None
-        return _record_from_row(row)
+        with self._read_snapshot() as connection:
+            row = connection.execute(
+                "SELECT * FROM artifacts WHERE source_id=? AND logical_path=?",
+                (source_id, normalize_logical_path(logical_path)),
+            ).fetchone()
+            if row is None or (row["deleted_at"] is not None and not include_deleted):
+                return None
+            return _record_from_row(row)
 
     def list_revisions(self, artifact_id: str, *, source_id: str | None = None) -> list[ArtifactRecord]:
         """Return all retained revisions, including deletion tombstones."""
-        resolved_id = self.resolve_artifact_id(artifact_id, source_id)
-        if resolved_id is None:
-            return []
-        rows = self.conn.execute(
-            """SELECT artifact_id AS id, source_id, logical_path, name, storage_uri,
-                      description, domain, source_type, content_type, size_bytes,
-                      indexed_at, revision, content_revision, metadata_revision,
-                      checksum_sha256, deleted_at
-               FROM artifact_revisions WHERE artifact_id=? ORDER BY revision""",
-            (resolved_id,),
-        ).fetchall()
-        return [_record_from_row(row) for row in rows]
+        with self._read_snapshot() as connection:
+            resolved_id = self._resolve_artifact_id(connection, artifact_id, source_id)
+            if resolved_id is None:
+                return []
+            rows = connection.execute(
+                """SELECT artifact_id AS id, source_id, logical_path, name, storage_uri,
+                          description, domain, source_type, content_type, size_bytes,
+                          indexed_at, revision, content_revision, metadata_revision,
+                          checksum_sha256, deleted_at
+                   FROM artifact_revisions WHERE artifact_id=? ORDER BY revision""",
+                (resolved_id,),
+            ).fetchall()
+            return [_record_from_row(row) for row in rows]
 
     def get_existing_uris(self, source_id: str | None = None) -> set[str]:
-        if source_id is None:
-            rows = self.conn.execute("SELECT storage_uri FROM artifacts WHERE deleted_at IS NULL").fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT storage_uri FROM artifacts WHERE source_id=? AND deleted_at IS NULL", (source_id,)
-            ).fetchall()
-        return {row[0] for row in rows}
+        with self._read_snapshot() as connection:
+            if source_id is None:
+                rows = connection.execute("SELECT storage_uri FROM artifacts WHERE deleted_at IS NULL").fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT storage_uri FROM artifacts WHERE source_id=? AND deleted_at IS NULL", (source_id,)
+                ).fetchall()
+            return {row[0] for row in rows}
 
     def current_paths(self, source_id: str) -> dict[str, str]:
-        rows = self.conn.execute(
-            "SELECT logical_path, id FROM artifacts WHERE source_id=? AND deleted_at IS NULL", (source_id,)
-        ).fetchall()
-        return {row["logical_path"]: row["id"] for row in rows}
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                "SELECT logical_path, id FROM artifacts WHERE source_id=? AND deleted_at IS NULL", (source_id,)
+            ).fetchall()
+            return {row["logical_path"]: row["id"] for row in rows}
 
     def records_by_source_path(self, source_id: str, *, include_deleted: bool = False) -> dict[str, ArtifactRecord]:
         """Return one source's records keyed by normalized logical path."""
         deleted_filter = "" if include_deleted else " AND deleted_at IS NULL"
-        rows = self.conn.execute(
-            f"SELECT * FROM artifacts WHERE source_id=?{deleted_filter}",
-            (source_id,),
-        ).fetchall()
-        return {row["logical_path"]: _record_from_row(row) for row in rows}
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM artifacts WHERE source_id=?{deleted_filter}",
+                (source_id,),
+            ).fetchall()
+            return {row["logical_path"]: _record_from_row(row) for row in rows}
 
     def delete_artifacts(self, artifact_ids: list[str], *, deleted_at: str | None = None) -> None:
         """Create tombstone revisions; history is retained until explicit purge."""
+        with self._write_transaction():
+            self._delete_artifacts(artifact_ids, deleted_at=deleted_at)
+
+    def _delete_artifacts(self, artifact_ids: list[str], *, deleted_at: str | None) -> None:
         timestamp = deleted_at or datetime.now(timezone.utc).isoformat()
         has_vector_table = self._vector_loaded or self._has_vector_table(self.conn)
         if has_vector_table:
-            self._ensure_vector_capability(self.conn)
-        with self.conn:
-            for value in artifact_ids:
-                artifact_id = self.resolve_artifact_id(value)
-                if artifact_id is None:
-                    continue
-                row = self.conn.execute(
-                    "SELECT current_revision, deleted_at FROM artifacts WHERE id=?", (artifact_id,)
-                ).fetchone()
-                if row["deleted_at"] is not None:
-                    continue
-                self.conn.execute(
-                    "UPDATE artifacts SET current_revision=?, deleted_at=?, indexed_at=? WHERE id=?",
-                    (row["current_revision"] + 1, timestamp, timestamp, artifact_id),
-                )
-                self._insert_revision(artifact_id)
-                if has_vector_table:
-                    self.conn.execute("DELETE FROM artifacts_vec WHERE id = ?", (artifact_id,))
+            self._ensure_vector_capability(self.conn, create_table=False)
+        for value in artifact_ids:
+            artifact_id = self._resolve_artifact_id(self.conn, value)
+            if artifact_id is None:
+                continue
+            row = self.conn.execute(
+                "SELECT current_revision, deleted_at FROM artifacts WHERE id=?", (artifact_id,)
+            ).fetchone()
+            if row["deleted_at"] is not None:
+                continue
+            self.conn.execute(
+                "UPDATE artifacts SET current_revision=?, deleted_at=?, indexed_at=? WHERE id=?",
+                (row["current_revision"] + 1, timestamp, timestamp, artifact_id),
+            )
+            self._insert_revision(artifact_id)
+            if has_vector_table:
+                self.conn.execute("DELETE FROM artifacts_vec WHERE id = ?", (artifact_id,))
 
     def purge_deleted(self, before: str) -> int:
         """Permanently remove tombstones older than *before* and all their revisions."""
-        rows = self.conn.execute(
-            """SELECT id FROM artifacts
-               WHERE deleted_at IS NOT NULL
-                 AND julianday(deleted_at) < julianday(?)""",
-            (before,),
-        ).fetchall()
-        ids = [row["id"] for row in rows]
-        if not ids:
-            return 0
-        placeholders = ",".join("?" for _ in ids)
-        has_vector_table = self._vector_loaded or self._has_vector_table(self.conn)
-        if has_vector_table:
-            self._ensure_vector_capability(self.conn)
-        with self.conn:
+        with self._write_transaction():
+            rows = self.conn.execute(
+                """SELECT id FROM artifacts
+                   WHERE deleted_at IS NOT NULL
+                     AND julianday(deleted_at) < julianday(?)""",
+                (before,),
+            ).fetchall()
+            ids = [row["id"] for row in rows]
+            if not ids:
+                return 0
+            placeholders = ",".join("?" for _ in ids)
+            has_vector_table = self._vector_loaded or self._has_vector_table(self.conn)
+            if has_vector_table:
+                self._ensure_vector_capability(self.conn, create_table=False)
+                self.conn.execute(f"DELETE FROM artifacts_vec WHERE id IN ({placeholders})", ids)
             self.conn.execute(f"DELETE FROM artifact_aliases WHERE artifact_id IN ({placeholders})", ids)
             self.conn.execute(f"DELETE FROM artifact_revisions WHERE artifact_id IN ({placeholders})", ids)
-            if has_vector_table:
-                self.conn.execute(f"DELETE FROM artifacts_vec WHERE id IN ({placeholders})", ids)
             self.conn.execute(f"DELETE FROM artifacts WHERE id IN ({placeholders})", ids)
         return len(ids)
 
     def list_domains(self) -> list[str]:
-        rows = self.conn.execute(
-            "SELECT DISTINCT domain FROM artifacts WHERE domain IS NOT NULL AND deleted_at IS NULL ORDER BY domain"
-        ).fetchall()
-        return [row[0] for row in rows]
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT domain FROM artifacts WHERE domain IS NOT NULL AND deleted_at IS NULL ORDER BY domain"
+            ).fetchall()
+            return [row[0] for row in rows]
 
     def search(
         self,
@@ -933,77 +1216,144 @@ class CatalogDB:
         top: int = 10,
         hybrid_alpha: float = 0.5,
     ) -> list[ArtifactRecord]:
-        fts_scores: dict[str, float] = {}
-        vec_scores: dict[str, float] = {}
-        if query.strip():
-            fts_rows = self.conn.execute(
-                """SELECT a.id, rank FROM artifacts_fts fts
-                   JOIN artifacts a ON a.rowid = fts.rowid
-                   WHERE artifacts_fts MATCH ? AND a.deleted_at IS NULL
-                   ORDER BY rank LIMIT ?""",
-                (query, top * 3),
-            ).fetchall()
-            if fts_rows:
-                min_rank = min(row[1] for row in fts_rows)
-                max_rank = max(row[1] for row in fts_rows)
-                rank_range = max_rank - min_rank if max_rank != min_rank else 1.0
-                for row in fts_rows:
-                    fts_scores[row[0]] = 1.0 - (row[1] - min_rank) / rank_range
+        top = max(0, min(top, 100))
+        if top == 0:
+            return []
+        domain = domain or None
+        source_type = source_type or None
+        stripped_query = query.strip()
         if query_embedding is not None:
             self._validate_vector_dimensions(query_embedding, "query embedding")
-            self._ensure_vector_capability(self.conn)
-            vec_rows = self.conn.execute(
-                """SELECT id, distance FROM artifacts_vec
-                   WHERE embedding MATCH ? ORDER BY distance LIMIT ?""",
-                (_serialize_vector(query_embedding), top * 3),
-            ).fetchall()
-            for row in vec_rows:
-                vec_scores[row[0]] = 1.0 - row[1]
+        with self._read_snapshot(vectors=query_embedding is not None) as connection:
+            if not stripped_query and query_embedding is None:
+                conditions = ["deleted_at IS NULL"]
+                params: list[object] = []
+                if domain:
+                    conditions.append("domain = ?")
+                    params.append(domain)
+                if source_type:
+                    conditions.append("source_type = ?")
+                    params.append(source_type)
+                rows = connection.execute(
+                    f"""SELECT * FROM artifacts
+                        WHERE {" AND ".join(conditions)}
+                        ORDER BY source_id, logical_path, id LIMIT ?""",
+                    (*params, top),
+                ).fetchall()
+                return [_record_from_row(row) for row in rows]
 
-        all_ids = set(fts_scores) | set(vec_scores)
-        if not all_ids:
-            return self._filter_all(domain, source_type, top)
-        scored = sorted(
-            (
+            fts_scores: dict[str, float] = {}
+            vec_scores: dict[str, float] = {}
+            candidate_keys: dict[str, tuple[str, str]] = {}
+            candidate_limit = min(max(top * 3, top), 300)
+            fts_query = self._literal_fts_query(stripped_query)
+            if fts_query:
+                conditions = ["artifacts_fts MATCH ?", "a.deleted_at IS NULL"]
+                params: list[object] = [fts_query]
+                if domain:
+                    conditions.append("a.domain = ?")
+                    params.append(domain)
+                if source_type:
+                    conditions.append("a.source_type = ?")
+                    params.append(source_type)
+                fts_rows = connection.execute(
+                    f"""SELECT a.id, a.source_id, a.logical_path, rank FROM artifacts_fts fts
+                       JOIN artifacts a ON a.rowid = fts.rowid
+                       WHERE {" AND ".join(conditions)}
+                       ORDER BY rank, a.source_id, a.logical_path, a.id LIMIT ?""",
+                    (*params, candidate_limit),
+                ).fetchall()
+                if fts_rows:
+                    min_rank = min(row["rank"] for row in fts_rows)
+                    max_rank = max(row["rank"] for row in fts_rows)
+                    rank_range = max_rank - min_rank if max_rank != min_rank else 1.0
+                    for row in fts_rows:
+                        fts_scores[row["id"]] = 1.0 - (row["rank"] - min_rank) / rank_range
+                        candidate_keys[row["id"]] = (row["source_id"], row["logical_path"])
+            if query_embedding is not None:
+                has_vectors = connection.execute("SELECT 1 FROM artifacts_vec LIMIT 1").fetchone() is not None
+                if has_vectors:
+                    vector_state = connection.execute(
+                        "SELECT model_id FROM catalog_vector_state WHERE singleton=1"
+                    ).fetchone()
+                    if vector_state["model_id"] is None:
+                        raise ValueError(
+                            "Catalog contains vectors with unknown model identity; rebuild vectors before searching"
+                        )
+                serialized_embedding = _serialize_vector(query_embedding)
+                if domain or source_type:
+                    conditions = ["a.deleted_at IS NULL"]
+                    params = [serialized_embedding]
+                    if domain:
+                        conditions.append("a.domain = ?")
+                        params.append(domain)
+                    if source_type:
+                        conditions.append("a.source_type = ?")
+                        params.append(source_type)
+                    vec_rows = connection.execute(
+                        f"""SELECT a.id, a.source_id, a.logical_path,
+                                   vec_distance_L2(v.embedding, ?) AS distance
+                            FROM artifacts a
+                            CROSS JOIN artifacts_vec v ON v.id = a.id
+                            WHERE {" AND ".join(conditions)}
+                            ORDER BY distance, a.source_id, a.logical_path, a.id
+                            LIMIT ?""",
+                        (*params, candidate_limit),
+                    ).fetchall()
+                else:
+                    vec_rows = connection.execute(
+                        """SELECT a.id, a.source_id, a.logical_path, v.distance
+                           FROM artifacts_vec v
+                           JOIN artifacts a ON a.id = v.id
+                           WHERE v.embedding MATCH ? AND v.k = ? AND a.deleted_at IS NULL
+                           ORDER BY v.distance, a.source_id, a.logical_path, a.id
+                           LIMIT ?""",
+                        (serialized_embedding, candidate_limit, candidate_limit),
+                    ).fetchall()
+                for row in vec_rows:
+                    vec_scores[row["id"]] = 1.0 - row["distance"]
+                    candidate_keys[row["id"]] = (row["source_id"], row["logical_path"])
+
+            all_ids = set(fts_scores) | set(vec_scores)
+            if not all_ids:
+                return []
+            scored = sorted(
                 (
-                    artifact_id,
-                    hybrid_alpha * fts_scores.get(artifact_id, 0.0)
-                    + (1.0 - hybrid_alpha) * vec_scores.get(artifact_id, 0.0),
-                )
-                for artifact_id in all_ids
-            ),
-            key=lambda item: item[1],
-            reverse=True,
-        )
-        results = []
-        for artifact_id, score in scored:
-            if len(results) >= top:
-                break
-            record = self.get_artifact(artifact_id)
-            if (
-                record is None
-                or (domain and record.domain != domain)
-                or (source_type and record.source_type != source_type)
-            ):
-                continue
-            record.score = score
-            results.append(record)
-        return results
+                    (
+                        artifact_id,
+                        hybrid_alpha * fts_scores.get(artifact_id, 0.0)
+                        + (1.0 - hybrid_alpha) * vec_scores.get(artifact_id, 0.0),
+                    )
+                    for artifact_id in all_ids
+                ),
+                key=lambda item: (
+                    -item[1],
+                    candidate_keys[item[0]][0],
+                    candidate_keys[item[0]][1],
+                    item[0],
+                ),
+            )
+            selected = scored[:top]
+            placeholders = ",".join("?" for _ in selected)
+            rows = connection.execute(
+                f"SELECT * FROM artifacts WHERE id IN ({placeholders})",
+                [artifact_id for artifact_id, _score in selected],
+            ).fetchall()
+            records = {row["id"]: _record_from_row(row) for row in rows}
+            results: list[ArtifactRecord] = []
+            for artifact_id, score in selected:
+                record = records[artifact_id]
+                record.score = score
+                results.append(record)
+            return results
 
-    def _filter_all(self, domain: Optional[str], source_type: Optional[str], top: int) -> list[ArtifactRecord]:
-        conditions = ["deleted_at IS NULL"]
-        params: list[object] = []
-        if domain:
-            conditions.append("domain = ?")
-            params.append(domain)
-        if source_type:
-            conditions.append("source_type = ?")
-            params.append(source_type)
-        rows = self.conn.execute(
-            f"SELECT * FROM artifacts WHERE {' AND '.join(conditions)} ORDER BY name LIMIT ?",
-            [*params, top],
-        ).fetchall()
-        return [_record_from_row(row) for row in rows]
+    @staticmethod
+    def _literal_fts_query(query: str) -> str | None:
+        """Convert user text to a literal-token FTS expression."""
+        tokens = re.findall(r"\w+", query, flags=re.UNICODE)
+        if not tokens:
+            return None
+        return " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
 
     def _probe_fts5(self) -> None:
         """Verify that the active Python SQLite build supports FTS5."""
@@ -1023,7 +1373,7 @@ class CatalogDB:
         create_table: bool = True,
         operation: str = "Catalog vector search",
     ) -> None:
-        """Load sqlite-vec and validate or create the vector table on demand."""
+        """Load sqlite-vec and validate or create vector storage on demand."""
         if conn is self._conn and self._vector_loaded:
             return
 
@@ -1079,6 +1429,27 @@ class CatalogDB:
                     f"database uses {stored_dimensions}, but CatalogDB is configured for {self._vec_dimensions}."
                 )
 
+        has_state_table = (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'catalog_vector_state'"
+            ).fetchone()
+            is not None
+        )
+        if has_state_table:
+            state = conn.execute("SELECT dimensions FROM catalog_vector_state WHERE singleton=1").fetchone()
+            if state is None:
+                if not create_table:
+                    raise RuntimeError("Catalog vector model state is missing; reopen the catalog for vector indexing.")
+                conn.execute(
+                    "INSERT INTO catalog_vector_state(singleton, dimensions, model_id) VALUES (1, ?, NULL)",
+                    (self._vec_dimensions,),
+                )
+            elif state["dimensions"] != self._vec_dimensions:
+                raise ValueError(
+                    f"Catalog vector dimension mismatch: database uses {state['dimensions']}, "
+                    f"but CatalogDB is configured for {self._vec_dimensions}."
+                )
+
         if create_table:
             conn.execute(f"DELETE FROM {_VECTOR_TABLE_NAME} WHERE id NOT IN (SELECT id FROM artifacts)")
             if not had_active_transaction:
@@ -1093,6 +1464,10 @@ class CatalogDB:
             self._vec_dimensions = len(vector)
             return
         if len(vector) != self._vec_dimensions:
+            if label == "artifact embedding":
+                raise ValueError(
+                    f"Embedding dimension mismatch for artifact: expected {self._vec_dimensions}, got {len(vector)}."
+                )
             raise ValueError(
                 f"{label.capitalize()} dimension mismatch: expected {self._vec_dimensions}, got {len(vector)}."
             )

@@ -7,6 +7,7 @@ from agora_workbench.code_execution.data_access.catalog import (
     CatalogIndexer,
     SearchConfig,
     SourceConfig,
+    SourceRefreshState,
     artifact_id_from_uri,
 )
 
@@ -72,6 +73,7 @@ __all__ = [
     "SearchRequest",
     "SourceCapabilities",
     "SourceConfig",
+    "SourceRefreshState",
     "StorageLocator",
     "artifact_id_from_uri",
     "azure_uri_from_blob_name",

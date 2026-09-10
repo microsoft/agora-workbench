@@ -34,7 +34,7 @@ from agora_workbench.data_lake import (
     sanitize_uri_for_display,
     stable_source_id,
 )
-from agora_workbench.data_lake.catalog import CatalogDB
+from agora_workbench.data_lake.catalog import CatalogDB, SourceRefreshState
 from agora_workbench.data_lake.execution import AssetFetcher, AssetPublisher, DataLakeDataManager
 from agora_workbench.data_lake.errors import DataLakeError, DataLakeErrorCode
 
@@ -67,6 +67,20 @@ class MemoryCatalog:
         self.contexts.append(context)
         assert self.artifact.locator is not None
         return ResolvedArtifact(reference, self.artifact.locator)
+
+
+def test_source_refresh_state_is_public_catalog_contract():
+    state = SourceRefreshState(
+        source_id="weather",
+        attempt_generation=2,
+        successful_generation=1,
+        status="error",
+        artifact_count=None,
+        last_attempt_at="2026-09-10T00:00:00Z",
+        last_success_at="2026-09-09T00:00:00Z",
+        error="Source enumeration failed",
+    )
+    assert state.source_id == "weather"
 
 
 class MemoryResolver:
