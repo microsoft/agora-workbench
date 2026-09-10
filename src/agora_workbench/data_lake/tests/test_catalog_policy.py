@@ -353,6 +353,31 @@ async def test_cursor_fails_closed_when_policy_narrows_source_scope(contexts):
     assert error.value.operation == "list"
 
 
+async def test_cursor_fails_closed_when_provider_capabilities_narrow_source_scope(contexts):
+    class SearchOnlyResearchCatalog(MemoryCatalog):
+        async def capabilities(self):
+            return (
+                SourceCapabilities("public-data", READ_OPERATIONS),
+                SourceCapabilities("research-data", frozenset({CatalogOperation.SEARCH})),
+            )
+
+    catalog = AuthorizedCatalogProvider(
+        SearchOnlyResearchCatalog(),
+        DevelopmentAllowAllCatalogAuthorizer(),
+        mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
+
+    with pytest.raises(InvalidRequestError, match="provider capabilities or authorization") as error:
+        await catalog.list(
+            ListRequest(
+                source_ids=("public-data", "research-data"),
+                page=PageRequest(limit=1, cursor="1"),
+            ),
+            contexts[0],
+        )
+    assert error.value.operation == "list"
+
+
 async def test_search_authorizes_only_the_requested_operation(contexts):
     policy = PrincipalPolicy({"analyst-a": {"public-data"}}, {})
     catalog = AuthorizedCatalogProvider(

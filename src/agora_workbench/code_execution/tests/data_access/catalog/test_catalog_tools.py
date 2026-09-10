@@ -174,6 +174,25 @@ class TestQueryCatalog:
         register_catalog_tools(mock_mcp, ctx)
         return captured
 
+    @pytest.fixture
+    def admin_file_tools(self, file_db):
+        """Register the privileged SQL extension with an on-disk DB."""
+        config = CatalogConfig(search=SearchConfig(embedding_model="none"))
+        ctx = CatalogToolsContext(db=file_db, embedding_provider=None, config=config)
+        captured = {}
+        mock_mcp = MagicMock()
+
+        def capture_tool(name, description):
+            def decorator(fn):
+                captured[name] = fn
+                return fn
+
+            return decorator
+
+        mock_mcp.tool = capture_tool
+        register_catalog_admin_tools(mock_mcp, ctx)
+        return captured
+
     @pytest.mark.asyncio
     async def test_select_query(self, file_tools):
         results = await file_tools["query_catalog"]("SELECT name, domain FROM artifacts ORDER BY name")
@@ -200,6 +219,21 @@ class TestQueryCatalog:
     async def test_max_rows(self, file_tools):
         results = await file_tools["query_catalog"]("SELECT * FROM artifacts", max_rows=1)
         assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_admin_query_catalog_selects_rows(self, admin_file_tools):
+        results = await admin_file_tools["query_catalog"](
+            "SELECT name, domain FROM artifacts ORDER BY name",
+        )
+        assert results == [
+            {"name": "daily_obs.csv", "domain": "earthscience"},
+            {"name": "transmission_lines.geojson", "domain": "powergrid"},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_admin_query_catalog_rejects_writes(self, admin_file_tools):
+        with pytest.raises(ValueError, match="Write operations are not permitted"):
+            await admin_file_tools["query_catalog"]("DELETE FROM artifacts")
 
 
 def test_legacy_registration_preserves_all_v02_catalog_tools(ctx, caplog):

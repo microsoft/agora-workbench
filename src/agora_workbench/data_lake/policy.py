@@ -219,7 +219,8 @@ class AuthorizedCatalogProvider:
         source_ids = tuple(source_id for source_id in requested_sources if source_id in permitted_sources)
         if request.page.cursor is not None and source_ids != requested_sources:
             raise InvalidRequestError(
-                "Catalog cursor cannot be reused after authorization narrows the source scope; "
+                "Catalog cursor cannot be reused after the effective source scope changes due to "
+                "provider capabilities or authorization; "
                 "resume with explicit source_ids from the current effective capabilities.",
                 operation=operation.value,
             )
