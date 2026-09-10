@@ -293,6 +293,32 @@ class TestCatalogDBSearch:
         assert verified.execute_readonly("SELECT COUNT(*) AS count FROM artifacts_vec")[0]["count"] == 0
         verified.close()
 
+    def test_vector_capability_does_not_commit_active_transaction(self, tmp_path):
+        db_path = tmp_path / "catalog.db"
+        catalog_db = CatalogDB(db_path, vec_dimensions=2)
+        catalog_db.open()
+        catalog_db.conn.execute(
+            """INSERT INTO artifacts
+               (id, name, storage_uri, indexed_at)
+               VALUES ('pending', 'pending.csv', '/pending.csv', '2026-01-01T00:00:00Z')"""
+        )
+
+        catalog_db._ensure_vector_capability(catalog_db.conn)
+
+        assert catalog_db.conn.in_transaction is True
+        catalog_db.conn.rollback()
+        assert catalog_db.get_artifact("pending") is None
+
+        catalog_db.upsert_artifact(
+            artifact_id="committed",
+            name="committed.csv",
+            storage_uri="/committed.csv",
+            indexed_at="2026-01-01T00:00:00Z",
+            embedding=[1.0, 0.0],
+        )
+        assert catalog_db.search("", query_embedding=[1.0, 0.0])[0].id == "committed"
+        catalog_db.close()
+
 
 class TestCatalogDBReadonlyQuery:
     """Tests for execute_readonly."""

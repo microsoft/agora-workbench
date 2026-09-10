@@ -176,10 +176,13 @@ def create_storage_credential(client_id: str | None = None):
         An ``AsyncTokenCredential`` usable with ``BlobPublisher``,
         ``BlobFetcher``, ``BlobServiceClient``, etc.
     """
-    from azure.identity.aio import (
-        ChainedTokenCredential,
-        ManagedIdentityCredential,
-    )
+    try:
+        from azure.identity.aio import (
+            ChainedTokenCredential,
+            ManagedIdentityCredential,
+        )
+    except ImportError as exc:
+        raise RuntimeError("Azure storage credentials require the 'agora-workbench[azure]' extra.") from exc
 
     managed_identity_client_id = (client_id.strip() if client_id is not None else None) or os.getenv(
         "DEFAULT_IDENTITY_CLIENT_ID"

@@ -187,11 +187,11 @@ SDKs are absent, and selecting a cloud capability reports that the `azure`
 extra is required.
 
 The base distribution still includes the existing MCP, execution, session, and
-kernel runtime dependencies. Because the package retains its eager root API,
-importing `agora_workbench.data_lake` loads those standard runtime modules even
-for catalog-only code. The optional extras isolate cloud and vector
-dependencies; they do not turn the data-lake namespace into a separately
-installable lightweight package.
+kernel runtime dependencies. Importing the backend-neutral
+`agora_workbench.data_lake` contracts does not initialize execution or cloud
+modules. Import concrete catalog, resolver, and execution implementations from
+their documented public submodules; optional extras determine whether cloud
+and vector backends are available.
 
 ### Setting up the catalog
 
@@ -245,7 +245,7 @@ dimension is applied consistently. When `embedding_dimensions` is omitted,
 reopen, from the existing vector table:
 
 ```python
-from agora_workbench.data_lake import CatalogConfig, CatalogDB
+from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB
 
 config = CatalogConfig.from_yaml("catalog.yaml")
 catalog = CatalogDB(
@@ -286,8 +286,7 @@ Source type is inferred automatically from the path:
     package with keyword search (FTS5) by omitting the `search` section entirely.
     Catalog creation, refresh, search, and reopen do not import or load
     sqlite-vec, create a vector table, or initialize Azure credentials and
-    clients. The normal Agora Workbench runtime modules may already be loaded by
-    the eager root package initializer.
+    clients.
 
 ### How indexing works
 

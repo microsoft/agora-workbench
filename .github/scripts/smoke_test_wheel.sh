@@ -52,7 +52,7 @@ from agora_workbench.code_execution.data_access import (
 )
 from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
 import agora_workbench.code_execution.tools.search as tool_search
-from agora_workbench.data_lake import CatalogDB
+from agora_workbench.data_lake.catalog import CatalogDB
 
 print(f"agora-workbench {version('agora-workbench')}")
 print(agora_workbench.__file__)

@@ -392,6 +392,7 @@ class CatalogDB:
         if conn is self._conn and self._vector_loaded:
             return
 
+        had_active_transaction = conn.in_transaction
         try:
             sqlite_vec = import_module("sqlite_vec")
         except ImportError as exc:
@@ -446,8 +447,9 @@ class CatalogDB:
 
         if create_table:
             conn.execute(f"DELETE FROM {_VECTOR_TABLE_NAME} WHERE id NOT IN (SELECT id FROM artifacts)")
-            conn.commit()
-        if conn is self._conn:
+            if not had_active_transaction:
+                conn.commit()
+        if conn is self._conn and not had_active_transaction:
             self._vector_loaded = True
 
     def _validate_vector_dimensions(self, vector: list[float], label: str) -> None:

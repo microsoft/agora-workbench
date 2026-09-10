@@ -178,7 +178,7 @@ def test_noop_auth_import_does_not_require_azure_sdk():
     assert result.returncode == 0, result.stderr
 
 
-def test_v021_eager_import_surface_does_not_require_optional_sdks():
+def test_public_and_compatibility_exports_do_not_require_optional_sdks():
     result = _run_isolated(
         """
         import importlib.abc
@@ -194,9 +194,8 @@ def test_v021_eager_import_surface_does_not_require_optional_sdks():
 
         sys.meta_path.insert(0, BlockOptionalImports())
 
-        # Explicitly load the modules exported by the v0.2.1 eager package
-        # initializers. PR #345 restores these imports, so #335 must remain safe
-        # without depending on the current parent-package __getattr__ behavior.
+        # Exercise the established code-execution compatibility surface directly
+        # so optional dependency safety does not depend on root-package laziness.
         from agora_workbench.base import BaseMCPServer
         from agora_workbench.code_execution.code_execution_models import (
             AssetSpec,
@@ -290,6 +289,12 @@ def test_v021_eager_import_surface_does_not_require_optional_sdks():
                 should_resolve_as_asset,
             )
         )
+        try:
+            create_storage_credential()
+        except RuntimeError as exc:
+            assert "agora-workbench[azure]" in str(exc)
+        else:
+            raise AssertionError("Azure storage credentials unexpectedly initialized")
         assert not any(
             any(name == blocked_name or name.startswith(f"{blocked_name}.") for blocked_name in blocked)
             for name in sys.modules

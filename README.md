@@ -107,10 +107,11 @@ Conversely, a base-only installation means the Azure SDKs are not installed at
 all; selecting an Azure or vector capability reports the required extra.
 
 The base distribution continues to include the existing execution, session,
-kernel, MCP, and connector dependencies. Its eager public root API means
-`import agora_workbench.data_lake` loads the standard Agora Workbench runtime;
-the extras above isolate cloud/vector dependencies, not the data-lake namespace
-into a standalone lightweight distribution.
+kernel, MCP, and connector dependencies. Importing the backend-neutral
+`agora_workbench.data_lake` contracts does not load execution or cloud modules.
+Concrete catalog, resolver, and execution integrations remain available from
+their documented public submodules; the extras above control only whether their
+cloud and vector backends are installed.
 
 ### Configuration
 
