@@ -432,6 +432,15 @@ class TestCatalogIndexerLocal:
         assert await indexer.index() == 0
         assert db.get_artifact("successful") is None
         assert db.get_artifact("failed") is not None
+        successful = db.get_source_refresh_state("successful")
+        failed = db.get_source_refresh_state("failed")
+        assert successful.status == "success"
+        assert successful.artifact_count == 0
+        assert successful.successful_generation == successful.attempt_generation == 1
+        assert failed.status == "error"
+        assert failed.artifact_count is None
+        assert failed.successful_generation == 0
+        assert "FileNotFoundError" in failed.error
 
     @pytest.mark.asyncio
     async def test_total_enumeration_failure_preserves_catalog(self, db, tmp_path):
@@ -500,6 +509,255 @@ class TestCatalogIndexerLocal:
         )
         assert await indexer.index() == 0
         assert db.get_artifact("blob-existing") is not None
+        assert db.get_source_refresh_state("local-source").status == "success"
+        assert db.get_source_refresh_state("blob-source").status == "error"
+
+    @pytest.mark.asyncio
+    async def test_only_searchable_metadata_changes_reembed(self, db, tmp_path):
+        root = tmp_path / "data"
+        root.mkdir()
+        path = root / "sample.csv"
+        path.write_text("one")
+        provider = MagicMock(dimensions=4)
+        provider.embed = AsyncMock(return_value=[[1.0, 0.0, 0.0, 0.0]])
+        first = CatalogIndexer(
+            CatalogConfig(
+                sources=[SourceConfig(source_id="source", path=str(root), description="first")],
+                search=SearchConfig(embedding_model="model"),
+            ),
+            db,
+            embedding_provider=provider,
+        )
+        assert await first.index() == 1
+
+        provider.embed.reset_mock()
+        provider.embed.return_value = [[0.0, 1.0, 0.0, 0.0]]
+        changed_description = CatalogIndexer(
+            CatalogConfig(
+                sources=[SourceConfig(source_id="source", path=str(root), description="second")],
+                search=SearchConfig(embedding_model="model"),
+            ),
+            db,
+            embedding_provider=provider,
+        )
+        assert await changed_description.index() == 1
+        provider.embed.assert_awaited_once()
+
+        provider.embed.reset_mock()
+        enumeration = await changed_description._enumerate_all_sources()
+        artifact = enumeration.artifacts[0]
+        artifact["content_type"] = "application/custom"
+        artifact["metadata_revision"] = "metadata-only-change"
+        changed_description._enumerate_all_sources = AsyncMock(return_value=_EnumerationResult([artifact], {"source"}))
+        assert await changed_description.index() == 1
+        provider.embed.assert_not_awaited()
+
+        provider.embed.reset_mock()
+        before_content_change = db.find_by_source_path("source", "sample.csv")
+        vector_before = db.conn.execute(
+            "SELECT embedding FROM artifacts_vec WHERE id=?", (before_content_change.id,)
+        ).fetchone()["embedding"]
+        path.write_text("changed content")
+        assert (
+            await CatalogIndexer(
+                CatalogConfig(
+                    sources=[SourceConfig(source_id="source", path=str(root), description="second")],
+                    search=SearchConfig(embedding_model="model"),
+                ),
+                db,
+                embedding_provider=provider,
+            ).index()
+            == 1
+        )
+        provider.embed.assert_not_awaited()
+        after_content_change = db.find_by_source_path("source", "sample.csv")
+        assert after_content_change.current_revision == before_content_change.current_revision + 1
+        assert after_content_change.content_revision != before_content_change.content_revision
+        assert (
+            db.conn.execute("SELECT embedding FROM artifacts_vec WHERE id=?", (after_content_change.id,)).fetchone()[
+                "embedding"
+            ]
+            == vector_before
+        )
+
+    @pytest.mark.asyncio
+    async def test_tombstone_restoration_reembeds_and_advances_revision(self, db, tmp_path):
+        root = tmp_path / "data"
+        root.mkdir()
+        path = root / "sample.csv"
+        path.write_text("one")
+        provider = MagicMock(dimensions=4)
+        provider.embed = AsyncMock(return_value=[[1.0, 0.0, 0.0, 0.0]])
+        indexer = CatalogIndexer(
+            CatalogConfig(
+                sources=[SourceConfig(source_id="source", path=str(root))],
+                search=SearchConfig(embedding_model="model"),
+            ),
+            db,
+            embedding_provider=provider,
+        )
+        await indexer.index()
+        artifact_id = db.find_by_source_path("source", "sample.csv").id
+        path.unlink()
+        await indexer.index()
+        assert db.get_artifact(artifact_id) is None
+
+        provider.embed.reset_mock()
+        provider.embed.return_value = [[0.0, 1.0, 0.0, 0.0]]
+        path.write_text("restored")
+        assert await indexer.index() == 1
+        provider.embed.assert_awaited_once()
+        restored = db.get_artifact(artifact_id)
+        assert restored.current_revision == 3
+        assert len(db.list_revisions(artifact_id)) == 3
+        assert db.conn.execute("SELECT COUNT(*) FROM artifacts_vec WHERE id=?", (artifact_id,)).fetchone()[0] == 1
+
+    @pytest.mark.asyncio
+    async def test_refresh_generations_preserve_last_success_after_failure(self, db, tmp_path):
+        root = tmp_path / "data"
+        root.mkdir()
+        (root / "sample.csv").write_text("one")
+        config = CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))])
+        indexer = CatalogIndexer(config, db)
+        await indexer.index()
+        first = db.get_source_refresh_state("source")
+        assert first.status == "success"
+        assert first.artifact_count == 1
+
+        root.rename(tmp_path / "unavailable")
+        assert await indexer.index() == 0
+        failed = db.get_source_refresh_state("source")
+        assert failed.status == "error"
+        assert failed.attempt_generation == 2
+        assert failed.successful_generation == 1
+        assert failed.last_success_at == first.last_success_at
+        assert db.find_by_source_path("source", "sample.csv") is not None
+
+    @pytest.mark.asyncio
+    async def test_enabling_embeddings_indexes_unchanged_artifacts_without_new_revision(
+        self, db, tmp_path, monkeypatch
+    ):
+        root = tmp_path / "data"
+        root.mkdir()
+        (root / "sample.csv").write_text("one")
+        keyword_indexer = CatalogIndexer(
+            CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]),
+            db,
+        )
+        assert await keyword_indexer.index() == 1
+        artifact = db.find_by_source_path("source", "sample.csv")
+        assert not db.has_vector(artifact.id)
+
+        provider = MagicMock(dimensions=4)
+        provider.embed = AsyncMock(return_value=[[1.0, 0.0, 0.0, 0.0]])
+        vector_indexer = CatalogIndexer(
+            CatalogConfig(
+                sources=[SourceConfig(source_id="source", path=str(root))],
+                search=SearchConfig(embedding_model="model"),
+            ),
+            db,
+            embedding_provider=provider,
+        )
+        missing_vectors = MagicMock(wraps=db.missing_vectors)
+        monkeypatch.setattr(db, "missing_vectors", missing_vectors)
+        monkeypatch.setattr(db, "has_vector", MagicMock(side_effect=AssertionError("per-artifact vector lookup")))
+        assert await vector_indexer.index() == 1
+        missing_vectors.assert_called_once_with([artifact.id])
+        provider.embed.assert_awaited_once()
+        assert artifact.id not in db.missing_vectors([artifact.id])
+        assert db.get_artifact(artifact.id).current_revision == artifact.current_revision
+
+    @pytest.mark.asyncio
+    async def test_duplicate_explicit_source_id_rejected_before_mixed_enumeration(self, db, tmp_path):
+        successful = tmp_path / "successful"
+        successful.mkdir()
+        (successful / "new.csv").write_text("new")
+        db.upsert_artifact(
+            artifact_id="existing",
+            source_id="shared",
+            logical_path="old.csv",
+            name="old.csv",
+            storage_uri="/old.csv",
+            source_type="local",
+        )
+        indexer = CatalogIndexer(
+            CatalogConfig(
+                sources=[
+                    SourceConfig(source_id="shared", path=str(successful)),
+                    SourceConfig(source_id="shared", path=str(tmp_path / "missing")),
+                ]
+            ),
+            db,
+        )
+
+        with pytest.raises(ValueError, match="Duplicate effective catalog source_id 'shared'"):
+            await indexer.index()
+        assert db.get_artifact("existing") is not None
+        assert db.find_by_source_path("shared", "new.csv") is None
+        assert db.get_source_refresh_state("shared") is None
+
+    @pytest.mark.asyncio
+    async def test_equivalent_local_roots_rejected_without_incrementing_generation(self, db, tmp_path):
+        root = tmp_path / "data"
+        root.mkdir()
+        (root / "one.csv").write_text("one")
+        first = CatalogIndexer(CatalogConfig(sources=[SourceConfig(path=str(root))]), db)
+        assert await first.index() == 1
+        source_id = first._validated_sources()[0][1]
+        state = db.get_source_refresh_state(source_id)
+        assert state.attempt_generation == 1
+        assert state.artifact_count == 1
+
+        duplicate = CatalogIndexer(
+            CatalogConfig(
+                sources=[
+                    SourceConfig(path=str(root)),
+                    SourceConfig(path=f"{root}/"),
+                ]
+            ),
+            db,
+        )
+        with pytest.raises(ValueError, match="Duplicate effective catalog source_id"):
+            await duplicate.index()
+        unchanged = db.get_source_refresh_state(source_id)
+        assert unchanged.attempt_generation == 1
+        assert unchanged.artifact_count == 1
+        assert len(db.get_existing_uris(source_id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_same_root_with_distinct_explicit_ids_is_rejected_before_indexing(self, db, tmp_path):
+        root = tmp_path / "data"
+        root.mkdir()
+        (root / "one.csv").write_text("one")
+        indexer = CatalogIndexer(
+            CatalogConfig(
+                sources=[
+                    SourceConfig(source_id="primary", path=str(root)),
+                    SourceConfig(source_id="duplicate", path=f"{root}/"),
+                ]
+            ),
+            db,
+        )
+
+        with pytest.raises(ValueError, match="Duplicate effective catalog source root"):
+            await indexer.index()
+        assert db.get_existing_uris() == set()
+        assert db.list_source_refresh_states() == []
+
+    @pytest.mark.asyncio
+    async def test_equivalent_blob_uris_rejected_before_credentials_are_used(self, db):
+        indexer = CatalogIndexer(
+            CatalogConfig(
+                sources=[
+                    SourceConfig(path="az://account123/container/prefix"),
+                    SourceConfig(path="https://account123.blob.core.windows.net/container/prefix"),
+                ]
+            ),
+            db,
+        )
+        with pytest.raises(ValueError, match="Duplicate effective catalog source_id"):
+            await indexer.index()
+        assert db.list_source_refresh_states() == []
 
 
 class _FakeContainerClient:

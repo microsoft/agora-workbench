@@ -2,6 +2,8 @@
 
 import sqlite3
 import struct
+import threading
+import time
 
 import pytest
 
@@ -457,6 +459,117 @@ class TestCatalogDBSearch:
         results = db.search(query="")
         assert len(results) == 1
 
+    def test_empty_string_filters_are_treated_as_absent(self, db):
+        db.upsert_artifact(artifact_id="a", name="a.csv", storage_uri="/a.csv")
+        assert [record.id for record in db.search("", domain="", source_type="")] == ["a"]
+
+    def test_nonempty_no_match_does_not_browse(self, db):
+        db.upsert_artifact(artifact_id="a", name="weather.csv", storage_uri="/a.csv")
+        assert db.search(query="quantum") == []
+
+    @pytest.mark.parametrize(
+        ("query", "expected"),
+        [('"', []), (":", []), ("weather - (daily)", ["a"]), ("weather OR", [])],
+    )
+    def test_punctuation_is_treated_as_literal_text(self, db, query, expected):
+        db.upsert_artifact(
+            artifact_id="a",
+            name="weather-daily.csv",
+            storage_uri="/a.csv",
+            description="weather daily observations",
+        )
+        results = db.search(query=query)
+        assert [result.id for result in results] == expected
+
+    def test_filters_are_applied_before_vector_top_k(self, db):
+        db.upsert_artifact(
+            artifact_id="outside",
+            source_id="one",
+            logical_path="outside.csv",
+            name="outside.csv",
+            storage_uri="/outside.csv",
+            domain="other",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        db.upsert_artifact(
+            artifact_id="inside",
+            source_id="two",
+            logical_path="inside.csv",
+            name="inside.csv",
+            storage_uri="/inside.csv",
+            domain="wanted",
+            embedding=[0.0, 1.0, 0.0, 0.0],
+        )
+        results = db.search("", query_embedding=[1.0, 0.0, 0.0, 0.0], domain="wanted", top=1)
+        assert [result.id for result in results] == ["inside"]
+
+    def test_vector_search_uses_bounded_candidates_and_loads_only_results(self, db):
+        for index in range(10):
+            db.upsert_artifact(
+                artifact_id=f"artifact-{index}",
+                name=f"artifact-{index}.csv",
+                storage_uri=f"/artifact-{index}.csv",
+                embedding=[float(index), 0.0, 0.0, 0.0],
+            )
+        statements = []
+        db.conn.set_trace_callback(statements.append)
+        try:
+            results = db.search("", query_embedding=[0.0, 0.0, 0.0, 0.0], top=2)
+        finally:
+            db.conn.set_trace_callback(None)
+
+        assert len(results) == 2
+        traced_sql = "\n".join(statements).upper()
+        assert "V.K = 6" in traced_sql
+        assert "COUNT(*) FROM ARTIFACTS_VEC" not in traced_sql
+        assert "SELECT * FROM ARTIFACTS WHERE ID IN" in traced_sql
+
+    def test_deterministic_tie_breaking_and_bounded_top(self, db):
+        for source_id, artifact_id in (("z-source", "z"), ("a-source", "a"), ("m-source", "m")):
+            db.upsert_artifact(
+                artifact_id=artifact_id,
+                source_id=source_id,
+                logical_path="same.csv",
+                name="same.csv",
+                storage_uri=f"/{artifact_id}.csv",
+                description="identical searchable text",
+            )
+        assert [result.id for result in db.search("identical", top=2)] == ["a", "m"]
+        assert db.search("identical", top=0) == []
+        assert len(db.search("", top=1000)) == 3
+
+    def test_delete_restore_keeps_fts_vectors_and_revisions_consistent(self, db):
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="source",
+            logical_path="weather.csv",
+            name="weather.csv",
+            storage_uri="/weather.csv",
+            description="old weather",
+            content_revision="one",
+            metadata_revision="one",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        db.delete_artifacts(["stable"])
+        assert db.search("weather") == []
+        assert db.conn.execute("SELECT COUNT(*) FROM artifacts_vec WHERE id='stable'").fetchone()[0] == 0
+
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="source",
+            logical_path="weather.csv",
+            name="weather.csv",
+            storage_uri="/weather.csv",
+            description="restored weather",
+            content_revision="two",
+            metadata_revision="two",
+            embedding=[0.0, 1.0, 0.0, 0.0],
+            _replace_embedding=True,
+        )
+        assert [result.id for result in db.search("restored")] == ["stable"]
+        assert db.conn.execute("SELECT COUNT(*) FROM artifacts_vec WHERE id='stable'").fetchone()[0] == 1
+        assert len(db.list_revisions("stable")) == 3
+
     def test_to_dict(self, db):
         db.upsert_artifact(
             artifact_id="a",
@@ -692,6 +805,389 @@ class TestCatalogDBReadonlyQuery:
         assert results == [{"value": "artifacts_vec"}]
         assert file_db._vector_loaded is False
 
+    def test_wal_reader_sees_committed_snapshot_during_refresh(self, tmp_path, monkeypatch):
+        path = tmp_path / "concurrent.db"
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        catalog.upsert_artifact(
+            artifact_id="old",
+            source_id="source",
+            logical_path="old.csv",
+            name="old.csv",
+            storage_uri="/old.csv",
+            source_type="local",
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        original = catalog._record_source_refresh
+
+        def pause_refresh(**kwargs):
+            entered.set()
+            assert release.wait(timeout=5)
+            original(**kwargs)
+
+        monkeypatch.setattr(catalog, "_record_source_refresh", pause_refresh)
+        error = []
+
+        def write_refresh():
+            try:
+                catalog.apply_refresh_batch(
+                    [
+                        {
+                            "artifact_id": "new",
+                            "source_id": "source",
+                            "logical_path": "new.csv",
+                            "name": "new.csv",
+                            "storage_uri": "/new.csv",
+                            "source_type": "local",
+                        }
+                    ],
+                    ["old"],
+                    [
+                        {
+                            "source_id": "source",
+                            "source_type": "local",
+                            "root_uri": "/",
+                            "attempted_at": "2026-01-01T00:00:00Z",
+                            "succeeded": True,
+                            "artifact_count": 1,
+                            "error": None,
+                        }
+                    ],
+                )
+            except Exception as exc:  # pragma: no cover - assertion reports the exception
+                error.append(exc)
+
+        thread = threading.Thread(target=write_refresh)
+        thread.start()
+        assert entered.wait(timeout=5)
+        started = time.monotonic()
+        rows = catalog.execute_readonly("SELECT id FROM artifacts WHERE deleted_at IS NULL ORDER BY id")
+        elapsed = time.monotonic() - started
+        assert rows == [{"id": "old"}]
+        assert elapsed < 2
+        assert catalog.conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+        release.set()
+        thread.join(timeout=5)
+        try:
+            assert not error
+            assert catalog.get_artifact("new") is not None
+            assert catalog.get_artifact("old") is None
+        finally:
+            release.set()
+            catalog.close()
+
+    def test_public_readers_never_observe_rolled_back_refresh(self, tmp_path, monkeypatch):
+        path = tmp_path / "rollback-readers.db"
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        catalog.apply_refresh_batch(
+            [
+                {
+                    "artifact_id": "old",
+                    "source_id": "source",
+                    "logical_path": "old.csv",
+                    "name": "old.csv",
+                    "storage_uri": "/old.csv",
+                    "description": "old committed data",
+                    "domain": "committed",
+                    "source_type": "local",
+                    "aliases": ["legacy:old"],
+                }
+            ],
+            [],
+            [
+                {
+                    "source_id": "source",
+                    "source_type": "local",
+                    "root_uri": "/",
+                    "attempted_at": "2026-01-01T00:00:00Z",
+                    "succeeded": True,
+                    "artifact_count": 1,
+                    "error": None,
+                }
+            ],
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        original = catalog._record_source_refresh
+
+        def fail_after_status(**kwargs):
+            original(**kwargs)
+            entered.set()
+            assert release.wait(timeout=5)
+            raise RuntimeError("rollback refresh")
+
+        monkeypatch.setattr(catalog, "_record_source_refresh", fail_after_status)
+        errors = []
+
+        def write_refresh():
+            try:
+                catalog.apply_refresh_batch(
+                    [
+                        {
+                            "artifact_id": "new",
+                            "source_id": "source",
+                            "logical_path": "new.csv",
+                            "name": "new.csv",
+                            "storage_uri": "/new.csv",
+                            "description": "new uncommitted data",
+                            "domain": "uncommitted",
+                            "source_type": "local",
+                            "aliases": ["legacy:new"],
+                        }
+                    ],
+                    ["old"],
+                    [
+                        {
+                            "source_id": "source",
+                            "source_type": "local",
+                            "root_uri": "/",
+                            "attempted_at": "2026-01-02T00:00:00Z",
+                            "succeeded": True,
+                            "artifact_count": 1,
+                            "error": None,
+                        }
+                    ],
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=write_refresh)
+        thread.start()
+        assert entered.wait(timeout=5)
+
+        def assert_committed_view():
+            assert catalog.get_artifact("old") is not None
+            assert catalog.get_artifact("new") is None
+            assert catalog.resolve_artifact_id("legacy:old") == "old"
+            assert catalog.resolve_artifact_id("legacy:new") is None
+            assert [record.current_revision for record in catalog.list_revisions("old")] == [1]
+            assert catalog.list_revisions("new") == []
+            assert catalog.find_by_source_path("source", "old.csv") is not None
+            assert catalog.find_by_source_path("source", "new.csv") is None
+            assert catalog.get_existing_uris("source") == {"/old.csv"}
+            assert catalog.current_paths("source") == {"old.csv": "old"}
+            assert catalog.list_domains() == ["committed"]
+            assert [record.id for record in catalog.search("committed")] == ["old"]
+            assert catalog.search("uncommitted") == []
+            states = catalog.list_source_refresh_states()
+            assert [(state.attempt_generation, state.artifact_count) for state in states] == [(1, 1)]
+            assert catalog.get_source_refresh_state("source").attempt_generation == 1
+            assert "new.csv" not in catalog.export_v0_json()
+
+        assert_committed_view()
+        release.set()
+        thread.join(timeout=5)
+        try:
+            assert len(errors) == 1
+            assert isinstance(errors[0], RuntimeError)
+            assert_committed_view()
+        finally:
+            release.set()
+            catalog.close()
+
+    def test_in_memory_public_reader_waits_for_writer_rollback(self, db, monkeypatch):
+        db.upsert_artifact(artifact_id="old", name="old.csv", storage_uri="/old.csv")
+        entered = threading.Event()
+        release = threading.Event()
+        reader_finished = threading.Event()
+        original = db._record_source_refresh
+
+        def fail_refresh(**kwargs):
+            original(**kwargs)
+            entered.set()
+            assert release.wait(timeout=5)
+            raise RuntimeError("rollback refresh")
+
+        monkeypatch.setattr(db, "_record_source_refresh", fail_refresh)
+
+        def writer():
+            with pytest.raises(RuntimeError, match="rollback"):
+                db.apply_refresh_batch(
+                    [
+                        {
+                            "artifact_id": "new",
+                            "source_id": "legacy",
+                            "logical_path": "new.csv",
+                            "name": "new.csv",
+                            "storage_uri": "/new.csv",
+                            "source_type": "legacy",
+                        }
+                    ],
+                    ["old"],
+                    [
+                        {
+                            "source_id": "legacy",
+                            "source_type": "legacy",
+                            "root_uri": None,
+                            "attempted_at": "2026-01-01T00:00:00Z",
+                            "succeeded": True,
+                            "artifact_count": 1,
+                            "error": None,
+                        }
+                    ],
+                )
+
+        observed = []
+
+        def reader():
+            observed.append(db.get_artifact("old"))
+            reader_finished.set()
+
+        writer_thread = threading.Thread(target=writer)
+        writer_thread.start()
+        assert entered.wait(timeout=5)
+        reader_thread = threading.Thread(target=reader)
+        reader_thread.start()
+        assert not reader_finished.wait(timeout=0.1)
+        release.set()
+        writer_thread.join(timeout=5)
+        reader_thread.join(timeout=5)
+        assert reader_finished.is_set()
+        assert observed[0] is not None
+        assert db.get_artifact("new") is None
+
+    def test_search_uses_one_snapshot_during_concurrent_tombstone(self, tmp_path, monkeypatch):
+        path = tmp_path / "search-race.db"
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        catalog.upsert_artifact(
+            artifact_id="race",
+            source_id="source",
+            logical_path="race.csv",
+            name="race.csv",
+            storage_uri="/race.csv",
+            description="race searchable",
+            source_type="local",
+        )
+        entered = threading.Event()
+        release = threading.Event()
+        original = catalog._literal_fts_query
+
+        def pause_after_eligible_snapshot(query):
+            entered.set()
+            assert release.wait(timeout=5)
+            return original(query)
+
+        monkeypatch.setattr(catalog, "_literal_fts_query", pause_after_eligible_snapshot)
+        results = []
+        errors = []
+
+        def run_search():
+            try:
+                results.extend(catalog.search("race"))
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run_search)
+        thread.start()
+        assert entered.wait(timeout=5)
+        writer = CatalogDB(path, vec_dimensions=4)
+        writer.open()
+        try:
+            writer.delete_artifacts(["race"])
+        finally:
+            writer.close()
+        release.set()
+        thread.join(timeout=5)
+        try:
+            assert errors == []
+            assert [record.id for record in results] == ["race"]
+            assert catalog.search("race") == []
+        finally:
+            release.set()
+            catalog.close()
+
+
+class TestCatalogDBRefreshTransactions:
+    def test_refresh_batch_rolls_back_all_catalog_surfaces(self, db, monkeypatch):
+        db.upsert_artifact(
+            artifact_id="old",
+            source_id="source",
+            logical_path="old.csv",
+            name="old.csv",
+            storage_uri="/old.csv",
+            description="old searchable",
+            source_type="local",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        original = db.upsert_artifact
+        calls = 0
+
+        def fail_second(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("injected batch failure")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(db, "upsert_artifact", fail_second)
+        rows = [
+            {
+                "artifact_id": artifact_id,
+                "source_id": "source",
+                "logical_path": f"{artifact_id}.csv",
+                "name": f"{artifact_id}.csv",
+                "storage_uri": f"/{artifact_id}.csv",
+                "description": f"{artifact_id} searchable",
+                "source_type": "local",
+                "aliases": [f"legacy:{artifact_id}"],
+                "embedding": [0.0, 1.0, 0.0, 0.0],
+                "_replace_embedding": True,
+            }
+            for artifact_id in ("first", "second")
+        ]
+        with pytest.raises(RuntimeError, match="injected"):
+            db.apply_refresh_batch(
+                rows,
+                ["old"],
+                [
+                    {
+                        "source_id": "source",
+                        "source_type": "local",
+                        "root_uri": "/",
+                        "attempted_at": "2026-01-01T00:00:00Z",
+                        "succeeded": True,
+                        "artifact_count": 2,
+                        "error": None,
+                    }
+                ],
+            )
+
+        assert db.get_artifact("old") is not None
+        assert db.search("old")[0].id == "old"
+        assert db.conn.execute("SELECT COUNT(*) FROM artifacts_vec WHERE id='old'").fetchone()[0] == 1
+        assert db.get_artifact("first") is None
+        assert db.resolve_artifact_id("legacy:first") is None
+        assert db.conn.execute("SELECT COUNT(*) FROM artifact_revisions WHERE artifact_id='first'").fetchone()[0] == 0
+        assert (
+            db.conn.execute("SELECT COUNT(*) FROM artifacts_fts WHERE artifacts_fts MATCH 'first'").fetchone()[0] == 0
+        )
+        assert db.conn.execute("SELECT COUNT(*) FROM artifacts_vec WHERE id='first'").fetchone()[0] == 0
+        assert db.get_source_refresh_state("source") is None
+
+    def test_vector_dimensions_and_model_state_are_validated(self, db):
+        with pytest.raises(ValueError, match="provider dimension mismatch"):
+            db.validate_vector_state("model-a", 3)
+        db.validate_vector_state("model-a", 4)
+        db.apply_refresh_batch([], [], [], "model-a")
+        db.upsert_artifact(
+            artifact_id="a",
+            name="a.csv",
+            storage_uri="/a.csv",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        with pytest.raises(ValueError, match="model changed"):
+            db.validate_vector_state("model-b", 4)
+        with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+            db.upsert_artifact(
+                artifact_id="b",
+                name="b.csv",
+                storage_uri="/b.csv",
+                embedding=[1.0, 0.0],
+            )
+
 
 class TestCatalogSchemaMigration:
     def test_migrates_existing_records_and_preserves_legacy_id_alias(self, tmp_path):
@@ -834,7 +1330,17 @@ class TestCatalogSchemaMigration:
             migrated_id = catalog.resolve_artifact_id("old-id")
             row = catalog.conn.execute("SELECT embedding FROM artifacts_vec WHERE id=?", (migrated_id,)).fetchone()
             assert row["embedding"] == embedding
-            assert catalog.search("", query_embedding=[0.9, 0.1, 0.0, 0.0])[0].id == migrated_id
+            with pytest.raises(ValueError, match="unknown model identity"):
+                catalog.search("", query_embedding=[0.9, 0.1, 0.0, 0.0])
+            with pytest.raises(ValueError, match="unknown model identity"):
+                catalog.validate_vector_state("configured-model", 4)
+            with pytest.raises(ValueError, match="unknown model identity"):
+                catalog.upsert_artifact(
+                    artifact_id="new",
+                    name="new.csv",
+                    storage_uri="/new.csv",
+                    embedding=[0.0, 1.0, 0.0, 0.0],
+                )
         finally:
             catalog.close()
 
