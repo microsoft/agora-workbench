@@ -413,6 +413,7 @@ class CatalogDB:
             try:
                 conn.enable_load_extension(False)
             except (AttributeError, sqlite3.Error):
+                # Best-effort hardening: some SQLite builds cannot toggle extension loading after a load attempt.
                 pass
 
         row = conn.execute(
