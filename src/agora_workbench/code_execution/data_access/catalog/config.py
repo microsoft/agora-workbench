@@ -15,6 +15,7 @@ from .identity import (
     canonicalize_azure_uri,
     parse_azure_uri,
     sanitize_uri_for_display,
+    split_alias,
 )
 
 
@@ -25,6 +26,20 @@ class FileOverride(BaseModel):
     domain: Optional[str] = None
     artifact_id: Optional[str] = Field(None, description="Stable opaque artifact ID for this logical path")
     aliases: list[str] = Field(default_factory=list, description="Additional namespaced aliases for this artifact")
+
+    @model_validator(mode="after")
+    def _validate_identity_values(self):
+        values = [("alias", alias) for alias in self.aliases]
+        if self.artifact_id is not None:
+            values.append(("artifact_id", self.artifact_id))
+        for label, value in values:
+            if not value.strip() or value != value.strip():
+                raise ValueError(f"{label} must be non-empty and must not have surrounding whitespace")
+            try:
+                split_alias(value)
+            except ArtifactIdentityError as exc:
+                raise ValueError(f"Invalid {label}: {exc}") from exc
+        return self
 
 
 class SourceConfig(BaseModel):

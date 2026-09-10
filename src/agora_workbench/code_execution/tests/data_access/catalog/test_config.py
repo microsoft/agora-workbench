@@ -10,6 +10,34 @@ from ....data_access.catalog.config import (
 )
 
 
+class TestFileOverride:
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("artifact_id", ""),
+            ("artifact_id", " "),
+            ("artifact_id", ":bad"),
+            ("artifact_id", "bad:"),
+            ("aliases", [""]),
+            ("aliases", [" external:id"]),
+            ("aliases", [":bad"]),
+            ("aliases", ["bad:"]),
+        ],
+    )
+    def test_rejects_empty_or_malformed_identity_values(self, field, value):
+        with pytest.raises(ValueError, match="non-empty|Invalid"):
+            FileOverride(**{field: value})
+
+    def test_accepts_opaque_and_namespaced_identity_values(self):
+        override = FileOverride(
+            artifact_id="external:weather",
+            aliases=["legacy-id", "source-key:weather"],
+        )
+
+        assert override.artifact_id == "external:weather"
+        assert override.aliases == ["legacy-id", "source-key:weather"]
+
+
 class TestSourceConfig:
     """Tests for SourceConfig model."""
 
