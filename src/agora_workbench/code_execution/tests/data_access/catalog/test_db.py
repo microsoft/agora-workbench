@@ -120,6 +120,25 @@ class TestCatalogDBBasicOps:
         assert db.get_artifact("stable", revision=2).storage_uri == "/new/daily.csv"
         assert len(db.list_revisions("stable")) == 3
 
+    def test_purge_deleted_compares_timestamp_instants(self, db):
+        for artifact_id, deleted_at in (
+            ("older", "2026-01-02T23:59:59Z"),
+            ("boundary-z", "2026-01-03T00:00:00Z"),
+            ("boundary-offset", "2026-01-03T00:00:00+00:00"),
+        ):
+            db.upsert_artifact(
+                artifact_id=artifact_id,
+                name=f"{artifact_id}.csv",
+                storage_uri=f"/{artifact_id}.csv",
+                indexed_at="2026-01-01T00:00:00Z",
+            )
+            db.delete_artifacts([artifact_id], deleted_at=deleted_at)
+
+        assert db.purge_deleted("2026-01-03T00:00:00+00:00") == 1
+        assert db.get_artifact("older", include_deleted=True) is None
+        assert db.get_artifact("boundary-z", include_deleted=True) is not None
+        assert db.get_artifact("boundary-offset", include_deleted=True) is not None
+
     def test_alias_lookup_and_collision_rejection(self, db):
         first = db.upsert_artifact(
             artifact_id="canonical-1",

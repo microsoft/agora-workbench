@@ -240,6 +240,11 @@ search:
   hybrid_alpha: 0.5
 ```
 
+Set `source_id` explicitly when artifact identity must remain stable after moving
+a local root. See
+[Identity, revisions, and compatibility](data-lake-api.md#identity-revisions-and-compatibility)
+for the full contract.
+
 Construct the database from the same search configuration so an explicit
 dimension is applied consistently. When `embedding_dimensions` is omitted,
 `CatalogDB` infers the service-default size from the first embedding and, on

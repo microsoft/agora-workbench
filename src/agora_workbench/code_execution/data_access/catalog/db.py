@@ -882,7 +882,10 @@ class CatalogDB:
     def purge_deleted(self, before: str) -> int:
         """Permanently remove tombstones older than *before* and all their revisions."""
         rows = self.conn.execute(
-            "SELECT id FROM artifacts WHERE deleted_at IS NOT NULL AND deleted_at < ?", (before,)
+            """SELECT id FROM artifacts
+               WHERE deleted_at IS NOT NULL
+                 AND julianday(deleted_at) < julianday(?)""",
+            (before,),
         ).fetchall()
         ids = [row["id"] for row in rows]
         if not ids:
