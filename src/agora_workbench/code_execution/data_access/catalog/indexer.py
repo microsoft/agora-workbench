@@ -296,7 +296,7 @@ class CatalogIndexer:
 
         account, container, prefix = _parse_blob_path(source.path)
         source_id = _source_id(source)
-        source_root = canonicalize_azure_uri(source.path).rstrip("/")
+        source_root = canonicalize_azure_uri(source.path)
         service_url = f"https://{account}.blob.core.windows.net"
 
         # Reuse BlobServiceClient per account
@@ -309,7 +309,8 @@ class CatalogIndexer:
 
         container_client = client.get_container_client(container)
         async for blob in container_client.list_blobs(name_starts_with=prefix):
-            if prefix and not blob.name.startswith(prefix):
+            prefix_boundary = prefix if prefix.endswith("/") else f"{prefix}/"
+            if prefix and blob.name != prefix and not blob.name.startswith(prefix_boundary):
                 continue
             if blob.name.endswith("/"):
                 continue
@@ -318,7 +319,14 @@ class CatalogIndexer:
                 continue
 
             storage_uri = azure_uri_from_blob_name(account, container, blob.name)
-            logical_path = normalize_logical_path(blob.name[len(prefix) :].lstrip("/") if prefix else blob.name)
+            relative_name = (
+                filename
+                if prefix and blob.name == prefix
+                else blob.name[len(prefix) :].lstrip("/")
+                if prefix
+                else blob.name
+            )
+            logical_path = normalize_logical_path(relative_name)
 
             description = source.description
             domain = source.domain

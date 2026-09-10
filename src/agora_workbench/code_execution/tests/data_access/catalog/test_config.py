@@ -24,7 +24,7 @@ class TestSourceConfig:
     def test_blob_https_source_type(self):
         source = SourceConfig(path="https://orfb0eastus.blob.core.windows.net/fingerprints/.amltconfig")
         assert source.source_type == "blob"
-        assert source.path == "az://orfb0eastus/fingerprints/.amltconfig/"
+        assert source.path == "az://orfb0eastus/fingerprints/.amltconfig"
 
     @pytest.mark.parametrize(
         "path",
@@ -36,17 +36,18 @@ class TestSourceConfig:
     def test_adls_source_forms_are_supported(self, path):
         source = SourceConfig(path=path)
         assert source.source_type == "blob"
-        assert source.path == "az://account123/container/path/"
+        assert source.path == "az://account123/container/path"
 
     @pytest.mark.parametrize("container", ["$root", "$web", "$logs"])
     def test_azure_system_containers_are_supported(self, container):
         source = SourceConfig(path=f"az://account123/{container}")
         assert source.path == f"az://account123/{container}"
 
-    def test_blob_prefix_forms_normalize_to_same_directory_boundary(self):
+    def test_blob_prefix_normalization_preserves_directory_boundary(self):
         without_slash = SourceConfig(path="az://account123/container/data")
         with_slash = SourceConfig(path="az://account123/container/data/")
-        assert without_slash.path == with_slash.path == "az://account123/container/data/"
+        assert without_slash.path == "az://account123/container/data"
+        assert with_slash.path == "az://account123/container/data/"
 
     @pytest.mark.parametrize(
         "path",

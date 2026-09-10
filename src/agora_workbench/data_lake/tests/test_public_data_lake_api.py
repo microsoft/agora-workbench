@@ -154,6 +154,20 @@ def test_artifact_reference_can_follow_current_or_pin_revision():
     assert not pinned.is_current
 
 
+@pytest.mark.parametrize(
+    ("artifact_id", "source_id", "revision", "message"),
+    [
+        ("", "weather", None, "Artifact ID must be non-empty"),
+        ("wind-hourly", "", None, "Source ID must be non-empty"),
+        ("wind-hourly", "weather", 0, "Artifact revision must be at least 1"),
+        ("wind-hourly", "weather", -1, "Artifact revision must be at least 1"),
+    ],
+)
+def test_artifact_reference_rejects_invalid_identity_and_revision(artifact_id, source_id, revision, message):
+    with pytest.raises(InvalidRequestError, match=message):
+        ArtifactReference(artifact_id, source_id=source_id, revision=revision)
+
+
 def test_azure_uri_canonicalization_strips_credentials_and_preserves_object_case():
     expected = "az://account/container/Folder/File~Name.csv"
     assert (

@@ -75,8 +75,6 @@ class SourceConfig(BaseModel):
                 data["path"] = sanitized
                 raise
             account, container, prefix = parse_azure_uri(canonical)
-            if prefix and not prefix.endswith("/"):
-                prefix = f"{prefix}/"
             data["path"] = azure_uri_from_blob_name(account, container, prefix)
         return data
 

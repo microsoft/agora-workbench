@@ -556,7 +556,7 @@ class TestBlobMigrationAdoption:
         db.open()
         try:
             source = SourceConfig(source_id="blob-source", path="az://account123/container/data")
-            assert source.path == "az://account123/container/data/"
+            assert source.path == "az://account123/container/data"
             indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
             blobs = [
                 SimpleNamespace(
@@ -566,19 +566,22 @@ class TestBlobMigrationAdoption:
                     last_modified=None,
                     content_settings=SimpleNamespace(content_type="text/csv"),
                 )
-                for name in ("data/file.csv", "database/file.csv")
+                for name in ("data", "data/file.csv", "database/file.csv")
             ]
             clients = {"https://account123.blob.core.windows.net": _FakeBlobServiceClient(blobs)}
 
             artifacts = await indexer._enumerate_blob_source(source, MagicMock(), clients)
 
-            assert len(artifacts) == 1
-            assert artifacts[0]["logical_path"] == "file.csv"
-            expected_id = artifacts[0]["artifact_id"]
+            assert {artifact["logical_path"] for artifact in artifacts} == {"data", "file.csv"}
+            expected_id = next(
+                artifact["artifact_id"] for artifact in artifacts if artifact["logical_path"] == "file.csv"
+            )
 
-            equivalent = SourceConfig(source_id="blob-source", path="az://account123/container/data/")
-            equivalent_indexer = CatalogIndexer(CatalogConfig(sources=[equivalent]), db)
-            repeated = await equivalent_indexer._enumerate_blob_source(equivalent, MagicMock(), clients)
+            directory = SourceConfig(source_id="blob-source", path="az://account123/container/data/")
+            directory_indexer = CatalogIndexer(CatalogConfig(sources=[directory]), db)
+            repeated = await directory_indexer._enumerate_blob_source(directory, MagicMock(), clients)
+            assert len(repeated) == 1
+            assert repeated[0]["logical_path"] == "file.csv"
             assert repeated[0]["artifact_id"] == expected_id
         finally:
             db.close()

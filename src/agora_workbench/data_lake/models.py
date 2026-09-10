@@ -99,6 +99,18 @@ class ArtifactReference:
     source_id: str
     revision: int | None = None
 
+    def __post_init__(self) -> None:
+        if not self.artifact_id:
+            raise InvalidRequestError("Artifact ID must be non-empty.", operation="artifact_reference")
+        if not self.source_id:
+            raise InvalidRequestError("Source ID must be non-empty.", operation="artifact_reference")
+        if isinstance(self.revision, int) and self.revision < 1:
+            raise InvalidRequestError(
+                "Artifact revision must be at least 1.",
+                resource_id=self.artifact_id,
+                operation="artifact_reference",
+            )
+
     @property
     def is_current(self) -> bool:
         """Whether the reference follows the current artifact revision."""
