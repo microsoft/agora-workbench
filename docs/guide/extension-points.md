@@ -128,7 +128,7 @@ server = CodeExecutionServer(
 
 ## Data access: AssetFetcher
 
-Defined in `agora_workbench.code_execution.data_access.fetchers`:
+Import `AssetFetcher` from `agora_workbench.data_lake.execution`.
 
 ### AssetFetcher
 
@@ -152,7 +152,7 @@ Built-in implementations: `BlobFetcher` (Azure Blob), `LocalFileFetcher`
 ### Custom fetcher example
 
 ```python
-from agora_workbench.code_execution.data_access.fetchers import AssetFetcher
+from agora_workbench.data_lake.execution import AssetFetcher
 
 class S3Fetcher(AssetFetcher):
     def can_handle(self, uri: str) -> bool:
@@ -165,7 +165,7 @@ class S3Fetcher(AssetFetcher):
 
 ## Data access: AssetPublisher
 
-Defined in `agora_workbench.code_execution.data_access.publishers`:
+Import `AssetPublisher` from `agora_workbench.data_lake.execution`.
 
 ### AssetPublisher
 
@@ -229,7 +229,7 @@ class MyServer(CodeExecutionServer):
 | `IdentityExtractor` | `agora_workbench.code_execution.auth.base` | Custom identity derivation |
 | `CredentialProvider` | `agora_workbench.code_execution.auth.base` | Custom downstream credentials |
 | `ToolSearchBackend` | `agora_workbench.code_execution.tools.tool_search` | Custom tool search |
-| `AssetFetcher` | `agora_workbench.code_execution.data_access.fetchers` | Custom data sources |
-| `AssetPublisher` | `agora_workbench.code_execution.data_access.publishers` | Custom artifact output |
+| `AssetFetcher` | `agora_workbench.data_lake.execution` | Custom data sources |
+| `AssetPublisher` | `agora_workbench.data_lake.execution` | Custom artifact output |
 | `ConnectorServer` | `agora_workbench.connector.base` | Custom server composition |
 | `CodeExecutionServer.preprocess_code` | `agora_workbench.code_execution.server` | Code preprocessing |
