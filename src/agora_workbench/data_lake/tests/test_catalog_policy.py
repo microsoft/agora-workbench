@@ -345,7 +345,7 @@ async def test_cursor_fails_closed_when_policy_narrows_source_scope(contexts):
     assert first_page.next_cursor is not None
     policy.source_access["analyst-a"].remove("research-data")
 
-    with pytest.raises(InvalidRequestError, match="cursor cannot be reused") as error:
+    with pytest.raises(InvalidRequestError, match="resume with explicit source_ids") as error:
         await catalog.list(
             replace(request, page=PageRequest(limit=1, cursor=first_page.next_cursor)),
             contexts[0],
