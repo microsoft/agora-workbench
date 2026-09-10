@@ -21,6 +21,9 @@ The API separates an artifact's identity, storage location, and display
 metadata:
 
 - `ArtifactReference` identifies an artifact by `source_id` and `artifact_id`.
+  Its optional `revision` pins a retained revision; omitting it follows the
+  current revision. Providers and adapters must either honor a pinned revision
+  exactly or reject it explicitly; they must not silently return current data.
 - `StorageLocator` contains the physical URI used to retrieve it.
 - `ArtifactPresentation` contains human-facing metadata.
 - `DownloadInfo` optionally provides a user-facing download link and expiry.
@@ -123,6 +126,75 @@ artifact = CatalogArtifact(
 )
 catalog: CatalogProvider = MemoryCatalog((artifact,))
 ```
+
+## Identity, revisions, and compatibility
+
+Catalog identity is independent of physical storage. Configure a stable
+`source_id` and identify artifacts by their normalized source-relative path:
+
+```yaml
+sources:
+  - source_id: weather-observations
+    path: /mounted/data/weather
+```
+
+The SQLite index persists the resulting logical artifact ID. Moving the local
+root while retaining `source_id` and relative paths preserves artifact identity;
+local roots themselves are deliberately not portable IDs. A rename or move to a
+different relative path creates a new artifact and tombstones the old one. The
+indexer does not guess rename relationships from size, timestamps, or content.
+
+Each change appends an `artifact_revisions` row. `content_revision` and
+`metadata_revision` are separate opaque change tokens. `checksum_sha256`, when
+supplied, is optional integrity metadata and is never the artifact identity.
+Deleted artifacts remain as tombstones and retain history until an operator
+explicitly calls `CatalogDB.purge_deleted(before=...)`.
+
+The indexer supplies provider change tokens: local size plus `mtime_ns`, or a
+Blob ETag. Direct `CatalogDB.upsert_artifact()` callers should supply an explicit
+`content_revision` or `checksum_sha256` when reliable same-size content-change
+detection matters. The fallback size token intentionally does not change merely
+because indexing ran again or the storage location moved.
+
+Azure Blob locations in `az://`, Blob HTTPS, and ADLS Gen2 `abfss://` forms are
+canonicalized to `az://account/container/object`. SAS/query parameters and
+fragments do not participate in identity, account/container case is normalized,
+and object-name case is preserved. Blob names returned by the Azure SDK are
+quoted exactly once, so a literal `%41` object remains distinct from `A`.
+
+Schema-v0 databases are migrated transactionally to the current version. Their
+original URI-derived IDs and IDs derived from canonical Azure URIs remain
+resolvable through `artifact-id` aliases. Original and canonical storage
+locations are stored as actual values in the `storage-uri` namespace. Existing
+sqlite-vec embeddings are preserved and re-keyed during migration when present.
+New aliases use the explicit `namespace:value` form; unqualified opaque IDs use
+the `artifact-id` namespace. Aliases are source-scoped, so the same imported
+alias may exist in multiple sources; callers must provide `source_id` when an
+unqualified lookup is ambiguous. Alias and canonical-ID collisions are rejected.
+`artifact_id_from_uri()` remains available only as a legacy import/mapping helper
+and does not define new canonical identities. Databases with an unknown newer
+schema fail before mutation.
+
+`CatalogDB.export_v0_json()` provides deterministic, CLI-independent recovery
+for downgrade or inspection. It emits current, non-deleted artifacts using the
+v0 record fields and prefers a retained legacy `artifact-id` alias where one
+exists:
+
+```python
+catalog.export_v0_json("catalog-v0.json")
+```
+
+The export intentionally omits revision history and tombstones because schema
+v0 cannot represent them. It is a recovery/import artifact, not a guarantee that
+every retained legacy ID can be recomputed from the exported URI: canonicalized
+Azure locators may differ textually from the URI that originally produced a v0
+ID.
+
+Indexer reconciliation is source-transactional in the safety sense: stale
+paths are tombstoned only for sources that enumerated successfully. Missing or
+unreadable local roots and failed Blob listings leave prior records untouched;
+a successfully enumerated empty source tombstones its former contents. Batch
+database upserts are atomic.
 
 Providers receive the same `RequestContext` on every operation. Its fields are
 copied into immutable mappings so they can be propagated safely. They do not

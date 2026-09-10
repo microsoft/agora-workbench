@@ -1,11 +1,24 @@
 """Public catalog contracts and compatibility exports."""
 
 from agora_workbench.code_execution.data_access.catalog import (
+    SCHEMA_VERSION,
     CatalogConfig,
     CatalogDB,
     CatalogIndexer,
     SearchConfig,
     SourceConfig,
+    artifact_id_from_uri,
+)
+
+from .identity import (
+    azure_uri_from_blob_name,
+    canonicalize_azure_uri,
+    logical_artifact_id,
+    normalize_logical_path,
+    parse_azure_uri,
+    sanitize_uri_for_display,
+    split_alias,
+    stable_source_id,
 )
 from .models import (
     MAX_PAGE_LIMIT,
@@ -28,7 +41,6 @@ from .models import (
 )
 from .policy import AuthorizedCatalogProvider, DenyAllCatalogAuthorizer, DevelopmentAllowAllCatalogAuthorizer
 from .protocols import CatalogAuthorizer, CatalogPolicyEnforcer, CatalogProvider, PolicyEnforcedCatalog
-
 
 __all__ = [
     "ArtifactPresentation",
@@ -55,9 +67,19 @@ __all__ = [
     "READ_OPERATIONS",
     "RequestContext",
     "ResolvedArtifact",
+    "SCHEMA_VERSION",
     "SearchConfig",
     "SearchRequest",
     "SourceCapabilities",
     "SourceConfig",
     "StorageLocator",
+    "artifact_id_from_uri",
+    "azure_uri_from_blob_name",
+    "canonicalize_azure_uri",
+    "logical_artifact_id",
+    "normalize_logical_path",
+    "parse_azure_uri",
+    "sanitize_uri_for_display",
+    "split_alias",
+    "stable_source_id",
 ]

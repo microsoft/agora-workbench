@@ -88,10 +88,33 @@ class Page(Generic[T]):
 
 @dataclass(frozen=True)
 class ArtifactReference:
-    """Stable logical identity ``(source_id, artifact_id)``, independent of storage."""
+    """Stable logical identity, optionally pinned to a provider-honored revision.
+
+    Providers and adapters that accept a non-``None`` revision must resolve that
+    exact retained revision or reject the request explicitly; they must not
+    silently return the current revision.
+    """
 
     artifact_id: str
     source_id: str
+    revision: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.artifact_id:
+            raise InvalidRequestError("Artifact ID must be non-empty.", operation="artifact_reference")
+        if not self.source_id:
+            raise InvalidRequestError("Source ID must be non-empty.", operation="artifact_reference")
+        if isinstance(self.revision, int) and self.revision < 1:
+            raise InvalidRequestError(
+                "Artifact revision must be at least 1.",
+                resource_id=self.artifact_id,
+                operation="artifact_reference",
+            )
+
+    @property
+    def is_current(self) -> bool:
+        """Whether the reference follows the current artifact revision."""
+        return self.revision is None
 
 
 @dataclass(frozen=True)
@@ -145,9 +168,19 @@ class CatalogArtifact:
     locator: StorageLocator | None = None
     download: DownloadInfo | None = None
     metadata: Mapping[str, object] = field(default_factory=dict)
+    revision: int | None = None
+    content_revision: str | None = None
+    metadata_revision: str | None = None
+    checksum_sha256: str | None = None
+    deleted_at: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))
+
+    @property
+    def is_deleted(self) -> bool:
+        """Whether the catalog record is a deletion tombstone."""
+        return self.deleted_at is not None
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,16 @@ from typing import Optional
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from .identity import (
+    ArtifactIdentityError,
+    azure_uri_from_blob_name,
+    canonicalize_azure_uri,
+    parse_azure_uri,
+    sanitize_uri_for_display,
+    split_alias,
+)
 
 
 class FileOverride(BaseModel):
@@ -15,6 +24,22 @@ class FileOverride(BaseModel):
 
     description: Optional[str] = None
     domain: Optional[str] = None
+    artifact_id: Optional[str] = Field(None, description="Stable opaque artifact ID for this logical path")
+    aliases: list[str] = Field(default_factory=list, description="Additional namespaced aliases for this artifact")
+
+    @model_validator(mode="after")
+    def _validate_identity_values(self):
+        values = [("alias", alias) for alias in self.aliases]
+        if self.artifact_id is not None:
+            values.append(("artifact_id", self.artifact_id))
+        for label, value in values:
+            if not value.strip() or value != value.strip():
+                raise ValueError(f"{label} must be non-empty and must not have surrounding whitespace")
+            try:
+                split_alias(value)
+            except ArtifactIdentityError as exc:
+                raise ValueError(f"Invalid {label}: {exc}") from exc
+        return self
 
 
 class SourceConfig(BaseModel):
@@ -22,7 +47,16 @@ class SourceConfig(BaseModel):
 
     path: str = Field(
         ...,
-        description="Local path, az://account/container/prefix, or https://<account>.blob.core.windows.net/container/prefix",
+        description=(
+            "Local path, az://account/container/prefix, Blob/DFS HTTPS URI, "
+            "or abfss://container@account.dfs.core.windows.net/prefix"
+        ),
+    )
+    source_id: Optional[str] = Field(
+        None,
+        description=(
+            "Stable logical source ID. Configure this for local sources that must retain identity when their root moves."
+        ),
     )
     domain: Optional[str] = Field(None, description="Domain label for all files in this source")
     description: Optional[str] = Field(None, description="Default description for files without an explicit one")
@@ -30,20 +64,39 @@ class SourceConfig(BaseModel):
         None, description="Per-file metadata overrides keyed by relative filename"
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_azure_path(cls, value):
+        if not isinstance(value, dict) or not isinstance(value.get("path"), str):
+            return value
+        data = value
+        path = data["path"]
+        parsed = urlparse(path)
+        host = (parsed.hostname or "").lower()
+        azure_candidate = parsed.scheme.lower() in {"az", "abfss"} or (
+            parsed.scheme.lower() in {"http", "https"}
+            and (
+                host == "blob.core.windows.net"
+                or host == "dfs.core.windows.net"
+                or host.endswith(".blob.core.windows.net")
+                or host.endswith(".dfs.core.windows.net")
+            )
+        )
+        if azure_candidate:
+            sanitized = sanitize_uri_for_display(path)
+            try:
+                canonical = canonicalize_azure_uri(path)
+            except ArtifactIdentityError:
+                data["path"] = sanitized
+                raise
+            account, container, prefix = parse_azure_uri(canonical)
+            data["path"] = azure_uri_from_blob_name(account, container, prefix)
+        return data
+
     @property
     def source_type(self) -> str:
         """Infer storage type from path prefix."""
-        if self.path.startswith("az://"):
-            return "blob"
-
-        parsed = urlparse(self.path)
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme in {"http", "https"} and (
-            host == "blob.core.windows.net" or host.endswith(".blob.core.windows.net")
-        ):
-            return "blob"
-
-        return "local"
+        return "blob" if self.path.startswith("az://") else "local"
 
 
 class SearchConfig(BaseModel):

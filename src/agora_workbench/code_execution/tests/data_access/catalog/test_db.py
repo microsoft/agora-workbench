@@ -1,9 +1,13 @@
 """Tests for catalog SQLite database."""
 
-import pytest
 import sqlite3
+import struct
 
+import pytest
+
+from ....data_access.catalog import db as db_module
 from ....data_access.catalog.db import (
+    SCHEMA_VERSION,
     CatalogDB,
     artifact_id_from_uri,
 )
@@ -78,12 +82,244 @@ class TestCatalogDBBasicOps:
         uris = db.get_existing_uris()
         assert uris == {"/a.csv", "/b.csv"}
 
+    def test_upsert_without_source_root_preserves_existing_root(self, db):
+        db.upsert_artifact(
+            artifact_id="a",
+            source_id="weather",
+            source_type="local",
+            source_root="/data/weather",
+            name="a.csv",
+            storage_uri="/data/weather/a.csv",
+        )
+        db.upsert_artifact(
+            artifact_id="b",
+            source_id="weather",
+            source_type="local",
+            name="b.csv",
+            storage_uri="/data/weather/b.csv",
+        )
+
+        source = db.conn.execute("SELECT root_uri FROM catalog_sources WHERE source_id = 'weather'").fetchone()
+        assert source["root_uri"] == "/data/weather"
+
     def test_delete_artifacts(self, db):
         db.upsert_artifact(artifact_id="a", name="a.csv", storage_uri="/a.csv", indexed_at="2026-01-01T00:00:00Z")
         db.upsert_artifact(artifact_id="b", name="b.csv", storage_uri="/b.csv", indexed_at="2026-01-01T00:00:00Z")
         db.delete_artifacts(["a"])
         assert db.get_artifact("a") is None
         assert db.get_artifact("b") is not None
+
+    def test_revisions_and_tombstones_are_retained(self, db):
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="weather",
+            logical_path="daily.csv",
+            name="daily.csv",
+            storage_uri="/old/daily.csv",
+            content_revision="content-1",
+            metadata_revision="metadata-1",
+            indexed_at="2026-01-01T00:00:00Z",
+        )
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="weather",
+            logical_path="daily.csv",
+            name="daily.csv",
+            storage_uri="/new/daily.csv",
+            content_revision="content-1",
+            metadata_revision="metadata-1",
+            indexed_at="2026-01-02T00:00:00Z",
+        )
+        db.delete_artifacts(["stable"], deleted_at="2026-01-03T00:00:00Z")
+
+        assert db.get_artifact("stable") is None
+        tombstone = db.get_artifact("stable", include_deleted=True)
+        assert tombstone is not None
+        assert tombstone.current_revision == 3
+        assert tombstone.deleted_at == "2026-01-03T00:00:00Z"
+        assert db.get_artifact("stable", revision=1).storage_uri == "/old/daily.csv"
+        assert db.get_artifact("stable", revision=2).storage_uri == "/new/daily.csv"
+        assert len(db.list_revisions("stable")) == 3
+
+    def test_purge_deleted_compares_timestamp_instants(self, db):
+        for artifact_id, deleted_at in (
+            ("older", "2026-01-02T23:59:59Z"),
+            ("boundary-z", "2026-01-03T00:00:00Z"),
+            ("boundary-offset", "2026-01-03T00:00:00+00:00"),
+        ):
+            db.upsert_artifact(
+                artifact_id=artifact_id,
+                name=f"{artifact_id}.csv",
+                storage_uri=f"/{artifact_id}.csv",
+                indexed_at="2026-01-01T00:00:00Z",
+            )
+            db.delete_artifacts([artifact_id], deleted_at=deleted_at)
+
+        assert db.purge_deleted("2026-01-03T00:00:00+00:00") == 1
+        assert db.get_artifact("older", include_deleted=True) is None
+        assert db.get_artifact("boundary-z", include_deleted=True) is not None
+        assert db.get_artifact("boundary-offset", include_deleted=True) is not None
+
+    def test_alias_lookup_and_collision_rejection(self, db):
+        first = db.upsert_artifact(
+            artifact_id="canonical-1",
+            source_id="weather",
+            logical_path="one.csv",
+            name="one.csv",
+            storage_uri="/one.csv",
+            aliases=["legacy-uri:old-one", "old-opaque-id"],
+        )
+        second = db.upsert_artifact(
+            artifact_id="canonical-2",
+            source_id="weather",
+            logical_path="two.csv",
+            name="two.csv",
+            storage_uri="/two.csv",
+        )
+
+        assert db.resolve_artifact_id("legacy-uri:old-one") == first
+        assert db.get_artifact("old-opaque-id").id == first
+        with pytest.raises(ValueError, match="Alias collision"):
+            db.add_alias("legacy-uri", "old-one", "weather", second)
+        with pytest.raises(ValueError, match="collides with canonical"):
+            db.add_alias("artifact-id", "canonical-2", "weather", first)
+        with pytest.raises(ValueError, match="collides with an existing alias"):
+            db.upsert_artifact(
+                artifact_id="legacy-uri:old-one",
+                source_id="weather",
+                logical_path="three.csv",
+                name="three.csv",
+                storage_uri="/three.csv",
+            )
+
+    def test_checksum_is_not_used_as_identity(self, db):
+        artifact_id = db.upsert_artifact(
+            artifact_id=None,
+            source_id="weather",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/same.csv",
+            checksum_sha256="a" * 64,
+        )
+        record = db.get_artifact(artifact_id)
+        assert record.id != record.checksum_sha256
+
+    def test_default_content_revision_does_not_include_storage_uri(self, db):
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/first/same.csv",
+            size_bytes=10,
+        )
+        first = db.get_artifact("stable")
+        db.upsert_artifact(
+            artifact_id="stable",
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/second/same.csv",
+            size_bytes=10,
+        )
+        second = db.get_artifact("stable")
+        assert second.content_revision == first.content_revision
+        assert second.current_revision == 2
+
+    def test_same_storage_uri_can_have_distinct_logical_identities(self, db):
+        db.upsert_artifact(
+            artifact_id="one",
+            source_id="source-one",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/shared/same.csv",
+        )
+        db.upsert_artifact(
+            artifact_id="two",
+            source_id="source-two",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/shared/same.csv",
+        )
+        assert db.get_artifact("one") is not None
+        assert db.get_artifact("two") is not None
+
+    def test_source_scoped_aliases_require_source_when_ambiguous(self, db):
+        for source_id, artifact_id, path in (
+            ("one", "canonical-one", "/one.csv"),
+            ("two", "canonical-two", "/two.csv"),
+        ):
+            db.upsert_artifact(
+                artifact_id=artifact_id,
+                source_id=source_id,
+                logical_path="same.csv",
+                name="same.csv",
+                storage_uri=path,
+                aliases=["shared-id"],
+            )
+
+        assert db.resolve_artifact_id("shared-id", "one") == "canonical-one"
+        assert db.resolve_artifact_id("shared-id", "two") == "canonical-two"
+        with pytest.raises(ValueError, match="Ambiguous artifact alias"):
+            db.resolve_artifact_id("shared-id")
+
+    def test_configured_id_added_later_becomes_alias(self, db):
+        canonical = db.upsert_artifact(
+            artifact_id=None,
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/same.csv",
+        )
+        returned = db.upsert_artifact(
+            artifact_id="configured-id",
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/same.csv",
+        )
+        assert returned == canonical
+        assert db.resolve_artifact_id("configured-id", "source") == canonical
+
+    def test_namespaced_configured_id_added_later_becomes_alias(self, db):
+        canonical = db.upsert_artifact(
+            artifact_id=None,
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/same.csv",
+        )
+        returned = db.upsert_artifact(
+            artifact_id="external:configured-id",
+            source_id="source",
+            logical_path="same.csv",
+            name="same.csv",
+            storage_uri="/same.csv",
+        )
+        assert returned == canonical
+        assert db.resolve_artifact_id("external:configured-id", "source") == canonical
+
+    def test_batch_upsert_is_atomic(self, db):
+        with pytest.raises(ValueError, match="already assigned"):
+            db.upsert_artifacts_batch(
+                [
+                    {
+                        "artifact_id": "first",
+                        "source_id": "source",
+                        "logical_path": "first.csv",
+                        "name": "first.csv",
+                        "storage_uri": "/first.csv",
+                    },
+                    {
+                        "artifact_id": "first",
+                        "source_id": "other",
+                        "logical_path": "other.csv",
+                        "name": "other.csv",
+                        "storage_uri": "/other.csv",
+                    },
+                ]
+            )
+        assert db.get_artifact("first") is None
 
     def test_list_domains(self, db):
         db.upsert_artifact(
@@ -279,6 +515,7 @@ class TestCatalogDBSearch:
             indexed_at="2026-01-01T00:00:00Z",
             embedding=[1.0, 0.0],
         )
+        catalog_db.conn.execute("DELETE FROM artifact_revisions WHERE artifact_id = 'a'")
         catalog_db.conn.execute("DELETE FROM artifacts WHERE id = 'a'")
         catalog_db.conn.commit()
         catalog_db.close()
@@ -298,9 +535,15 @@ class TestCatalogDBSearch:
         catalog_db = CatalogDB(db_path, vec_dimensions=2)
         catalog_db.open()
         catalog_db.conn.execute(
+            """INSERT INTO catalog_sources(source_id, source_type, root_uri, created_at)
+               VALUES ('legacy', 'legacy', NULL, '2026-01-01T00:00:00Z')"""
+        )
+        catalog_db.conn.execute(
             """INSERT INTO artifacts
-               (id, name, storage_uri, indexed_at)
-               VALUES ('pending', 'pending.csv', '/pending.csv', '2026-01-01T00:00:00Z')"""
+               (id, source_id, logical_path, name, storage_uri, indexed_at,
+                content_revision, metadata_revision)
+               VALUES ('pending', 'legacy', 'pending.csv', 'pending.csv',
+                       '/pending.csv', '2026-01-01T00:00:00Z', 'unknown', 'pending')"""
         )
 
         catalog_db._ensure_vector_capability(catalog_db.conn)
@@ -396,6 +639,46 @@ class TestCatalogDBReadonlyQuery:
         with pytest.raises(ValueError, match="Write operations"):
             file_db.execute_readonly("DROP TABLE artifacts")
 
+    def test_in_memory_query_only_blocks_with_prefixed_writes(self, db):
+        db.upsert_artifact(
+            artifact_id="a",
+            name="weather.csv",
+            storage_uri="/data/weather.csv",
+            indexed_at="2026-01-01T00:00:00Z",
+        )
+
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            db.execute_readonly("WITH doomed AS (SELECT id FROM artifacts) DELETE FROM artifacts")
+
+        assert db.get_artifact("a") is not None
+        db.upsert_artifact(
+            artifact_id="b",
+            name="grid.csv",
+            storage_uri="/data/grid.csv",
+            indexed_at="2026-01-02T00:00:00Z",
+        )
+        assert db.get_artifact("b") is not None
+
+    def test_in_memory_vector_query_loads_capability_lazily(self, db, monkeypatch):
+        db.upsert_artifact(
+            artifact_id="a",
+            name="weather.csv",
+            storage_uri="/data/weather.csv",
+            embedding=[1.0, 0.0, 0.0, 0.0],
+        )
+        db._vector_loaded = False
+        imported = []
+        original_import_module = db_module.import_module
+
+        def tracked_import_module(name):
+            imported.append(name)
+            return original_import_module(name)
+
+        monkeypatch.setattr(db_module, "import_module", tracked_import_module)
+
+        assert db.execute_readonly("SELECT COUNT(*) AS count FROM artifacts_vec") == [{"count": 1}]
+        assert imported == ["sqlite_vec"]
+
     def test_fts_match_query(self, file_db):
         results = file_db.execute_readonly(
             "SELECT a.name FROM artifacts_fts fts JOIN artifacts a ON a.rowid = fts.rowid "
@@ -408,3 +691,229 @@ class TestCatalogDBReadonlyQuery:
         results = file_db.execute_readonly("SELECT 'artifacts_vec' AS value /* artifacts_vec */ -- artifacts_vec\n")
         assert results == [{"value": "artifacts_vec"}]
         assert file_db._vector_loaded is False
+
+
+class TestCatalogSchemaMigration:
+    def test_migrates_existing_records_and_preserves_legacy_id_alias(self, tmp_path):
+        path = tmp_path / "legacy.db"
+        storage_uri = "/data/weather.csv"
+        legacy_id = artifact_id_from_uri(storage_uri)
+        connection = sqlite3.connect(path)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO artifacts VALUES (?, 'weather.csv', ?, 'Weather', 'earth', "
+            "'local', 'text/csv', 12, '2026-01-01T00:00:00Z')",
+            (legacy_id, storage_uri),
+        )
+        connection.commit()
+        connection.close()
+
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        try:
+            migrated = catalog.get_artifact(legacy_id)
+            assert migrated is not None
+            assert migrated.id != legacy_id
+            assert migrated.logical_path.startswith(f"imported/{legacy_id}/")
+            migrated_id = migrated.id
+            catalog.upsert_artifact(
+                artifact_id=migrated_id,
+                source_id="weather",
+                logical_path="weather.csv",
+                name="weather.csv",
+                storage_uri=storage_uri,
+                source_type="local",
+            )
+            adopted = catalog.get_artifact(legacy_id)
+            assert adopted.id == migrated_id
+            assert adopted.source_id == "weather"
+            assert adopted.logical_path == "weather.csv"
+            assert catalog.conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        finally:
+            catalog.close()
+
+        reopened = CatalogDB(path, vec_dimensions=4)
+        reopened.open()
+        try:
+            assert reopened.get_artifact(legacy_id).id == migrated_id
+        finally:
+            reopened.close()
+
+    @pytest.mark.parametrize("suffix", ["?token=DO_NOT_STORE", "#token=DO_NOT_STORE"])
+    def test_migration_strips_az_query_and_fragment_credentials(self, tmp_path, suffix):
+        path = tmp_path / "legacy-secret.db"
+        storage_uri = f"az://account123/container/weather.csv{suffix}"
+        legacy_id = artifact_id_from_uri(storage_uri)
+        connection = sqlite3.connect(path)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO artifacts VALUES (?, 'weather.csv', ?, NULL, NULL, "
+            "'blob', 'text/csv', 12, '2026-01-01T00:00:00Z')",
+            (legacy_id, storage_uri),
+        )
+        connection.commit()
+        connection.close()
+
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        try:
+            migrated = catalog.get_artifact(f"storage-uri:{storage_uri}")
+            assert migrated is not None
+            assert migrated.storage_uri == "az://account123/container/weather.csv"
+            persisted = catalog.conn.execute(
+                """SELECT storage_uri AS value FROM artifacts
+                   UNION ALL
+                   SELECT alias AS value FROM artifact_aliases"""
+            ).fetchall()
+            assert all("DO_NOT_STORE" not in row["value"] for row in persisted)
+        finally:
+            catalog.close()
+
+    def test_future_schema_fails_without_mutation(self, tmp_path):
+        path = tmp_path / "future.db"
+        connection = sqlite3.connect(path)
+        connection.execute("CREATE TABLE marker(value TEXT)")
+        connection.execute("INSERT INTO marker VALUES ('unchanged')")
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        connection.commit()
+        connection.close()
+
+        with pytest.raises(RuntimeError, match="newer than supported"):
+            CatalogDB(path, vec_dimensions=4).open()
+
+        connection = sqlite3.connect(path)
+        try:
+            assert connection.execute("SELECT value FROM marker").fetchone()[0] == "unchanged"
+            assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION + 1
+            assert (
+                connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='artifacts'").fetchone()
+                is None
+            )
+        finally:
+            connection.close()
+
+    def test_migration_preserves_and_rekeys_vector_embedding(self, tmp_path):
+        sqlite_vec = pytest.importorskip("sqlite_vec")
+        path = tmp_path / "legacy-vectors.db"
+        connection = sqlite3.connect(path)
+        connection.enable_load_extension(True)
+        sqlite_vec.load(connection)
+        connection.enable_load_extension(False)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute("CREATE VIRTUAL TABLE artifacts_vec USING vec0(id TEXT PRIMARY KEY, embedding float[4])")
+        connection.execute(
+            "INSERT INTO artifacts VALUES ('old-id', 'weather.csv', '/weather.csv', NULL, NULL, "
+            "'local', 'text/csv', 12, '2026-01-01T00:00:00Z')"
+        )
+        embedding = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
+        connection.execute("INSERT INTO artifacts_vec VALUES ('old-id', ?)", (embedding,))
+        connection.commit()
+        connection.close()
+
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        try:
+            migrated_id = catalog.resolve_artifact_id("old-id")
+            row = catalog.conn.execute("SELECT embedding FROM artifacts_vec WHERE id=?", (migrated_id,)).fetchone()
+            assert row["embedding"] == embedding
+            assert catalog.search("", query_embedding=[0.9, 0.1, 0.0, 0.0])[0].id == migrated_id
+        finally:
+            catalog.close()
+
+    def test_migration_with_vectors_reports_required_extra(self, tmp_path, monkeypatch):
+        sqlite_vec = pytest.importorskip("sqlite_vec")
+        path = tmp_path / "legacy-vectors-missing-extra.db"
+        connection = sqlite3.connect(path)
+        connection.enable_load_extension(True)
+        sqlite_vec.load(connection)
+        connection.enable_load_extension(False)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute("CREATE VIRTUAL TABLE artifacts_vec USING vec0(id TEXT PRIMARY KEY, embedding float[4])")
+        connection.commit()
+        connection.close()
+
+        def missing_sqlite_vec(_name):
+            raise ImportError("sqlite_vec is unavailable")
+
+        monkeypatch.setattr(
+            "agora_workbench.code_execution.data_access.catalog.db.import_module",
+            missing_sqlite_vec,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="Migrating a catalog with existing vector embeddings requires sqlite-vec",
+        ):
+            CatalogDB(path, vec_dimensions=4).open()
+
+    def test_migration_without_vector_table_succeeds(self, tmp_path):
+        path = tmp_path / "legacy-no-vectors.db"
+        connection = sqlite3.connect(path)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            "INSERT INTO artifacts VALUES ('old-id', 'weather.csv', '/weather.csv', NULL, NULL, "
+            "'local', 'text/csv', 12, '2026-01-01T00:00:00Z')"
+        )
+        connection.commit()
+        connection.close()
+        catalog = CatalogDB(path, vec_dimensions=4)
+        catalog.open()
+        try:
+            assert catalog.get_artifact("old-id") is not None
+        finally:
+            catalog.close()
+
+    def test_v0_export_is_deterministic_and_excludes_tombstones(self, db, tmp_path):
+        db.upsert_artifact(
+            artifact_id="live",
+            source_id="source",
+            logical_path="live.csv",
+            name="live.csv",
+            storage_uri="/live.csv",
+            aliases=["old-live"],
+        )
+        db.upsert_artifact(
+            artifact_id="deleted",
+            source_id="source",
+            logical_path="deleted.csv",
+            name="deleted.csv",
+            storage_uri="/deleted.csv",
+        )
+        db.delete_artifacts(["deleted"])
+        destination = tmp_path / "v0.json"
+
+        first = db.export_v0_json(destination)
+        second = db.export_v0_json()
+
+        assert first == second == destination.read_text()
+        assert '"id": "old-live"' in first
+        assert "deleted.csv" not in first

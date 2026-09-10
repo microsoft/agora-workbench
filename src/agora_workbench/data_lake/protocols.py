@@ -60,11 +60,11 @@ class CatalogProvider(Protocol):
         ...
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        """Get one artifact by logical reference."""
+        """Get one artifact, honoring or explicitly rejecting a pinned revision."""
         ...
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        """Resolve a logical reference to a physical storage locator."""
+        """Resolve a logical reference, honoring or explicitly rejecting a pinned revision."""
         ...
 
 

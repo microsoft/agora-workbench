@@ -201,7 +201,8 @@ Create a `catalog.yaml` file in your server's directory:
 # catalog.yaml
 sources:
   # Local filesystem directory
-  - path: /data/weather/
+  - source_id: weather
+    path: /data/weather/
     domain: earthscience
     description: "NOAA daily weather observations for Pacific Northwest"
     files:
@@ -238,6 +239,11 @@ search:
   # Hybrid ranking weight: 0.0 = pure vector, 1.0 = pure keyword
   hybrid_alpha: 0.5
 ```
+
+Set `source_id` explicitly when artifact identity must remain stable after moving
+a local root. See
+[Identity, revisions, and compatibility](data-lake-api.md#identity-revisions-and-compatibility)
+for the full contract.
 
 Construct the database from the same search configuration so an explicit
 dimension is applied consistently. When `embedding_dimensions` is omitted,
