@@ -32,6 +32,7 @@ from agora_workbench.data_lake import (
     canonicalize_azure_uri,
     normalize_logical_path,
     sanitize_uri_for_display,
+    stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogDB
 from agora_workbench.data_lake.execution import AssetFetcher, AssetPublisher, DataLakeDataManager
@@ -222,6 +223,13 @@ def test_logical_path_normalization_is_relative_and_safe():
     assert normalize_logical_path(r"folder\child\..\file.csv") == "folder/file.csv"
     with pytest.raises(InvalidRequestError):
         normalize_logical_path("../../outside.csv")
+
+
+def test_blob_fallback_source_identity_preserves_prefix_boundary():
+    exact_object = stable_source_id("blob", "az://account123/container/data")
+    directory_prefix = stable_source_id("blob", "az://account123/container/data/")
+
+    assert exact_object != directory_prefix
 
 
 def test_generic_data_lake_error_is_internal_not_backend_unavailable():

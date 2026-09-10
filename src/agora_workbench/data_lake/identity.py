@@ -123,7 +123,7 @@ def canonicalize_azure_uri(uri: str) -> str:
 
 def stable_source_id(source_type: str, root: str) -> str:
     """Derive a stable fallback source ID."""
-    identity_root = canonicalize_azure_uri(root).rstrip("/") if source_type == "blob" else str(root)
+    identity_root = canonicalize_azure_uri(root) if source_type == "blob" else str(root)
     digest = hashlib.sha256(f"{source_type}\0{identity_root}".encode()).hexdigest()[:20]
     return f"{source_type}-{digest}"
 
