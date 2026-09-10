@@ -797,6 +797,37 @@ class TestCatalogSchemaMigration:
         finally:
             catalog.close()
 
+    def test_migration_with_vectors_reports_required_extra(self, tmp_path, monkeypatch):
+        sqlite_vec = pytest.importorskip("sqlite_vec")
+        path = tmp_path / "legacy-vectors-missing-extra.db"
+        connection = sqlite3.connect(path)
+        connection.enable_load_extension(True)
+        sqlite_vec.load(connection)
+        connection.enable_load_extension(False)
+        connection.execute(
+            """CREATE TABLE artifacts (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, storage_uri TEXT NOT NULL UNIQUE,
+                description TEXT, domain TEXT, source_type TEXT, content_type TEXT,
+                size_bytes INTEGER, indexed_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute("CREATE VIRTUAL TABLE artifacts_vec USING vec0(id TEXT PRIMARY KEY, embedding float[4])")
+        connection.commit()
+        connection.close()
+
+        def missing_sqlite_vec(_name):
+            raise ImportError("sqlite_vec is unavailable")
+
+        monkeypatch.setattr(
+            "agora_workbench.code_execution.data_access.catalog.db.import_module",
+            missing_sqlite_vec,
+        )
+        with pytest.raises(
+            RuntimeError,
+            match="Migrating a catalog with existing vector embeddings requires sqlite-vec",
+        ):
+            CatalogDB(path, vec_dimensions=4).open()
+
     def test_migration_without_vector_table_succeeds(self, tmp_path):
         path = tmp_path / "legacy-no-vectors.db"
         connection = sqlite3.connect(path)

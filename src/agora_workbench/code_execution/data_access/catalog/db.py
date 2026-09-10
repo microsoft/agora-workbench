@@ -297,7 +297,11 @@ class CatalogDB:
             is not None
         )
         if has_vectors:
-            self._ensure_vector_capability(self.conn, create_table=False)
+            self._ensure_vector_capability(
+                self.conn,
+                create_table=False,
+                operation="Migrating a catalog with existing vector embeddings",
+            )
         legacy_vectors = (
             {row["id"]: row["embedding"] for row in self.conn.execute("SELECT id, embedding FROM artifacts_vec")}
             if has_vectors
@@ -1005,6 +1009,7 @@ class CatalogDB:
         conn: sqlite3.Connection,
         *,
         create_table: bool = True,
+        operation: str = "Catalog vector search",
     ) -> None:
         """Load sqlite-vec and validate or create the vector table on demand."""
         if conn is self._conn and self._vector_loaded:
@@ -1015,8 +1020,7 @@ class CatalogDB:
             sqlite_vec = import_module("sqlite_vec")
         except ImportError as exc:
             raise RuntimeError(
-                "Catalog vector search requires sqlite-vec. "
-                f"Install the '{_VECTOR_EXTRA}' extra and reopen the catalog."
+                f"{operation} requires sqlite-vec. Install the '{_VECTOR_EXTRA}' extra and reopen the catalog."
             ) from exc
 
         try:
