@@ -127,6 +127,7 @@ class AuthorizedCatalogProvider:
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
         """Get an artifact without distinguishing denied from absent artifacts."""
         await self._require_source_operation(reference, CatalogOperation.GET, context)
+        backend_denied = False
         try:
             if self._uses_per_artifact_enforcement():
                 assert self._per_artifact_enforcer is not None
@@ -142,16 +143,21 @@ class AuthorizedCatalogProvider:
                 self._raise_enforcement_failure(CatalogOperation.GET)
         except ArtifactNotFoundError:
             pass
+        except PermissionDeniedError:
+            backend_denied = True
         else:
             self._validate_reference(artifact.reference, reference, CatalogOperation.GET)
             if self._uses_per_artifact_enforcement():
                 await self._require_artifact_operation(artifact.reference, CatalogOperation.GET, context)
             return artifact
+        if backend_denied:
+            self._raise_enforcement_failure(CatalogOperation.GET)
         self._raise_not_found(CatalogOperation.GET)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
         """Resolve an artifact without distinguishing denied from absent artifacts."""
         await self._require_source_operation(reference, CatalogOperation.RESOLVE, context)
+        backend_denied = False
         try:
             if self._uses_per_artifact_enforcement():
                 assert self._per_artifact_enforcer is not None
@@ -167,11 +173,15 @@ class AuthorizedCatalogProvider:
                 self._raise_enforcement_failure(CatalogOperation.RESOLVE)
         except ArtifactNotFoundError:
             pass
+        except PermissionDeniedError:
+            backend_denied = True
         else:
             self._validate_reference(resolved.reference, reference, CatalogOperation.RESOLVE)
             if self._uses_per_artifact_enforcement():
                 await self._require_artifact_operation(resolved.reference, CatalogOperation.RESOLVE, context)
             return resolved
+        if backend_denied:
+            self._raise_enforcement_failure(CatalogOperation.RESOLVE)
         self._raise_not_found(CatalogOperation.RESOLVE)
 
     async def _provider_capabilities(self) -> tuple[SourceCapabilities, ...]:
@@ -298,7 +308,7 @@ class AuthorizedCatalogProvider:
         raise PermissionDeniedError(
             "Catalog authorization could not be enforced.",
             operation=operation.value if operation is not None else None,
-        )
+        ) from None
 
     @staticmethod
     def _raise_not_found(operation: CatalogOperation) -> Never:

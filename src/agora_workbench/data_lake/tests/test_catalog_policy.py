@@ -408,6 +408,48 @@ async def test_detailed_backend_not_found_is_normalized(contexts, operation, mod
     assert error.value.__context__ is None
 
 
+@pytest.mark.parametrize("operation", ["get", "resolve"])
+@pytest.mark.parametrize("mode", [CatalogPolicyMode.HOMOGENEOUS_SOURCE, CatalogPolicyMode.PER_ARTIFACT])
+async def test_backend_permission_denial_is_normalized(contexts, operation, mode):
+    detailed = PermissionDeniedError(
+        "Caller cannot access secret backend object customer-42.",
+        resource_id="customer-42",
+        operation=operation,
+    )
+
+    class DenyingCatalog(MemoryCatalog):
+        async def get(self, reference, context):
+            raise detailed from RuntimeError("backend detail")
+
+        async def resolve(self, reference, context):
+            raise detailed from RuntimeError("backend detail")
+
+    class DenyingEnforcer(MemoryPerArtifactEnforcer):
+        async def get(self, provider, reference, context, authorizer):
+            raise detailed from RuntimeError("enforcer detail")
+
+        async def resolve(self, provider, reference, context, authorizer):
+            raise detailed from RuntimeError("enforcer detail")
+
+    catalog = AuthorizedCatalogProvider(
+        DenyingCatalog(),
+        PrincipalPolicy(
+            {"analyst-a": {"public-data"}},
+            {"analyst-a": {("public-data", "open-second")}},
+        ),
+        mode=mode,
+        per_artifact_enforcer=DenyingEnforcer() if mode is CatalogPolicyMode.PER_ARTIFACT else None,
+    )
+
+    with pytest.raises(PermissionDeniedError) as error:
+        await getattr(catalog, operation)(ArtifactReference("open-second", "public-data"), contexts[0])
+    assert str(error.value) == "Catalog authorization could not be enforced."
+    assert error.value.resource_id is None
+    assert error.value.operation == operation
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
+
+
 def test_unknown_policy_mode_fails_closed():
     class FuturePolicyMode(StrEnum):
         FUTURE = "future"
