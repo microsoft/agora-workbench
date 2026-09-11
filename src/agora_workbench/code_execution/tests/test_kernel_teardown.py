@@ -321,6 +321,140 @@ class TestAwaitableClose:
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         await manager.aclose_session(session_id)
 
+    async def test_aclose_session_claims_kernel_before_blocked_resource_cleanup(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
+        cleanup_gate = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        session = manager.storage.retrieve(session_id)
+
+        async def blocked_cleanup():
+            cleanup_started.set()
+            await cleanup_gate.wait()
+
+        session.aclose = blocked_cleanup
+        close_task = asyncio.create_task(manager.aclose_session(session_id))
+        await cleanup_started.wait()
+
+        assert session_id not in manager._kernels
+        assert km.shutdown_finished is True
+        assert manager.storage.retrieve(session_id) is None
+
+        cleanup_gate.set()
+        await close_task
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):
+        session_ids = [
+            manager.create_session(data={}, user_identity="u", user_token="t", token_claims={}) for _ in range(2)
+        ]
+        started = [asyncio.Event(), asyncio.Event()]
+        gates = [asyncio.Event(), asyncio.Event()]
+        for index, session_id in enumerate(session_ids):
+            register_kernel(manager, session_id)
+            session = manager.storage.retrieve(session_id)
+
+            async def blocked_cleanup(i=index):
+                started[i].set()
+                await gates[i].wait()
+
+            session.aclose = blocked_cleanup
+
+        close_task = asyncio.create_task(manager.aclose_all_sessions())
+        await asyncio.gather(*(event.wait() for event in started))
+        assert all(session_id not in manager._kernels for session_id in session_ids)
+
+        for gate in gates:
+            gate.set()
+        await close_task
+        assert manager.storage.count() == 0
+
+    @pytest.mark.parametrize("async_close", [False, True])
+    async def test_session_cleanup_attempts_every_resource_before_reporting(self, manager, tmp_path, async_close):
+        attempted = []
+        session_file = tmp_path / "session_cleanup.txt"
+        session_file.write_text("payload")
+
+        class FailingManager:
+            def cleanup(self):
+                attempted.append("manager")
+                raise RuntimeError("manager failed")
+
+            async def aclose(self):
+                attempted.append("manager")
+                raise RuntimeError("manager failed")
+
+        class FailingExtension:
+            def cleanup(self):
+                attempted.append("extension")
+                raise RuntimeError("extension failed")
+
+            async def aclose(self):
+                attempted.append("extension")
+                raise RuntimeError("extension failed")
+
+        class FailingPayload(dict):
+            def cleanup(self):
+                attempted.append("payload")
+                raise RuntimeError("payload failed")
+
+            async def aclose(self):
+                attempted.append("payload")
+                raise RuntimeError("payload failed")
+
+        payload = FailingPayload(session_file=str(session_file))
+        session_id = manager.create_session(
+            payload,
+            user_identity="u",
+            user_token="t",
+            token_claims={},
+        )
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, FailingManager())
+        session.extensions["failing"] = FailingExtension()
+
+        if async_close:
+            with pytest.raises(ExceptionGroup, match="Session cleanup failed"):
+                await manager.aclose_session(session_id)
+        else:
+            manager.close_session(session_id)
+            with pytest.raises(ExceptionGroup, match="Session resource cleanup failed"):
+                await manager.await_resource_cleanup()
+
+        assert attempted == ["manager", "extension", "payload"]
+        assert not session_file.exists()
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_cancelled_resource_drain_remains_tracked_for_next_drain(self, manager):
+        started = asyncio.Event()
+        gate = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def cleanup():
+            started.set()
+            await gate.wait()
+            finished.set()
+
+        task = asyncio.create_task(cleanup())
+        manager._resource_cleanup_tasks.add(task)
+        first_drain = asyncio.create_task(manager.await_resource_cleanup())
+        await started.wait()
+
+        first_drain.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first_drain
+        assert task in manager._resource_cleanup_tasks
+        assert not task.cancelled()
+
+        second_drain = asyncio.create_task(manager.await_resource_cleanup())
+        await asyncio.sleep(0)
+        assert not second_drain.done()
+        gate.set()
+        await second_drain
+
+        assert finished.is_set()
+        assert not manager._resource_cleanup_tasks
+
     async def test_await_kernel_shutdown_is_a_noop_when_idle(self, manager):
         await manager.await_kernel_shutdown("never-existed")
 

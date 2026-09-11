@@ -173,6 +173,7 @@ class CatalogArtifact:
     metadata_revision: str | None = None
     checksum_sha256: str | None = None
     deleted_at: datetime | None = None
+    score: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", _immutable_mapping(self.metadata))

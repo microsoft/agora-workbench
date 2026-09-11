@@ -373,6 +373,10 @@ application-defined `CatalogAuthorizer` outside the provider with
 `AuthorizedCatalogProvider`; its caller-aware `capabilities(context)` result is
 the intersection of provider support and policy.
 
+Search providers may set `CatalogArtifact.score` to a backend-neutral relevance
+value. Discovery adapters preserve it as the legacy-compatible `score` payload
+field without assigning cross-provider meaning to the number.
+
 ```python
 from agora_workbench.data_lake import (
     AuthorizedCatalogProvider,
@@ -619,6 +623,27 @@ SQLite read-only access as authorization.
 `ResourceLease` records whether a supplied resource is `OWNED` or `BORROWED`.
 Close only owned resources. A resolver or manager may close a client it creates,
 but must not close a credential or other resource borrowed from its caller.
+
+`CodeExecutionServer` provides the opt-in lifecycle composition through
+`CatalogIntegration`. `CatalogIntegration.from_config(...)` owns the generated
+SQLite provider and loads it at server startup. Passing
+`ResourceLease(provider, ResourceOwnership.BORROWED)` mounts an
+application-managed provider without refreshing or closing it by default.
+Startup failure and cancellation close owned providers and remove their private
+cache. Shutdown closes execution sessions before the shared provider, so one
+session cannot invalidate another session's resolver.
+
+Discovery tools use `AuthorizedCatalogProvider` and a session-specific
+`RequestContext`; they never expose the legacy raw `query_catalog` SQL surface.
+Use `authorizer_factory(SessionContext)` when policy objects hold mutable
+caller state. `get_catalog_capabilities` and
+`CodeExecutionServer.get_data_lake_capabilities(session)` expose the effective
+read operations after provider support and caller policy are intersected.
+`CatalogIntegration.capability_extension_factory` can attach session-owned,
+authorized capability providers without changing the read provider lifecycle.
+Their `SourceCapabilities` are merged by source, allowing a later managed
+writer adapter to contribute write operations while remaining independently
+authorized and cleaned up.
 
 ## Import reference
 

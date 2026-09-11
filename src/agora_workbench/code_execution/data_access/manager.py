@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 from agora_workbench.data_lake.errors import UnsupportedOperationError, UnsafePathError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
-from agora_workbench.data_lake.models import RequestContext
+from agora_workbench.data_lake.models import RequestContext, ResourceOwnership
 from agora_workbench.data_lake.transfer import (
     TransferOptions,
     _run_blocking_io,
@@ -160,6 +160,7 @@ class DataLakeDataManager:
         allowed_local_roots: list[str] | None = None,
         extra_fetchers: list[AssetFetcher] | None = None,
         credential: "AsyncTokenCredential | None" = None,
+        credential_ownership: ResourceOwnership = ResourceOwnership.BORROWED,
         artifact_resolver: ArtifactResolver | None = None,
         transfer_options: TransferOptions | None = None,
     ):
@@ -186,6 +187,10 @@ class DataLakeDataManager:
                 Storage and Azure AI Search access. When omitted, the manager
                 creates the same storage credential chain as before, resolving
                 ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.
+            credential_ownership: Whether the manager closes a supplied
+                credential. Existing callers retain borrowed semantics by
+                default; integrations that create one credential per session
+                can explicitly transfer ownership.
             artifact_resolver: Optional resolver turning ``<blob>id</blob>``
                 identifiers into fetchable URLs, for deployments whose catalog
                 is not an Azure AI Search index. When omitted, a
@@ -204,7 +209,7 @@ class DataLakeDataManager:
 
         self._credential_init_error: str | None = None
         self._credential: "AsyncTokenCredential | None" = None
-        self._owns_credential = credential is None
+        self._owns_credential = credential is None or credential_ownership is ResourceOwnership.OWNED
 
         # Initialize fetchers — custom fetchers take priority over built-ins
         self._fetchers: list[AssetFetcher] = list(extra_fetchers or [])
