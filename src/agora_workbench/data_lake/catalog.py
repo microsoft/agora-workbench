@@ -3,14 +3,18 @@
 from agora_workbench.code_execution.data_access.catalog import (
     SCHEMA_VERSION,
     CatalogConfig,
+    CatalogConfigConversionReport,
     CatalogDB,
+    CatalogDryRunReport,
     CatalogIndexer,
+    DiscoveryMode,
     SearchConfig,
     SourceConfig,
+    SourceDryRun,
     SourceRefreshState,
     artifact_id_from_uri,
+    convert_catalog_config,
 )
-
 from .identity import (
     azure_uri_from_blob_name,
     canonicalize_azure_uri,
@@ -41,6 +45,7 @@ from .models import (
     StorageLocator,
 )
 from .policy import AuthorizedCatalogProvider, DenyAllCatalogAuthorizer, DevelopmentAllowAllCatalogAuthorizer
+from .providers import CatalogArtifactResolver, CatalogReadiness, ManifestCatalogProvider, SQLiteCatalogProvider
 from .protocols import CatalogAuthorizer, CatalogPolicyEnforcer, CatalogProvider, PolicyEnforcedCatalog
 
 __all__ = [
@@ -51,8 +56,13 @@ __all__ = [
     "CatalogAuthorizer",
     "CatalogArtifact",
     "CatalogConfig",
+    "CatalogConfigConversionReport",
     "CatalogDB",
+    "CatalogDryRunReport",
     "CatalogIndexer",
+    "CatalogArtifactResolver",
+    "CatalogReadiness",
+    "DiscoveryMode",
     "CatalogOperation",
     "CatalogPolicyEnforcer",
     "CatalogPolicyMode",
@@ -61,6 +71,7 @@ __all__ = [
     "DevelopmentAllowAllCatalogAuthorizer",
     "DownloadInfo",
     "ListRequest",
+    "ManifestCatalogProvider",
     "MAX_PAGE_LIMIT",
     "Page",
     "PageRequest",
@@ -73,7 +84,9 @@ __all__ = [
     "SearchRequest",
     "SourceCapabilities",
     "SourceConfig",
+    "SourceDryRun",
     "SourceRefreshState",
+    "SQLiteCatalogProvider",
     "StorageLocator",
     "artifact_id_from_uri",
     "azure_uri_from_blob_name",
@@ -83,5 +96,6 @@ __all__ = [
     "parse_azure_uri",
     "sanitize_uri_for_display",
     "split_alias",
+    "convert_catalog_config",
     "stable_source_id",
 ]

@@ -1,5 +1,7 @@
 """Tests for catalog config parsing."""
 
+import math
+
 import pytest
 
 from ....data_access.catalog.config import (
@@ -115,6 +117,26 @@ class TestSourceConfig:
             files={"daily_obs.csv": FileOverride(description="Daily observations")},
         )
         assert source.files["daily_obs.csv"].description == "Daily observations"
+
+    def test_local_manifest_rejects_remote_uri(self):
+        with pytest.raises(ValueError, match="local manifest path"):
+            SourceConfig(
+                source_id="local",
+                path="/data/weather",
+                discovery="manifest",
+                manifest="az://account123/container/manifest.json",
+            )
+
+    @pytest.mark.parametrize("stale_limit", [math.inf, -math.inf, math.nan])
+    def test_manifest_stale_limit_must_be_finite(self, stale_limit):
+        with pytest.raises(ValueError, match="finite|greater than or equal"):
+            SourceConfig(
+                source_id="local",
+                path="/data/weather",
+                discovery="manifest",
+                manifest="manifest.json",
+                max_stale_seconds=stale_limit,
+            )
 
 
 class TestSearchConfig:

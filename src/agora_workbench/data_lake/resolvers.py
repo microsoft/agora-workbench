@@ -2,5 +2,6 @@
 
 from agora_workbench.code_execution.data_access.artifact_resolvers import SearchIndexArtifactResolver
 from .protocols import ArtifactResolver
+from .providers import CatalogArtifactResolver
 
-__all__ = ["ArtifactResolver", "SearchIndexArtifactResolver"]
+__all__ = ["ArtifactResolver", "CatalogArtifactResolver", "SearchIndexArtifactResolver"]

@@ -80,6 +80,60 @@ def test_keyword_catalog_blocks_optional_imports_and_reopens():
     assert result.returncode == 0, result.stderr
 
 
+def test_local_manifest_provider_does_not_require_azure_sdk():
+    result = _run_isolated(
+        """
+        import asyncio
+        import importlib.abc
+        import json
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        class BlockAzure(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "azure" or fullname.startswith("azure."):
+                    raise ModuleNotFoundError(f"blocked Azure SDK import: {fullname}", name=fullname)
+                return None
+
+        sys.meta_path.insert(0, BlockAzure())
+
+        from agora_workbench.data_lake import ListRequest, RequestContext
+        from agora_workbench.data_lake.catalog import CatalogConfig, ManifestCatalogProvider, SourceConfig
+
+        async def main():
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "data.csv").write_text("data", encoding="utf-8")
+                (root / "manifest.json").write_text(
+                    json.dumps({
+                        "version": 1,
+                        "generation": 1,
+                        "artifacts": [{"path": "data.csv", "artifact_id": "data"}],
+                    }),
+                    encoding="utf-8",
+                )
+                config = CatalogConfig(sources=[SourceConfig(
+                    source_id="local",
+                    path=str(root),
+                    discovery="manifest",
+                    manifest="manifest.json",
+                )])
+                provider = ManifestCatalogProvider(config)
+                try:
+                    await provider.load()
+                    assert len((await provider.list(ListRequest(), RequestContext())).items) == 1
+                finally:
+                    await provider.aclose()
+
+        asyncio.run(main())
+        assert not any(name == "azure" or name.startswith("azure.") for name in sys.modules)
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_vector_selection_reports_missing_sqlite_vec():
     result = _run_isolated(
         """

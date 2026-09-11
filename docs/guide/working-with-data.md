@@ -199,10 +199,13 @@ Create a `catalog.yaml` file in your server's directory:
 
 ```yaml
 # catalog.yaml
+version: 1
 sources:
-  # Local filesystem directory
+  # Scan mode is the compatibility default. Every discovered non-hidden file
+  # under the validated root is disclosed.
   - source_id: weather
     path: /data/weather/
+    discovery: scan
     domain: earthscience
     description: "NOAA daily weather observations for Pacific Northwest"
     files:
@@ -226,6 +229,13 @@ sources:
     files:
       lines.geojson:
         description: "US high-voltage transmission lines with voltage and owner metadata"
+
+  # Manifest mode is authoritative. Only manifest entries are disclosed.
+  - source_id: approved-model-inputs
+    path: az://mystorageaccount/approved/model-inputs/
+    discovery: manifest
+    manifest: catalog.manifest.json
+    max_stale_seconds: 300
 
 search:
   # Only Azure OpenAI embeddings are currently supported for vector search
@@ -268,14 +278,100 @@ Each source entry in `sources` declares a data location:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `path` | ✓ | Local path, `az://account/container/prefix/`, or HTTPS blob URL |
+| `source_id` | manifest mode | Stable source identity. Strongly recommended in scan mode and required in manifest mode |
+| `discovery` | | `scan` (default) or authoritative `manifest` |
+| `manifest` | manifest mode | Local path within the source root, or Blob name/full URI within the source prefix |
+| `max_stale_seconds` | | How long a previously valid manifest generation may remain readable after refresh failure |
 | `domain` | | Domain label (used for filtering in search, e.g. `"earthscience"`) |
 | `description` | | Default description for files that don't have a per-file override |
-| `files` | | Dict of `filename → {description, domain}` overrides |
+| `files` | | Dict of `filename → {description, domain, artifact_id, aliases}` metadata overrides |
 
 Source type is inferred automatically from the path:
 
 - Bare paths or `file://` → `local`
 - `az://` or `https://*.blob.core.windows.net/` → `blob`
+
+`files` remains a metadata override map. It is never an allowlist. In scan mode,
+files not named in `files` are still discovered. In manifest mode, registration
+comes only from the manifest; a `files` entry can override metadata for a
+registered path but cannot register an otherwise absent file.
+
+### Authoritative manifests
+
+Manifest files use strict JSON with this versioned shape:
+
+```json
+{
+  "version": 1,
+  "generation": 42,
+  "artifacts": [
+    {
+      "path": "approved/data.csv",
+      "artifact_id": "approved-data",
+      "name": "data.csv",
+      "description": "Approved experiment input",
+      "domain": "science",
+      "media_type": "text/csv",
+      "size_bytes": 1204,
+      "content_revision": "sha256:4f...",
+      "metadata_revision": "metadata-7",
+      "checksum_sha256": "4f...",
+      "aliases": ["external:experiment-input"]
+    }
+  ]
+}
+```
+
+`generation` is a positive, monotonically non-decreasing integer. Reusing a
+generation with different manifest bytes is rejected, as is rolling back to an
+older generation. Artifact paths are normalized source-relative paths and must
+remain inside the configured local root or Blob prefix. Duplicate paths,
+artifact IDs, storage locators, or source-scoped aliases; duplicate JSON keys;
+unknown fields; oversized or malformed JSON; missing manifests; and unsupported
+versions fail the source refresh explicitly. Manifest JSON is size- and
+item-bounded and does not support YAML anchors or aliases. The 4 MiB byte limit
+is enforced while reading: local reads stop at limit-plus-one bytes, and Blob
+downloads request and consume only a bounded range of response chunks.
+
+Manifest mode never falls back to listing the source. A valid empty manifest is
+an authoritatively empty catalog and tombstones previously registered entries.
+An invalid or unavailable manifest preserves the last valid SQLite generation
+according to the configured stale-read bound; if no valid generation has ever
+loaded, the provider is not ready and all operations fail closed. Fixing the
+manifest or credentials and retrying `load()` on the same provider is supported.
+Public load/readiness errors contain source IDs and generic categories, not
+absolute local paths, SAS query values, or backend response details.
+
+Local and Blob manifests use the same records and identity rules. Blob loading
+downloads the configured manifest object directly and records the ETag from that
+same download response; it does not enumerate the container or issue a second
+properties request. If the response exposes no ETag, the SHA-256 digest of the
+downloaded bytes is used as the generation token. Azure SDK imports remain
+optional and selecting a Blob source without `agora-workbench[azure]` fails with
+the existing explicit optional-dependency error.
+
+### Conversion and dry-run
+
+Existing unversioned `catalog.yaml` files remain valid and are interpreted as
+version 1 with `discovery: scan`. Convert one to an explicit representation
+without touching storage:
+
+```python
+from agora_workbench.data_lake.catalog import convert_catalog_config
+
+report = convert_catalog_config("catalog.yaml")  # dry-run by default
+print(report.rendered_yaml)
+print(report.summary)
+```
+
+Pass a separate destination and `dry_run=False` to write the converted file.
+The conversion report distinguishes `configuration_valid`,
+`manifest_checked`, and `manifest_content_valid`; side-effect-free conversion
+does not claim that an unaccessed manifest is valid.
+`CatalogIndexer.dry_run()` performs storage-backed enumeration/manifest
+validation and reports additions, updates, deletions, unchanged entries,
+generation/ETag, whether the manifest was checked, manifest content validity,
+and errors without writing SQLite or computing embeddings.
 
 ### Search configuration
 
@@ -298,13 +394,36 @@ Source type is inferred automatically from the path:
 
 At server startup, the catalog indexer:
 
-1. Reads `catalog.yaml` and discovers files from each source (local directory listing or blob enumeration)
-2. Computes a stable artifact ID for each file based on its storage URI
+1. Reads `catalog.yaml` and either scans each source or loads its authoritative manifest
+2. Resolves stable identity from the source/path model or an explicit manifest `artifact_id`
 3. Inserts metadata into the SQLite `artifacts` table (with FTS5 triggers for keyword indexing)
 4. When `embedding_model` is selected, computes embeddings in batches and
    stores them in an on-demand sqlite-vec virtual table
 
-The catalog is stored as a SQLite database on disk, so it persists across server restarts. Re-indexing only adds new files — existing entries are skipped.
+The SQLite database is a rebuildable per-reader index/cache. A manifest-backed
+reader opens its own database, calls `load()` before serving, validates the
+schema and manifest generation/ETag, and atomically refreshes artifacts, aliases,
+history, FTS, vectors, and readiness state. Unchanged generations are skipped;
+changed generations create normal artifact revisions. Failed refreshes preserve
+the previous successful generation until its stale bound expires. Expiry is
+always measured from that source's `last_success_at`, including validation,
+embedding, and database-write failures whose transactions roll back.
+Legacy timezone-naive success timestamps are interpreted as UTC; malformed
+timestamps fail readiness closed.
+
+An explicitly declared manifest `artifact_id` may move to a new logical path in
+one generation. The current row and locator move without changing canonical
+identity, while retained revisions preserve exact old locators and any
+tombstones. Removing the entry in one generation and re-registering the same ID
+at a new path later is also supported. Destination paths or aliases retained by
+a different artifact fail only that source; independently valid source
+generations still commit.
+
+Do not place one writable SQLite file on a shared volume and open it from
+multiple pods. The supported deployment model is one writable SQLite file per
+reader/pod (or `:memory:`), rebuilt from the manifest after restart. The manifest
+is the authority; SQLite is disposable. Historical refresh rows for sources no
+longer configured by that reader do not affect readiness or visibility.
 
 ### MCP tools exposed
 
