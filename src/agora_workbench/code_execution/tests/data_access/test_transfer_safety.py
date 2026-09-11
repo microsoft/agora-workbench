@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import logging
 import os
@@ -249,12 +250,11 @@ def test_local_fetcher_finalizer_closes_retained_root_descriptors(tmp_path):
     fetcher = LocalFileFetcher([str(tmp_path)])
     descriptor = fetcher._allowed_root_fds[0]
 
-    fetcher.__del__()
+    del fetcher
+    gc.collect()
 
     with pytest.raises(OSError):
         os.fstat(descriptor)
-    assert fetcher._allowed_root_fds == []
-    assert fetcher._allowed_root_identities == []
 
 
 async def test_local_publisher_rejects_symlink_parent_before_writing(tmp_path):

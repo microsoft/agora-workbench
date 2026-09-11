@@ -15,6 +15,7 @@ import os
 import stat
 import asyncio
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 from urllib.parse import unquote, urlsplit
@@ -423,25 +424,21 @@ class LocalFileFetcher(AssetFetcher):
 
     async def close(self) -> None:
         """Close retained trusted allowed-root descriptors."""
-        for descriptor in self._allowed_root_fds:
-            os.close(descriptor)
-        self._allowed_root_fds.clear()
-        self._allowed_root_identities.clear()
+        self._close_root_descriptors()
+
+    def _close_root_descriptors(self) -> None:
+        """Idempotently release retained allowed-root descriptors."""
+        descriptors = tuple(getattr(self, "_allowed_root_fds", ()))
+        self._allowed_root_fds = []
+        self._allowed_root_identities = []
+        for descriptor in descriptors:
+            with suppress(OSError):
+                os.close(descriptor)
 
     def __del__(self) -> None:
         """Defensively release retained descriptors when explicit cleanup is missed."""
-        try:
-            for descriptor in getattr(self, "_allowed_root_fds", ()):
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    LOGGER.debug("LocalFileFetcher descriptor was already closed during finalization", exc_info=True)
-            if hasattr(self, "_allowed_root_fds"):
-                self._allowed_root_fds.clear()
-            if hasattr(self, "_allowed_root_identities"):
-                self._allowed_root_identities.clear()
-        except Exception:
-            LOGGER.debug("LocalFileFetcher finalization could not complete cleanly", exc_info=True)
+        with suppress(Exception):
+            self._close_root_descriptors()
 
     def can_handle(self, qualified_name: str) -> bool:
         """Check if this is a local filesystem path."""
