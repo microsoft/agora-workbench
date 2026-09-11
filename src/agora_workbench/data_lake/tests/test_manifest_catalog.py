@@ -39,7 +39,13 @@ from agora_workbench.data_lake.catalog import (
     SourceConfig,
     convert_catalog_config,
 )
-from agora_workbench.data_lake.providers import CatalogArtifactResolver, ManifestCatalogProvider, SQLiteCatalogProvider
+from agora_workbench.data_lake.providers import (
+    CatalogArtifactResolver,
+    ManifestCatalogProvider,
+    SQLiteCatalogProvider,
+    _cursor_offset,
+    _next_cursor,
+)
 
 
 def _manifest(generation: int = 1, *, description: str = "Approved data") -> dict[str, object]:
@@ -850,6 +856,47 @@ async def test_retained_path_conflict_isolated_to_bad_source(tmp_path):
         await provider.aclose()
 
 
+async def test_manifest_rejects_new_artifact_id_for_retained_path(tmp_path):
+    (tmp_path / "occupied.csv").write_text("occupied")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generation": 1,
+                "artifacts": [{"path": "occupied.csv", "artifact_id": "original-id"}],
+            }
+        )
+    )
+    provider = ManifestCatalogProvider(_local_config(tmp_path))
+    try:
+        await provider.load()
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 2,
+                    "artifacts": [{"path": "occupied.csv", "artifact_id": "replacement-id"}],
+                }
+            )
+        )
+        with pytest.raises(BackendUnavailableError):
+            await provider.load()
+
+        original = await provider.get(
+            ArtifactReference("original-id", source_id="approved"),
+            RequestContext(),
+        )
+        assert original.locator.uri == str(tmp_path / "occupied.csv")
+        with pytest.raises(ArtifactNotFoundError):
+            await provider.get(
+                ArtifactReference("replacement-id", source_id="approved"),
+                RequestContext(),
+            )
+    finally:
+        await provider.aclose()
+
+
 class _Download:
     def __init__(self, payload, etag: str | None = '"download-etag"', size: int | None = None):
         self._payload = payload
@@ -1169,6 +1216,15 @@ async def test_catalog_cursor_rejects_unbounded_offset(tmp_path):
             )
     finally:
         db.close()
+
+
+def test_catalog_does_not_emit_cursor_beyond_offset_limit():
+    request = {"operation": "list", "source_ids": [], "filters": {}}
+
+    assert _next_cursor(9_990, 100, 100, request) is None
+    boundary_cursor = _next_cursor(9_990, 10, 10, request)
+    assert boundary_cursor is not None
+    assert _cursor_offset(boundary_cursor, request) == 10_000
 
 
 @pytest.mark.parametrize(

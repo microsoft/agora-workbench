@@ -97,7 +97,10 @@ def _cursor_offset(cursor: str | None, expected: dict[str, object]) -> int:
 def _next_cursor(offset: int, returned: int, limit: int, request: dict[str, object]) -> str | None:
     if returned < limit:
         return None
-    payload = json.dumps({"offset": offset + returned, "request": request}, sort_keys=True, separators=(",", ":"))
+    next_offset = offset + returned
+    if next_offset > _MAX_CATALOG_RESULT_OFFSET:
+        return None
+    payload = json.dumps({"offset": next_offset, "request": request}, sort_keys=True, separators=(",", ":"))
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 

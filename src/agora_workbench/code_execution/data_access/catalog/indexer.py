@@ -865,7 +865,7 @@ class CatalogIndexer:
                     f"Manifest source {source_id!r} uses artifact_id {artifact_id!r} owned by another source"
                 )
             existing_at_path = existing_by_path.get(logical_path)
-            if existing_at_path is not None and existing_at_path.id != artifact_id and existing_by_id is not None:
+            if existing_at_path is not None and existing_at_path.id != artifact_id:
                 raise ValueError(
                     f"Manifest source {source_id!r} assigns {logical_path!r} to "
                     f"artifact_id {artifact_id!r}, but that path belongs to another artifact"
