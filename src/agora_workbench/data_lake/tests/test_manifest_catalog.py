@@ -158,6 +158,40 @@ async def test_missing_manifest_fails_explicitly(tmp_path):
         await provider.aclose()
 
 
+async def test_manifest_provider_rejects_scan_cache_without_manifest_generation(tmp_path):
+    (tmp_path / "scanned.csv").write_text("scan-only")
+    db_path = tmp_path / "catalog.db"
+    scan_db = CatalogDB(db_path, vec_dimensions=None)
+    scan_db.open()
+    try:
+        scan_config = CatalogConfig(
+            sources=[
+                SourceConfig(
+                    source_id="approved",
+                    path=str(tmp_path),
+                    discovery=DiscoveryMode.SCAN,
+                )
+            ]
+        )
+        await CatalogIndexer(scan_config, scan_db).index()
+        state = scan_db.get_source_refresh_state("approved")
+        assert state is not None
+        assert state.successful_generation == 1
+        assert state.manifest_generation is None
+    finally:
+        scan_db.close()
+
+    provider = ManifestCatalogProvider(_local_config(tmp_path, "missing.json"), db_path=db_path)
+    try:
+        with pytest.raises(BackendUnavailableError, match="no valid generation"):
+            await provider.load()
+        assert not provider.readiness().ready
+        with pytest.raises(BackendUnavailableError):
+            await provider.list(ListRequest(), RequestContext())
+    finally:
+        await provider.aclose()
+
+
 async def test_empty_manifest_is_valid_and_authoritatively_empty(tmp_path):
     (tmp_path / "unregistered.csv").write_text("hidden")
     (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "generation": 1, "artifacts": []}))
@@ -953,9 +987,12 @@ async def test_mocked_blob_manifest_matches_local_registered_metadata(tmp_path):
     try:
         artifacts = await blob._indexer._enumerate_blob_manifest(blob_source, MagicMock(), clients)
         assert blob._indexer._manifest_revisions["approved"] == (1, '"etag-one"')
-        blob._indexer._enumerate_blob_sources_concurrent = AsyncMock(
-            return_value=_EnumerationResult(artifacts, {"approved"})
-        )
+
+        async def enumerate_blob_sources(_sources):
+            blob._indexer._manifest_revisions["approved"] = (1, '"etag-one"')
+            return _EnumerationResult(artifacts, {"approved"})
+
+        blob._indexer._enumerate_blob_sources_concurrent = enumerate_blob_sources
         await blob.load()
         blob_artifact = (await blob.list(ListRequest(), RequestContext())).items[0]
         assert blob_artifact.reference == local_artifact.reference
@@ -1082,6 +1119,55 @@ async def test_blob_credential_failure_runs_real_manifest_path_without_listing(m
     assert "do-not-expose" not in (provider.readiness().reason or "")
     assert not provider._closed
     await provider.aclose()
+
+
+async def test_blob_setup_failure_preserves_healthy_local_manifest(tmp_path):
+    local_root = tmp_path / "local"
+    local_root.mkdir()
+    (local_root / "data.csv").write_text("local")
+    (local_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generation": 1,
+                "artifacts": [{"path": "data.csv", "artifact_id": "local-data"}],
+            }
+        )
+    )
+    provider = ManifestCatalogProvider(
+        CatalogConfig(
+            sources=[
+                SourceConfig(
+                    source_id="local",
+                    path=str(local_root),
+                    discovery="manifest",
+                    manifest="manifest.json",
+                ),
+                SourceConfig(
+                    source_id="blob",
+                    path="az://account123/container/prefix",
+                    discovery="manifest",
+                    manifest="manifest.json",
+                ),
+            ]
+        )
+    )
+    provider._indexer._enumerate_blob_sources_concurrent = AsyncMock(
+        side_effect=ImportError("azure dependency unavailable")
+    )
+    try:
+        with pytest.raises(BackendUnavailableError, match="blob"):
+            await provider.load()
+
+        states = {state.source_id: state for state in provider.readiness().sources}
+        assert states["local"].status == "success"
+        assert states["local"].manifest_generation == 1
+        assert states["blob"].status == "error"
+        assert states["blob"].error == "optional_dependency_missing: source refresh failed"
+        assert provider._db_owned.get_artifact("local-data", source_id="local") is not None
+        assert not provider.readiness().ready
+    finally:
+        await provider.aclose()
 
 
 def test_constructor_rejects_empty_sources_before_opening_sqlite():

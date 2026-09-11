@@ -483,7 +483,16 @@ class CatalogIndexer:
                 blob_sources.append(source)
 
         if blob_sources:
-            blob_result = await self._enumerate_blob_sources_concurrent(blob_sources)
+            try:
+                blob_result = await self._enumerate_blob_sources_concurrent(blob_sources)
+            except Exception as exc:
+                error = _safe_source_error(exc)
+                LOGGER.error("Failed to initialize Blob source enumeration: %s", type(exc).__name__)
+                blob_result = _EnumerationResult(
+                    [],
+                    set(),
+                    {_source_id(source): error for source in blob_sources},
+                )
             artifacts.extend(blob_result.artifacts)
             successful_source_ids.update(blob_result.successful_source_ids)
             errors.update(blob_result.errors)

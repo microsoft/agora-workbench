@@ -294,7 +294,11 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         return states
 
     def _has_successful_generation(self) -> bool:
-        successful = {state.source_id for state in self._current_source_states() if state.successful_generation > 0}
+        successful = {
+            state.source_id
+            for state in self._current_source_states()
+            if state.successful_generation > 0 and state.manifest_generation is not None
+        }
         return set(self._source_ids) <= successful
 
     async def load(self) -> int:
@@ -343,7 +347,11 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         if not self._load_attempted:
             return CatalogReadiness(False, False, states, "Manifest catalog load() has not completed.")
         expected = set(self._source_ids)
-        successful = {state.source_id for state in states if state.successful_generation > 0}
+        successful = {
+            state.source_id
+            for state in states
+            if state.successful_generation > 0 and state.manifest_generation is not None
+        }
         if not expected <= successful:
             return CatalogReadiness(False, False, states, self._last_error or "No valid manifest generation loaded.")
         if self._last_error is None:
