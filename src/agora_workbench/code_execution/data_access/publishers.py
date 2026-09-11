@@ -114,6 +114,28 @@ def _validate_artifact_name(name: str, *, allow_reserved: bool = False) -> None:
         raise ValueError("Artifact name is reserved for provider metadata.")
 
 
+def _open_posix_path_no_follow(path: Path, *, directory: bool = False) -> int:
+    """Open an absolute or relative path without following any symlink component."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    current = os.open(
+        os.path.sep,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        for index, part in enumerate(absolute_path.parts[1:]):
+            is_final = index == len(absolute_path.parts) - 2
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            if not is_final or directory:
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            next_fd = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
 # Regex for parsing tag-based destination strings.
 # Matches both closed (``<blob>name</blob>``) and unclosed (``<blob>name``)
 # forms to tolerate LLM output that occasionally omits the closing tag.
@@ -172,7 +194,11 @@ async def _copy_local_descriptors(
     context: RequestContext,
 ) -> TransferResult:
     """Copy a regular source descriptor to an already-secured destination descriptor."""
-    source_fd = os.open(local_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    source_fd = (
+        _open_posix_path_no_follow(local_path)
+        if os.name == "posix"
+        else os.open(local_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    )
     started = time.monotonic()
     total = 0
     digest = hashlib.sha256()
@@ -574,7 +600,7 @@ class BlobPublisher(AssetPublisher):
                 try:
                     self._staging_dir.rmdir()
                 except OSError:
-                    pass
+                    LOGGER.debug("BlobPublisher staging directory could not be removed", exc_info=True)
         result = TransferResult(
             uploaded.bytes_transferred,
             uploaded.checksum_sha256,
@@ -596,7 +622,7 @@ class BlobPublisher(AssetPublisher):
             ),
         )
         LOGGER.info("BlobPublisher: uploaded %d bytes → %s", result.bytes_transferred, display_uri)
-        return f"{self._account_url}/{self._container}/{blob_path}", result
+        return f"{self._account_url}{urlsplit(remote_uri).path}", result
 
 
 class GuiPublisher(AssetPublisher):
@@ -725,15 +751,23 @@ class LocalFilePublisher(AssetPublisher):
                 candidate = candidate.parent
         if candidate.is_symlink() or not candidate.is_dir():
             raise UnsafePathError("Local publisher root ancestor must be a real directory.", operation="upload")
-        self._anchor_fd = os.open(
-            candidate,
-            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-        )
+        self._anchor_fd = _open_posix_path_no_follow(candidate, directory=True)
         relative_existing = self._base_dir.relative_to(candidate).parts
         self._root_parts = tuple(relative_existing) if relative_existing else ()
         if not self._root_parts:
             stat_result = os.fstat(self._anchor_fd)
             self._root_identity = (stat_result.st_dev, stat_result.st_ino)
+            return
+        try:
+            self._base_dir.lstat()
+        except FileNotFoundError:
+            return
+        root_fd = _open_posix_path_no_follow(self._base_dir, directory=True)
+        try:
+            stat_result = os.fstat(root_fd)
+            self._root_identity = (stat_result.st_dev, stat_result.st_ino)
+        finally:
+            os.close(root_fd)
 
     def _open_verified_root(self) -> int:
         """Open/create the configured root beneath the retained trusted ancestor."""
@@ -745,7 +779,7 @@ class LocalFilePublisher(AssetPublisher):
                 try:
                     os.mkdir(part, mode=0o750, dir_fd=current)
                 except FileExistsError:
-                    pass
+                    LOGGER.debug("Local publisher root component already exists: %s", part)
                 next_fd = os.open(
                     part,
                     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
@@ -889,7 +923,7 @@ class LocalFilePublisher(AssetPublisher):
                 try:
                     os.mkdir(part, mode=0o750, dir_fd=parent_fd)
                 except FileExistsError:
-                    pass
+                    LOGGER.debug("Local publisher destination directory already exists: %s", part)
                 next_fd = os.open(
                     part,
                     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
@@ -933,7 +967,7 @@ class LocalFilePublisher(AssetPublisher):
             try:
                 os.unlink(temporary_name, dir_fd=parent_fd)
             except FileNotFoundError:
-                pass
+                LOGGER.debug("Local publisher temporary file was already committed or removed: %s", temporary_name)
             if parent_fd != root_fd:
                 os.close(parent_fd)
             os.close(root_fd)

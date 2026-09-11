@@ -10,13 +10,12 @@ import os
 import re
 import secrets
 import time
-from collections.abc import AsyncIterable, Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import BinaryIO
 from urllib.parse import urlsplit
-from collections.abc import Mapping
 
 from .errors import (
     TransferCancelledError,
@@ -64,7 +63,7 @@ class TransferOptions:
                 raise ValueError(f"{name} must be a non-negative integer or None.")
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive or None.")
-        if self.chunk_size < 1:
+        if isinstance(self.chunk_size, bool) or not isinstance(self.chunk_size, int) or self.chunk_size < 1:
             raise ValueError("chunk_size must be at least 1.")
         if self.expected_sha256 is not None:
             checksum = self.expected_sha256.lower()
@@ -259,9 +258,10 @@ async def stream_chunks_to_file(
     chunk has been written. Peak Workbench-owned payload memory is therefore
     bounded by one provider chunk plus ``options.chunk_size``.
     """
-    destination_path = Path(destination)
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = destination_path.with_name(f".{destination_path.name}.{secrets.token_hex(8)}.part")
+    destination_path = Path(os.path.abspath(os.fspath(destination)))
+    temporary_name = f".{destination_path.name}.{secrets.token_hex(8)}.part"
+    temporary_path = destination_path.with_name(temporary_name)
+    parent_fd: int | None = None
     display_resource = safe_transfer_resource(resource)
     started = time.monotonic()
     bytes_transferred = 0
@@ -273,7 +273,17 @@ async def stream_chunks_to_file(
 
     async def copy() -> None:
         nonlocal bytes_transferred
-        with temporary_path.open("xb", buffering=0) as output:
+        if parent_fd is None:
+            output_file = temporary_path.open("xb", buffering=0)
+        else:
+            output_descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=parent_fd,
+            )
+            output_file = os.fdopen(output_descriptor, "wb", buffering=0, closefd=True)
+        with output_file as output:
             async for provider_chunk in chunks:
                 check_transfer_cancelled(options, operation=operation, resource=resource)
                 view = memoryview(provider_chunk)
@@ -291,12 +301,46 @@ async def stream_chunks_to_file(
             output.flush()
             os.fsync(output.fileno())
 
+    def cleanup_temporary() -> None:
+        try:
+            if parent_fd is None:
+                temporary_path.unlink(missing_ok=True)
+            else:
+                os.unlink(temporary_name, dir_fd=parent_fd)
+        except FileNotFoundError:
+            return
+
     try:
+        if os.name == "posix":
+            parent_fd = os.open(
+                os.path.sep,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                for part in destination_path.parts[1:-1]:
+                    try:
+                        os.mkdir(part, mode=0o750, dir_fd=parent_fd)
+                    except FileExistsError:
+                        LOGGER.debug("Transfer destination directory already exists: %s", part)
+                    next_fd = os.open(
+                        part,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=parent_fd,
+                    )
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+            except BaseException:
+                os.close(parent_fd)
+                parent_fd = None
+                raise
+        else:
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
         if options.timeout_seconds is None:
             await copy()
         else:
             async with asyncio.timeout(options.timeout_seconds):
                 await copy()
+        check_transfer_cancelled(options, operation=operation, resource=resource)
         actual_checksum = digest.hexdigest()
         if options.expected_sha256 is not None and not secrets.compare_digest(actual_checksum, options.expected_sha256):
             raise TransferChecksumError(
@@ -305,19 +349,37 @@ async def stream_chunks_to_file(
                 operation=operation,
             )
         if options.create_exclusive:
-            os.link(temporary_path, destination_path)
-            temporary_path.unlink()
+            if parent_fd is None:
+                os.link(temporary_path, destination_path)
+                temporary_path.unlink()
+            else:
+                os.link(
+                    temporary_name,
+                    destination_path.name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+                os.unlink(temporary_name, dir_fd=parent_fd)
         else:
-            os.replace(temporary_path, destination_path)
+            if parent_fd is None:
+                os.replace(temporary_path, destination_path)
+            else:
+                os.replace(
+                    temporary_name,
+                    destination_path.name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                )
     except asyncio.CancelledError:
-        temporary_path.unlink(missing_ok=True)
+        cleanup_temporary()
         await emit_transfer_diagnostic(
             options,
             TransferDiagnostic(operation, "cancelled", context, display_resource, bytes_transferred),
         )
         raise
     except TimeoutError as exc:
-        temporary_path.unlink(missing_ok=True)
+        cleanup_temporary()
         error = TransferTimeoutError(
             f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
             resource_id=display_resource,
@@ -331,7 +393,7 @@ async def stream_chunks_to_file(
         )
         raise error from exc
     except BaseException as exc:
-        temporary_path.unlink(missing_ok=True)
+        cleanup_temporary()
         await emit_transfer_diagnostic(
             options,
             TransferDiagnostic(
@@ -339,6 +401,9 @@ async def stream_chunks_to_file(
             ),
         )
         raise
+    finally:
+        if parent_fd is not None:
+            os.close(parent_fd)
 
     result = TransferResult(
         bytes_transferred=bytes_transferred,

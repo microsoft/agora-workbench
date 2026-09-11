@@ -428,6 +428,21 @@ class LocalFileFetcher(AssetFetcher):
         self._allowed_root_fds.clear()
         self._allowed_root_identities.clear()
 
+    def __del__(self) -> None:
+        """Defensively release retained descriptors when explicit cleanup is missed."""
+        try:
+            for descriptor in getattr(self, "_allowed_root_fds", ()):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    LOGGER.debug("LocalFileFetcher descriptor was already closed during finalization", exc_info=True)
+            if hasattr(self, "_allowed_root_fds"):
+                self._allowed_root_fds.clear()
+            if hasattr(self, "_allowed_root_identities"):
+                self._allowed_root_identities.clear()
+        except Exception:
+            LOGGER.debug("LocalFileFetcher finalization could not complete cleanly", exc_info=True)
+
     def can_handle(self, qualified_name: str) -> bool:
         """Check if this is a local filesystem path."""
         return (
@@ -503,7 +518,7 @@ class LocalFileFetcher(AssetFetcher):
         LOGGER.info("Streaming local file to cache: %s", source)
 
         async def chunks():
-            with os.fdopen(descriptor, "rb", closefd=True) as input_file:
+            with os.fdopen(os.dup(descriptor), "rb", closefd=True) as input_file:
                 while True:
                     chunk = input_file.read(options.chunk_size)
                     if not chunk:
@@ -511,14 +526,17 @@ class LocalFileFetcher(AssetFetcher):
                     yield chunk
                     await asyncio.sleep(0)
 
-        return await stream_chunks_to_file(
-            chunks(),
-            dest_path,
-            options=options,
-            context=context,
-            operation="download",
-            resource=str(source),
-        )
+        try:
+            return await stream_chunks_to_file(
+                chunks(),
+                dest_path,
+                options=options,
+                context=context,
+                operation="download",
+                resource=str(source),
+            )
+        finally:
+            os.close(descriptor)
 
     # ------------------------------------------------------------------
     # Internal helpers

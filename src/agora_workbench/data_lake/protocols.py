@@ -182,7 +182,7 @@ class StreamingArtifactFetcher(Protocol):
         context: RequestContext | None = None,
     ) -> int:
         """Stream an artifact to a file and return the committed byte count."""
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
@@ -199,7 +199,7 @@ class StreamingArtifactPublisher(Protocol):
         context: RequestContext | None = None,
     ) -> str:
         """Publish a file after enforcing the supplied transfer guarantees."""
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
@@ -215,7 +215,7 @@ class DetailedStreamingArtifactFetcher(Protocol):
         context: RequestContext | None = None,
     ) -> TransferResult:
         """Stream an artifact and return integrity and caller diagnostics."""
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
@@ -232,4 +232,4 @@ class DetailedStreamingArtifactPublisher(Protocol):
         context: RequestContext | None = None,
     ) -> tuple[str, TransferResult]:
         """Publish a file and return its locator plus transfer result."""
-        ...
+        raise NotImplementedError

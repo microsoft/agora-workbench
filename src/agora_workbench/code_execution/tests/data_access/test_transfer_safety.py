@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import os
 import tracemalloc
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -39,6 +40,12 @@ from ...data_access.publishers import BlobPublisher, LocalFilePublisher, ServerP
 
 def _part_files(parent: Path) -> list[Path]:
     return list(parent.glob(".*.part"))
+
+
+@pytest.mark.parametrize("chunk_size", [True, 1.5])
+def test_transfer_options_reject_non_integer_chunk_sizes(chunk_size):
+    with pytest.raises(ValueError, match="chunk_size"):
+        TransferOptions(chunk_size=chunk_size)
 
 
 async def test_local_streaming_peak_memory_is_independent_of_file_size(tmp_path):
@@ -133,6 +140,48 @@ async def test_timeout_cleans_partial_and_preserves_existing_destination(tmp_pat
     assert _part_files(tmp_path) == []
 
 
+async def test_transfer_cancellation_after_final_chunk_prevents_commit(tmp_path):
+    destination = tmp_path / "destination.bin"
+    destination.write_bytes(b"previous")
+    cancellation = asyncio.Event()
+
+    async def chunks():
+        yield b"complete"
+        cancellation.set()
+
+    with pytest.raises(TransferCancelledError):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(cancellation_event=cancellation),
+            context=RequestContext(),
+        )
+
+    assert destination.read_bytes() == b"previous"
+    assert _part_files(tmp_path) == []
+
+
+async def test_transfer_rejects_symlinked_destination_parent(tmp_path):
+    safe = tmp_path / "safe"
+    outside = tmp_path / "outside"
+    safe.mkdir()
+    outside.mkdir()
+    (safe / "link").symlink_to(outside, target_is_directory=True)
+
+    async def chunks():
+        yield b"content"
+
+    with pytest.raises(OSError):
+        await stream_chunks_to_file(
+            chunks(),
+            safe / "link" / "destination.bin",
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert list(outside.iterdir()) == []
+
+
 async def test_local_fetcher_rejects_traversal_and_symlink_escape(tmp_path):
     allowed = tmp_path / "allowed"
     allowed.mkdir()
@@ -176,6 +225,38 @@ async def test_local_fetcher_root_swap_after_containment_uses_retained_verified_
     await fetcher.close()
 
 
+async def test_local_fetcher_closes_source_when_destination_setup_fails(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    safe = tmp_path / "safe"
+    outside = tmp_path / "outside"
+    safe.mkdir()
+    outside.mkdir()
+    (safe / "link").symlink_to(outside, target_is_directory=True)
+    fetcher = LocalFileFetcher([str(tmp_path)])
+    checked_path, descriptor = fetcher._open_checked(str(source))
+    monkeypatch.setattr(fetcher, "_open_checked", lambda _qualified_name: (checked_path, descriptor))
+
+    with pytest.raises(OSError):
+        await fetcher.fetch_to_file(str(source), safe / "link" / "destination.bin")
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+    await fetcher.close()
+
+
+def test_local_fetcher_finalizer_closes_retained_root_descriptors(tmp_path):
+    fetcher = LocalFileFetcher([str(tmp_path)])
+    descriptor = fetcher._allowed_root_fds[0]
+
+    fetcher.__del__()
+
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+    assert fetcher._allowed_root_fds == []
+    assert fetcher._allowed_root_identities == []
+
+
 async def test_local_publisher_rejects_symlink_parent_before_writing(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"content")
@@ -209,6 +290,56 @@ async def test_local_publisher_rejects_root_replaced_by_symlink_after_constructi
 
     assert list(outside.iterdir()) == []
     await publisher.close()
+
+
+async def test_local_publisher_rejects_existing_root_replaced_before_first_publish(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    publisher = LocalFilePublisher(output_root)
+    original_root = tmp_path / "outputs-original"
+    output_root.rename(original_root)
+    output_root.mkdir()
+
+    with pytest.raises(UnsafePathError, match="replaced"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert list(output_root.iterdir()) == []
+    assert list(original_root.iterdir()) == []
+    await publisher.close()
+
+
+@pytest.mark.parametrize("publisher_kind", ["local", "blob"])
+async def test_publishers_reject_source_paths_with_symlinked_parent(tmp_path, publisher_kind):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    source = actual / "source.bin"
+    source.write_bytes(b"secret")
+    linked = tmp_path / "linked"
+    linked.symlink_to(actual, target_is_directory=True)
+    source_through_link = linked / "source.bin"
+
+    if publisher_kind == "local":
+        publisher = LocalFilePublisher(tmp_path / "outputs")
+        with pytest.raises(OSError):
+            await publisher.publish(source_through_link, "result.bin", "session")
+        assert not (tmp_path / "outputs" / "session" / "result.bin").exists()
+        await publisher.close()
+    else:
+        blob_client = MagicMock()
+        blob_client.upload_blob = AsyncMock()
+        service_client = MagicMock()
+        service_client.get_blob_client.return_value = blob_client
+        publisher = BlobPublisher(
+            "https://account123.blob.core.windows.net",
+            "container",
+            staging_dir=tmp_path / "staging",
+        )
+        publisher._client = service_client
+        with pytest.raises(OSError):
+            await publisher.publish(source_through_link, "result.bin", "session")
+        blob_client.upload_blob.assert_not_awaited()
 
 
 async def test_publishers_reject_provider_reserved_names_before_side_effects(tmp_path):
@@ -468,6 +599,21 @@ async def test_blob_publisher_streams_file_and_returns_auditable_result(tmp_path
     assert uri == "https://account123.blob.core.windows.net/container/published/session/result.bin"
     assert result.context is context
     assert result.resource == "az://account123/container/published/session/result.bin"
+
+
+async def test_blob_publisher_returns_encoded_https_locator(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    blob_client = MagicMock()
+    blob_client.upload_blob = AsyncMock()
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
+    publisher._client = service_client
+
+    uri = await publisher.publish(source, "file name?.csv", "session")
+
+    assert uri == "https://account123.blob.core.windows.net/container/session/file%20name%3F.csv"
 
 
 async def test_blob_publisher_uploads_immutable_snapshot_and_reports_uploaded_checksum(tmp_path):
