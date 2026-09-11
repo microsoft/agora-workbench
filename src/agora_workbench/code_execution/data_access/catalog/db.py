@@ -1186,6 +1186,24 @@ class CatalogDB:
             ).fetchall()
             return {row["logical_path"]: _record_from_row(row) for row in rows}
 
+    def retained_artifact_ids_by_source_path(self, source_id: str) -> dict[str, set[str]]:
+        """Return current and revision artifact IDs grouped by retained logical path."""
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                """SELECT logical_path, id AS artifact_id
+                   FROM artifacts
+                   WHERE source_id=?
+                   UNION
+                   SELECT logical_path, artifact_id
+                   FROM artifact_revisions
+                   WHERE source_id=?""",
+                (source_id, source_id),
+            ).fetchall()
+        retained: dict[str, set[str]] = {}
+        for row in rows:
+            retained.setdefault(row["logical_path"], set()).add(row["artifact_id"])
+        return retained
+
     def delete_artifacts(self, artifact_ids: list[str], *, deleted_at: str | None = None) -> None:
         """Create tombstone revisions; history is retained until explicit purge."""
         with self._write_transaction():

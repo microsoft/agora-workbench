@@ -928,6 +928,7 @@ class CatalogIndexer:
         storage_paths: dict[str, str] = {}
         aliases: dict[tuple[str, str], tuple[str, str]] = {}
         existing_by_path = self._db.records_by_source_path(source_id, include_deleted=True)
+        retained_ids_by_path = self._db.retained_artifact_ids_by_source_path(source_id)
         for artifact in artifacts:
             artifact_id = artifact["artifact_id"]
             logical_path = artifact["logical_path"]
@@ -951,6 +952,12 @@ class CatalogIndexer:
             if existing_at_path is not None and existing_at_path.id != artifact_id:
                 raise ValueError(
                     f"Manifest source {source_id!r} assigns {logical_path!r} to "
+                    f"artifact_id {artifact_id!r}, but that path belongs to another artifact"
+                )
+            retained_ids = retained_ids_by_path.get(logical_path, set())
+            if retained_ids - {artifact_id}:
+                raise ValueError(
+                    f"Manifest source {source_id!r} assigns retained path {logical_path!r} to "
                     f"artifact_id {artifact_id!r}, but that path belongs to another artifact"
                 )
             previous_locator = storage_paths.get(storage_uri)

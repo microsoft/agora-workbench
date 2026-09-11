@@ -495,6 +495,69 @@ async def test_manifest_stable_id_moves_and_preserves_pinned_revisions_across_re
         await restarted.aclose()
 
 
+async def test_manifest_rejects_reassigning_moved_artifacts_retained_path(tmp_path):
+    old_path = tmp_path / "old.csv"
+    new_path = tmp_path / "new.csv"
+    old_path.write_text("old")
+    new_path.write_text("new")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generation": 1,
+                "artifacts": [{"path": "old.csv", "artifact_id": "stable-id"}],
+            }
+        )
+    )
+    provider = ManifestCatalogProvider(_local_config(tmp_path))
+    try:
+        await provider.load()
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 2,
+                    "artifacts": [{"path": "new.csv", "artifact_id": "stable-id"}],
+                }
+            )
+        )
+        await provider.load()
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 3,
+                    "artifacts": [
+                        {"path": "new.csv", "artifact_id": "stable-id"},
+                        {"path": "old.csv", "artifact_id": "replacement-id"},
+                    ],
+                }
+            )
+        )
+
+        with pytest.raises(BackendUnavailableError, match="manifest_invalid"):
+            await provider.load()
+
+        current = await provider.get(
+            ArtifactReference("stable-id", source_id="approved"),
+            RequestContext(),
+        )
+        pinned = await provider.get(
+            ArtifactReference("stable-id", source_id="approved", revision=1),
+            RequestContext(),
+        )
+        assert current.locator.uri == str(new_path)
+        assert pinned.locator.uri == str(old_path)
+        with pytest.raises(ArtifactNotFoundError):
+            await provider.get(
+                ArtifactReference("replacement-id", source_id="approved"),
+                RequestContext(),
+            )
+    finally:
+        await provider.aclose()
+
+
 async def test_tombstoned_manifest_id_can_be_reregistered_at_new_path(tmp_path):
     (tmp_path / "old.csv").write_text("old")
     (tmp_path / "new.csv").write_text("new")
