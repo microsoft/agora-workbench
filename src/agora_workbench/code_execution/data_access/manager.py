@@ -414,10 +414,14 @@ class DataLakeDataManager:
                     fetcher.__class__.__name__,
                     sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
                 )
-                detailed_overridden = type(fetcher).fetch_to_file_result is not AssetFetcher.fetch_to_file_result
-                legacy_instance_override = "fetch_to_file" in vars(fetcher)
-                if detailed_overridden and not legacy_instance_override:
-                    result = await fetcher.fetch_to_file_result(
+                detailed_fetch = getattr(fetcher, "fetch_to_file_result", None)
+                detailed_implementation = getattr(type(fetcher), "fetch_to_file_result", None)
+                if (
+                    "fetch_to_file" not in getattr(fetcher, "__dict__", {})
+                    and callable(detailed_fetch)
+                    and detailed_implementation is not AssetFetcher.fetch_to_file_result
+                ):
+                    result = await detailed_fetch(
                         qualified_name,
                         dest_path,
                         options=transfer_options or self._transfer_options,

@@ -215,10 +215,16 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
             return ResolvedArtifact(reference, artifact.locator)
 
     class BlobFetcher:
+        __slots__ = ("destination",)
+
+        def __init__(self):
+            self.destination = None
+
         def can_handle(self, qualified_name):
             return qualified_name.startswith("az://")
 
         async def fetch_to_file(self, qualified_name, dest_path):
+            self.destination = dest_path
             dest_path.write_text("blob-payload")
             return len("blob-payload")
 
@@ -265,6 +271,10 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
         reference = ArtifactReference("blob-artifact", "blob-source", page.items[0].revision)
         path = await session.data_manager.get_cache_path(f"<blob>{_encode_reference(reference)}</blob>")
         assert path.read_text() == "blob-payload"
+        legacy_fetcher = session.data_manager._fetchers[0]
+        assert legacy_fetcher.destination != path
+        assert ".legacy-part" in legacy_fetcher.destination.name
+        assert not legacy_fetcher.destination.exists()
     finally:
         await server.session_manager.aclose_all_sessions()
         await integration.shutdown()
