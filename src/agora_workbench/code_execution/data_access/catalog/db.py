@@ -29,7 +29,7 @@ from .identity import (
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _VECTOR_EXTRA = "agora-workbench[catalog-vector]"
 _VECTOR_TABLE_NAME = "artifacts_vec"
 _VECTOR_DIMENSIONS_RE = re.compile(r"embedding\s+float\[(\d+)\]", re.IGNORECASE)
@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS catalog_source_refreshes (
     last_attempt_at TEXT NOT NULL,
     last_success_at TEXT,
     error TEXT,
+    manifest_generation INTEGER,
+    manifest_etag TEXT,
     FOREIGN KEY(source_id) REFERENCES catalog_sources(source_id)
 );
 
@@ -222,6 +224,8 @@ class SourceRefreshState:
     last_attempt_at: str
     last_success_at: str | None
     error: str | None
+    manifest_generation: int | None = None
+    manifest_etag: str | None = None
 
 
 def artifact_id_from_uri(uri: str) -> str:
@@ -315,11 +319,20 @@ class CatalogDB:
         self._conn = connection
         try:
             self._probe_fts5()
-            if version < SCHEMA_VERSION and self._has_legacy_schema():
+            if version < 2 and self._has_legacy_schema():
                 self._migrate_legacy_schema()
             else:
                 connection.executescript(f"BEGIN IMMEDIATE;\n{_SCHEMA_SQL}")
                 try:
+                    refresh_columns = {
+                        row["name"] for row in connection.execute("PRAGMA table_info(catalog_source_refreshes)")
+                    }
+                    if "manifest_generation" not in refresh_columns:
+                        connection.execute(
+                            "ALTER TABLE catalog_source_refreshes ADD COLUMN manifest_generation INTEGER"
+                        )
+                    if "manifest_etag" not in refresh_columns:
+                        connection.execute("ALTER TABLE catalog_source_refreshes ADD COLUMN manifest_etag TEXT")
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                     connection.commit()
                 except Exception:
@@ -620,6 +633,7 @@ class CatalogDB:
         checksum_sha256: str | None = None,
         aliases: tuple[str, ...] | list[str] = (),
         _replace_embedding: bool = False,
+        _allow_move: bool = False,
         _commit: bool = True,
     ) -> str:
         """Insert or update an artifact and return its persisted logical ID."""
@@ -650,6 +664,7 @@ class CatalogDB:
                     checksum_sha256=checksum_sha256,
                     aliases=aliases,
                     _replace_embedding=_replace_embedding,
+                    _allow_move=_allow_move,
                     _commit=False,
                 )
         if embedding is not None:
@@ -677,7 +692,9 @@ class CatalogDB:
                 (source_id, logical_path),
             ).fetchone()
             configured_alias = None
-            if existing_by_path is not None:
+            if existing_by_id is not None:
+                chosen_id = existing_by_id["id"]
+            elif existing_by_path is not None:
                 chosen_id = existing_by_path["id"]
                 if artifact_id is not None and artifact_id != chosen_id:
                     configured_alias = artifact_id
@@ -689,13 +706,21 @@ class CatalogDB:
                 and existing_by_id["source_id"].startswith("legacy-")
                 and existing_by_id["logical_path"].startswith("imported/")
             )
-            if existing_by_id is not None and existing_by_id["id"] == chosen_id and not adopting_legacy:
-                if (existing_by_id["source_id"], existing_by_id["logical_path"]) != (source_id, logical_path):
-                    raise ValueError(
-                        f"Artifact ID {chosen_id!r} is already assigned to "
-                        f"{existing_by_id['source_id']}:{existing_by_id['logical_path']}"
-                    )
-            existing = existing_by_path or (existing_by_id if adopting_legacy else None)
+            if existing_by_id is not None and existing_by_id["source_id"] != source_id and not adopting_legacy:
+                raise ValueError(
+                    f"Artifact ID {chosen_id!r} is already assigned to source {existing_by_id['source_id']!r}"
+                )
+            if (
+                existing_by_id is not None
+                and existing_by_id["source_id"] == source_id
+                and existing_by_id["logical_path"] != logical_path
+                and not adopting_legacy
+                and not _allow_move
+            ):
+                raise ValueError(
+                    f"Artifact ID {chosen_id!r} is already assigned to {source_id}:{existing_by_id['logical_path']}"
+                )
+            existing = existing_by_id or existing_by_path
 
             conflicting_alias = self.conn.execute(
                 "SELECT artifact_id FROM artifact_aliases WHERE namespace='artifact-id' AND alias=?",
@@ -863,10 +888,12 @@ class CatalogDB:
         artifact_count: int | None,
         error: str | None,
         root_uri: str | None = None,
+        manifest_generation: int | None = None,
+        manifest_etag: str | None = None,
     ) -> None:
         del source_type, root_uri
         existing = self.conn.execute(
-            "SELECT attempt_generation, successful_generation, last_success_at "
+            "SELECT attempt_generation, successful_generation, last_success_at, manifest_generation, manifest_etag "
             "FROM catalog_source_refreshes WHERE source_id=?",
             (source_id,),
         ).fetchone()
@@ -875,11 +902,15 @@ class CatalogDB:
             attempt_generation if succeeded else (existing["successful_generation"] if existing else 0)
         )
         last_success_at = attempted_at if succeeded else (existing["last_success_at"] if existing else None)
+        successful_manifest_generation = (
+            manifest_generation if succeeded else (existing["manifest_generation"] if existing else None)
+        )
+        successful_manifest_etag = manifest_etag if succeeded else (existing["manifest_etag"] if existing else None)
         self.conn.execute(
             """INSERT INTO catalog_source_refreshes(
                    source_id, attempt_generation, successful_generation, status, artifact_count,
-                   last_attempt_at, last_success_at, error
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   last_attempt_at, last_success_at, error, manifest_generation, manifest_etag
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(source_id) DO UPDATE SET
                    attempt_generation=excluded.attempt_generation,
                    successful_generation=excluded.successful_generation,
@@ -887,7 +918,9 @@ class CatalogDB:
                    artifact_count=excluded.artifact_count,
                    last_attempt_at=excluded.last_attempt_at,
                    last_success_at=excluded.last_success_at,
-                   error=excluded.error""",
+                   error=excluded.error,
+                   manifest_generation=excluded.manifest_generation,
+                   manifest_etag=excluded.manifest_etag""",
             (
                 source_id,
                 attempt_generation,
@@ -897,6 +930,8 @@ class CatalogDB:
                 attempted_at,
                 last_success_at,
                 error,
+                successful_manifest_generation,
+                successful_manifest_etag,
             ),
         )
 
@@ -1207,6 +1242,37 @@ class CatalogDB:
             ).fetchall()
             return [row[0] for row in rows]
 
+    def list_artifacts(
+        self,
+        *,
+        source_ids: tuple[str, ...] = (),
+        domain: str | None = None,
+        source_type: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[ArtifactRecord]:
+        """List current artifacts deterministically for public provider adapters."""
+        conditions = ["deleted_at IS NULL"]
+        params: list[object] = []
+        if source_ids:
+            placeholders = ",".join("?" for _ in source_ids)
+            conditions.append(f"source_id IN ({placeholders})")
+            params.extend(source_ids)
+        if domain:
+            conditions.append("domain = ?")
+            params.append(domain)
+        if source_type:
+            conditions.append("source_type = ?")
+            params.append(source_type)
+        with self._read_snapshot() as connection:
+            rows = connection.execute(
+                f"""SELECT * FROM artifacts
+                    WHERE {" AND ".join(conditions)}
+                    ORDER BY source_id, logical_path, id LIMIT ? OFFSET ?""",
+                (*params, max(0, limit), max(0, offset)),
+            ).fetchall()
+        return [_record_from_row(row) for row in rows]
+
     def search(
         self,
         query: str,
@@ -1215,8 +1281,11 @@ class CatalogDB:
         source_type: Optional[str] = None,
         top: int = 10,
         hybrid_alpha: float = 0.5,
+        source_ids: tuple[str, ...] = (),
+        offset: int = 0,
     ) -> list[ArtifactRecord]:
-        top = max(0, min(top, 100))
+        top = max(0, min(top, 1000))
+        offset = max(0, offset)
         if top == 0:
             return []
         domain = domain or None
@@ -1234,18 +1303,23 @@ class CatalogDB:
                 if source_type:
                     conditions.append("source_type = ?")
                     params.append(source_type)
+                if source_ids:
+                    placeholders = ",".join("?" for _ in source_ids)
+                    conditions.append(f"source_id IN ({placeholders})")
+                    params.extend(source_ids)
                 rows = connection.execute(
                     f"""SELECT * FROM artifacts
                         WHERE {" AND ".join(conditions)}
-                        ORDER BY source_id, logical_path, id LIMIT ?""",
-                    (*params, top),
+                        ORDER BY source_id, logical_path, id LIMIT ? OFFSET ?""",
+                    (*params, top, offset),
                 ).fetchall()
                 return [_record_from_row(row) for row in rows]
 
             fts_scores: dict[str, float] = {}
             vec_scores: dict[str, float] = {}
             candidate_keys: dict[str, tuple[str, str]] = {}
-            candidate_limit = min(max(top * 3, top), 300)
+            required_candidates = offset + top
+            candidate_limit = max(required_candidates * 3, required_candidates)
             fts_query = self._literal_fts_query(stripped_query)
             if fts_query:
                 conditions = ["artifacts_fts MATCH ?", "a.deleted_at IS NULL"]
@@ -1256,6 +1330,10 @@ class CatalogDB:
                 if source_type:
                     conditions.append("a.source_type = ?")
                     params.append(source_type)
+                if source_ids:
+                    placeholders = ",".join("?" for _ in source_ids)
+                    conditions.append(f"a.source_id IN ({placeholders})")
+                    params.extend(source_ids)
                 fts_rows = connection.execute(
                     f"""SELECT a.id, a.source_id, a.logical_path, rank FROM artifacts_fts fts
                        JOIN artifacts a ON a.rowid = fts.rowid
@@ -1281,7 +1359,7 @@ class CatalogDB:
                             "Catalog contains vectors with unknown model identity; rebuild vectors before searching"
                         )
                 serialized_embedding = _serialize_vector(query_embedding)
-                if domain or source_type:
+                if domain or source_type or source_ids:
                     conditions = ["a.deleted_at IS NULL"]
                     params = [serialized_embedding]
                     if domain:
@@ -1290,6 +1368,10 @@ class CatalogDB:
                     if source_type:
                         conditions.append("a.source_type = ?")
                         params.append(source_type)
+                    if source_ids:
+                        placeholders = ",".join("?" for _ in source_ids)
+                        conditions.append(f"a.source_id IN ({placeholders})")
+                        params.extend(source_ids)
                     vec_rows = connection.execute(
                         f"""SELECT a.id, a.source_id, a.logical_path,
                                    vec_distance_L2(v.embedding, ?) AS distance
@@ -1333,7 +1415,7 @@ class CatalogDB:
                     item[0],
                 ),
             )
-            selected = scored[:top]
+            selected = scored[offset : offset + top]
             placeholders = ",".join("?" for _ in selected)
             rows = connection.execute(
                 f"SELECT * FROM artifacts WHERE id IN ({placeholders})",

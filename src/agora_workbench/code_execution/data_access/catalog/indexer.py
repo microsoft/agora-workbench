@@ -11,7 +11,14 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Optional
+
+from agora_workbench.data_lake.manifest import (
+    MAX_MANIFEST_BYTES,
+    CatalogManifest,
+    ManifestArtifact,
+)
 
 from .identity import (
     azure_uri_from_blob_name,
@@ -20,10 +27,11 @@ from .identity import (
     normalize_logical_path,
     parse_azure_uri,
     sanitize_uri_for_display,
+    split_alias,
     stable_source_id,
 )
 
-from .config import CatalogConfig, SourceConfig
+from .config import CatalogConfig, DiscoveryMode, SourceConfig
 from .db import ArtifactRecord, CatalogDB, artifact_id_from_uri
 from .embeddings import EmbeddingProvider, create_embedding_provider
 
@@ -101,6 +109,68 @@ class _EnumerationResult:
     errors: dict[str, str] = field(default_factory=dict)
 
 
+class _DuplicateManifestKeyError(ValueError):
+    pass
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateManifestKeyError(f"Duplicate JSON object key: {key!r}")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> object:
+    raise ValueError(f"Unsupported JSON numeric constant: {value}")
+
+
+def _safe_source_error(exc: BaseException) -> str:
+    error_type = type(exc).__name__.lower()
+    if isinstance(exc, FileNotFoundError):
+        category = "manifest_missing"
+    elif isinstance(exc, PermissionError) or "credential" in error_type or "authentication" in error_type:
+        category = "credential_or_access_failure"
+    elif isinstance(exc, ValueError):
+        category = "manifest_invalid"
+    elif isinstance(exc, ImportError):
+        category = "optional_dependency_missing"
+    else:
+        category = "source_unavailable"
+    return f"{category}: source refresh failed"
+
+
+@dataclass(frozen=True)
+class SourceDryRun:
+    """Planned changes for one source without mutating SQLite."""
+
+    source_id: str
+    discovery: str
+    added: int = 0
+    updated: int = 0
+    deleted: int = 0
+    unchanged: int = 0
+    manifest_generation: int | None = None
+    manifest_etag: str | None = None
+    configuration_valid: bool = True
+    manifest_checked: bool = False
+    manifest_content_valid: bool | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class CatalogDryRunReport:
+    """Mutation-free catalog refresh preview."""
+
+    sources: tuple[SourceDryRun, ...]
+    configuration_valid: bool = True
+
+    @property
+    def has_errors(self) -> bool:
+        return any(source.error is not None for source in self.sources)
+
+
 class CatalogIndexer:
     """Scans configured sources and populates the catalog database."""
 
@@ -127,6 +197,7 @@ class CatalogIndexer:
         self._db = db
         self._credential_provider = credential_provider
         self._embedding_provider: Optional[EmbeddingProvider] = embedding_provider
+        self._manifest_revisions: dict[str, tuple[int, str]] = {}
 
     @property
     def embedding_provider(self) -> Optional[EmbeddingProvider]:
@@ -163,6 +234,7 @@ class CatalogIndexer:
             Number of artifacts indexed (new + updated).
         """
         sources = self._validated_sources()
+        self._manifest_revisions = {}
         enumeration = await self._enumerate_all_sources(sources)
         all_artifacts = enumeration.artifacts
         attempted_at = datetime.now(timezone.utc).isoformat()
@@ -228,6 +300,7 @@ class CatalogIndexer:
         source_results = []
         for source, source_id in sources:
             succeeded = source_id in enumeration.successful_source_ids
+            manifest_revision = self._manifest_revisions.get(source_id)
             source_results.append(
                 {
                     "source_id": source_id,
@@ -241,6 +314,8 @@ class CatalogIndexer:
                     "succeeded": succeeded,
                     "artifact_count": artifact_counts.get(source_id, 0) if succeeded else None,
                     "error": None if succeeded else enumeration.errors.get(source_id, "Source enumeration failed"),
+                    "manifest_generation": manifest_revision[0] if succeeded and manifest_revision else None,
+                    "manifest_etag": manifest_revision[1] if succeeded and manifest_revision else None,
                 }
             )
 
@@ -250,6 +325,16 @@ class CatalogIndexer:
         self._db.apply_refresh_batch(rows, stale_ids, source_results, vector_model_id)
         if stale_ids:
             LOGGER.info("Tombstoned %d stale artifacts.", len(stale_ids))
+
+        manifest_errors = {
+            source_id: error
+            for source_id, error in enumeration.errors.items()
+            if next(source.discovery for source, candidate_id in sources if candidate_id == source_id)
+            is DiscoveryMode.MANIFEST
+        }
+        if manifest_errors:
+            details = "; ".join(f"{source_id}: {error}" for source_id, error in sorted(manifest_errors.items()))
+            raise RuntimeError(f"Manifest refresh failed: {details}")
 
         # Log warning for artifacts without descriptions
         no_desc_count = sum(1 for a in all_artifacts if not a.get("description"))
@@ -270,6 +355,79 @@ class CatalogIndexer:
             return 0
         LOGGER.info("Indexed %d new or updated artifacts (%d total).", len(to_index), len(all_artifacts))
         return len(to_index)
+
+    async def dry_run(self) -> CatalogDryRunReport:
+        """Enumerate and diff sources without writing SQLite or computing embeddings."""
+        sources = self._validated_sources()
+        self._manifest_revisions = {}
+        enumeration = await self._enumerate_all_sources(sources)
+        artifacts_by_source: dict[str, list[dict]] = {}
+        for artifact in enumeration.artifacts:
+            artifacts_by_source.setdefault(artifact["source_id"], []).append(artifact)
+
+        planned: list[SourceDryRun] = []
+        for source, source_id in sources:
+            error = enumeration.errors.get(source_id)
+            revision = self._manifest_revisions.get(source_id)
+            if error is not None:
+                planned.append(
+                    SourceDryRun(
+                        source_id=source_id,
+                        discovery=source.discovery.value,
+                        manifest_generation=revision[0] if revision else None,
+                        manifest_etag=revision[1] if revision else None,
+                        manifest_checked=source.discovery is DiscoveryMode.MANIFEST,
+                        manifest_content_valid=(False if source.discovery is DiscoveryMode.MANIFEST else None),
+                        error=error,
+                    )
+                )
+                continue
+            existing = self._db.records_by_source_path(source_id, include_deleted=True)
+            discovered = {artifact["logical_path"]: artifact for artifact in artifacts_by_source.get(source_id, [])}
+            added = updated = unchanged = 0
+            for logical_path, artifact in discovered.items():
+                record = existing.get(logical_path)
+                if record is None:
+                    added += 1
+                elif (
+                    record.deleted_at is not None
+                    or record.storage_uri != artifact["storage_uri"]
+                    or record.content_revision != artifact["content_revision"]
+                    or record.metadata_revision != artifact["metadata_revision"]
+                ):
+                    updated += 1
+                else:
+                    unchanged += 1
+            deleted = sum(
+                record.deleted_at is None and logical_path not in discovered
+                for logical_path, record in existing.items()
+            )
+            planned.append(
+                SourceDryRun(
+                    source_id=source_id,
+                    discovery=source.discovery.value,
+                    added=added,
+                    updated=updated,
+                    deleted=deleted,
+                    unchanged=unchanged,
+                    manifest_generation=revision[0] if revision else None,
+                    manifest_etag=revision[1] if revision else None,
+                    manifest_checked=source.discovery is DiscoveryMode.MANIFEST,
+                    manifest_content_valid=(True if source.discovery is DiscoveryMode.MANIFEST else None),
+                )
+            )
+        return CatalogDryRunReport(tuple(planned))
+
+    def _record_manifest_revision(self, source_id: str, generation: int, etag: str) -> None:
+        state = self._db.get_source_refresh_state(source_id)
+        if state is not None and state.manifest_generation is not None:
+            if generation < state.manifest_generation:
+                raise ValueError(
+                    f"Manifest generation {generation} is older than cached generation {state.manifest_generation}"
+                )
+            if generation == state.manifest_generation and state.manifest_etag not in {None, etag}:
+                raise ValueError("Manifest content changed without advancing its generation")
+        self._manifest_revisions[source_id] = (generation, etag)
 
     def _validated_sources(self) -> list[tuple[SourceConfig, str]]:
         """Resolve normalized source identities and reject ambiguous duplicate refresh ownership."""
@@ -303,7 +461,10 @@ class CatalogIndexer:
 
         for source, source_id in sources:
             if source.source_type == "local":
-                source_artifacts, error = self._enumerate_local(source)
+                if source.discovery is DiscoveryMode.MANIFEST:
+                    source_artifacts, error = self._enumerate_local_manifest(source)
+                else:
+                    source_artifacts, error = self._enumerate_local(source)
                 artifacts.extend(source_artifacts)
                 if error is None:
                     successful_source_ids.add(source_id)
@@ -351,6 +512,8 @@ class CatalogIndexer:
 
         async def enumerate_one(source: SourceConfig) -> list[dict]:
             async with semaphore:
+                if source.discovery is DiscoveryMode.MANIFEST:
+                    return await self._enumerate_blob_manifest(source, credential, clients)
                 return await self._enumerate_blob_source(source, credential, clients)
 
         try:
@@ -363,11 +526,11 @@ class CatalogIndexer:
             for source, result in zip(sources, results):
                 source_id = _source_id(source)
                 if isinstance(result, BaseException):
-                    error = f"{type(result).__name__}: source enumeration failed"
+                    error = _safe_source_error(result)
                     LOGGER.error(
                         "Failed to enumerate blob source '%s': %s",
                         sanitize_uri_for_display(source.path),
-                        error,
+                        type(result).__name__,
                     )
                     errors[source_id] = error
                 else:
@@ -489,6 +652,311 @@ class CatalogIndexer:
             )
 
         return artifacts
+
+    @staticmethod
+    def _parse_manifest(payload: bytes, location: str) -> CatalogManifest:
+        if len(payload) > MAX_MANIFEST_BYTES:
+            raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit at {location}")
+        try:
+            raw = json.loads(
+                payload.decode("utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+                parse_constant=_reject_json_constant,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+            raise ValueError(f"Malformed manifest at {location}") from exc
+        except ValueError as exc:
+            raise ValueError(f"Invalid manifest at {location}: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise ValueError(f"Manifest at {location} must contain an object")
+        try:
+            return CatalogManifest.from_mapping(raw)
+        except Exception as exc:
+            raise ValueError(f"Invalid manifest at {location}: {exc}") from exc
+
+    @staticmethod
+    def _read_local_manifest(manifest_path: Path) -> bytes:
+        try:
+            declared_size = manifest_path.stat().st_size
+        except OSError:
+            raise
+        if declared_size > MAX_MANIFEST_BYTES:
+            raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
+        with manifest_path.open("rb") as manifest_file:
+            payload = manifest_file.read(MAX_MANIFEST_BYTES + 1)
+        if len(payload) > MAX_MANIFEST_BYTES:
+            raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
+        return payload
+
+    @staticmethod
+    async def _read_blob_manifest(download: object) -> bytes:
+        properties = getattr(download, "properties", None)
+        declared_size = getattr(properties, "size", None)
+        if declared_size is None and isinstance(properties, Mapping):
+            declared_size = properties.get("size")
+        if isinstance(declared_size, int) and declared_size > MAX_MANIFEST_BYTES:
+            raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
+
+        chunks_method = getattr(download, "chunks", None)
+        if not callable(chunks_method):
+            raise ValueError("Blob manifest download does not expose bounded chunks")
+        payload = bytearray()
+        async for chunk in chunks_method():
+            remaining = MAX_MANIFEST_BYTES + 1 - len(payload)
+            if remaining <= 0:
+                break
+            payload.extend(chunk[:remaining])
+            if len(payload) > MAX_MANIFEST_BYTES:
+                raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
+        return bytes(payload)
+
+    @staticmethod
+    def _local_manifest_path(source: SourceConfig, source_root: Path) -> Path:
+        manifest = Path(source.manifest or "")
+        candidate = manifest.resolve() if manifest.is_absolute() else (source_root / manifest).resolve()
+        try:
+            candidate.relative_to(source_root)
+        except ValueError as exc:
+            raise ValueError("Local manifest must be within the configured source root") from exc
+        return candidate
+
+    def _enumerate_local_manifest(self, source: SourceConfig) -> tuple[list[dict], str | None]:
+        source_root = Path(source.path).resolve()
+        source_id = _source_id(source)
+        try:
+            if not source_root.is_dir():
+                raise FileNotFoundError("source root does not exist or is not a directory")
+            manifest_path = self._local_manifest_path(source, source_root)
+            payload = self._read_local_manifest(manifest_path)
+            manifest = self._parse_manifest(payload, str(manifest_path))
+            manifest_etag = hashlib.sha256(payload).hexdigest()
+            self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
+            now = datetime.now(timezone.utc).isoformat()
+            artifacts = []
+            for entry in manifest.artifacts:
+                storage_path = (source_root / entry.path).resolve()
+                try:
+                    storage_path.relative_to(source_root)
+                except ValueError as exc:
+                    raise ValueError(f"Manifest artifact escapes the configured source root: {entry.path}") from exc
+                artifacts.append(
+                    self._make_manifest_artifact(
+                        entry,
+                        source,
+                        source_id,
+                        str(source_root),
+                        str(storage_path),
+                        f"manifest-generation:{manifest.generation}",
+                        now,
+                    )
+                )
+            self._validate_manifest_artifacts(source_id, artifacts)
+            return artifacts, None
+        except Exception as exc:
+            error = _safe_source_error(exc)
+            LOGGER.error(
+                "Failed to load local manifest for source %r: %s: %s",
+                source_id,
+                type(exc).__name__,
+                exc,
+            )
+            return [], error
+
+    @staticmethod
+    def _blob_manifest_name(source: SourceConfig) -> tuple[str, str, str]:
+        account, container, prefix = _parse_blob_path(source.path)
+        manifest_value = source.manifest or ""
+        if "://" in manifest_value:
+            manifest_account, manifest_container, manifest_name = _parse_blob_path(manifest_value)
+            if (manifest_account, manifest_container) != (account, container):
+                raise ValueError("Blob manifest must use the configured source account and container")
+        else:
+            manifest_name = "/".join(part for part in (prefix.rstrip("/"), manifest_value.lstrip("/")) if part)
+        prefix_boundary = prefix.rstrip("/")
+        if prefix_boundary and manifest_name != prefix_boundary and not manifest_name.startswith(f"{prefix_boundary}/"):
+            raise ValueError("Blob manifest must be within the configured source prefix")
+        return account, container, manifest_name
+
+    async def _enumerate_blob_manifest(
+        self,
+        source: SourceConfig,
+        credential: AsyncTokenCredential,
+        clients: dict,
+    ) -> list[dict]:
+        from azure.storage.blob.aio import BlobServiceClient
+
+        account, container, manifest_name = self._blob_manifest_name(source)
+        source_id = _source_id(source)
+        source_root = canonicalize_azure_uri(source.path)
+        service_url = f"https://{account}.blob.core.windows.net"
+        if service_url not in clients:
+            clients[service_url] = BlobServiceClient(service_url, credential=credential)
+        client = clients[service_url]
+        blob_client = client.get_blob_client(container=container, blob=manifest_name)
+        download = await blob_client.download_blob(
+            offset=0,
+            length=MAX_MANIFEST_BYTES + 1,
+        )
+        payload = await self._read_blob_manifest(download)
+        manifest = self._parse_manifest(payload, azure_uri_from_blob_name(account, container, manifest_name))
+        download_properties = getattr(download, "properties", None)
+        response_etag = getattr(download_properties, "etag", None)
+        if response_etag is None and isinstance(download_properties, Mapping):
+            response_etag = download_properties.get("etag")
+        manifest_etag = str(response_etag) if response_etag else f"sha256:{hashlib.sha256(payload).hexdigest()}"
+        self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
+        _, _, prefix = _parse_blob_path(source.path)
+        prefix_root = prefix.rstrip("/")
+        now = datetime.now(timezone.utc).isoformat()
+        artifacts = [
+            self._make_manifest_artifact(
+                entry,
+                source,
+                source_id,
+                source_root,
+                azure_uri_from_blob_name(
+                    account,
+                    container,
+                    "/".join(part for part in (prefix_root, entry.path) if part),
+                ),
+                f"manifest-generation:{manifest.generation}",
+                now,
+            )
+            for entry in manifest.artifacts
+        ]
+        self._validate_manifest_artifacts(source_id, artifacts)
+        return artifacts
+
+    def _validate_manifest_artifacts(self, source_id: str, artifacts: list[dict]) -> None:
+        """Validate manifest identities against the source and retained catalog state."""
+        artifact_paths: dict[str, str] = {}
+        storage_paths: dict[str, str] = {}
+        aliases: dict[tuple[str, str], tuple[str, str]] = {}
+        existing_by_path = self._db.records_by_source_path(source_id, include_deleted=True)
+        for artifact in artifacts:
+            artifact_id = artifact["artifact_id"]
+            logical_path = artifact["logical_path"]
+            storage_uri = artifact["storage_uri"]
+            previous_path = artifact_paths.get(artifact_id)
+            if previous_path is not None:
+                raise ValueError(
+                    f"Manifest source {source_id!r} assigns artifact_id {artifact_id!r} "
+                    f"to both {previous_path!r} and {logical_path!r}"
+                )
+            artifact_paths[artifact_id] = logical_path
+            existing_by_id = self._db.get_artifact(
+                artifact_id,
+                include_deleted=True,
+            )
+            if existing_by_id is not None and existing_by_id.source_id != source_id:
+                raise ValueError(
+                    f"Manifest source {source_id!r} uses artifact_id {artifact_id!r} owned by another source"
+                )
+            existing_at_path = existing_by_path.get(logical_path)
+            if existing_at_path is not None and existing_at_path.id != artifact_id and existing_by_id is not None:
+                raise ValueError(
+                    f"Manifest source {source_id!r} assigns {logical_path!r} to "
+                    f"artifact_id {artifact_id!r}, but that path belongs to another artifact"
+                )
+            previous_locator = storage_paths.get(storage_uri)
+            if previous_locator is not None:
+                raise ValueError(
+                    f"Manifest source {source_id!r} maps both {previous_locator!r} "
+                    f"and {logical_path!r} to the same storage locator"
+                )
+            storage_paths[storage_uri] = logical_path
+
+            identity_alias = split_alias(_configured_id_alias(artifact_id))
+            previous_identity = aliases.get(identity_alias)
+            if previous_identity is not None and previous_identity != (artifact_id, logical_path):
+                raise ValueError(
+                    f"Manifest source {source_id!r} uses artifact_id {artifact_id!r} as an alias for another artifact"
+                )
+            aliases[identity_alias] = (artifact_id, logical_path)
+            for alias_value in artifact.get("aliases", []):
+                alias = split_alias(alias_value)
+                existing_alias_id = self._db.resolve_artifact_id(alias_value, source_id)
+                if existing_alias_id is not None and existing_alias_id != artifact_id:
+                    raise ValueError(
+                        f"Manifest source {source_id!r} assigns alias "
+                        f"{alias[0]}:{alias[1]} to a different retained artifact"
+                    )
+                previous = aliases.get(alias)
+                if previous is not None:
+                    previous_id, previous_alias_path = previous
+                    if previous_id == artifact_id and previous_alias_path == logical_path:
+                        continue
+                    raise ValueError(
+                        f"Manifest source {source_id!r} assigns alias {alias[0]}:{alias[1]} to multiple artifacts"
+                    )
+                aliases[alias] = (artifact_id, logical_path)
+
+    def _make_manifest_artifact(
+        self,
+        entry: ManifestArtifact,
+        source: SourceConfig,
+        source_id: str,
+        source_root: str,
+        storage_uri: str,
+        manifest_revision: str,
+        indexed_at: str,
+    ) -> dict:
+        filename = entry.name or entry.path.rsplit("/", 1)[-1]
+        override = None
+        if source.files:
+            override = source.files.get(entry.path) or source.files.get(filename)
+        description = entry.description if entry.description is not None else source.description
+        domain = entry.domain if entry.domain is not None else source.domain
+        custom_id = entry.artifact_id
+        aliases = list(entry.aliases)
+        if override is not None:
+            if override.description is not None:
+                description = override.description
+            if override.domain is not None:
+                domain = override.domain
+            if override.artifact_id is not None:
+                custom_id = override.artifact_id
+            aliases.extend(override.aliases)
+        artifact_id = (
+            (self._db.resolve_scan_alias(custom_id, source_id) if custom_id else None)
+            or custom_id
+            or logical_artifact_id(source_id, entry.path)
+        )
+        content_revision = entry.content_revision or entry.checksum_sha256 or manifest_revision
+        metadata_revision = entry.metadata_revision or _revision_digest(
+            [
+                filename,
+                description,
+                domain,
+                entry.media_type,
+                entry.size_bytes,
+                custom_id,
+                aliases,
+            ]
+        )
+        return {
+            "artifact_id": artifact_id,
+            "source_id": source_id,
+            "logical_path": entry.path,
+            "source_root": source_root,
+            "name": filename,
+            "storage_uri": storage_uri,
+            "description": description,
+            "domain": domain,
+            "source_type": source.source_type,
+            "content_type": entry.media_type or _infer_content_type(filename),
+            "size_bytes": entry.size_bytes,
+            "indexed_at": indexed_at,
+            "content_revision": content_revision,
+            "metadata_revision": metadata_revision,
+            "checksum_sha256": entry.checksum_sha256,
+            "aliases": [
+                f"storage-uri:{storage_uri}",
+                *([_configured_id_alias(custom_id)] if custom_id else []),
+                *aliases,
+            ],
+            "_allow_move": True,
+        }
 
     def _enumerate_local(self, source: SourceConfig) -> tuple[list[dict], str | None]:
         """Walk a local directory and produce artifact records."""

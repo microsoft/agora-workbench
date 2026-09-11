@@ -40,6 +40,13 @@ from .models import (
     SourceCapabilities,
     StorageLocator,
 )
+from .manifest import (
+    MANIFEST_VERSION,
+    MAX_MANIFEST_ARTIFACTS,
+    MAX_MANIFEST_BYTES,
+    CatalogManifest,
+    ManifestArtifact,
+)
 from .policy import AuthorizedCatalogProvider, DenyAllCatalogAuthorizer, DevelopmentAllowAllCatalogAuthorizer
 from .protocols import (
     ArtifactResolver,
@@ -57,6 +64,7 @@ __all__ = [
     "AuthorizedCatalogProvider",
     "BackendUnavailableError",
     "CatalogArtifact",
+    "CatalogManifest",
     "CatalogAuthorizationRequest",
     "CatalogAuthorizer",
     "CatalogOperation",
@@ -71,6 +79,10 @@ __all__ = [
     "InvalidRequestError",
     "ListRequest",
     "MAX_PAGE_LIMIT",
+    "MAX_MANIFEST_ARTIFACTS",
+    "MAX_MANIFEST_BYTES",
+    "MANIFEST_VERSION",
+    "ManifestArtifact",
     "Page",
     "PageRequest",
     "PolicyEnforcedCatalog",

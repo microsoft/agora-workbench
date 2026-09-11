@@ -9,6 +9,7 @@ Choose the import path that matches your task:
 | --- | --- |
 | Define artifact records or implement a catalog/resolver | `agora_workbench.data_lake` |
 | Use the built-in SQLite catalog and indexer | `agora_workbench.data_lake.catalog` |
+| Use manifest-backed provider/resolver adapters | `agora_workbench.data_lake.catalog` / `agora_workbench.data_lake.resolvers` |
 | Use the Azure AI Search resolver | `agora_workbench.data_lake.resolvers` |
 | Configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
 
@@ -143,6 +144,10 @@ root while retaining `source_id` and relative paths preserves artifact identity;
 local roots themselves are deliberately not portable IDs. A rename or move to a
 different relative path creates a new artifact and tombstones the old one. The
 indexer does not guess rename relationships from size, timestamps, or content.
+In authoritative manifest mode, an explicitly declared stable `artifact_id` is
+the rename signal: moving that ID to a new registered path keeps the canonical
+identity, appends retained history for the old and new locations, and updates
+current resolution to the new locator.
 
 Each change appends an `artifact_revisions` row. `content_revision` and
 `metadata_revision` are separate opaque change tokens. `checksum_sha256`, when
@@ -339,6 +344,73 @@ async def search_catalog():
 
 See [Working with data](working-with-data.md#data-catalog) for the
 `catalog.yaml` format, source configuration, and search options.
+
+## Use an authoritative manifest provider
+
+`ManifestCatalogProvider` composes the existing versioned SQLite identity,
+revision, alias, search, and refresh implementation with authoritative local or
+Azure Blob manifests:
+
+```python
+from agora_workbench.data_lake import ListRequest, RequestContext
+from agora_workbench.data_lake.catalog import CatalogConfig, ManifestCatalogProvider
+from agora_workbench.data_lake.resolvers import CatalogArtifactResolver
+
+config = CatalogConfig.from_yaml("catalog.yaml")
+provider = ManifestCatalogProvider(
+    config,
+    db_path="/var/run/agora/catalog-reader.db",
+    max_stale_seconds=300,
+)
+
+await provider.load()
+readiness = provider.readiness()
+page = await provider.list(ListRequest(), RequestContext())
+resolver = CatalogArtifactResolver(provider, source_id="approved-model-inputs")
+qualified_name = await resolver.resolve(page.items[0].reference.artifact_id)
+```
+
+The provider performs no caller authorization. Wrap it with
+`AuthorizedCatalogProvider` exactly as any other `CatalogProvider`; credentials
+used to read a Blob manifest are storage-host credentials and remain separate
+from caller policy.
+
+`load()` is required before serving. On failure it raises
+`BackendUnavailableError` and records the failed attempt. If a valid generation
+already exists, it is preserved within its stale bound; otherwise the provider
+remains unavailable but may be retried after the manifest or credentials are
+fixed. Caller-facing errors identify affected source IDs and generic failure
+categories without exposing local absolute paths, SAS values, or backend
+response details. `readiness()` distinguishes ready, bounded-stale, and
+unavailable states. Once the configured stale bound expires, catalog operations
+fail rather than serving indefinitely stale approvals. The age check uses
+`last_success_at` for each configured source even when validation, embedding, or
+SQLite writes fail after enumeration and the persisted transaction remains at
+its prior successful status. Refresh rows belonging to removed or unrelated
+sources in a reused per-reader cache are ignored.
+
+Pinned `ArtifactReference.revision` values are passed to the shared retained
+history store. The exact revision is returned or `ArtifactNotFoundError` is
+raised; pinned requests never follow current. This remains true across manifest
+moves: an old live revision resolves its old locator, a tombstone revision is
+not returned as live data, and an unqualified current request resolves the new
+locator. `CatalogArtifactResolver` is the compatibility adapter for the existing
+string-based execution resolver and is bound to one source, so aliases remain
+source-scoped.
+
+`SQLiteCatalogProvider` adapts an already-open, caller-owned `CatalogDB`. It
+supports the public list/search/get/resolve surface, source constraints,
+`domain` and `source_type` filters, and request-bound opaque cursors. SQLite
+search pages are limited to 100 records, matching the current deterministic
+search candidate bound.
+
+Manifest-backed SQLite files are private per reader. Do not share one writable
+database between pods; use a pod-local file or `:memory:` and rebuild from the
+authoritative manifest on startup. `ManifestCatalogProvider` owns this database,
+keeps it open after a recoverable initial load failure so `load()` can be
+retried, closes it on initial-load cancellation, supports idempotent `aclose()`,
+and may be used as an async context manager. `SQLiteCatalogProvider` instead
+borrows its already-open `CatalogDB`; the caller retains cleanup ownership.
 
 ## Provide a custom artifact resolver
 
