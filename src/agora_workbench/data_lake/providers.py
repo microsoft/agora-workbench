@@ -307,6 +307,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             raise BackendUnavailableError("Manifest catalog is closed.", operation="refresh")
         self._load_attempted = True
         had_successful_generation = self._has_successful_generation()
+        refresh_error: BackendUnavailableError | None = None
         try:
             count = await self._indexer.index()
         except asyncio.CancelledError:
@@ -322,10 +323,12 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
                 message = "Manifest catalog refresh failed; the last valid generation was preserved."
             else:
                 message = "Manifest catalog refresh failed; no valid generation is available."
-            raise BackendUnavailableError(f"{message} {self._last_error}", operation="refresh") from exc
-        self._last_error = None
-        self._current_source_states()
-        return count
+            refresh_error = BackendUnavailableError(f"{message} {self._last_error}", operation="refresh")
+        else:
+            self._last_error = None
+            self._current_source_states()
+            return count
+        raise refresh_error
 
     def readiness(self) -> CatalogReadiness:
         """Return readiness, stale bounds, and per-source refresh state."""

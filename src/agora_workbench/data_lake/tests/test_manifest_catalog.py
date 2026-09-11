@@ -149,7 +149,8 @@ async def test_missing_manifest_fails_explicitly(tmp_path):
     try:
         with pytest.raises(BackendUnavailableError, match="no valid generation.*approved") as exc_info:
             await provider.load()
-        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert exc_info.value.__cause__ is None
+        assert exc_info.value.__context__ is None
         assert str(tmp_path) not in str(exc_info.value)
         assert str(tmp_path) not in (provider.readiness().reason or "")
         assert str(tmp_path) not in (provider.readiness().sources[0].error or "")
