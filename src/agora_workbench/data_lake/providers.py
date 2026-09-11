@@ -49,7 +49,8 @@ class CatalogReadiness:
 
 def _safe_refresh_error(exc: BaseException) -> str:
     if isinstance(exc, ManifestRefreshError):
-        return "Manifest refresh failed for source(s): " + ", ".join(exc.source_ids)
+        details = "; ".join(f"{source_id}: {exc.errors[source_id]}" for source_id in exc.source_ids)
+        return f"Manifest refresh failed: {details}"
     return f"Catalog refresh failed ({type(exc).__name__})"
 
 

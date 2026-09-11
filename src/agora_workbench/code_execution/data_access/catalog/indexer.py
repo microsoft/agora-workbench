@@ -85,6 +85,12 @@ def _configured_id_alias(custom_id: str) -> str:
     return custom_id if ":" in custom_id else f"artifact-id:{custom_id}"
 
 
+def _alias_canonical_candidates(namespace: str, alias: str) -> tuple[str, ...]:
+    if namespace == "artifact-id":
+        return alias, f"{namespace}:{alias}"
+    return (f"{namespace}:{alias}",)
+
+
 def _embedding_model_id(config: CatalogConfig) -> str:
     """Return a stable non-secret identifier for stored vector semantics."""
     model = config.search.embedding_model
@@ -114,8 +120,9 @@ class ManifestRefreshError(RuntimeError):
     """One or more manifest sources failed while other source updates may have committed."""
 
     def __init__(self, errors: dict[str, str]):
-        self.source_ids = tuple(sorted(errors))
-        details = "; ".join(f"{source_id}: {errors[source_id]}" for source_id in self.source_ids)
+        self.errors = {source_id: errors[source_id] for source_id in sorted(errors)}
+        self.source_ids = tuple(self.errors)
+        details = "; ".join(f"{source_id}: {self.errors[source_id]}" for source_id in self.source_ids)
         super().__init__(f"Manifest refresh failed: {details}")
 
 
@@ -144,11 +151,22 @@ def _safe_source_error(exc: BaseException) -> str:
         category = "credential_or_access_failure"
     elif isinstance(exc, ValueError):
         category = "manifest_invalid"
-    elif isinstance(exc, ImportError):
+    elif _exception_chain_contains(exc, ImportError):
         category = "optional_dependency_missing"
     else:
         category = "source_unavailable"
     return f"{category}: source refresh failed"
+
+
+def _exception_chain_contains(exc: BaseException, error_type: type[BaseException]) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, error_type):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass(frozen=True)
@@ -246,6 +264,7 @@ class CatalogIndexer:
         sources = self._validated_sources()
         self._manifest_revisions = {}
         enumeration = await self._enumerate_all_sources(sources)
+        enumeration = self._isolate_manifest_candidate_conflicts(enumeration, sources)
         all_artifacts = enumeration.artifacts
         attempted_at = datetime.now(timezone.utc).isoformat()
 
@@ -370,6 +389,7 @@ class CatalogIndexer:
         sources = self._validated_sources()
         self._manifest_revisions = {}
         enumeration = await self._enumerate_all_sources(sources)
+        enumeration = self._isolate_manifest_candidate_conflicts(enumeration, sources)
         artifacts_by_source: dict[str, list[dict]] = {}
         for artifact in enumeration.artifacts:
             artifacts_by_source.setdefault(artifact["source_id"], []).append(artifact)
@@ -498,6 +518,60 @@ class CatalogIndexer:
             errors.update(blob_result.errors)
 
         return _EnumerationResult(artifacts, successful_source_ids, errors)
+
+    def _isolate_manifest_candidate_conflicts(
+        self,
+        enumeration: _EnumerationResult,
+        sources: list[tuple[SourceConfig, str]],
+    ) -> _EnumerationResult:
+        """Remove conflicting manifest sources before the shared refresh transaction."""
+        manifest_sources = {
+            source_id
+            for source, source_id in sources
+            if source.discovery is DiscoveryMode.MANIFEST and source_id in enumeration.successful_source_ids
+        }
+        candidate_owners: dict[str, set[str]] = {}
+        for artifact in enumeration.artifacts:
+            source_id = artifact["source_id"]
+            if source_id in manifest_sources:
+                candidate_owners.setdefault(artifact["artifact_id"], set()).add(source_id)
+
+        failed_sources: set[str] = set()
+        conflicting_candidate_ids: set[str] = set()
+        for candidate_id, owners in candidate_owners.items():
+            if len(owners) > 1:
+                failed_sources.update(owners)
+                conflicting_candidate_ids.add(candidate_id)
+
+        candidate_ids = set(candidate_owners) - conflicting_candidate_ids
+        for artifact in enumeration.artifacts:
+            source_id = artifact["source_id"]
+            if source_id not in manifest_sources or source_id in failed_sources:
+                continue
+            artifact_id = artifact["artifact_id"]
+            for alias_value in artifact.get("aliases", []):
+                namespace, alias = split_alias(alias_value)
+                if any(
+                    candidate_id != artifact_id and candidate_id in candidate_ids
+                    for candidate_id in _alias_canonical_candidates(namespace, alias)
+                ):
+                    failed_sources.add(source_id)
+                    break
+
+        if not failed_sources:
+            return enumeration
+
+        errors = dict(enumeration.errors)
+        errors.update({source_id: "manifest_invalid: source refresh failed" for source_id in failed_sources})
+        LOGGER.error(
+            "Rejected manifest identity conflicts for source(s): %s",
+            ", ".join(sorted(failed_sources)),
+        )
+        return _EnumerationResult(
+            [artifact for artifact in enumeration.artifacts if artifact["source_id"] not in failed_sources],
+            enumeration.successful_source_ids - failed_sources,
+            errors,
+        )
 
     async def _enumerate_blob_sources_concurrent(self, sources: list[SourceConfig]) -> _EnumerationResult:
         """Enumerate multiple blob sources concurrently with shared credential."""
@@ -896,6 +970,13 @@ class CatalogIndexer:
             aliases[identity_alias] = (artifact_id, logical_path)
             for alias_value in artifact.get("aliases", []):
                 alias = split_alias(alias_value)
+                for candidate_id in _alias_canonical_candidates(*alias):
+                    existing_candidate = self._db.get_artifact(candidate_id, include_deleted=True)
+                    if existing_candidate is not None and existing_candidate.id != artifact_id:
+                        raise ValueError(
+                            f"Manifest source {source_id!r} assigns alias "
+                            f"{alias[0]}:{alias[1]} that collides with a canonical artifact ID"
+                        )
                 existing_alias_id = self._db.resolve_artifact_id(alias_value, source_id)
                 if existing_alias_id is not None and existing_alias_id != artifact_id:
                     raise ValueError(

@@ -820,6 +820,130 @@ async def test_bad_manifest_source_preserves_itself_without_blocking_healthy_sou
         await provider.aclose()
 
 
+async def test_duplicate_ids_across_new_manifest_sources_are_isolated(tmp_path):
+    sources = []
+    for source_id, artifact_id in (
+        ("healthy", "healthy-id"),
+        ("conflict-one", "shared-id"),
+        ("conflict-two", "shared-id"),
+    ):
+        root = tmp_path / source_id
+        root.mkdir()
+        (root / "data.csv").write_text(source_id)
+        (root / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 1,
+                    "artifacts": [{"path": "data.csv", "artifact_id": artifact_id}],
+                }
+            )
+        )
+        sources.append(
+            SourceConfig(
+                source_id=source_id,
+                path=str(root),
+                discovery="manifest",
+                manifest="manifest.json",
+            )
+        )
+
+    provider = ManifestCatalogProvider(CatalogConfig(sources=sources))
+    try:
+        with pytest.raises(BackendUnavailableError, match="manifest_invalid") as exc_info:
+            await provider.load()
+
+        states = {state.source_id: state for state in provider.readiness().sources}
+        assert states["healthy"].status == "success"
+        assert states["conflict-one"].error == "manifest_invalid: source refresh failed"
+        assert states["conflict-two"].error == "manifest_invalid: source refresh failed"
+        assert provider._db_owned.get_artifact("healthy-id", source_id="healthy") is not None
+        assert provider._db_owned.get_artifact("shared-id", include_deleted=True) is None
+        assert "conflict-one: manifest_invalid" in str(exc_info.value)
+        assert "conflict-two: manifest_invalid" in (provider.readiness().reason or "")
+    finally:
+        await provider.aclose()
+
+
+async def test_global_canonical_id_alias_conflict_isolated_to_bad_source(tmp_path):
+    roots = {source_id: tmp_path / source_id for source_id in ("canonical", "alias")}
+    for root in roots.values():
+        root.mkdir()
+        (root / "data.csv").write_text(root.name)
+    roots["canonical"].joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generation": 1,
+                "artifacts": [{"path": "data.csv", "artifact_id": "other-id", "description": "one"}],
+            }
+        )
+    )
+    roots["alias"].joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "generation": 1,
+                "artifacts": [{"path": "data.csv", "artifact_id": "alias-id"}],
+            }
+        )
+    )
+    provider = ManifestCatalogProvider(
+        CatalogConfig(
+            sources=[
+                SourceConfig(
+                    source_id=source_id,
+                    path=str(root),
+                    discovery="manifest",
+                    manifest="manifest.json",
+                )
+                for source_id, root in roots.items()
+            ]
+        )
+    )
+    try:
+        await provider.load()
+        roots["canonical"].joinpath("manifest.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 2,
+                    "artifacts": [{"path": "data.csv", "artifact_id": "other-id", "description": "two"}],
+                }
+            )
+        )
+        roots["alias"].joinpath("manifest.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "generation": 2,
+                    "artifacts": [
+                        {
+                            "path": "data.csv",
+                            "artifact_id": "alias-id",
+                            "aliases": ["artifact-id:other-id"],
+                        }
+                    ],
+                }
+            )
+        )
+        with pytest.raises(BackendUnavailableError, match="alias: manifest_invalid"):
+            await provider.load()
+
+        states = {state.source_id: state for state in provider.readiness().sources}
+        assert states["canonical"].successful_generation == 2
+        assert states["canonical"].status == "success"
+        assert states["alias"].successful_generation == 1
+        assert states["alias"].status == "error"
+        canonical = await provider.get(
+            ArtifactReference("other-id", source_id="canonical"),
+            RequestContext(),
+        )
+        assert canonical.presentation.description == "two"
+    finally:
+        await provider.aclose()
+
+
 async def test_retained_path_conflict_isolated_to_bad_source(tmp_path):
     roots = {source_id: tmp_path / source_id for source_id in ("healthy", "bad")}
     for source_id, root in roots.items():
@@ -1152,9 +1276,9 @@ async def test_blob_setup_failure_preserves_healthy_local_manifest(tmp_path):
             ]
         )
     )
-    provider._indexer._enumerate_blob_sources_concurrent = AsyncMock(
-        side_effect=ImportError("azure dependency unavailable")
-    )
+    dependency_error = RuntimeError("Azure Blob catalog sources require the azure extra")
+    dependency_error.__cause__ = ModuleNotFoundError("No module named 'azure'")
+    provider._indexer._enumerate_blob_sources_concurrent = AsyncMock(side_effect=dependency_error)
     try:
         with pytest.raises(BackendUnavailableError, match="blob"):
             await provider.load()
@@ -1166,6 +1290,7 @@ async def test_blob_setup_failure_preserves_healthy_local_manifest(tmp_path):
         assert states["blob"].error == "optional_dependency_missing: source refresh failed"
         assert provider._db_owned.get_artifact("local-data", source_id="local") is not None
         assert not provider.readiness().ready
+        assert "blob: optional_dependency_missing" in (provider.readiness().reason or "")
     finally:
         await provider.aclose()
 
