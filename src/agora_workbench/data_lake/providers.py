@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from math import isfinite
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from agora_workbench.code_execution.data_access.catalog.config import CatalogConfig, DiscoveryMode
 from agora_workbench.code_execution.data_access.catalog.db import ArtifactRecord, CatalogDB, SourceRefreshState
-from agora_workbench.code_execution.data_access.catalog.indexer import CatalogIndexer
+from agora_workbench.code_execution.data_access.catalog.indexer import CatalogIndexer, ManifestRefreshError
 
 from .errors import ArtifactNotFoundError, BackendUnavailableError, InvalidRequestError
 from .models import (
@@ -33,6 +34,8 @@ from .protocols import CatalogProvider
 if TYPE_CHECKING:
     from agora_workbench.code_execution.auth import CredentialProvider
 
+_MAX_CATALOG_RESULT_OFFSET = 10_000
+
 
 @dataclass(frozen=True)
 class CatalogReadiness:
@@ -45,15 +48,8 @@ class CatalogReadiness:
 
 
 def _safe_refresh_error(exc: BaseException) -> str:
-    message = str(exc)
-    if isinstance(exc, RuntimeError) and message.startswith("Manifest refresh failed:"):
-        source_ids = []
-        for detail in message.removeprefix("Manifest refresh failed:").split(";"):
-            source_id, separator, _reason = detail.strip().partition(":")
-            if separator and source_id:
-                source_ids.append(source_id)
-        if source_ids:
-            return "Manifest refresh failed for source(s): " + ", ".join(sorted(source_ids))
+    if isinstance(exc, ManifestRefreshError):
+        return "Manifest refresh failed for source(s): " + ", ".join(exc.source_ids)
     return f"Catalog refresh failed ({type(exc).__name__})"
 
 
@@ -93,7 +89,7 @@ def _cursor_offset(cursor: str | None, expected: dict[str, object]) -> int:
     if not isinstance(decoded, dict) or decoded.get("request") != expected:
         raise InvalidRequestError("Catalog cursor does not match the request.", operation="pagination")
     offset = decoded.get("offset")
-    if not isinstance(offset, int) or offset < 0:
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0 or offset > _MAX_CATALOG_RESULT_OFFSET:
         raise InvalidRequestError("Catalog cursor offset is invalid.", operation="pagination")
     return offset
 
@@ -105,9 +101,9 @@ def _next_cursor(offset: int, returned: int, limit: int, request: dict[str, obje
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
-def _artifact(record: ArtifactRecord, *, requested_revision: int | None = None) -> CatalogArtifact:
+def _artifact(record: ArtifactRecord, *, requested_reference: ArtifactReference | None = None) -> CatalogArtifact:
     return CatalogArtifact(
-        reference=ArtifactReference(record.id, source_id=record.source_id, revision=requested_revision),
+        reference=requested_reference or ArtifactReference(record.id, source_id=record.source_id),
         presentation=ArtifactPresentation(
             record.name,
             description=record.description,
@@ -232,7 +228,7 @@ class SQLiteCatalogProvider:
                 resource_id=reference.artifact_id,
                 operation="get",
             )
-        return _artifact(record, requested_revision=reference.revision)
+        return _artifact(record, requested_reference=reference)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
         artifact = await self.get(reference, context)
@@ -253,7 +249,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         config: CatalogConfig,
         *,
         db_path: str | Path = ":memory:",
-        credential_provider: "CredentialProvider | None" = None,
+        credential_provider: CredentialProvider | None = None,
         max_stale_seconds: float = 300.0,
     ):
         if not config.sources:
@@ -262,6 +258,8 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             raise ValueError("ManifestCatalogProvider accepts only discovery='manifest' sources")
         if max_stale_seconds < 0:
             raise ValueError("max_stale_seconds must be non-negative")
+        if not isfinite(max_stale_seconds):
+            raise ValueError("max_stale_seconds must be finite")
         self._config = config
         self._closed = False
         self._lifecycle_lock = asyncio.Lock()
@@ -321,7 +319,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
                 message = "Manifest catalog refresh failed; the last valid generation was preserved."
             else:
                 message = "Manifest catalog refresh failed; no valid generation is available."
-            raise BackendUnavailableError(message, operation="refresh") from exc
+            raise BackendUnavailableError(f"{message} {self._last_error}", operation="refresh") from exc
         self._last_error = None
         self._current_source_states()
         return count

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Optional
+from urllib.parse import unquote
 
 from agora_workbench.data_lake.manifest import (
     MAX_MANIFEST_BYTES,
@@ -107,6 +108,15 @@ class _EnumerationResult:
     artifacts: list[dict]
     successful_source_ids: set[str]
     errors: dict[str, str] = field(default_factory=dict)
+
+
+class ManifestRefreshError(RuntimeError):
+    """One or more manifest sources failed while other source updates may have committed."""
+
+    def __init__(self, errors: dict[str, str]):
+        self.source_ids = tuple(sorted(errors))
+        details = "; ".join(f"{source_id}: {errors[source_id]}" for source_id in self.source_ids)
+        super().__init__(f"Manifest refresh failed: {details}")
 
 
 class _DuplicateManifestKeyError(ValueError):
@@ -333,8 +343,7 @@ class CatalogIndexer:
             is DiscoveryMode.MANIFEST
         }
         if manifest_errors:
-            details = "; ".join(f"{source_id}: {error}" for source_id, error in sorted(manifest_errors.items()))
-            raise RuntimeError(f"Manifest refresh failed: {details}")
+            raise ManifestRefreshError(manifest_errors)
 
         # Log warning for artifacts without descriptions
         no_desc_count = sum(1 for a in all_artifacts if not a.get("description"))
@@ -766,6 +775,9 @@ class CatalogIndexer:
     def _blob_manifest_name(source: SourceConfig) -> tuple[str, str, str]:
         account, container, prefix = _parse_blob_path(source.path)
         manifest_value = source.manifest or ""
+        decoded_segments = unquote(manifest_value).replace("\\", "/").split("/")
+        if any(segment in {".", ".."} for segment in decoded_segments):
+            raise ValueError("Blob manifest path must not contain dot segments")
         if "://" in manifest_value:
             manifest_account, manifest_container, manifest_name = _parse_blob_path(manifest_value)
             if (manifest_account, manifest_container) != (account, container):

@@ -37,8 +37,12 @@ class ManifestArtifact:
         object.__setattr__(self, "path", normalize_logical_path(self.path))
         object.__setattr__(self, "aliases", tuple(self.aliases))
         if self.artifact_id is not None:
+            if not self.artifact_id.strip() or self.artifact_id != self.artifact_id.strip():
+                raise _invalid("Manifest artifact artifact_id must be non-empty and have no surrounding whitespace.")
             split_alias(self.artifact_id)
         for alias in self.aliases:
+            if not alias.strip() or alias != alias.strip():
+                raise _invalid("Manifest artifact aliases must be non-empty and have no surrounding whitespace.")
             split_alias(alias)
         if self.size_bytes is not None and self.size_bytes < 0:
             raise _invalid("Manifest artifact size_bytes must be non-negative.")
@@ -106,7 +110,7 @@ class CatalogManifest:
         if unknown:
             raise _invalid(f"Unknown manifest fields: {', '.join(sorted(unknown))}")
         version = value.get("version")
-        if version != MANIFEST_VERSION:
+        if not isinstance(version, int) or isinstance(version, bool) or version != MANIFEST_VERSION:
             raise _invalid(f"Unsupported manifest version: {version!r}")
         generation = value.get("generation")
         if not isinstance(generation, int) or isinstance(generation, bool) or generation < 1:

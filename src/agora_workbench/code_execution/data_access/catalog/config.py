@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -136,6 +137,10 @@ class SourceConfig(BaseModel):
                 raise ValueError("Manifest sources require an explicit stable source_id")
             if not self.manifest or not self.manifest.strip():
                 raise ValueError("Manifest sources require a manifest path")
+            if self.source_type == "local" and "://" in self.manifest:
+                raise ValueError("Local manifest sources require a local manifest path")
+            if self.max_stale_seconds is not None and not isfinite(self.max_stale_seconds):
+                raise ValueError("max_stale_seconds must be finite")
         elif self.manifest is not None:
             raise ValueError("manifest is only valid when discovery is 'manifest'")
         elif self.max_stale_seconds is not None:

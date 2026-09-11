@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import io
 import json
 import sqlite3
@@ -23,6 +24,7 @@ from agora_workbench.data_lake import (
     CatalogManifest,
     CatalogPolicyMode,
     DevelopmentAllowAllCatalogAuthorizer,
+    InvalidRequestError,
     ListRequest,
     MAX_MANIFEST_BYTES,
     PageRequest,
@@ -100,6 +102,11 @@ async def test_local_manifest_is_authoritative_and_resolves_registered_revision(
             mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
         )
         assert len((await authorized.list(ListRequest(), RequestContext(caller_id="reader"))).items) == 1
+        alias_reference = ArtifactReference("external:approved", source_id="approved")
+        assert (await authorized.get(alias_reference, RequestContext(caller_id="reader"))).reference == alias_reference
+        assert (
+            await authorized.resolve(alias_reference, RequestContext(caller_id="reader"))
+        ).reference == alias_reference
     finally:
         await provider.aclose()
 
@@ -110,7 +117,11 @@ async def test_local_manifest_is_authoritative_and_resolves_registered_revision(
         "",
         "{",
         json.dumps({"version": 99, "generation": 1, "artifacts": []}),
+        json.dumps({"version": True, "generation": 1, "artifacts": []}),
+        json.dumps({"version": 1.0, "generation": 1, "artifacts": []}),
         json.dumps({"version": 1, "generation": 1}),
+        json.dumps({"version": 1, "generation": 1, "artifacts": [{"path": "data.csv", "artifact_id": ""}]}),
+        json.dumps({"version": 1, "generation": 1, "artifacts": [{"path": "data.csv", "aliases": [" alias"]}]}),
     ],
 )
 async def test_invalid_manifest_fails_without_scan_fallback(tmp_path, payload):
@@ -130,7 +141,7 @@ async def test_invalid_manifest_fails_without_scan_fallback(tmp_path, payload):
 async def test_missing_manifest_fails_explicitly(tmp_path):
     provider = ManifestCatalogProvider(_local_config(tmp_path, "missing.json"))
     try:
-        with pytest.raises(BackendUnavailableError, match="no valid generation") as exc_info:
+        with pytest.raises(BackendUnavailableError, match="no valid generation.*approved") as exc_info:
             await provider.load()
         assert isinstance(exc_info.value.__cause__, RuntimeError)
         assert str(tmp_path) not in str(exc_info.value)
@@ -691,7 +702,8 @@ async def test_aliases_are_source_scoped_across_manifest_sources(tmp_path):
         )
         assert one.locator.uri.endswith("/one/data.csv")
         assert two.locator.uri.endswith("/two/data.csv")
-        assert one.reference.artifact_id != two.reference.artifact_id
+        assert one.reference.artifact_id == two.reference.artifact_id == "external:shared"
+        assert one.reference != two.reference
     finally:
         await provider.aclose()
 
@@ -1031,6 +1043,11 @@ def test_constructor_rejects_empty_sources_before_opening_sqlite():
     open_db.assert_not_called()
 
 
+def test_constructor_rejects_infinite_default_stale_limit(tmp_path):
+    with pytest.raises(ValueError, match="finite"):
+        ManifestCatalogProvider(_local_config(tmp_path), max_stale_seconds=float("inf"))
+
+
 async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sqlite(tmp_path, monkeypatch):
     missing = ManifestCatalogProvider(_local_config(tmp_path, "missing.json"))
     with pytest.raises(BackendUnavailableError, match="no valid generation"):
@@ -1099,7 +1116,8 @@ async def test_manifest_loads_are_serialized_and_close_waits_for_refresh(tmp_pat
     release.set()
     assert await first == 0
     assert await second == 0
-    await close
+    close_result = await close
+    assert close_result is None
     assert max_active == 1
     assert provider._closed
     assert provider._db_owned._conn is None
@@ -1135,6 +1153,62 @@ async def test_search_pagination_returns_more_than_one_hundred_matches(tmp_path)
         assert len(set(artifact_ids)) == 120
     finally:
         db.close()
+
+
+async def test_catalog_cursor_rejects_unbounded_offset(tmp_path):
+    db = CatalogDB(tmp_path / "catalog.db", vec_dimensions=None)
+    db.open()
+    try:
+        provider = SQLiteCatalogProvider(db, ("approved",))
+        request = {"operation": "list", "source_ids": [], "filters": {}}
+        cursor = base64.urlsafe_b64encode(json.dumps({"offset": 10_001, "request": request}).encode()).decode()
+        with pytest.raises(InvalidRequestError, match="offset"):
+            await provider.list(
+                ListRequest(page=PageRequest(cursor=cursor)),
+                RequestContext(),
+            )
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "../outside.json",
+        "%2e%2e/outside.json",
+        "az://account123/container/prefix/../outside.json",
+    ],
+)
+def test_blob_manifest_rejects_dot_segment_prefix_escape(manifest):
+    source = SourceConfig(
+        source_id="approved",
+        path="az://account123/container/prefix",
+        discovery="manifest",
+        manifest=manifest,
+    )
+    with pytest.raises(ValueError, match="dot segments"):
+        CatalogIndexer._blob_manifest_name(source)
+
+
+async def test_refresh_error_preserves_source_id_with_colon(tmp_path):
+    provider = ManifestCatalogProvider(
+        CatalogConfig(
+            sources=[
+                SourceConfig(
+                    source_id="team:approved",
+                    path=str(tmp_path),
+                    discovery="manifest",
+                    manifest="missing.json",
+                )
+            ]
+        )
+    )
+    try:
+        with pytest.raises(BackendUnavailableError, match="team:approved"):
+            await provider.load()
+        assert "team:approved" in (provider.readiness().reason or "")
+    finally:
+        await provider.aclose()
 
 
 def test_versioned_config_conversion_and_boundaries(tmp_path):
