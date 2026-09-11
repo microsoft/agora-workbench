@@ -271,6 +271,89 @@ catalog = CatalogDB(
 catalog.open()
 ```
 
+### Mounting a catalog on `CodeExecutionServer`
+
+Catalogs are opt-in. The supported host composition point is
+`CatalogIntegration`, passed to `CodeExecutionServer`:
+
+```python
+from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServer
+from agora_workbench.data_lake import CatalogPolicyMode, DevelopmentAllowAllCatalogAuthorizer
+from agora_workbench.data_lake.catalog import CatalogConfig
+
+catalog_config = CatalogConfig.from_yaml("catalog.yaml")
+catalog = CatalogIntegration.from_config(
+    catalog_config,
+    authorizer=DevelopmentAllowAllCatalogAuthorizer(),  # development only
+    policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+)
+
+server = CodeExecutionServer(
+    server_config=config,
+    auth_config=auth,
+    catalog=catalog,
+)
+```
+
+The server loads configured scan or manifest sources during startup, fails
+startup if no ready generation is available, and closes its owned catalog on
+startup rollback or shutdown. `search_data`, `get_artifact`, `list_domains`,
+and `get_catalog_capabilities` are registered only when `catalog` is supplied.
+Search/get payloads retain `id`, `source_id`, familiar metadata fields, and
+relevance `score` when supplied by the provider. They do not eagerly resolve or
+expose credential-bearing storage locators. A `load_path` is returned only when
+the session uses the integration-provided resolver; paste that opaque,
+revision-pinned tag into `execute_*_code`, where resolution occurs on demand.
+
+Do not also call the legacy `register_catalog_tools()` on the same MCP server:
+both surfaces own `search_data`, `get_artifact`, and `list_domains`, so
+registration fails explicitly rather than silently replacing handlers. The
+policy-aware integration deliberately does not expose legacy `query_catalog`;
+raw SQL remains available only through `register_catalog_admin_tools()` on a
+separately authorized administrative MCP surface.
+
+For production, provide an application authorizer or `authorizer_factory`.
+The factory receives a `SessionContext`; each execution session gets a distinct
+policy wrapper, immutable request context, resolver, and data-manager cache.
+Token claims are available to policy as `context.attributes["claims"]`, but
+bearer tokens are not copied into catalog request attributes.
+
+If the supplied `SessionManager` already has a `data_manager_factory`, the
+server preserves that manager and its resolver. Discovery remains available,
+but catalog results omit `load_path` because the server cannot assume a custom
+resolver understands its opaque references. Applications that need both should
+compose the catalog resolver in their custom manager factory.
+
+To mount an application-managed provider, make ownership explicit:
+
+```python
+from agora_workbench.data_lake import ResourceLease, ResourceOwnership
+
+catalog = CatalogIntegration(
+    ResourceLease(provider, ResourceOwnership.BORROWED),
+    authorizer_factory=make_authorizer,
+)
+```
+
+Borrowed providers are neither loaded nor closed by the server by default.
+Owned providers are loaded at startup and closed at shutdown. Override
+`load_on_startup` only when the application has a different refresh owner.
+Catalog refresh remains an administrative/application operation; no agent
+reindex or filesystem-watcher tool is registered.
+
+`capability_extension_factory` is a narrow session-scoped composition seam for
+applications that add separately authorized capabilities, such as a managed
+writer. It receives the `SessionContext`, authorized read catalog, and immutable
+`RequestContext`. Returned extension objects may provide
+`capabilities(request_context)`; those source capabilities are merged into
+`get_catalog_capabilities`, and the extension is closed with the session. The
+read provider remains independently owned and is not treated as a writer.
+Extensions may implement async-only `aclose()`. Synchronous session closure and
+timeout cleanup schedule and retain that work; server shutdown waits for it
+before closing the shared provider. Cleanup attempts the manager, every
+extension, session payload, and session files independently, reporting
+aggregated failures only after all steps have run.
+
 ### Source configuration
 
 Each source entry in `sources` declares a data location:

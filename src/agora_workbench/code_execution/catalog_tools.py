@@ -41,6 +41,16 @@ def register_catalog_tools(
     adapter. This compatibility surface is unscoped and is appropriate only
     where every registered artifact is already authorized to every caller.
     """
+    registration_state = getattr(mcp, "__dict__", {}).get("_agora_catalog_tool_mode")
+    if registration_state is not None:
+        raise RuntimeError(
+            f"Catalog tools are already registered in {registration_state!r} mode. "
+            "Legacy register_catalog_tools() cannot be combined with CatalogIntegration. "
+            "Use register_catalog_admin_tools() on a separately authorized administrative "
+            "MCP surface if query_catalog compatibility is required."
+        )
+    setattr(mcp, "_agora_catalog_tool_mode", "legacy-unscoped")
+
     LOGGER.warning(
         "Registering legacy unscoped catalog tools. All catalog metadata, including raw read-only SQL, "
         "will be visible to every caller with tool access; read-only SQL is not caller authorization."
