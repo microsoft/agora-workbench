@@ -27,6 +27,7 @@ from agora_workbench.data_lake import (
     InvalidRequestError,
     ListRequest,
     MAX_MANIFEST_BYTES,
+    ManifestArtifact,
     PageRequest,
     RequestContext,
     SearchRequest,
@@ -1511,14 +1512,53 @@ def test_catalog_does_not_emit_cursor_beyond_offset_limit():
     ],
 )
 def test_blob_manifest_rejects_dot_segment_prefix_escape(manifest):
-    source = SourceConfig(
-        source_id="approved",
-        path="az://account123/container/prefix",
-        discovery="manifest",
-        manifest=manifest,
-    )
     with pytest.raises(ValueError, match="dot segments"):
+        source = SourceConfig(
+            source_id="approved",
+            path="az://account123/container/prefix",
+            discovery="manifest",
+            manifest=manifest,
+        )
         CatalogIndexer._blob_manifest_name(source)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".agora/manifest.json",
+        ".agora/operations/op-1",
+        ".agora/revisions/op-1/data.bin",
+        ".agora/receipts/op-1.json",
+    ],
+)
+def test_manifest_logical_paths_reject_provider_reserved_names(path):
+    with pytest.raises(InvalidRequestError, match="logical path is reserved"):
+        ManifestArtifact(path=path)
+
+
+async def test_sqlite_provider_preserves_internal_credential_capable_locator():
+    db = CatalogDB(":memory:", vec_dimensions=4)
+    db.open()
+    try:
+        storage_uri = "https://account123.blob.core.windows.net/container/data.csv?sig=credential"
+        db.upsert_artifact(
+            artifact_id="artifact-1",
+            source_id="source-1",
+            logical_path="data.csv",
+            name="data.csv",
+            storage_uri=storage_uri,
+            indexed_at="2026-01-01T00:00:00Z",
+        )
+        provider = SQLiteCatalogProvider(db, ("source-1",))
+
+        resolved = await provider.resolve(
+            ArtifactReference("artifact-1", "source-1"),
+            RequestContext(),
+        )
+
+        assert resolved.locator.uri == storage_uri
+    finally:
+        db.close()
 
 
 async def test_refresh_error_preserves_source_id_with_colon(tmp_path):

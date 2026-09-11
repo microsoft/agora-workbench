@@ -107,7 +107,7 @@ class TestDestinationName:
     """Tests for the ``destination_name`` property on publishers."""
 
     def test_blob_publisher_destination_name(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.destination_name == "blob"
 
     def test_local_publisher_destination_name(self, tmp_path):
@@ -149,23 +149,23 @@ class TestBlobPublisherCanHandle:
     """Tests for BlobPublisher.can_handle()."""
 
     def test_handles_blob_closed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv</blob>") is True
 
     def test_handles_blob_unclosed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv") is True
 
     def test_rejects_local_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<local>output</local>") is False
 
     def test_rejects_plain_string(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("results.csv") is False
 
     def test_rejects_url(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("https://acct.blob.core.windows.net/c/f") is False
 
 
@@ -182,11 +182,11 @@ class TestBlobPublisherInit:
 
     def test_credential_stored(self, create_mock_credential):
         cred = create_mock_credential()
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c", credential=cred)
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container", credential=cred)
         assert pub.credential is cred
 
     def test_client_lazily_created(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub._client is None
 
 
@@ -235,7 +235,7 @@ class TestBlobPublisherPublish:
 
     @pytest.mark.asyncio
     async def test_publish_raises_if_file_missing(self, tmp_path):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(FileNotFoundError):
@@ -246,7 +246,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="parent traversal"):
@@ -257,7 +257,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="absolute path"):
@@ -268,7 +268,7 @@ class TestBlobPublisherPublish:
         mock_service_client = AsyncMock()
         mock_service_client.close = AsyncMock()
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = mock_service_client
 
         await pub.close()

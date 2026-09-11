@@ -1878,10 +1878,19 @@ class CodeExecutionServer(BaseMCPServer):
                     pub_instance._transfer_id = transfer_id
 
                 target_session = session_id if is_server_destination else session.session_id
-                remote_uri = await pub_instance.publish(
+                from agora_workbench.data_lake import RequestContext
+                from .data_access.publishers import publish_compat
+
+                remote_uri = await publish_compat(
+                    pub_instance,
                     local_path=materialized_path,
                     name=logical_name,
                     session_id=target_session,
+                    context=RequestContext(
+                        request_id=transfer_id,
+                        caller_id=session.user_identity,
+                        attributes={"session_id": session.session_id},
+                    ),
                 )
 
                 # --- Activity event ---

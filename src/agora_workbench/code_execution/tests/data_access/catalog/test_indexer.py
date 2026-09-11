@@ -140,6 +140,40 @@ class TestCatalogIndexerLocal:
         assert not any(".hidden" in uri for uri in uris)
 
     @pytest.mark.asyncio
+    async def test_prunes_hidden_and_provider_managed_directories(self, config, db, data_dir):
+        hidden = data_dir / "weather" / ".cache"
+        revision = data_dir / "weather" / ".agora" / "revisions" / "operation-1"
+        hidden.mkdir()
+        revision.mkdir(parents=True)
+        (hidden / "hidden.csv").write_text("hidden")
+        (revision / "managed.csv").write_text("managed")
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]] * 2)
+        mock_provider.dimensions = 4
+        indexer._embedding_provider = mock_provider
+
+        await indexer.index()
+
+        names = {record.name for record in db.list_artifacts(limit=100)}
+        assert names == {"daily_obs.csv", "hourly_wind.parquet"}
+
+    @pytest.mark.asyncio
+    async def test_skips_symlinked_files_that_could_escape_source(self, config, db, data_dir):
+        outside = data_dir / "outside.csv"
+        outside.write_text("secret")
+        (data_dir / "weather" / "escape.csv").symlink_to(outside)
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]] * 2)
+        mock_provider.dimensions = 4
+        indexer._embedding_provider = mock_provider
+
+        await indexer.index()
+
+        assert not any(record.name == "escape.csv" for record in db.list_artifacts(limit=100))
+
+    @pytest.mark.asyncio
     async def test_idempotent_reindex(self, config, db, data_dir):
         indexer = CatalogIndexer(config, db)
         mock_provider = MagicMock()
@@ -782,6 +816,30 @@ class _FakeBlobServiceClient:
 
 
 class TestBlobMigrationAdoption:
+    @pytest.mark.asyncio
+    async def test_blob_scan_prunes_hidden_and_provider_managed_paths(self):
+        db = CatalogDB(":memory:", vec_dimensions=4)
+        db.open()
+        source = SourceConfig(source_id="blob-source", path="az://account123/container")
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        blobs = [
+            SimpleNamespace(
+                name=name,
+                etag=f'"{name}"',
+                size=10,
+                last_modified=None,
+                content_settings=SimpleNamespace(content_type="text/csv"),
+            )
+            for name in ("visible.csv", "nested/.cache/hidden.csv", ".agora/revisions/op-1/managed.csv")
+        ]
+        clients = {"https://account123.blob.core.windows.net": _FakeBlobServiceClient(blobs)}
+
+        try:
+            artifacts = await indexer._enumerate_blob_source(source, MagicMock(), clients)
+            assert [artifact["name"] for artifact in artifacts] == ["visible.csv"]
+        finally:
+            db.close()
+
     @pytest.mark.asyncio
     async def test_blob_namespaced_configured_id_preserves_namespace(self):
         db = CatalogDB(":memory:", vec_dimensions=4)

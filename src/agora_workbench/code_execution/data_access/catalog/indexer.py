@@ -24,6 +24,8 @@ from agora_workbench.data_lake.manifest import (
 from .identity import (
     azure_uri_from_blob_name,
     canonicalize_azure_uri,
+    is_reserved_provider_path,
+    is_scan_excluded_path,
     logical_artifact_id,
     normalize_logical_path,
     parse_azure_uri,
@@ -681,6 +683,8 @@ class CatalogIndexer:
                 if prefix
                 else blob.name
             )
+            if is_scan_excluded_path(relative_name):
+                continue
             logical_path = normalize_logical_path(relative_name)
 
             description = source.description
@@ -826,6 +830,8 @@ class CatalogIndexer:
             now = datetime.now(timezone.utc).isoformat()
             artifacts = []
             for entry in manifest.artifacts:
+                if is_reserved_provider_path(entry.path):
+                    raise ValueError(f"Manifest artifact uses a reserved provider path: {entry.path}")
                 storage_path = (source_root / entry.path).resolve()
                 try:
                     storage_path.relative_to(source_root)
@@ -1091,11 +1097,20 @@ class CatalogIndexer:
                     )
                 )
             else:
-                for root, _dirs, files in os.walk(source_path, onerror=errors.append):
+                for root, dirs, files in os.walk(source_path, onerror=errors.append):
+                    root_path = Path(root)
+                    dirs[:] = [
+                        directory
+                        for directory in dirs
+                        if not is_scan_excluded_path(str((root_path / directory).relative_to(source_path)))
+                    ]
                     for filename in files:
-                        if filename.startswith("."):
+                        filepath = root_path / filename
+                        relative_path = str(filepath.relative_to(source_path))
+                        if is_scan_excluded_path(relative_path):
                             continue
-                        filepath = Path(root) / filename
+                        if filepath.is_symlink():
+                            continue
                         artifacts.append(
                             self._make_local_artifact(filepath, filename, source_path, source_id, source, now)
                         )

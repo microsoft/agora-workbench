@@ -9,6 +9,8 @@ import re
 from typing import Any, TYPE_CHECKING
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
+from agora_workbench.data_lake import RequestContext
+from agora_workbench.data_lake.transfer import safe_artifact_reference
 
 from ..types import AssetId, VarName
 
@@ -139,7 +141,13 @@ class AssetResolutionMiddleware(Middleware):
 
             async def _fetch(param_name: VarName, qualified_name: AssetId):
                 try:
-                    cache_path = await session.data_manager.get_cache_path(qualified_name)
+                    cache_path = await session.data_manager.get_cache_path(
+                        qualified_name,
+                        context=RequestContext(
+                            request_id=session_id,
+                            caller_id=getattr(session, "user_identity", None),
+                        ),
+                    )
                     return (param_name, qualified_name, str(cache_path), None)
                 except Exception as e:
                     return (param_name, qualified_name, None, e)
@@ -149,8 +157,9 @@ class AssetResolutionMiddleware(Middleware):
             # Check for errors
             for param_name, qualified_name, cache_path, error in results:
                 if error:
+                    safe_reference = safe_artifact_reference(qualified_name)
                     raise RuntimeError(
-                        f"Failed to resolve DataLake asset '{qualified_name}' for parameter '{param_name}': {error}"
+                        f"Failed to resolve DataLake asset '{safe_reference}' for parameter '{param_name}': {error}"
                     ) from error
 
             # Replace argument values in-place and build injection metadata
@@ -163,7 +172,7 @@ class AssetResolutionMiddleware(Middleware):
                 session.object_store.store(
                     asset_key,
                     {
-                        "qualified_name": qualified_name,
+                        "qualified_name": safe_artifact_reference(qualified_name),
                         "cache_path": cache_path,
                     },
                 )
@@ -173,7 +182,8 @@ class AssetResolutionMiddleware(Middleware):
                 arguments[param_name] = cache_path
                 resolved.append((param_name, asset_key, cache_path))
 
-                LOGGER.debug(f"Middleware: resolved '{param_name}': {qualified_name} -> {cache_path}")
+                safe_reference = safe_artifact_reference(qualified_name)
+                LOGGER.debug("Middleware: resolved '%s': %s -> %s", param_name, safe_reference, cache_path)
 
             # Store resolution metadata for the tool callback
             _resolved_assets.set(resolved)

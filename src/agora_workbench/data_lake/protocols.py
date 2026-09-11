@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from .models import (
@@ -16,6 +17,7 @@ from .models import (
     SearchRequest,
     SourceCapabilities,
 )
+from .transfer import TransferOptions, TransferResult
 
 
 @runtime_checkable
@@ -160,4 +162,74 @@ class PolicyEnforcedCatalog(Protocol):
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
         """Resolve an artifact without disclosing unauthorized existence."""
+        ...
+
+
+@runtime_checkable
+class StreamingArtifactFetcher(Protocol):
+    """Fetcher capability that commits a bounded stream to a local file.
+
+    This is deliberately separate from full-memory ``fetch()`` conveniences.
+    Implementations leave an existing destination unchanged on failure.
+    """
+
+    async def fetch_to_file(
+        self,
+        qualified_name: str,
+        dest_path: Path,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> int:
+        """Stream an artifact to a file and return the committed byte count."""
+        ...
+
+
+@runtime_checkable
+class StreamingArtifactPublisher(Protocol):
+    """Publisher capability that uploads a local file with bounded memory."""
+
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
+        """Publish a file after enforcing the supplied transfer guarantees."""
+        ...
+
+
+@runtime_checkable
+class DetailedStreamingArtifactFetcher(Protocol):
+    """Optional detailed-result seam for managed-read and audit integrations."""
+
+    async def fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Path,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Stream an artifact and return integrity and caller diagnostics."""
+        ...
+
+
+@runtime_checkable
+class DetailedStreamingArtifactPublisher(Protocol):
+    """Optional detailed-result seam for managed-write integrations."""
+
+    async def publish_with_result(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> tuple[str, TransferResult]:
+        """Publish a file and return its locator plus transfer result."""
         ...
