@@ -27,10 +27,12 @@ from agora_workbench.data_lake import (
     Page,
     ResourceLease,
     ResourceOwnership,
+    RequestContext,
     ResolvedArtifact,
     SearchRequest,
     SourceCapabilities,
     StorageLocator,
+    stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogConfig, DiscoveryMode, SourceConfig
 from agora_workbench.code_execution.data_access.catalog import CatalogDB
@@ -95,6 +97,24 @@ async def test_no_catalog_preserves_session_factory_and_tool_surface(tmp_path):
     tool_names = {tool.name for tool in await server.mcp.list_tools()}
     assert "search_data" not in tool_names
     assert "get_catalog_capabilities" not in tool_names
+
+
+async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
+    root = tmp_path / "implicit-source"
+    root.mkdir()
+    (root / "data.txt").write_text("payload")
+    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[SourceConfig(path=str(root))]))
+
+    await integration.startup()
+    try:
+        expected_source_id = stable_source_id("local", str(root.resolve()))
+        assert [capability.source_id for capability in await integration.provider.capabilities()] == [
+            expected_source_id
+        ]
+        page = await integration.provider.search(SearchRequest(""), RequestContext())
+        assert page.items[0].reference.source_id == expected_source_id
+    finally:
+        await integration.shutdown()
 
 
 async def test_server_startup_failure_rolls_back_owned_catalog(tmp_path):
