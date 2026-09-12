@@ -19,6 +19,10 @@ class DataLakeErrorCode(StrEnum):
     TRANSFER_LIMIT = "transfer_limit"
     CHECKSUM_MISMATCH = "checksum_mismatch"
     UNSAFE_PATH = "unsafe_path"
+    CONFLICT = "conflict"
+    PRECONDITION_FAILED = "precondition_failed"
+    RETRY_EXHAUSTED = "retry_exhausted"
+    RECONCILIATION_FAILED = "reconciliation_failed"
 
 
 class DataLakeError(Exception):
@@ -97,3 +101,27 @@ class UnsafePathError(DataLakeError):
     """A local or provider path escaped its configured namespace."""
 
     code = DataLakeErrorCode.UNSAFE_PATH
+
+
+class ConflictError(DataLakeError):
+    """A concurrent mutation conflicted with the requested operation."""
+
+    code = DataLakeErrorCode.CONFLICT
+
+
+class PreconditionFailedError(DataLakeError):
+    """An ownership, generation, or revision precondition was not satisfied."""
+
+    code = DataLakeErrorCode.PRECONDITION_FAILED
+
+
+class RetryExhaustedError(DataLakeError):
+    """Bounded optimistic-concurrency retries were exhausted."""
+
+    code = DataLakeErrorCode.RETRY_EXHAUSTED
+
+
+class ReconciliationError(DataLakeError):
+    """Recovery could not safely classify or clean an interrupted operation."""
+
+    code = DataLakeErrorCode.RECONCILIATION_FAILED

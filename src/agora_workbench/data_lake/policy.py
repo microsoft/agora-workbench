@@ -71,6 +71,11 @@ class AuthorizedCatalogProvider:
         """Return the configured enforcement granularity."""
         return self._mode
 
+    @property
+    def authorizer(self) -> CatalogAuthorizer:
+        """Return the caller-scoped authorizer used by this policy wrapper."""
+        return self._authorizer
+
     async def capabilities(self, context: RequestContext) -> tuple[SourceCapabilities, ...]:
         """Return provider support intersected with current caller policy."""
         effective: list[SourceCapabilities] = []

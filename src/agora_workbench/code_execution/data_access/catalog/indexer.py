@@ -547,16 +547,17 @@ class CatalogIndexer:
             )
         return CatalogDryRunReport(tuple(planned))
 
-    def _record_manifest_revision(self, source_id: str, generation: int, etag: str) -> None:
+    def _record_manifest_revision(self, source_id: str, manifest: CatalogManifest, etag: str) -> None:
         state = self._db.get_source_refresh_state(source_id)
         if state is not None and state.manifest_generation is not None:
-            if generation < state.manifest_generation:
+            if manifest.generation < state.manifest_generation:
                 raise ValueError(
-                    f"Manifest generation {generation} is older than cached generation {state.manifest_generation}"
+                    f"Manifest generation {manifest.generation} is older than cached generation "
+                    f"{state.manifest_generation}"
                 )
-            if generation == state.manifest_generation and state.manifest_etag not in {None, etag}:
+            if manifest.generation == state.manifest_generation and state.manifest_etag not in {None, etag}:
                 raise ValueError("Manifest content changed without advancing its generation")
-        self._manifest_revisions[source_id] = (generation, etag)
+        self._manifest_revisions[source_id] = (manifest.generation, etag)
 
     def _validated_sources(self) -> list[tuple[SourceConfig, str]]:
         """Resolve normalized source identities and reject ambiguous duplicate refresh ownership."""
@@ -947,14 +948,16 @@ class CatalogIndexer:
             payload = self._read_local_manifest(root_fd, manifest_path.relative_to(source_root))
             manifest = self._parse_manifest(payload, str(manifest_path))
             manifest_etag = hashlib.sha256(payload).hexdigest()
-            self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
+            self._record_manifest_revision(source_id, manifest, manifest_etag)
             now = datetime.now(timezone.utc).isoformat()
             artifacts = []
             for entry in manifest.artifacts:
                 verify_live_root()
                 if is_reserved_provider_path(entry.path):
                     raise ValueError(f"Manifest artifact uses a reserved provider path: {entry.path}")
-                storage_path = (source_root / entry.path).resolve()
+                if entry.deleted_at is not None:
+                    continue
+                storage_path = (source_root / (entry.storage_path or entry.path)).resolve()
                 try:
                     storage_path.relative_to(source_root)
                 except ValueError as exc:
@@ -1031,7 +1034,7 @@ class CatalogIndexer:
         if response_etag is None and isinstance(download_properties, Mapping):
             response_etag = download_properties.get("etag")
         manifest_etag = str(response_etag) if response_etag else f"sha256:{hashlib.sha256(payload).hexdigest()}"
-        self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
+        self._record_manifest_revision(source_id, manifest, manifest_etag)
         _, _, prefix = _parse_blob_path(source.path)
         prefix_root = prefix.rstrip("/")
         now = datetime.now(timezone.utc).isoformat()
@@ -1044,12 +1047,13 @@ class CatalogIndexer:
                 azure_uri_from_blob_name(
                     account,
                     container,
-                    "/".join(part for part in (prefix_root, entry.path) if part),
+                    "/".join(part for part in (prefix_root, entry.storage_path or entry.path) if part),
                 ),
                 f"manifest-generation:{manifest.generation}",
                 now,
             )
             for entry in manifest.artifacts
+            if entry.deleted_at is None
         ]
         self._validate_manifest_artifacts(source_id, artifacts)
         return artifacts

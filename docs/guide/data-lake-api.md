@@ -10,6 +10,7 @@ Choose the import path that matches your task:
 | Define artifact records or implement a catalog/resolver | `agora_workbench.data_lake` |
 | Use the built-in SQLite catalog and indexer | `agora_workbench.data_lake.catalog` |
 | Use manifest-backed provider/resolver adapters | `agora_workbench.data_lake.catalog` / `agora_workbench.data_lake.resolvers` |
+| Register, upload, remove, or promote durable artifacts | `agora_workbench.data_lake` / `agora_workbench.data_lake.catalog` |
 | Use the Azure AI Search resolver | `agora_workbench.data_lake.resolvers` |
 | Configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
 
@@ -377,6 +378,139 @@ Use `SearchRequest.source_ids` and `ListRequest.source_ids` to restrict an
 operation to specific sources. An empty tuple means all sources. Treat
 pagination cursors as opaque provider values; callers should not parse them.
 Page limits cannot exceed `MAX_PAGE_LIMIT` (1000).
+
+## Managed writes
+
+`ManagedCatalogWriter` adds durable mutations to an authoritative manifest.
+Use `LocalManagedStorage` for one filesystem root or `BlobManagedStorage` with
+a caller-owned container/transfer adapter. Wrap the writer in
+`AuthorizedManagedCatalogWriter` so application policy is checked before any
+metadata or byte mutation.
+
+```python
+from pathlib import Path
+
+from agora_workbench.data_lake import (
+    ArtifactMetadata,
+    LocalManagedStorage,
+    ManagedCatalogWriter,
+    PromoteOutputRequest,
+    RequestContext,
+)
+
+writer = ManagedCatalogWriter(
+    "approved-results",
+    LocalManagedStorage("/srv/data/approved"),
+)
+committed = await writer.promote(
+    PromoteOutputRequest(
+        operation_id="run-42-result",
+        path="results/run-42.csv",
+        local_path=Path("/srv/scratch/session-7/result.csv"),
+        metadata=ArtifactMetadata(description="Validated run 42 result"),
+        session_id="session-7",
+        output_name="result.csv",
+    ),
+    RequestContext(caller_id="researcher@example.com"),
+)
+manifest = await writer.read_manifest(minimum_generation=committed.generation)
+```
+
+Promotion is always explicit. Ordinary `AssetPublisher.publish()` calls and
+session output directories remain scratch publication and never become
+discoverable merely because bytes were copied. Promotion copies the output to
+an immutable managed revision and does not delete or transfer ownership of the
+caller/session file.
+
+The four mutations have distinct ownership:
+
+- `register()` requires the caller's SHA-256 and snapshots bytes already inside
+  the configured source into a managed immutable revision. The original path
+  remains caller-owned and is never modified or deleted. Catalog reads resolve
+  the snapshot, so later changes at the external path cannot mutate a retained
+  revision.
+- `upload()` creates a managed immutable revision from a local file.
+- `promote()` is an upload with required session/output provenance.
+- `remove()` commits a tombstone before optional garbage collection. Collection
+  only deletes revisions marked `managed`, created by the recorded operation,
+  and still at the recorded storage version.
+
+Every request supplies a stable `operation_id`. An operation intent is
+create-exclusive; retries with the same request return the same revision and
+committed result, while reuse for different input raises `ConflictError`.
+Authorized writers check both source scope and the normalized effective
+`ArtifactReference` before creating the intent or transferring bytes.
+Revision objects are create-exclusive (`O_EXCL` locally and
+`If-None-Match: *` on Blob). Manifest commits use a generation plus an atomic
+replacement under the local writer lock, or Blob ETag `If-Match`. Conflicts are
+merged and retried only up to `max_conflict_retries`; exhaustion raises
+`RetryExhaustedError`. These are ordered, recoverable steps, **not** a
+multi-object atomic transaction.
+
+Local writers sharing a root serialize through an advisory `flock`. New files,
+replacement manifests, and their containing directories are fsynced before the
+lock is released. Readers need no lock because they see either complete
+manifest generation. Blob writers use optimistic ETag concurrency. On the
+writer host, `read_manifest(minimum_generation=...)` provides read-after-write
+for the returned generation. Independent `ManifestCatalogProvider` readers see
+the generation after their next successful refresh; deployments must set their
+refresh interval and `max_stale_seconds` to the required cross-reader freshness
+bound.
+
+Call `reconcile(grace_seconds=...)` after startup or periodically. It creates a
+missing receipt when a manifest commit succeeded, and removes an uncommitted
+orphan only when the operation record, object ownership metadata, and storage
+version prove that the object belongs to that operation and no committed
+revision references it. Young operations are deferred. Unsafe cleanup raises
+`ReconciliationError` rather than deleting ambiguous bytes.
+Active operations hold a durable renewable lease. Reconciliation conditionally
+claims an expired operation under the local writer lock or Blob ETag CAS before
+cleanup, and writers re-check their lease before manifest commit. A slow active
+transfer or manifest CAS therefore cannot be collected based on age alone.
+Once revision bytes are complete, the operation enters `commit_ready`;
+reconciliation does not delete that revision while a manifest commit remains
+possible. After the lease expires, reconciliation conditionally claims the
+intent and commits a manifest fence generation. The fence CAS either loses to
+the original commit, allowing receipt recovery, or changes the manifest ETag so
+the old CAS can no longer succeed; only then may the operation become retryable
+or its verified owned orphan be collected. Fence generations are visible
+manifest generations, but the fenced operation retains its original generation
+precondition only when it equals the recorded pre-fence generation and no
+unrelated catalog mutation occurred before the fence was cleared. Remove receipts
+persist `cleanup_pending`; retries and reconciliation resume requested garbage
+collection. Confirmed absence after a tombstone satisfies deletion; an
+ownership/version mismatch remains pending.
+Committed tombstone records retain their operation result and exact revision
+cleanup set even if a later upload revives the artifact, so receipt recovery
+cannot delete the replacement revision or lose the completed removal.
+
+Local transfer staging lives only under `.agora/staging/{operation_id}`.
+Entries and staged bytes are fsynced before publication. Reconciliation removes
+abandoned staging after the grace period under the writer lock; unlinking a
+post-link leftover does not remove the already-published revision hard link.
+
+Managed fields are additive to manifest version 1, but managed storage paths
+live in the reserved namespace and cannot be replayed as caller-visible logical
+paths. Rollback therefore uses documented forward recovery rather than a lossy
+legacy export: stop writers, preserve the complete `.agora` namespace, redeploy
+managed-write-capable code, and run `reconcile()`. Do not point an older writer
+at the source, guess ownership, or remove `.agora` objects manually.
+
+### Transfer integration boundary
+
+Managed commit/recovery uses a private storage adapter boundary. Its transfer
+methods accept the shared `TransferOptions`, enforce exact checksums, use the
+shared reserved-path validation, and atomically attach ownership metadata while
+preserving the stronger lifecycle state needed for crash recovery. The adapter
+keeps Blob prefix composition in exactly one layer and reports success only
+after the complete revision is durable.
+
+Use `managed_writer_extension_factory(writer)` as
+`CatalogIntegration.capability_extension_factory`. It creates a
+session-scoped `AuthorizedManagedCatalogWriter` from the same per-session
+authorizer as catalog reads, and `CatalogIntegration.capabilities()` merges its
+authorized `WRITE_OPERATIONS`. No second server or session lifecycle is
+created.
 
 ## Caller-aware policy composition
 
