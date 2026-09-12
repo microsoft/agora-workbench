@@ -807,6 +807,39 @@ async def test_owned_catalog_startup_failure_and_cancellation_close(failure):
     assert provider.close_calls == 1
 
 
+async def test_cancelled_catalog_startup_awaits_owned_provider_close():
+    load_started = asyncio.Event()
+    close_started = asyncio.Event()
+    close_gate = asyncio.Event()
+
+    class Provider(_LifecycleProvider):
+        async def load(self):
+            load_started.set()
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            self.close_calls += 1
+            close_started.set()
+            await close_gate.wait()
+
+    provider = Provider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    startup = asyncio.create_task(integration.startup())
+    await load_started.wait()
+    startup.cancel()
+    await close_started.wait()
+    await asyncio.sleep(0)
+    assert not startup.done()
+
+    close_gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await startup
+    assert provider.close_calls == 1
+
+
 async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     artifact = CatalogArtifact(
         ArtifactReference("artifact", "source", revision=3),
