@@ -605,6 +605,36 @@ async def test_local_fetcher_root_swap_after_containment_uses_retained_verified_
     await fetcher.close()
 
 
+async def test_local_fetcher_rejects_real_directory_swap_during_traversal(tmp_path, monkeypatch):
+    allowed = tmp_path / "allowed"
+    trusted = allowed / "nested"
+    trusted.mkdir(parents=True)
+    source = trusted / "data.bin"
+    source.write_bytes(b"trusted")
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    (replacement / "data.bin").write_bytes(b"attacker")
+    fetcher = LocalFileFetcher([str(allowed)])
+    original_open = fetchers_module.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == "nested" and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            trusted.rename(allowed / "original-nested")
+            replacement.rename(trusted)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(fetchers_module.os, "open", swap_before_open)
+
+    with pytest.raises(PermissionError, match="identity changed"):
+        fetcher._open_checked(str(source))
+
+    assert swapped
+    await fetcher.close()
+
+
 async def test_local_fetcher_closes_source_when_destination_setup_fails(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"content")

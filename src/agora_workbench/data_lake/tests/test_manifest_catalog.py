@@ -1225,7 +1225,12 @@ def test_local_manifest_read_is_bounded_when_declared_size_lies(tmp_path, monkey
     def lying_fstat(descriptor):
         result = original_fstat(descriptor)
         if stat.S_ISREG(result.st_mode):
-            return SimpleNamespace(st_mode=result.st_mode, st_size=1)
+            return SimpleNamespace(
+                st_mode=result.st_mode,
+                st_size=1,
+                st_dev=result.st_dev,
+                st_ino=result.st_ino,
+            )
         return result
 
     monkeypatch.setattr(indexer_module.os, "fstat", lying_fstat)
@@ -1255,6 +1260,36 @@ def test_local_manifest_parent_swap_cannot_escape_source(tmp_path, monkeypatch):
             swapped = True
             manifest_parent.rename(root / "original-metadata")
             manifest_parent.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(indexer_module.os, "open", swap_before_parent_open)
+
+    artifacts, error = indexer._enumerate_local_manifest(source)
+
+    assert swapped
+    assert artifacts == []
+    assert error is not None
+
+
+def test_local_manifest_rejects_real_directory_swap_during_traversal(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    manifest_parent = root / "metadata"
+    manifest_parent.mkdir(parents=True)
+    (manifest_parent / "manifest.json").write_text(json.dumps(_manifest()))
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    (replacement / "manifest.json").write_text(json.dumps(_manifest(description="replacement")))
+    source = _local_config(root, manifest="metadata/manifest.json").sources[0]
+    indexer = CatalogIndexer(_local_config(root, manifest="metadata/manifest.json"), CatalogDB(":memory:"))
+    original_open = indexer_module.os.open
+    swapped = False
+
+    def swap_before_parent_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == manifest_parent.name and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            manifest_parent.rename(root / "original-metadata")
+            replacement.rename(manifest_parent)
         return original_open(path, flags, *args, **kwargs)
 
     monkeypatch.setattr(indexer_module.os, "open", swap_before_parent_open)

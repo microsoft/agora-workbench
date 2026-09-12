@@ -620,18 +620,36 @@ class LocalFileFetcher(AssetFetcher):
                 raise PermissionError("Configured allowed root identity changed.")
             try:
                 for part in relative.parts[:-1]:
+                    entry_stat = os.stat(part, dir_fd=current, follow_symlinks=False)
+                    if not stat.S_ISDIR(entry_stat.st_mode):
+                        raise PermissionError("Local asset path component must be a directory.")
                     next_fd = os.open(
                         part,
                         os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
                         dir_fd=current,
                     )
+                    try:
+                        opened_stat = os.fstat(next_fd)
+                        if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                            raise PermissionError("Local asset directory identity changed during traversal.")
+                    except BaseException:
+                        os.close(next_fd)
+                        raise
                     os.close(current)
                     current = next_fd
+                entry_stat = os.stat(relative.parts[-1], dir_fd=current, follow_symlinks=False)
                 descriptor = os.open(
                     relative.parts[-1],
                     os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
                     dir_fd=current,
                 )
+                try:
+                    opened_stat = os.fstat(descriptor)
+                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise PermissionError("Local asset identity changed during traversal.")
+                except BaseException:
+                    os.close(descriptor)
+                    raise
             finally:
                 os.close(current)
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):

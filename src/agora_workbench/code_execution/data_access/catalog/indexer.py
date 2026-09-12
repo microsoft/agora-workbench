@@ -96,21 +96,40 @@ def _open_relative_regular_file_no_follow(root_fd: int, relative_path: Path) -> 
     current = os.dup(root_fd)
     try:
         for part in relative_path.parts[:-1]:
+            entry_stat = os.stat(part, dir_fd=current, follow_symlinks=False)
+            if not stat.S_ISDIR(entry_stat.st_mode):
+                raise OSError("Catalog source path component is not a directory.")
             next_fd = os.open(
                 part,
                 os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
                 dir_fd=current,
             )
+            try:
+                opened_stat = os.fstat(next_fd)
+                if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                    raise OSError("Catalog source directory identity changed during traversal.")
+            except BaseException:
+                os.close(next_fd)
+                raise
             os.close(current)
             current = next_fd
+        entry_stat = os.stat(relative_path.parts[-1], dir_fd=current, follow_symlinks=False)
         descriptor = os.open(
             relative_path.parts[-1],
             os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
             dir_fd=current,
         )
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        try:
+            opened_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(entry_stat.st_mode)
+                or not stat.S_ISREG(opened_stat.st_mode)
+                or (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino)
+            ):
+                raise OSError("Catalog source file identity changed during traversal.")
+        except BaseException:
             os.close(descriptor)
-            raise OSError("Catalog source entry is not a regular file.")
+            raise
         return descriptor
     finally:
         os.close(current)
@@ -1265,6 +1284,12 @@ class CatalogIndexer:
                         dir_fd=directory_fd,
                     )
                     try:
+                        opened_stat = os.fstat(child_fd)
+                        if not stat.S_ISDIR(opened_stat.st_mode) or (opened_stat.st_dev, opened_stat.st_ino) != (
+                            entry_stat.st_dev,
+                            entry_stat.st_ino,
+                        ):
+                            raise OSError("Catalog source directory identity changed during traversal.")
                         self._walk_local_directory(
                             child_fd,
                             child_parts,
