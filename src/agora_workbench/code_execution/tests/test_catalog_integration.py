@@ -227,14 +227,30 @@ async def test_server_shutdown_cancellation_still_closes_sessions_and_catalog(tm
         catalog=integration,
     )
     await integration.startup()
-    server._sidecar_manager.stop_all = AsyncMock(side_effect=asyncio.CancelledError())
+    sidecar_started = asyncio.Event()
+    sidecar_gate = asyncio.Event()
+    sidecar_stopped = asyncio.Event()
+
+    async def stop_sidecars():
+        sidecar_started.set()
+        await sidecar_gate.wait()
+        sidecar_stopped.set()
+
+    server._sidecar_manager.stop_all = stop_sidecars
     server._close_tool_search_backends = AsyncMock(side_effect=RuntimeError("tool close failed"))
     session_cleanup = AsyncMock()
     server.session_manager.aclose_all_sessions = session_cleanup
 
+    shutdown = asyncio.create_task(server._shutdown())
+    await sidecar_started.wait()
+    shutdown.cancel()
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    sidecar_gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await server._shutdown()
+        await shutdown
 
+    assert sidecar_stopped.is_set()
     session_cleanup.assert_awaited_once()
     assert provider.close_calls == 1
 
@@ -864,6 +880,23 @@ async def test_factory_rollback_async_extension_is_awaited_by_integration_shutdo
 
     gate.set()
     await shutdown
+
+
+async def test_binding_factory_failure_closes_factory_authorizer():
+    authorizer = AsyncMock()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: authorizer,
+        capability_extension_factory=lambda context, catalog, request_context: (_ for _ in ()).throw(
+            RuntimeError("extension factory failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="extension factory failed"):
+        integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    await integration.shutdown()
+    authorizer.aclose.assert_awaited_once()
 
 
 async def test_cancelled_catalog_drain_remains_tracked_for_next_shutdown():

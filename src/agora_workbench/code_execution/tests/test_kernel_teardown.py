@@ -660,6 +660,55 @@ class TestKernelRebuildWaits:
         assert created_while_old_alive == [True], "replacement was built before the old kernel finished shutting down"
         assert "s1" in manager._kernels
 
+    async def test_generation_mismatch_teardown_preserves_replacement_outputs(self, manager, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        manager.create_session(
+            data={},
+            user_identity="old",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
+        register_kernel(manager, "s1", name="OLD")
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id="s1",
+        )
+        outputs = manager._get_outputs_dir("s1")
+        marker = outputs / "replacement.txt"
+        marker.write_text("replacement")
+
+        class FakeKernelManager:
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                pass
+
+            def client(self):
+                return FakeKernelClient()
+
+        class FakeKernelClient:
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                pass
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", FakeKernelManager)
+
+        await manager._get_or_create_kernel("s1")
+
+        assert marker.read_text() == "replacement"
+
 
 # ---------------------------------------------------------------------------
 # The sync fallback path
