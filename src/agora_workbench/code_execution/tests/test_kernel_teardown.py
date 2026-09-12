@@ -580,6 +580,32 @@ class TestAwaitableClose:
         await close_task
         assert manager.storage.count() == 0
 
+    async def test_aclose_all_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        original_close = manager.aclose_session
+        replacement = None
+
+        async def replace_then_close(closing_session_id, *, expected_generation=None):
+            nonlocal replacement
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            await original_close(closing_session_id, expected_generation=expected_generation)
+
+        monkeypatch.setattr(manager, "aclose_session", replace_then_close)
+        await manager.aclose_all_sessions()
+
+        assert manager.storage.retrieve(session_id) is replacement
+
     @pytest.mark.parametrize("async_close", [False, True])
     async def test_session_cleanup_attempts_every_resource_before_reporting(self, manager, tmp_path, async_close):
         attempted = []
@@ -786,6 +812,19 @@ class TestKernelRebuildWaits:
 
         assert created_while_old_alive == [True], "replacement was built before the old kernel finished shutting down"
         assert "s1" in manager._kernels
+
+    async def test_idle_cleanup_registers_teardown_for_kernel_rebuild_waiters(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+        register_kernel(manager, session_id, gate=gate)
+        manager._kernel_last_used[session_id] = 0
+
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=-1))
+        await let_teardown_start()
+        assert session_id in manager._kernel_shutdown_tasks
+
+        gate.set()
+        await cleanup
 
     async def test_generation_mismatch_teardown_preserves_replacement_outputs(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg
