@@ -7,6 +7,7 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 import shutil
 import uuid
 from collections.abc import Callable
@@ -49,6 +50,7 @@ LOGGER = logging.getLogger(__name__)
 _MAX_TOOL_PAGE_SIZE = 100
 _MAX_DOMAIN_SCAN = 1_000
 _REFERENCE_PREFIX = "catalog-v1:"
+_URI_IN_TEXT_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+")
 _RESERVED_PAYLOAD_FIELDS = frozenset(
     {
         "id",
@@ -328,6 +330,7 @@ class CatalogSessionBinding:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))
             raise cancelled
         if errors:
+            self._closed = False
             raise ExceptionGroup("Catalog session binding cleanup failed.", errors)
 
     def cleanup(self) -> None:
@@ -561,7 +564,7 @@ def _request_context(context: SessionContext) -> RequestContext:
 
 def _error_payload(exc: Exception) -> dict[str, Any]:
     if isinstance(exc, DataLakeError):
-        payload: dict[str, Any] = {"error": exc.message, "error_type": exc.code.value}
+        payload: dict[str, Any] = {"error": _sanitize_error_message(exc.message), "error_type": exc.code.value}
         if exc.operation is not None:
             payload["operation"] = exc.operation
         if exc.resource_id is not None:
@@ -570,9 +573,13 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
             )
         return payload
     if isinstance(exc, ValueError):
-        return {"error": str(exc), "error_type": "invalid_request"}
+        return {"error": _sanitize_error_message(str(exc)), "error_type": "invalid_request"}
     LOGGER.exception("Catalog tool failed", exc_info=exc)
     return {"error": "Catalog operation failed.", "error_type": "internal"}
+
+
+def _sanitize_error_message(message: str) -> str:
+    return _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), message)
 
 
 def _sanitize_metadata_value(value: Any) -> Any:
@@ -684,7 +691,9 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                 ),
                 current.context,
             )
-            capabilities = {capability.source_id: capability for capability in await integration.capabilities(current)}
+            capabilities = {
+                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
+            }
             hits = []
             for artifact in page.items:
                 hits.append(
@@ -710,7 +719,9 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
     ) -> dict[str, Any]:
         try:
             current = await binding("get_artifact", mcp_ctx)
-            capabilities = {capability.source_id: capability for capability in await integration.capabilities(current)}
+            capabilities = {
+                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
+            }
             if source_id is None:
                 source_ids = [
                     capability.source_id
