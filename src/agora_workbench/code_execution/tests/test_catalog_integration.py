@@ -403,7 +403,15 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
         ArtifactReference("artifact", "source"),
         ArtifactPresentation("data.csv", description="Data", media_type="text/csv", size_bytes=4),
         StorageLocator("file:///data/data.csv"),
-        metadata={"domain": "science", "source_type": "local"},
+        metadata={
+            "domain": "science",
+            "source_type": "local",
+            "id": "metadata-id",
+            "source_id": "metadata-source",
+            "current_revision": 99,
+            "load_path": "<blob>untrusted</blob>",
+            "storage_uri": "https://user:secret@example.test/data.csv?sig=secret",
+        },
         score=0.75,
         revision=2,
     )
@@ -447,6 +455,7 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     result = await captured["search_data"]("data")
     assert result[0]["id"] == "artifact"
     assert result[0]["source_id"] == "source"
+    assert result[0]["current_revision"] == 2
     assert "storage_uri" not in result[0]
     assert result[0]["score"] == 0.75
     assert result[0]["load_path"].startswith("<blob>catalog-v1:")

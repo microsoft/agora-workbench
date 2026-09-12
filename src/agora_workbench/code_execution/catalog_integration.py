@@ -48,6 +48,22 @@ LOGGER = logging.getLogger(__name__)
 _MAX_TOOL_PAGE_SIZE = 100
 _MAX_DOMAIN_SCAN = 1_000
 _REFERENCE_PREFIX = "catalog-v1:"
+_RESERVED_PAYLOAD_FIELDS = frozenset(
+    {
+        "id",
+        "source_id",
+        "current_revision",
+        "content_revision",
+        "metadata_revision",
+        "checksum_sha256",
+        "score",
+        "description",
+        "content_type",
+        "size_bytes",
+        "load_path",
+        "storage_uri",
+    }
+)
 
 AuthorizerFactory = Callable[[SessionContext], CatalogAuthorizer]
 CapabilityExtensionFactory = Callable[
@@ -454,6 +470,7 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
 
 def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[str, Any]:
     payload = {
+        **{key: value for key, value in artifact.metadata.items() if key not in _RESERVED_PAYLOAD_FIELDS},
         "id": artifact.reference.artifact_id,
         "source_id": artifact.reference.source_id,
         "name": artifact.presentation.name,
@@ -462,7 +479,6 @@ def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[st
         "metadata_revision": artifact.metadata_revision,
         "checksum_sha256": artifact.checksum_sha256,
         "score": artifact.score,
-        **dict(artifact.metadata),
     }
     for key, value in {
         "description": artifact.presentation.description,
