@@ -480,7 +480,10 @@ async def stream_chunks_to_file(
                 raise RuntimeError("Portable transfer destination was not initialized.")
             current_parent = destination_path.parent.resolve(strict=True)
             current_stat = current_parent.stat()
-            if current_parent != portable_parent or (current_stat.st_dev, current_stat.st_ino) != portable_parent_identity:
+            if (
+                current_parent != portable_parent
+                or (current_stat.st_dev, current_stat.st_ino) != portable_parent_identity
+            ):
                 raise UnsafePathError(
                     "Transfer destination parent identity changed before commit.",
                     resource_id=display_resource,

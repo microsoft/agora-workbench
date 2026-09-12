@@ -329,6 +329,7 @@ async def _copy_local_path(
     context: RequestContext,
 ) -> TransferResult:
     """Best-effort fallback for unrestricted local publishing on non-POSIX platforms."""
+
     def open_verified_source():
         source_path = local_path.resolve(strict=True)
         source_stat = source_path.stat()
@@ -346,6 +347,7 @@ async def _copy_local_path(
         resource=str(local_path),
     )
     try:
+
         async def chunks():
             while True:
                 chunk = await _run_blocking_io(
