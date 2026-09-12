@@ -522,7 +522,7 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
         ),
         StorageLocator("file:///data/data.csv"),
         metadata={
-            "domain": "science",
+            "domain": "science https://example.test/domain?sig=secret",
             "source_type": "local",
             "id": "metadata-id",
             "source_id": "metadata-source",
@@ -592,7 +592,7 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert catalog.capabilities.await_count == 1
     details = await captured["get_artifact"]("artifact")
     assert details["current_revision"] == 2
-    assert await captured["list_domains"]() == ["science"]
+    assert await captured["list_domains"]() == ["science https://example.test/domain"]
 
     catalog.capabilities.return_value = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
     integration.capabilities.return_value = (
@@ -852,8 +852,32 @@ async def test_cancelled_catalog_drain_remains_tracked_for_next_shutdown():
     assert not second_shutdown.done()
     gate.set()
     await second_shutdown
-
     assert finished.is_set()
+
+
+async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes():
+    attempts = 0
+    provider = _LifecycleProvider()
+
+    class Extension:
+        async def aclose(self):
+            nonlocal attempts
+            attempts += 1
+            raise asyncio.CancelledError
+
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: Extension(),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding.cleanup()
+
+    with pytest.raises(asyncio.CancelledError):
+        await integration.shutdown()
+
+    assert attempts == 2
+    assert provider.close_calls == 1
 
 
 async def test_slots_manager_accepts_catalog_binding_without_mutation(tmp_path):
