@@ -144,6 +144,18 @@ async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
         await integration.shutdown()
 
 
+async def test_configured_catalog_startup_rejects_unready_source(tmp_path):
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[SourceConfig(path=str(tmp_path / "missing"))]),
+        db_path=tmp_path / "catalog.db",
+    )
+
+    with pytest.raises(RuntimeError, match="not ready"):
+        await integration.startup()
+
+    assert cast(Any, integration.provider)._closed
+
+
 def test_from_config_rejects_invalid_authorizer_before_opening_database(tmp_path):
     source_root = tmp_path / "source"
     source_root.mkdir()
@@ -652,6 +664,34 @@ async def test_session_capability_extension_merges_and_closes():
     assert capabilities[0].supports(CatalogOperation.RESOLVE)
     await binding.aclose()
     assert extension.closed
+
+
+async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
+    closed = False
+
+    class CancelledExtension:
+        async def aclose(self):
+            raise asyncio.CancelledError()
+
+    class LaterExtension:
+        async def aclose(self):
+            nonlocal closed
+            closed = True
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: (
+            CancelledExtension(),
+            LaterExtension(),
+        ),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    with pytest.raises(asyncio.CancelledError):
+        await binding.aclose()
+
+    assert closed
 
 
 async def test_sync_session_close_tracks_async_only_extension_until_shutdown(tmp_path):

@@ -261,6 +261,8 @@ class SessionManager:
         # garbage-collected mid-flight).
         self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
         self._resource_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._resource_cleanup_errors: list[Exception] = []
+        self._resource_cleanup_cancellations: list[asyncio.CancelledError] = []
         self._session_generation_seq = 0
         self._session_generations: dict[str, int] = {}
 
@@ -484,8 +486,15 @@ class SessionManager:
                 task.add_done_callback(self._on_resource_cleanup_done)
 
     def _on_resource_cleanup_done(self, task: asyncio.Task[None]) -> None:
-        if not task.cancelled():
-            task.exception()
+        if task not in self._resource_cleanup_tasks:
+            return
+        self._resource_cleanup_tasks.discard(task)
+        if task.cancelled():
+            self._resource_cleanup_cancellations.append(asyncio.CancelledError())
+            return
+        error = task.exception()
+        if isinstance(error, Exception):
+            self._resource_cleanup_errors.append(error)
 
     async def await_resource_cleanup(self) -> None:
         """Wait for all async cleanup started by synchronous session closure."""
@@ -494,7 +503,7 @@ class SessionManager:
         while self._resource_cleanup_tasks:
             tasks = tuple(self._resource_cleanup_tasks)
             try:
-                results = await asyncio.gather(
+                await asyncio.gather(
                     *(asyncio.shield(task) for task in tasks),
                     return_exceptions=True,
                 )
@@ -502,12 +511,13 @@ class SessionManager:
                 # Cleanup continues under shield. Do not drop strong references:
                 # the next drain must still observe and await these tasks.
                 raise
-            self._resource_cleanup_tasks.difference_update(tasks)
-            for result in results:
-                if isinstance(result, asyncio.CancelledError):
-                    cancelled = cancelled or result
-                elif isinstance(result, Exception):
-                    errors.append(result)
+            for task in tasks:
+                self._on_resource_cleanup_done(task)
+        errors.extend(self._resource_cleanup_errors)
+        self._resource_cleanup_errors.clear()
+        if self._resource_cleanup_cancellations:
+            cancelled = self._resource_cleanup_cancellations[0]
+            self._resource_cleanup_cancellations.clear()
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
@@ -570,9 +580,12 @@ class SessionManager:
         completion = asyncio.create_task(finish_cleanup())
         try:
             await asyncio.shield(completion)
-        except asyncio.CancelledError:
-            await asyncio.shield(completion)
-            raise
+        except asyncio.CancelledError as cancelled:
+            try:
+                await asyncio.shield(completion)
+            except BaseException as cleanup_error:
+                cancelled.add_note(f"Session cleanup also failed: {cleanup_error!r}")
+            raise cancelled
 
     async def aclose_all_sessions(self) -> None:
         """Close every active session and wait for all kernel/resource teardown."""
