@@ -720,29 +720,19 @@ class TestAwaitableClose:
 
 @pytest.mark.unit
 class TestKernelRebuildWaits:
-    async def test_untracked_kernel_start_cannot_attach_to_later_session(self, manager, monkeypatch):
-        wait_started = asyncio.Event()
-        resume_wait = asyncio.Event()
+    async def test_untracked_kernel_start_is_rejected_before_teardown_wait(self, manager, monkeypatch):
+        shutdown_waited = False
 
-        async def delayed_shutdown(_session_id):
-            wait_started.set()
-            await resume_wait.wait()
+        async def wait_for_shutdown(_session_id):
+            nonlocal shutdown_waited
+            shutdown_waited = True
 
-        monkeypatch.setattr(manager, "await_kernel_shutdown", delayed_shutdown)
-        start = asyncio.create_task(manager._get_or_create_kernel("s1"))
-        await wait_started.wait()
+        monkeypatch.setattr(manager, "await_kernel_shutdown", wait_for_shutdown)
 
-        manager.create_session(
-            data={},
-            user_identity="replacement",
-            user_token="token",
-            token_claims={},
-            session_id="s1",
-        )
-        resume_wait.set()
+        with pytest.raises(ValueError, match="does not exist"):
+            await manager._get_or_create_kernel("s1")
 
-        with pytest.raises(ValueError, match="closed before its kernel could start"):
-            await start
+        assert not shutdown_waited
         assert "s1" not in manager._kernels
 
     async def test_get_or_create_waits_for_pending_teardown(self, manager, monkeypatch):

@@ -120,6 +120,7 @@ class TestUserTokenKernelPropagation:
     @pytest.mark.asyncio
     async def test_configured_kernel_name_is_used(self):
         manager = SessionManager(kernel_name="tools-py-alpha")
+        manager.create_session({}, "user", "token", {}, session_id="sess-kernel-name")
         km, kc = self._make_mock_kernel()
 
         with patch(
@@ -150,6 +151,7 @@ class TestUserTokenKernelPropagation:
     async def test_kernel_started_with_user_assertion_token(self):
         """USER_ASSERTION_TOKEN env var is set when a new kernel is started."""
         manager = SessionManager()
+        manager.create_session({}, "user@example.com", "my-bearer-token", {}, session_id="sess-1")
         km, kc = self._make_mock_kernel()
 
         with patch(
@@ -170,6 +172,7 @@ class TestUserTokenKernelPropagation:
     async def test_kernel_started_with_user_identity(self):
         """USER_IDENTITY env var is set when a new kernel is started."""
         manager = SessionManager()
+        manager.create_session({}, "user@example.com", "token", {}, session_id="sess-2")
         km, kc = self._make_mock_kernel()
 
         with patch(
@@ -190,6 +193,7 @@ class TestUserTokenKernelPropagation:
     async def test_kernel_started_without_token_when_none(self):
         """USER_ASSERTION_TOKEN is NOT set when no token is provided."""
         manager = SessionManager()
+        manager.create_session({}, "user", "", {}, session_id="sess-3")
         km, kc = self._make_mock_kernel()
 
         with patch(
@@ -206,6 +210,7 @@ class TestUserTokenKernelPropagation:
     async def test_kernel_token_tracked_after_start(self):
         """_kernel_tokens tracks the token used when the kernel was started."""
         manager = SessionManager()
+        manager.create_session({}, "user", "initial-token", {}, session_id="sess-4")
         km, kc = self._make_mock_kernel()
 
         with patch(

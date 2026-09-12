@@ -693,6 +693,8 @@ class SessionManager:
         # that is still releasing its resources.
         with self._session_lifecycle_lock:
             session_generation = self._session_generations.get(session_id)
+            if session_generation is None:
+                raise ValueError(f"Session {session_id} does not exist.")
         await self.await_kernel_shutdown(session_id)
 
         with self._session_lifecycle_lock:
