@@ -356,8 +356,6 @@ receives the `SessionContext`, authorized read catalog, and immutable
 `capabilities(request_context)`; those source capabilities are merged into
 `get_catalog_capabilities`, and the extension is closed with the session. The
 read provider remains independently owned and is not treated as a writer.
-Extensions that cache caller state may implement synchronous
-`refresh_context(session_context, request_context)` to rebind on token rotation.
 Extensions may implement async-only `aclose()`. Synchronous session closure and
 timeout cleanup schedule and retain that work; server shutdown waits for it
 before closing the shared provider. Cleanup attempts the manager, every

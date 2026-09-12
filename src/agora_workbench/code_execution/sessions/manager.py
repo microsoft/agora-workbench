@@ -483,9 +483,15 @@ class SessionManager:
         try:
             session.cleanup()
         finally:
-            for task in session.take_cleanup_tasks():
-                self._resource_cleanup_tasks.add(task)
-                task.add_done_callback(self._on_resource_cleanup_done)
+            self._track_session_cleanup_tasks(session)
+
+    def _track_session_cleanup_tasks(self, session: Session) -> tuple[asyncio.Task[None], ...]:
+        """Transfer session-owned cleanup tasks into the manager's strong-reference set."""
+        tasks = session.take_cleanup_tasks()
+        for task in tasks:
+            self._resource_cleanup_tasks.add(task)
+            task.add_done_callback(self._on_resource_cleanup_done)
+        return tasks
 
     def _on_resource_cleanup_done(self, task: asyncio.Task[None]) -> None:
         if task not in self._resource_cleanup_tasks:
@@ -545,9 +551,18 @@ class SessionManager:
                     if job.task and not job.task.done():
                         job.task.cancel()
 
-            shutdown_task = self._schedule_kernel_shutdown(session_id, caller=caller)
+            shutdown_task = self._schedule_kernel_shutdown(
+                session_id,
+                caller=caller,
+                cleanup_artifacts=False,
+            )
             session = self.storage.retrieve(session_id)
             if session is not None:
+                # Remove session-scoped files while the lifecycle lock still
+                # prevents an explicit-ID replacement from creating its output
+                # directory. The asynchronous kernel teardown must not remove
+                # the replacement's files later.
+                self._cleanup_session_artifacts(session_id)
                 self.storage.delete(session_id)
                 self._session_generations.pop(session_id, None)
         return shutdown_task, session
@@ -572,6 +587,9 @@ class SessionManager:
                     await cleanup_task
             except BaseException as exc:
                 cleanup_error = exc
+            finally:
+                if session is not None:
+                    self._track_session_cleanup_tasks(session)
             if shutdown_task is not None:
                 await shutdown_task
             else:
@@ -1723,7 +1741,13 @@ class SessionManager:
 
         return stdout, stderr, success, displays, artifacts
 
-    async def _shutdown_kernel(self, session_id: str):
+    async def _shutdown_kernel(
+        self,
+        session_id: str,
+        *,
+        cleanup_artifacts: bool = True,
+        expected_session_generation: int | None = None,
+    ):
         """Shut down the session's current kernel and drop its registry state.
 
         The kernel is *claimed* synchronously: the registry entry and every
@@ -1754,7 +1778,15 @@ class SessionManager:
         self._kernel_execute_locks.pop(session_id, None)
         self._kernel_session_generations.pop(session_id, None)
         self._discard_kernel_generation(session_id)
-        self._cleanup_session_artifacts(session_id)
+        if cleanup_artifacts:
+            with self._session_lifecycle_lock:
+                current_session_generation = self._session_generations.get(session_id)
+                if (
+                    expected_session_generation is None
+                    or current_session_generation is None
+                    or current_session_generation == expected_session_generation
+                ):
+                    self._cleanup_session_artifacts(session_id)
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
@@ -1782,7 +1814,11 @@ class SessionManager:
             LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
 
     def _schedule_kernel_shutdown(
-        self, session_id: str, *, caller: str = "close_session()"
+        self,
+        session_id: str,
+        *,
+        caller: str = "close_session()",
+        cleanup_artifacts: bool = True,
     ) -> "Optional[asyncio.Task[None]]":
         """Start teardown for a session's kernel, or join one already running.
 
@@ -1823,7 +1859,14 @@ class SessionManager:
             )
             return None
 
-        task = loop.create_task(self._shutdown_kernel(session_id))
+        expected_session_generation = self._session_generations.get(session_id)
+        task = loop.create_task(
+            self._shutdown_kernel(
+                session_id,
+                cleanup_artifacts=cleanup_artifacts,
+                expected_session_generation=expected_session_generation,
+            )
+        )
         self._kernel_shutdown_tasks[session_id] = task
         task.add_done_callback(partial(self._on_kernel_shutdown_done, session_id))
         return task

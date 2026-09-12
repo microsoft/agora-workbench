@@ -521,9 +521,27 @@ async def test_refreshed_session_token_updates_catalog_request_context_and_autho
     assert binding.resolver._context is binding.context
     assert (await binding.catalog.capabilities(binding.context))[0].source_id == "source"
 
+    def fail_refresh(context):
+        del context
+        raise RuntimeError("credential refresh failed")
+
+    binding.add_context_refresher(fail_refresh)
+    set_current_request_token("failed-token")
+    set_current_token_claims({"role": "reader"})
+    try:
+        with pytest.raises(RuntimeError, match="credential refresh failed"):
+            server._refresh_session_token(session)
+    finally:
+        set_current_request_token(None)
+        set_current_token_claims(None)
+
+    assert session.user_token == "new-token"
+    assert binding.context.attributes["claims"] == {"role": "writer"}
+    assert (await binding.catalog.capabilities(binding.context))[0].source_id == "source"
+
     await server.session_manager.aclose_all_sessions()
     await integration.shutdown()
-    assert [authorizer.close_calls for authorizer in authorizers] == [1, 1]
+    assert [authorizer.close_calls for authorizer in authorizers] == [1, 1, 1]
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])

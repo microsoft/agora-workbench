@@ -336,7 +336,7 @@ class CodeExecutionServer(BaseMCPServer):
                             credential_factory(context.user_token),
                             provider_factory=credential_factory,
                         )
-                        binding.add_context_refresher(credential.refresh_context)
+                        binding.add_context_refresher(credential.prepare_context_refresh)
                     manager = DataLakeDataManager(
                         credential=credential,
                         credential_ownership=ResourceOwnership.OWNED,
