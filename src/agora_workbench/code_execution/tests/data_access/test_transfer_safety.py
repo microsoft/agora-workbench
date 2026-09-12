@@ -186,6 +186,39 @@ async def test_provider_timeout_without_configured_deadline_is_not_masked(tmp_pa
         )
 
 
+async def test_await_transfer_cancels_provider_on_timeout_and_external_cancellation():
+    async def run_case(*, timeout_seconds, cancel_outer):
+        provider_started = asyncio.Event()
+        provider_finished = asyncio.Event()
+
+        async def provider():
+            provider_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                provider_finished.set()
+
+        operation = asyncio.create_task(
+            await_transfer(
+                provider(),
+                TransferOptions(timeout_seconds=timeout_seconds),
+                operation="upload",
+            )
+        )
+        await provider_started.wait()
+        if cancel_outer:
+            operation.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await operation
+        else:
+            with pytest.raises(TransferTimeoutError):
+                await operation
+        assert provider_finished.is_set()
+
+    await run_case(timeout_seconds=0.01, cancel_outer=False)
+    await run_case(timeout_seconds=None, cancel_outer=True)
+
+
 async def test_transfer_cancellation_after_final_chunk_prevents_commit(tmp_path):
     destination = tmp_path / "destination.bin"
     destination.write_bytes(b"previous")
@@ -762,6 +795,43 @@ async def test_blob_publisher_stages_outside_read_only_source_directory(tmp_path
     assert result.checksum_sha256 == hashlib.sha256(b"payload").hexdigest()
     assert list(source_dir.glob(".*.upload")) == []
     assert list(staging.glob("*.upload")) == []
+
+
+async def test_blob_publisher_cancels_upload_before_closing_snapshot(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    upload_started = asyncio.Event()
+    upload_cancelled_with_open_stream = asyncio.Event()
+
+    async def upload(stream, **kwargs):
+        upload_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            assert stream.read(1) == b"p"
+            upload_cancelled_with_open_stream.set()
+
+    blob_client = MagicMock()
+    blob_client.upload_blob = upload
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    service_client.close = AsyncMock()
+    publisher = BlobPublisher(
+        "https://account123.blob.core.windows.net",
+        "container",
+        staging_dir=tmp_path / "staging",
+    )
+    publisher._client = service_client
+
+    publish_task = asyncio.create_task(publisher.publish(source, "result.bin", "session"))
+    await upload_started.wait()
+    publish_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await publish_task
+
+    assert upload_cancelled_with_open_stream.is_set()
+    assert list((tmp_path / "staging").glob("*.upload")) == []
+    await publisher.close()
 
 
 async def test_blob_publisher_rejects_replaced_staging_root(tmp_path):

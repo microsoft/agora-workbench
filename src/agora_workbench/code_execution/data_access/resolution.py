@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from ..server import CodeExecutionServer
 
 LOGGER = logging.getLogger(__name__)
-_URI_IN_ERROR_RE = re.compile(r"(?:https?|az|abfss)://[^\s'\"<>]+", re.IGNORECASE)
+_URI_IN_ERROR_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
 
 
 def _safe_error_detail(error: BaseException) -> str:

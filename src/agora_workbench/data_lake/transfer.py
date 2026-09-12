@@ -220,10 +220,10 @@ async def await_transfer(
     """Await an SDK operation with timeout and cooperative cancellation."""
 
     async def run() -> object:
-        check_transfer_cancelled(options, operation=operation, resource=resource)
         task = asyncio.ensure_future(awaitable)
         cancel_task: asyncio.Task[bool] | None = None
         try:
+            check_transfer_cancelled(options, operation=operation, resource=resource)
             if options.cancellation_event is None:
                 return await task
             cancel_task = asyncio.create_task(options.cancellation_event.wait())
@@ -240,6 +240,10 @@ async def await_transfer(
         finally:
             if cancel_task is not None:
                 cancel_task.cancel()
+                await asyncio.gather(cancel_task, return_exceptions=True)
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     try:
         if options.timeout_seconds is None:
