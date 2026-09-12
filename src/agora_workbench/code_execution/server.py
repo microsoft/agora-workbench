@@ -342,6 +342,11 @@ class CodeExecutionServer(BaseMCPServer):
                         credential_ownership=ResourceOwnership.OWNED,
                         artifact_resolver=binding.resolver,
                     )
+
+                    def prepare_cache_invalidation(_context):
+                        return lambda: manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+
+                    binding.add_context_refresher(prepare_cache_invalidation)
                 else:
                     custom_result = existing_factory(context)
                     if isinstance(custom_result, SessionResources):

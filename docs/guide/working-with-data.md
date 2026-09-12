@@ -321,8 +321,9 @@ session presents a refreshed bearer token, the factory is invoked again before
 the session adopts it, and the previous factory-created authorizer is closed
 through the tracked session cleanup path. The catalog-created data manager also
 rebinds its token-scoped downstream credential while retaining prior providers
-for cleanup at session shutdown. An authorizer passed directly is borrowed and
-continues to evaluate each immutable per-request context.
+for cleanup at session shutdown, and invalidates catalog-derived cache entries
+so the next load is reauthorized. An authorizer passed directly is borrowed
+and continues to evaluate each immutable per-request context.
 
 If the supplied `SessionManager` already has a `data_manager_factory`, the
 server preserves that manager and its resolver. Discovery remains available,
