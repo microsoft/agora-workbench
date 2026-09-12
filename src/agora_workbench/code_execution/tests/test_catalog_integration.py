@@ -1056,7 +1056,9 @@ async def test_application_capability_adapter_holds_binding_snapshot():
     server = SimpleNamespace(catalog=catalog)
     session = SimpleNamespace(extensions={"catalog": binding})
 
-    assert await CodeExecutionServer.get_data_lake_capabilities(cast(Any, server), cast(Any, session)) == ("capability",)
+    assert await CodeExecutionServer.get_data_lake_capabilities(cast(Any, server), cast(Any, session)) == (
+        "capability",
+    )
     catalog.capabilities.assert_awaited_once_with(snapshot)
     assert closed
 
