@@ -2797,15 +2797,17 @@ else:
                 self._sidecar_manager.stop_all(),
                 "Sidecar rollback",
             )
-            rollback_cancellation = rollback_cancellation or await self._await_catalog_cleanup(
+            cleanup_cancellation = await self._await_catalog_cleanup(
                 self._close_tool_search_backends(),
                 "Tool-search rollback",
             )
+            rollback_cancellation = rollback_cancellation or cleanup_cancellation
             if self.catalog is not None:
-                rollback_cancellation = rollback_cancellation or await self._await_catalog_cleanup(
+                cleanup_cancellation = await self._await_catalog_cleanup(
                     self.catalog.shutdown(),
                     "Catalog rollback",
                 )
+                rollback_cancellation = rollback_cancellation or cleanup_cancellation
             if rollback_cancellation is not None and not isinstance(startup_error, asyncio.CancelledError):
                 startup_error.add_note(f"Startup rollback was cancelled: {rollback_cancellation!r}")
             raise

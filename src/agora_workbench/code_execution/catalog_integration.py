@@ -158,6 +158,8 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
     def __init__(self, config: CatalogConfig, *, db_path: str | Path = ":memory:", credential_provider: Any = None):
         self._db_owned = CatalogDB(db_path, vec_dimensions=config.search.embedding_dimensions)
         self._closed = False
+        self._embedding_closed = False
+        self._db_closed = False
         try:
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
@@ -182,8 +184,11 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         return indexed
 
     async def aclose(self) -> None:
-        if not self._closed:
-            self._closed = True
+        if self._closed:
+            return
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        if not self._embedding_closed:
             try:
                 embedding_provider = vars(self._indexer).get("_embedding_provider")
                 close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
@@ -191,8 +196,24 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
                     result = close()
                     if inspect.isawaitable(result):
                         await result
-            finally:
+                self._embedding_closed = True
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+            except Exception as exc:
+                errors.append(exc)
+        if not self._db_closed:
+            try:
                 self._db_owned.close()
+                self._db_closed = True
+            except Exception as exc:
+                errors.append(exc)
+        self._closed = self._embedding_closed and self._db_closed
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional configured catalog close failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("Configured catalog close failed.", errors)
 
 
 def _encode_reference(reference: ArtifactReference) -> str:
@@ -380,7 +401,7 @@ class CatalogIntegration:
         private_cache_directory: Path | None = None
         if db_path is None:
             private_cache_directory = Path.home() / ".cache" / "agora-workbench" / "catalogs" / uuid.uuid4().hex
-            private_cache_directory.mkdir(parents=True)
+            private_cache_directory.mkdir(mode=0o700, parents=True)
             db_path = private_cache_directory / "catalog.db"
         try:
             provider = _ConfiguredCatalogProvider(config, db_path=db_path, credential_provider=credential_provider)
@@ -632,6 +653,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         capabilities: dict[str, SourceCapabilities],
     ) -> str | None:
         if not current.execution_references:
+            return None
+        if integration._policy_mode is CatalogPolicyMode.PER_ARTIFACT:
             return None
         source = capabilities.get(artifact.reference.source_id)
         if source is None or not source.supports(CatalogOperation.RESOLVE):
