@@ -21,7 +21,13 @@ from agora_workbench.code_execution.catalog_integration import (
 from agora_workbench.code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
 from agora_workbench.code_execution.data_access.fetchers import AssetFetcher
 from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
-from agora_workbench.code_execution.sessions import SessionConfig, SessionContext, SessionManager
+from agora_workbench.code_execution.sessions import (
+    SessionConfig,
+    SessionContext,
+    SessionManager,
+    set_current_request_token,
+    set_current_token_claims,
+)
 from agora_workbench.data_lake import (
     ArtifactPresentation,
     ArtifactReference,
@@ -101,6 +107,12 @@ async def test_no_catalog_preserves_session_factory_and_tool_surface(tmp_path):
     tool_names = {tool.name for tool in await server.mcp.list_tools()}
     assert "search_data" not in tool_names
     assert "get_catalog_capabilities" not in tool_names
+    session_manager.aclose_all_sessions = AsyncMock()
+    server._sidecar_manager.stop_all = AsyncMock()
+    server._close_tool_search_backends = AsyncMock()
+    server.activity_publisher.stop = AsyncMock()
+    await server._shutdown()
+    session_manager.aclose_all_sessions.assert_awaited_once()
 
 
 def test_data_manager_preserves_positional_artifact_resolver():
@@ -130,6 +142,18 @@ async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
         assert page.items[0].reference.source_id == expected_source_id
     finally:
         await integration.shutdown()
+
+
+def test_from_config_rejects_invalid_authorizer_before_opening_database(tmp_path):
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    database = tmp_path / "catalog.db"
+    config = CatalogConfig(sources=[SourceConfig(path=str(source_root))])
+
+    with pytest.raises(ValueError, match="exactly one"):
+        CatalogIntegration.from_config(config, db_path=database)
+
+    assert not database.exists()
 
 
 async def test_server_startup_failure_rolls_back_owned_catalog(tmp_path):
@@ -399,6 +423,39 @@ async def test_owned_and_borrowed_catalog_lifecycle():
     await borrowed.startup()
     await borrowed.shutdown()
     assert (borrowed_provider.load_calls, borrowed_provider.close_calls) == (0, 0)
+
+
+def test_refreshed_session_token_updates_catalog_request_context(tmp_path):
+    provider = _LifecycleProvider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.BORROWED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+    server = CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        catalog=integration,
+    )
+    session_id = server.session_manager.create_session(
+        {},
+        user_identity="user",
+        user_token="old-token",
+        token_claims={"role": "reader"},
+    )
+    session = server.session_manager.get_session(session_id)
+
+    set_current_request_token("new-token")
+    set_current_token_claims({"role": "writer"})
+    try:
+        server._refresh_session_token(session)
+    finally:
+        set_current_request_token(None)
+        set_current_token_claims(None)
+
+    binding = session.extensions["catalog"]
+    assert binding.context.attributes["claims"] == {"role": "writer"}
+    assert binding.resolver._context is binding.context
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])
