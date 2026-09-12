@@ -462,6 +462,50 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     await manager.aclose()
 
 
+@pytest.mark.parametrize(
+    "denial",
+    [
+        PermissionError("authorization revoked"),
+        ArtifactNotFoundError("Artifact removed.", operation="resolve"),
+    ],
+)
+async def test_catalog_cache_hits_are_reauthorized_and_evicted_on_denial(denial):
+    class Resolver:
+        unavailable_reason = None
+
+        def __init__(self):
+            self.denial = None
+
+        async def resolve(self, artifact_id):
+            if self.denial is not None:
+                raise self.denial
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_text("blob-payload")
+            return len("blob-payload")
+
+    resolver = Resolver()
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, resolver),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    cached_path = await manager.get_cache_path(reference)
+    resolver.denial = denial
+
+    with pytest.raises(type(denial)):
+        await manager.get_cache_path(reference)
+
+    assert "catalog-v1:opaque" not in manager._cache_index
+    assert not cached_path.exists()
+    await manager.aclose()
+
+
 async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     class CredentialProvider:
         def __init__(self, *, cancel_once=False):

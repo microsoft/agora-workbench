@@ -335,6 +335,21 @@ class DataLakeDataManager:
             validated_cache_path = cache_path
             options = transfer_options or self._transfer_options
 
+            if generation_scoped:
+                try:
+                    await self._get_blob_url_from_artifact_id(artifact_id)
+                except Exception:
+                    self._cache_index.pop(artifact_id, None)
+                    try:
+                        validated_cache_path.unlink(missing_ok=True)
+                    except OSError:
+                        LOGGER.debug(
+                            "Failed to remove unauthorized catalog cache entry %s",
+                            validated_cache_path,
+                            exc_info=True,
+                        )
+                    raise
+
             async def validate_cached_file() -> None:
                 check_transfer_cancelled(options, operation="download", resource=str(validated_cache_path))
                 cache_file = await _run_blocking_io(
