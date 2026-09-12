@@ -41,6 +41,7 @@ from .sessions import (
     KERNEL_BOOTSTRAP_TOOL_PROXIES,
     MaxSessionsReachedError,
     SessionConfig,
+    SessionContext,
     SessionManager,
     SessionResources,
     SessionNotFound,
@@ -901,6 +902,19 @@ class CodeExecutionServer(BaseMCPServer):
             fresh_claims = get_current_token_claims()
             if fresh_claims is not None:
                 session.token_claims = fresh_claims
+            catalog_binding = session.extensions.get("catalog")
+            refresh_context = getattr(catalog_binding, "refresh_context", None)
+            if callable(refresh_context):
+                refresh_context(
+                    SessionContext(
+                        session_id=session.session_id,
+                        user_identity=session.user_identity,
+                        user_token=session.user_token,
+                        token_claims=session.token_claims,
+                        session_type=session.session_type,
+                        metadata=session.metadata,
+                    )
+                )
             LOGGER.debug(f"Refreshed token for session {session.session_id[:8]}")
 
     async def _get_existing_session(self, session_id: str) -> "Session":
@@ -2827,12 +2841,12 @@ else:
             except Exception:
                 LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
         finally:
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self.session_manager.aclose_all_sessions(),
+                "Session shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
             if self.catalog is not None:
-                cleanup_cancelled = await self._await_catalog_cleanup(
-                    self.session_manager.aclose_all_sessions(),
-                    "Catalog session shutdown",
-                )
-                cancelled = cancelled or cleanup_cancelled
                 cleanup_cancelled = await self._await_catalog_cleanup(
                     self.catalog.shutdown(),
                     "Catalog shutdown",

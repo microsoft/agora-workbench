@@ -236,6 +236,12 @@ class CatalogSessionBinding:
     cleanup_tracker: _AsyncCleanupTracker | None = None
     _closed: bool = False
 
+    def refresh_context(self, context: SessionContext) -> None:
+        """Refresh authorization inputs when a transport session receives a new token."""
+        request_context = _request_context(context)
+        self.context = request_context
+        self.resolver._context = request_context
+
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
         if self._closed:
@@ -316,6 +322,8 @@ class CatalogIntegration:
         """Create an owned catalog that is loaded during server startup."""
         if not config.sources:
             raise ValueError("Catalog integration requires at least one source.")
+        if (authorizer is None) == (authorizer_factory is None):
+            raise ValueError("Configure exactly one of authorizer or authorizer_factory.")
         private_cache_directory: Path | None = None
         if db_path is None:
             private_cache_directory = Path.home() / ".cache" / "agora-workbench" / "catalogs" / uuid.uuid4().hex
@@ -408,16 +416,7 @@ class CatalogIntegration:
             mode=self._policy_mode,
             per_artifact_enforcer=self._per_artifact_enforcer,
         )
-        request_context = RequestContext(
-            request_id=context.session_id,
-            caller_id=context.user_identity,
-            attributes={
-                "session_id": context.session_id,
-                "session_type": context.session_type,
-                "metadata": dict(context.metadata),
-                "claims": dict(context.token_claims),
-            },
-        )
+        request_context = _request_context(context)
         resolver = CatalogSessionResolver(catalog, request_context)
         extensions: tuple[object, ...] = ()
         if self._capability_extension_factory is not None:
@@ -453,6 +452,19 @@ class CatalogIntegration:
         return tuple(
             SourceCapabilities(source_id, frozenset(operations)) for source_id, operations in sorted(by_source.items())
         )
+
+
+def _request_context(context: SessionContext) -> RequestContext:
+    return RequestContext(
+        request_id=context.session_id,
+        caller_id=context.user_identity,
+        attributes={
+            "session_id": context.session_id,
+            "session_type": context.session_type,
+            "metadata": dict(context.metadata),
+            "claims": dict(context.token_claims),
+        },
+    )
 
 
 def _error_payload(exc: Exception) -> dict[str, Any]:
