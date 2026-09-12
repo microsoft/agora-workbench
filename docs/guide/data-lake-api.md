@@ -80,6 +80,9 @@ checksum describe that exact snapshot rather than a second read of a mutable
 source. The snapshot is created in the publisher-controlled `staging_dir`
 (defaulting below `MCP_ASSET_CACHE_DIR`, or a private working-directory staging
 folder), so publishing requires only read access to the source directory.
+Secure Blob snapshot staging currently requires POSIX descriptor-relative
+filesystem primitives; constructing `BlobPublisher` on other platforms raises
+an explicit unsupported-capability error.
 `TransferOptions.object_metadata` is copied into Azure object metadata and
 returned immutably on `TransferResult`; unsupported providers reject it
 explicitly. Credential-bearing metadata keys are rejected, as are URI values

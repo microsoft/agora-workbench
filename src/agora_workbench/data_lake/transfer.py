@@ -38,6 +38,8 @@ _USE_POSIX_DIR_FDS = os.name == "posix"
 TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None]
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
 _REDACTED_URI_RE = re.compile(r"^\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#].*)?$")
+_REDACTED_URI_IN_TEXT_RE = re.compile(r"\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#][^\s<>]*)?")
+_URI_IN_TEXT_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
 
 
 async def _run_blocking_io(
@@ -214,12 +216,14 @@ def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
 
     def sanitize_reference(reference: str) -> str:
-        if "://" in reference:
-            return sanitize_uri_for_display(reference)
         redacted = _REDACTED_URI_RE.fullmatch(reference)
         if redacted is not None:
             return sanitize_uri_for_display(f"https://{redacted.group('location')}")
-        return reference
+        sanitized = _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), reference)
+        return _REDACTED_URI_IN_TEXT_RE.sub(
+            lambda match: sanitize_uri_for_display(f"https://{match.group('location')}"),
+            sanitized,
+        )
 
     match = _TAGGED_REFERENCE_RE.fullmatch(value.strip())
     if match is None:

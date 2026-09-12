@@ -75,6 +75,12 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
 
     assert safe_artifact_reference(raw) == "https://example.com/data"
     assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>https://example.com/data</blob>"
+    assert (
+        safe_artifact_reference("failed <broken s3://user:secret@example.com/data?token=secret retry")
+        == "failed <broken s3://example.com/data retry"
+    )
+    embedded_uri = "failed <broken " + "s3" + "://" + "user:secret@" + "example.com/data?token=secret retry"
+    assert safe_artifact_reference(embedded_uri) == "failed <broken s3://example.com/data retry"
     assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"
 
 
@@ -366,6 +372,34 @@ async def test_non_posix_local_publisher_rejects_replaced_existing_root(tmp_path
         await publisher.publish(source, "result.bin", "session")
 
     assert not (output_root / "session" / "result.bin").exists()
+
+
+async def test_non_posix_local_publisher_rejects_root_replaced_by_symlink(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+    publisher = LocalFilePublisher(output_root)
+    await publisher.publish(source, "initial.bin", "session")
+    original_root = tmp_path / "original-outputs"
+    output_root.rename(original_root)
+    output_root.symlink_to(original_root, target_is_directory=True)
+
+    with pytest.raises(UnsafePathError, match="must not be a symlink"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert not (original_root / "session" / "result.bin").exists()
+
+
+def test_blob_publisher_rejects_non_posix_secure_staging(tmp_path, monkeypatch):
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+
+    with pytest.raises(UnsupportedOperationError, match="secure staging"):
+        BlobPublisher(
+            "https://account123.blob.core.windows.net",
+            "container",
+            staging_dir=tmp_path / "staging",
+        )
 
 
 async def test_non_posix_allowed_root_fetch_is_explicitly_unsupported(tmp_path, monkeypatch):

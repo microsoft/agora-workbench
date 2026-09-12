@@ -537,12 +537,16 @@ class BlobPublisher(AssetPublisher):
             Path(os.getenv("MCP_ASSET_CACHE_DIR", os.getcwd())) / ".agora-transfer-staging"
         )
         self._staging_dir = Path(os.path.abspath(os.fspath(configured_staging)))
+        if not _USE_POSIX_DIR_FDS:
+            raise UnsupportedOperationError(
+                "BlobPublisher requires POSIX descriptor-relative filesystem support for secure staging.",
+                operation="upload",
+            )
         self._staging_fd: int | None = None
         self._staging_identity: tuple[int, int] | None = None
-        if _USE_POSIX_DIR_FDS:
-            self._staging_fd = _open_or_create_posix_directory(self._staging_dir)
-            stat_result = os.fstat(self._staging_fd)
-            self._staging_identity = (stat_result.st_dev, stat_result.st_ino)
+        self._staging_fd = _open_or_create_posix_directory(self._staging_dir)
+        stat_result = os.fstat(self._staging_fd)
+        self._staging_identity = (stat_result.st_dev, stat_result.st_ino)
         self._client = None  # lazily initialised
 
     def _get_client(self):
@@ -569,9 +573,6 @@ class BlobPublisher(AssetPublisher):
 
     def _open_verified_staging_root(self) -> int:
         """Return the retained staging root after verifying its configured identity."""
-        if not _USE_POSIX_DIR_FDS:
-            self._staging_dir.mkdir(parents=True, exist_ok=True)
-            return -1
         if self._staging_fd is None or self._staging_identity is None:
             raise UnsafePathError("Blob publisher staging root is unavailable.", operation="upload")
         current_fd = _open_posix_path_no_follow(self._staging_dir, directory=True)
@@ -661,27 +662,18 @@ class BlobPublisher(AssetPublisher):
         started = time.monotonic()
         await emit_transfer_diagnostic(options, TransferDiagnostic("upload", "started", context, display_uri))
         snapshot_name = f"{secrets.token_hex(16)}.upload"
-        snapshot_path = self._staging_dir / snapshot_name
         staging_fd: int | None = None
         snapshot_fd: int | None = None
         snapshot_created = False
         try:
             staging_fd = self._open_verified_staging_root()
-            if staging_fd == -1:
-                snapshot_fd = os.open(
-                    snapshot_path,
-                    os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                    0o600,
-                )
-                snapshot_created = True
-            else:
-                snapshot_fd = os.open(
-                    snapshot_name,
-                    os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                    0o600,
-                    dir_fd=staging_fd,
-                )
-                snapshot_created = True
+            snapshot_fd = os.open(
+                snapshot_name,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=staging_fd,
+            )
+            snapshot_created = True
 
             async def perform_upload() -> TransferResult:
                 snapshot = await _copy_local_descriptors(local_path, snapshot_fd, options, context)
@@ -750,14 +742,12 @@ class BlobPublisher(AssetPublisher):
         finally:
             if snapshot_fd is not None:
                 os.close(snapshot_fd)
-            if snapshot_created and (staging_fd is None or staging_fd == -1):
-                snapshot_path.unlink(missing_ok=True)
-            elif snapshot_created and staging_fd is not None:
+            if snapshot_created and staging_fd is not None:
                 try:
                     os.unlink(snapshot_name, dir_fd=staging_fd)
                 except FileNotFoundError:
                     LOGGER.debug("BlobPublisher snapshot was already removed: %s", snapshot_name)
-            if staging_fd is not None and staging_fd != -1:
+            if staging_fd is not None:
                 os.close(staging_fd)
         result = TransferResult(
             uploaded.bytes_transferred,
@@ -933,6 +923,8 @@ class LocalFilePublisher(AssetPublisher):
             raise UnsafePathError("Local publisher root ancestor identity changed.", operation="upload")
         self._base_dir.mkdir(parents=True, exist_ok=True)
         resolved_root = self._base_dir.resolve(strict=True)
+        if resolved_root != self._base_dir:
+            raise UnsafePathError("Local publisher root must not be a symlink.", operation="upload")
         if not resolved_root.is_relative_to(self._portable_anchor_path):
             raise UnsafePathError("Local publisher root escapes its configured ancestor.", operation="upload")
         root_stat = resolved_root.stat()
