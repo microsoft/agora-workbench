@@ -1862,7 +1862,7 @@ class SessionManager:
             )
             return None
 
-        expected_session_generation = self._session_generations.get(session_id)
+        expected_session_generation = self._kernel_session_generations.get(session_id)
         task = loop.create_task(
             self._shutdown_kernel(
                 session_id,
@@ -1906,7 +1906,7 @@ class SessionManager:
         """Cleanup kernels that have been idle for too long."""
         now = time.time()
         idle_sessions = [
-            (sid, self._session_generations.get(sid))
+            (sid, self._kernel_session_generations.get(sid))
             for sid, last_used in self._kernel_last_used.items()
             if now - last_used > max_idle_time
         ]
