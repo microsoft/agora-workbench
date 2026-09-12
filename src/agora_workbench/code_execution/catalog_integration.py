@@ -634,35 +634,48 @@ class CatalogIntegration:
         """Create isolated caller policy and resolver state for one session."""
         authorizer = self._authorizer_factory(context) if self._authorizer_factory is not None else self._authorizer
         assert authorizer is not None
-        catalog = AuthorizedCatalogProvider(
-            self.provider,
-            authorizer,
-            mode=self._policy_mode,
-            per_artifact_enforcer=self._per_artifact_enforcer,
-        )
-        request_context = _request_context(context)
-        resolver = CatalogSessionResolver(catalog, request_context)
         extensions: tuple[object, ...] = ()
-        if self._capability_extension_factory is not None:
-            created = self._capability_extension_factory(context, catalog, request_context)
-            if created is not None:
-                if isinstance(created, (tuple, list)):
-                    extensions = tuple(created)
-                else:
-                    extensions = (created,)
-        return CatalogSessionBinding(
-            catalog,
-            request_context,
-            resolver,
-            execution_references,
-            extensions,
-            self._cleanup_tracker,
-            authorizer_factory=self._authorizer_factory,
-            owned_authorizer=authorizer if self._authorizer_factory is not None else None,
-            provider=self.provider,
-            policy_mode=self._policy_mode,
-            per_artifact_enforcer=self._per_artifact_enforcer,
-        )
+        try:
+            catalog = AuthorizedCatalogProvider(
+                self.provider,
+                authorizer,
+                mode=self._policy_mode,
+                per_artifact_enforcer=self._per_artifact_enforcer,
+            )
+            request_context = _request_context(context)
+            resolver = CatalogSessionResolver(catalog, request_context)
+            if self._capability_extension_factory is not None:
+                created = self._capability_extension_factory(context, catalog, request_context)
+                if created is not None:
+                    if isinstance(created, (tuple, list)):
+                        extensions = tuple(created)
+                    else:
+                        extensions = (created,)
+            return CatalogSessionBinding(
+                catalog,
+                request_context,
+                resolver,
+                execution_references,
+                extensions,
+                self._cleanup_tracker,
+                authorizer_factory=self._authorizer_factory,
+                owned_authorizer=authorizer if self._authorizer_factory is not None else None,
+                provider=self.provider,
+                policy_mode=self._policy_mode,
+                per_artifact_enforcer=self._per_artifact_enforcer,
+            )
+        except BaseException as bind_error:
+            resources = (*extensions, authorizer) if self._authorizer_factory is not None else extensions
+            if resources:
+
+                def cleanup() -> Any:
+                    return _close_resources(resources)
+
+                try:
+                    self._cleanup_tracker.schedule(cleanup(), retry=cleanup)
+                except BaseException as cleanup_error:
+                    bind_error.add_note(f"Catalog session binding rollback also failed: {cleanup_error!r}")
+            raise
 
     async def capabilities(self, binding: CatalogSessionBinding) -> tuple[Any, ...]:
         by_source = {

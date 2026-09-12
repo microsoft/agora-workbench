@@ -691,7 +691,11 @@ class SessionManager:
                 self._kernel_last_used[session_id] = time.time()
                 return existing_kernel
             stale_shutdown = (
-                self._schedule_kernel_shutdown(session_id, caller="_get_or_create_kernel()")
+                self._schedule_kernel_shutdown(
+                    session_id,
+                    caller="_get_or_create_kernel()",
+                    cleanup_artifacts=False,
+                )
                 if existing_kernel is not None
                 else None
             )

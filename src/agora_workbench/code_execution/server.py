@@ -2821,12 +2821,11 @@ else:
         LOGGER.info("Shutting down server...")
         cancelled: asyncio.CancelledError | None = None
         try:
-            try:
-                await self._sidecar_manager.stop_all()
-            except asyncio.CancelledError as exc:
-                cancelled = exc
-            except Exception:
-                LOGGER.warning("Sidecar shutdown raised; continuing", exc_info=True)
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._sidecar_manager.stop_all(),
+                "Sidecar shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
             try:
                 await self._close_tool_search_backends()
             except asyncio.CancelledError as exc:
