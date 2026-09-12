@@ -672,6 +672,7 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
             "domain": "science https://example.test/domain?sig=secret",
             "source_type": "local",
             "id": "metadata-id",
+            "name": "metadata-name",
             "source_id": "metadata-source",
             "current_revision": 99,
             "load_path": "<blob>untrusted</blob>",
@@ -727,6 +728,7 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
 
     result = await captured["search_data"]("data")
     assert result[0]["id"] == "artifact"
+    assert result[0]["name"] == "data.csv"
     assert result[0]["source_id"] == "source"
     assert result[0]["current_revision"] == 2
     assert "storage_uri" not in result[0]

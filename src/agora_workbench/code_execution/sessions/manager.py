@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
-from threading import RLock
+from threading import Condition, RLock
 from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
 
 from jupyter_client.manager import AsyncKernelManager
@@ -226,6 +226,8 @@ class SessionManager:
         self.storage = self.config.storage_backend
         self._last_cleanup = datetime.now()
         self._session_lifecycle_lock = RLock()
+        self._session_lifecycle_condition = Condition(self._session_lifecycle_lock)
+        self._closing_session_ids: set[str] = set()
         timeout_seconds = self.config.timeout.total_seconds()
         self.execution_session_keepalive_seconds = max(0.5, min(timeout_seconds / 10.0, 60.0))
 
@@ -318,6 +320,9 @@ class SessionManager:
             # Generate session ID
             if session_id is None:
                 session_id = str(uuid.uuid4())
+            else:
+                while session_id in self._closing_session_ids:
+                    self._session_lifecycle_condition.wait()
 
             # Build a customized data manager when a factory is configured, so
             # the Session never constructs (and immediately discards) a default
@@ -540,6 +545,7 @@ class SessionManager:
         caller: str,
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
+        cleanup_artifacts = False
         with self._session_lifecycle_lock:
             running_job_id = self._get_running_job_for_session(session_id)
             if running_job_id:
@@ -559,13 +565,17 @@ class SessionManager:
             session = self.storage.retrieve(session_id)
             if session is not None:
                 session.claim_session_file_cleanup()
-                # Remove session-scoped files while the lifecycle lock still
-                # prevents an explicit-ID replacement from creating its output
-                # directory. The asynchronous kernel teardown must not remove
-                # the replacement's files later.
-                self._cleanup_session_artifacts(session_id)
+                self._closing_session_ids.add(session_id)
+                cleanup_artifacts = True
                 self.storage.delete(session_id)
                 self._session_generations.pop(session_id, None)
+        if cleanup_artifacts:
+            try:
+                self._cleanup_session_artifacts(session_id)
+            finally:
+                with self._session_lifecycle_condition:
+                    self._closing_session_ids.discard(session_id)
+                    self._session_lifecycle_condition.notify_all()
         return shutdown_task, session
 
     async def aclose_session(self, session_id: str) -> None:
@@ -1914,15 +1924,16 @@ class SessionManager:
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
         now = time.time()
-        idle_sessions = [
-            (
-                sid,
-                self._kernel_session_generations.get(sid),
-                self._kernel_generations.get(sid),
-            )
-            for sid, last_used in self._kernel_last_used.items()
-            if now - last_used > max_idle_time
-        ]
+        with self._session_lifecycle_lock:
+            idle_sessions = [
+                (
+                    sid,
+                    self._kernel_session_generations.get(sid),
+                    self._kernel_generations.get(sid),
+                )
+                for sid, last_used in self._kernel_last_used.items()
+                if now - last_used > max_idle_time
+            ]
 
         for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")

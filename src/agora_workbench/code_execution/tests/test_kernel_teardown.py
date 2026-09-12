@@ -355,6 +355,29 @@ class TestCoalescing:
 
         assert manager.storage.retrieve(session_id).user_identity == "new"
 
+    async def test_slow_artifact_cleanup_does_not_block_unrelated_session_creation(self, manager, monkeypatch):
+        cleanup_started = threading.Event()
+        resume_cleanup = threading.Event()
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+
+        def slow_cleanup(closing_session_id):
+            assert closing_session_id == session_id
+            cleanup_started.set()
+            resume_cleanup.wait(timeout=5)
+
+        monkeypatch.setattr(manager, "_cleanup_session_artifacts", slow_cleanup)
+        close_task = asyncio.create_task(asyncio.to_thread(manager.close_session, session_id))
+        assert await asyncio.to_thread(cleanup_started.wait, 5)
+
+        replacement = await asyncio.wait_for(
+            asyncio.to_thread(manager.create_session, {}, "other", "t", {}),
+            timeout=1,
+        )
+        resume_cleanup.set()
+        await close_task
+
+        assert manager.storage.retrieve(replacement) is not None
+
     async def test_double_close_does_not_raise(self, manager):
         """Regression: the loser used to die on ``del self._kernels[...]``
         inside a task nobody was watching."""
