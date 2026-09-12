@@ -545,10 +545,13 @@ class SessionManager:
         session_id: str,
         *,
         caller: str,
+        expected_generation: int | None = None,
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
         cleanup_artifacts = False
         with self._session_lifecycle_lock:
+            if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
+                return None, None
             running_job_id = self._get_running_job_for_session(session_id)
             if running_job_id:
                 job = self._background_jobs.get(running_job_id)
@@ -585,7 +588,7 @@ class SessionManager:
                     self._session_lifecycle_condition.notify_all()
         return shutdown_task, session
 
-    async def aclose_session(self, session_id: str) -> None:
+    async def aclose_session(self, session_id: str, *, expected_generation: int | None = None) -> None:
         """Close a session and wait for its kernel to actually shut down.
 
         The awaitable counterpart to :meth:`close_session`. Prefer this
@@ -593,7 +596,11 @@ class SessionManager:
         freeing GPU memory, tearing down a batch's child sessions, or
         reclaiming capacity before starting new work.
         """
-        shutdown_task, session = self._claim_session_close(session_id, caller="aclose_session()")
+        shutdown_task, session = self._claim_session_close(
+            session_id,
+            caller="aclose_session()",
+            expected_generation=expected_generation,
+        )
         cleanup_task: asyncio.Task[None] | None = None
         if session is not None:
             cleanup_task = asyncio.create_task(session.aclose())
@@ -627,8 +634,14 @@ class SessionManager:
 
     async def aclose_all_sessions(self) -> None:
         """Close every active session and wait for all kernel/resource teardown."""
-        session_ids = list(self.storage.list_all())
-        tasks = [asyncio.create_task(self.aclose_session(session_id)) for session_id in session_ids]
+        with self._session_lifecycle_lock:
+            sessions = [
+                (session_id, self._session_generations.get(session_id)) for session_id in self.storage.list_all()
+            ]
+        tasks = [
+            asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
+            for session_id, generation in sessions
+        ]
         if not tasks:
             await self.await_resource_cleanup()
             return
@@ -640,12 +653,12 @@ class SessionManager:
             outer_cancellation = exc
             results = await asyncio.shield(completion)
         finally:
-            for session_id, task in zip(session_ids, tasks):
+            for (session_id, _), task in zip(sessions, tasks):
                 if task.done() and not task.cancelled() and task.exception() is not None:
                     LOGGER.error("Failed to close session %s: %s", session_id, task.exception())
         errors: list[Exception] = [
             RuntimeError(f"Failed to close session {session_id}: {result}")
-            for session_id, result in zip(session_ids, results)
+            for (session_id, _), result in zip(sessions, results)
             if isinstance(result, Exception)
         ]
         cancelled = next(
@@ -1944,11 +1957,18 @@ class SessionManager:
 
         for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
-            await self._shutdown_kernel(
-                session_id,
-                expected_session_generation=session_generation,
-                expected_kernel_generation=kernel_generation,
-            )
+            with self._session_lifecycle_lock:
+                if (
+                    self._kernel_session_generations.get(session_id) != session_generation
+                    or self._kernel_generations.get(session_id) != kernel_generation
+                ):
+                    continue
+                shutdown_task = self._schedule_kernel_shutdown(
+                    session_id,
+                    caller="cleanup_idle_kernels()",
+                )
+            if shutdown_task is not None:
+                await shutdown_task
 
     # ========================================================================
     # Session Listing and Cleanup
