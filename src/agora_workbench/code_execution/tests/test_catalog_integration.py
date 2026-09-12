@@ -591,7 +591,10 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
             "load_path": "<blob>untrusted</blob>",
             "storage_uri": "https://user:secret@example.test/data.csv?sig=secret",
             "documentation_url": "https://user:secret@example.test/docs?sig=secret#section",
-            "related": {"url": "https://example.test/related?sig=secret"},
+            "related": {
+                "url": "https://example.test/related?sig=secret",
+                "see https://example.test/key?sig=secret": "safe",
+            },
         },
         score=0.75,
         revision=2,
@@ -642,7 +645,10 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert result[0]["current_revision"] == 2
     assert "storage_uri" not in result[0]
     assert result[0]["documentation_url"] == "https://example.test/docs"
-    assert result[0]["related"] == {"url": "https://example.test/related"}
+    assert result[0]["related"] == {
+        "url": "https://example.test/related",
+        "see https://example.test/key": "safe",
+    }
     assert result[0]["description"] == "See https://example.test/data.csv"
     assert result[0]["content_type"] == "text/csv; source=https://example.test/type"
     assert result[0]["score"] == 0.75

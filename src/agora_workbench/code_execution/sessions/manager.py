@@ -1785,10 +1785,9 @@ class SessionManager:
         if cleanup_artifacts:
             with self._session_lifecycle_lock:
                 current_session_generation = self._session_generations.get(session_id)
-                if (
-                    expected_session_generation is None
-                    or current_session_generation is None
-                    or current_session_generation == expected_session_generation
+                if current_session_generation is None or (
+                    expected_session_generation is not None
+                    and current_session_generation == expected_session_generation
                 ):
                     self._cleanup_session_artifacts(session_id)
 
@@ -1906,11 +1905,18 @@ class SessionManager:
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
         now = time.time()
-        idle_sessions = [sid for sid, last_used in self._kernel_last_used.items() if now - last_used > max_idle_time]
+        idle_sessions = [
+            (sid, self._session_generations.get(sid))
+            for sid, last_used in self._kernel_last_used.items()
+            if now - last_used > max_idle_time
+        ]
 
-        for session_id in idle_sessions:
+        for session_id, session_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
-            await self._shutdown_kernel(session_id)
+            await self._shutdown_kernel(
+                session_id,
+                expected_session_generation=session_generation,
+            )
 
     # ========================================================================
     # Session Listing and Cleanup

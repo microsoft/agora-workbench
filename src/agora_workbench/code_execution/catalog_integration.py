@@ -733,7 +733,10 @@ def _sanitize_metadata_value(value: Any) -> Any:
     if isinstance(value, str):
         return _sanitize_error_message(value)
     if isinstance(value, Mapping):
-        return {key: _sanitize_metadata_value(item) for key, item in value.items()}
+        return {
+            _sanitize_error_message(key) if isinstance(key, str) else key: _sanitize_metadata_value(item)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_sanitize_metadata_value(item) for item in value]
     if isinstance(value, tuple):
@@ -744,7 +747,7 @@ def _sanitize_metadata_value(value: Any) -> Any:
 def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[str, Any]:
     payload = {
         **{
-            key: _sanitize_metadata_value(value)
+            _sanitize_error_message(key) if isinstance(key, str) else key: _sanitize_metadata_value(value)
             for key, value in artifact.metadata.items()
             if key not in _RESERVED_PAYLOAD_FIELDS
         },

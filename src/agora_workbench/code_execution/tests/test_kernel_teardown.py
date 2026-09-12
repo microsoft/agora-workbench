@@ -243,6 +243,30 @@ class TestAtomicClaim:
 
         assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
 
+    async def test_idle_cleanup_generation_snapshot_preserves_replacement_outputs(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD")
+        manager._kernel_last_used[session_id] = 0.0
+        original_shutdown = manager._shutdown_kernel
+        marker = manager._get_outputs_dir(session_id) / "replacement.txt"
+
+        async def replace_then_shutdown(closing_session_id, **kwargs):
+            manager.create_session(
+                data={},
+                user_identity="new",
+                user_token="replacement-token",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            marker.write_text("replacement")
+            await original_shutdown(closing_session_id, **kwargs)
+
+        monkeypatch.setattr(manager, "_shutdown_kernel", replace_then_shutdown)
+
+        await manager.cleanup_idle_kernels(max_idle_time=-1)
+
+        assert marker.read_text() == "replacement"
+
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
         gate = asyncio.Event()
