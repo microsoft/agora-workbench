@@ -220,15 +220,28 @@ class TestAtomicClaim:
         # And the fully-unknown-session case still does not raise.
         await manager._shutdown_kernel("never-existed")
 
-    async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager):
+    async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager, tmp_path):
         gate = asyncio.Event()
-        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        session_id = "reused-session"
+        session_dir = tmp_path / f"session_{session_id}"
+        session_dir.mkdir()
+        session_file = session_dir / "state.json"
+        session_file.write_text("old")
+        manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="old",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
         register_kernel(manager, session_id, name="OLD", gate=gate)
 
         shutdown = manager.close_session(session_id)
         assert shutdown is not None
+        session_dir.mkdir(exist_ok=True)
+        session_file.write_text("replacement")
         manager.create_session(
-            data={},
+            data={"session_file": str(session_file)},
             user_identity="new",
             user_token="replacement-token",
             token_claims={},
@@ -242,6 +255,7 @@ class TestAtomicClaim:
         await shutdown
 
         assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
+        assert session_file.read_text() == "replacement", "stale cleanup deleted a live session file"
 
     async def test_idle_cleanup_generation_snapshot_preserves_replacement_outputs(self, manager, monkeypatch):
         session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})

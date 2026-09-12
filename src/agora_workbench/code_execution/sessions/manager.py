@@ -558,6 +558,7 @@ class SessionManager:
             )
             session = self.storage.retrieve(session_id)
             if session is not None:
+                session.claim_session_file_cleanup()
                 # Remove session-scoped files while the lifecycle lock still
                 # prevents an explicit-ID replacement from creating its output
                 # directory. The asynchronous kernel teardown must not remove
