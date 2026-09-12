@@ -133,11 +133,14 @@ the bounded streaming contract.
   component is opened relative to a retained, identity-verified trusted root
   descriptor with
   no-follow semantics, preventing traversal, symlink escape, and the common
-  check-then-swap race. Other platforms perform resolved containment and
-  no-follow checks supported by that platform.
+  check-then-swap race. Because equivalent primitives are unavailable through
+  Python on other platforms, configured `allowed_roots` are explicitly
+  unsupported there; unrestricted local reads remain available.
 - `LocalFilePublisher(base_dir=...)` treats `base_dir` as its write root and
   creates/opens destination components relative to that root on POSIX. Partial
-  files are never exposed as the final name.
+  files are never exposed as the final name. Other platforms retain legacy
+  publishing with resolved-containment and parent-identity checks, but do not
+  claim the stronger descriptor-relative guarantee.
 - `BlobFetcher(allowed_locations=[...])` accepts `AzureBlobScope` values or
   supported Azure URI strings. Account, container, and prefix boundaries are
   checked before creating a client or making a request.

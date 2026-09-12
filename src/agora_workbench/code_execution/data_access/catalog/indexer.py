@@ -1215,6 +1215,9 @@ class CatalogIndexer:
                 elif stat.S_ISREG(entry_stat.st_mode):
                     file_stat = _stat_regular_file_no_follow(name, dir_fd=directory_fd)
                     filepath = source_path.joinpath(*child_parts)
+                    current_stat = _stat_regular_file_no_follow(filepath)
+                    if (current_stat.st_dev, current_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino):
+                        raise OSError("Catalog source path identity changed during enumeration.")
                     artifacts.append(
                         self._make_local_artifact(
                             filepath,

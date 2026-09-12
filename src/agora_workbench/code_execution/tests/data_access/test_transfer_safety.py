@@ -325,29 +325,28 @@ async def test_local_publisher_timeout_drains_slow_fsync_and_cleans_partial(tmp_
     assert _part_files(output_root / "session") == []
 
 
-async def test_non_posix_secure_local_transfer_fallbacks_are_explicitly_unsupported(tmp_path, monkeypatch):
+async def test_non_posix_unrestricted_local_transfer_fallbacks_remain_functional(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
 
     async def chunks():
         yield b"payload"
 
-    monkeypatch.setattr(transfer_module.os, "name", "nt")
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+    destination = tmp_path / "destination.bin"
+    await stream_chunks_to_file(
+        chunks(),
+        destination,
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+    assert destination.read_bytes() == b"payload"
 
-    with pytest.raises(UnsupportedOperationError, match="POSIX"):
-        await stream_chunks_to_file(
-            chunks(),
-            str(tmp_path / "destination.bin"),
-            options=TransferOptions(),
-            context=RequestContext(),
-        )
-    with pytest.raises(UnsupportedOperationError, match="POSIX"):
-        await publishers_module._copy_local_path(
-            source,
-            tmp_path / "destination.bin",
-            TransferOptions(),
-            RequestContext(),
-        )
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+    output_root = tmp_path / "outputs"
+    publisher = LocalFilePublisher(output_root)
+    published = await publisher.publish(source, "published.bin", "session")
+    assert Path(published).read_bytes() == b"payload"
 
 
 async def test_non_posix_allowed_root_fetch_is_explicitly_unsupported(tmp_path, monkeypatch):
@@ -764,7 +763,7 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
 
 async def test_stream_writer_retries_short_writes_and_hashes_committed_bytes(tmp_path, monkeypatch):
     destination = tmp_path / "destination.bin"
-    original_fdopen = transfer_module.os.fdopen
+    original_open = builtins.open
 
     class ShortWriter:
         def __init__(self, wrapped):
@@ -783,9 +782,10 @@ async def test_stream_writer_retries_short_writes_and_hashes_committed_bytes(tmp
             return self._wrapped.write(data[:2])
 
     monkeypatch.setattr(
-        transfer_module.os,
-        "fdopen",
-        lambda *args, **kwargs: ShortWriter(original_fdopen(*args, **kwargs)),
+        transfer_module,
+        "open",
+        lambda *args, **kwargs: ShortWriter(original_open(*args, **kwargs)),
+        raising=False,
     )
 
     async def chunks():
@@ -1403,6 +1403,40 @@ async def test_default_manager_rejects_arbitrary_remote_urls_without_disclosure(
             )
         assert "DO_NOT_DISCLOSE" not in str(exc.value)
         assert exc.value.resource_id == "https://example.com/file.csv"
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_revalidates_cached_file_against_per_call_transfer_options(tmp_path):
+    cached = tmp_path / "cached.bin"
+    cached.write_bytes(b"content")
+    manager = DataLakeDataManager(credential=None)
+    manager._cache_index["cached-id"] = cached
+    try:
+        with pytest.raises(TransferLimitError):
+            await manager.get_cache_path(
+                "<local>cached-id</local>",
+                transfer_options=TransferOptions(max_bytes=1),
+            )
+        with pytest.raises(TransferChecksumError):
+            await manager.get_cache_path(
+                "<local>cached-id</local>",
+                transfer_options=TransferOptions(expected_sha256="0" * 64),
+            )
+        cancellation = asyncio.Event()
+        cancellation.set()
+        with pytest.raises(TransferCancelledError):
+            await manager.get_cache_path(
+                "<local>cached-id</local>",
+                transfer_options=TransferOptions(cancellation_event=cancellation),
+            )
+
+        result = await manager.get_cache_path(
+            "<local>cached-id</local>",
+            transfer_options=TransferOptions(expected_sha256=hashlib.sha256(b"content").hexdigest()),
+        )
+        assert result == cached
+        assert cached.read_bytes() == b"content"
     finally:
         await manager.aclose()
 

@@ -59,12 +59,14 @@ from agora_workbench.data_lake.transfer import (
     check_transfer_size,
     emit_transfer_diagnostic,
     safe_transfer_resource,
+    stream_chunks_to_file,
 )
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
 
 LOGGER = logging.getLogger(__name__)
+_USE_POSIX_DIR_FDS = os.name == "posix"
 
 
 class ObjectTransferError(RuntimeError):
@@ -248,7 +250,7 @@ async def _copy_local_descriptors(
     """Copy a regular source descriptor to an already-secured destination descriptor."""
     source_fd = (
         _open_posix_path_no_follow(local_path)
-        if os.name == "posix"
+        if _USE_POSIX_DIR_FDS
         else os.open(local_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
     )
     started = time.monotonic()
@@ -326,12 +328,46 @@ async def _copy_local_path(
     options: TransferOptions,
     context: RequestContext,
 ) -> TransferResult:
-    """Reject platforms that cannot provide descriptor-relative no-follow source traversal."""
-    raise UnsupportedOperationError(
-        "Secure local publishing requires POSIX descriptor-relative path operations.",
-        resource_id=str(local_path),
+    """Best-effort fallback for unrestricted local publishing on non-POSIX platforms."""
+    def open_verified_source():
+        source_path = local_path.resolve(strict=True)
+        source_stat = source_path.stat()
+        source_file = source_path.open("rb", buffering=0)
+        opened_stat = os.fstat(source_file.fileno())
+        if (opened_stat.st_dev, opened_stat.st_ino) != (source_stat.st_dev, source_stat.st_ino):
+            source_file.close()
+            raise UnsafePathError("Upload source identity changed before open.", operation="upload")
+        return source_path, source_file
+
+    source_path, source_file = await _run_blocking_io(
+        open_verified_source,
+        options=options,
         operation="upload",
+        resource=str(local_path),
     )
+    try:
+        async def chunks():
+            while True:
+                chunk = await _run_blocking_io(
+                    lambda: source_file.read(options.chunk_size),
+                    options=options,
+                    operation="upload",
+                    resource=str(source_path),
+                )
+                if not chunk:
+                    break
+                yield chunk
+
+        return await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=options,
+            context=context,
+            operation="upload",
+            resource=str(source_path),
+        )
+    finally:
+        await _run_blocking_io(source_file.close)
 
 
 class AssetPublisher(ABC):
@@ -498,7 +534,7 @@ class BlobPublisher(AssetPublisher):
         self._staging_dir = Path(os.path.abspath(os.fspath(configured_staging)))
         self._staging_fd: int | None = None
         self._staging_identity: tuple[int, int] | None = None
-        if os.name == "posix":
+        if _USE_POSIX_DIR_FDS:
             self._staging_fd = _open_or_create_posix_directory(self._staging_dir)
             stat_result = os.fstat(self._staging_fd)
             self._staging_identity = (stat_result.st_dev, stat_result.st_ino)
@@ -528,7 +564,7 @@ class BlobPublisher(AssetPublisher):
 
     def _open_verified_staging_root(self) -> int:
         """Return the retained staging root after verifying its configured identity."""
-        if os.name != "posix":
+        if not _USE_POSIX_DIR_FDS:
             self._staging_dir.mkdir(parents=True, exist_ok=True)
             return -1
         if self._staging_fd is None or self._staging_identity is None:
@@ -852,7 +888,7 @@ class LocalFilePublisher(AssetPublisher):
         self._anchor_fd: int | None = None
         self._root_parts: tuple[str, ...] = ()
         self._root_identity: tuple[int, int] | None = None
-        if os.name == "posix":
+        if _USE_POSIX_DIR_FDS:
             self._initialize_root_anchor()
 
     def _initialize_root_anchor(self) -> None:
@@ -1026,9 +1062,10 @@ class LocalFilePublisher(AssetPublisher):
         options: TransferOptions,
         context: RequestContext,
     ) -> TransferResult:
-        if os.name != "posix":
-            destination = (self._base_dir / relative).resolve()
-            if not destination.is_relative_to(self._base_dir):
+        if not _USE_POSIX_DIR_FDS:
+            resolved_base = self._base_dir.resolve()
+            destination = (resolved_base / relative).resolve()
+            if not destination.is_relative_to(resolved_base):
                 raise UnsafePathError("Local publish path escapes the configured root.", operation="upload")
             destination.parent.mkdir(parents=True, exist_ok=True)
             return await _copy_local_path(local_path, destination, options, context)

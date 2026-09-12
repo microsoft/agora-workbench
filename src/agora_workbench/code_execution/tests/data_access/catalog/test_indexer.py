@@ -274,6 +274,37 @@ class TestCatalogIndexerLocal:
         assert "inside.csv" not in names
         assert "secret.csv" not in names
 
+    def test_path_swap_after_descriptor_stat_cannot_publish_outside_locator(self, db, tmp_path, monkeypatch):
+        root = tmp_path / "source"
+        nested = root / "nested"
+        nested.mkdir(parents=True)
+        victim = nested / "asset.csv"
+        victim.write_text("inside")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "asset.csv").write_text("outside")
+        source = SourceConfig(source_id="source", path=str(root))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        original_stat = indexer_module._stat_regular_file_no_follow
+        descriptor_stat_seen = False
+
+        def swap_before_path_revalidation(path, *, dir_fd=None):
+            nonlocal descriptor_stat_seen
+            if dir_fd is not None:
+                descriptor_stat_seen = True
+            elif descriptor_stat_seen:
+                nested.rename(root / "original-nested")
+                nested.symlink_to(outside, target_is_directory=True)
+            return original_stat(path, dir_fd=dir_fd)
+
+        monkeypatch.setattr(indexer_module, "_stat_regular_file_no_follow", swap_before_path_revalidation)
+
+        artifacts, error = indexer._enumerate_local(source)
+
+        assert descriptor_stat_seen
+        assert artifacts == []
+        assert error is not None
+
     @pytest.mark.asyncio
     async def test_root_symlink_swap_cannot_index_outside_files(self, config, db, data_dir, monkeypatch):
         root = data_dir / "weather"

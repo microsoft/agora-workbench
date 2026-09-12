@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 from agora_workbench.data_lake.errors import UnsupportedOperationError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
-from agora_workbench.data_lake.transfer import TransferOptions, safe_artifact_reference
+from agora_workbench.data_lake.transfer import TransferOptions, _run_blocking_io, hash_file, safe_artifact_reference
 
 from .. import agent_guidance
 from ..types import AssetId
@@ -262,6 +262,23 @@ class DataLakeDataManager:
         if artifact_id in self._cache_index:
             cache_path = self._cache_index[artifact_id]
             if cache_path.exists():
+                options = transfer_options or TransferOptions()
+                cache_file = await _run_blocking_io(
+                    lambda: cache_path.open("rb", buffering=0),
+                    options=options,
+                    operation="download",
+                    resource=str(cache_path),
+                )
+                try:
+                    await hash_file(
+                        cache_file,
+                        options=options,
+                        context=context or RequestContext(),
+                        operation="download",
+                        resource=str(cache_path),
+                    )
+                finally:
+                    await _run_blocking_io(cache_file.close)
                 LOGGER.debug(f"Asset already cached: {cache_path}")
                 return cache_path
 
