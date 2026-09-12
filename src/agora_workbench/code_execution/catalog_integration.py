@@ -569,6 +569,8 @@ class CatalogIntegration:
         self._started = False
         self._private_cache_directory: Path | None = None
         self._cleanup_tracker = _AsyncCleanupTracker()
+        self._provider_closed = False
+        self._provider_close_task: asyncio.Task[None] | None = None
 
     @classmethod
     def from_config(
@@ -705,11 +707,26 @@ class CatalogIntegration:
             raise ExceptionGroup("Catalog integration shutdown failed.", errors)
 
     async def _close_provider(self) -> None:
-        close = getattr(self.provider, "aclose", None) or getattr(self.provider, "close", None)
-        if callable(close):
-            result = close()
-            if inspect.isawaitable(result):
-                await result
+        if self._provider_closed:
+            return
+        task = self._provider_close_task
+        if task is None:
+
+            async def close_once() -> None:
+                close = getattr(self.provider, "aclose", None) or getattr(self.provider, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+                self._provider_closed = True
+
+            task = asyncio.create_task(close_once())
+            self._provider_close_task = task
+        try:
+            await asyncio.shield(task)
+        finally:
+            if task.done() and self._provider_close_task is task:
+                self._provider_close_task = None
 
     def _cleanup_private_cache_directory(self) -> None:
         if self._private_cache_directory is not None:

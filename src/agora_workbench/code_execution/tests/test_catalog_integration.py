@@ -635,6 +635,35 @@ async def test_owned_and_borrowed_catalog_lifecycle():
     assert (borrowed_provider.load_calls, borrowed_provider.close_calls) == (0, 0)
 
 
+async def test_owned_provider_closes_once_across_concurrent_and_repeated_shutdown():
+    close_started = asyncio.Event()
+    close_gate = asyncio.Event()
+
+    class Provider(_LifecycleProvider):
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls > 1:
+                raise RuntimeError("provider closed twice")
+            close_started.set()
+            await close_gate.wait()
+
+    provider = Provider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+    first = asyncio.create_task(integration.shutdown())
+    second = asyncio.create_task(integration.shutdown())
+    await close_started.wait()
+    assert provider.close_calls == 1
+    close_gate.set()
+    await asyncio.gather(first, second)
+
+    await integration.shutdown()
+    assert provider.close_calls == 1
+
+
 async def test_refreshed_session_token_updates_catalog_request_context_and_authorizer(tmp_path):
     provider = _LifecycleProvider()
     authorizers = []
