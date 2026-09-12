@@ -253,7 +253,7 @@ class TestCatalogIndexerLocal:
 
         def swap_before_open(path, flags, *args, **kwargs):
             nonlocal swapped
-            if path == root and not swapped:
+            if path == root.name and kwargs.get("dir_fd") is not None and not swapped:
                 swapped = True
                 root.rename(data_dir / "original-weather")
                 root.symlink_to(outside, target_is_directory=True)
@@ -266,6 +266,35 @@ class TestCatalogIndexerLocal:
         assert await indexer.index() == 0
         assert swapped
         assert not any(record.name == "secret.csv" for record in db.list_artifacts(limit=100))
+
+    def test_single_file_parent_swap_cannot_index_outside_metadata(self, db, tmp_path, monkeypatch):
+        source_parent = tmp_path / "source"
+        source_parent.mkdir()
+        source = source_parent / "asset.csv"
+        source.write_text("inside")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "asset.csv").write_text("outside metadata must not be indexed")
+        original_open = indexer_module.os.open
+        swapped = False
+
+        def swap_before_parent_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            if path == source_parent.name and kwargs.get("dir_fd") is not None and not swapped:
+                swapped = True
+                source_parent.rename(tmp_path / "original-source")
+                source_parent.symlink_to(outside, target_is_directory=True)
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(indexer_module.os, "open", swap_before_parent_open)
+        source_config = SourceConfig(path=str(source))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source_config]), db)
+
+        artifacts, error = indexer._enumerate_local(source_config)
+
+        assert swapped
+        assert artifacts == []
+        assert error is not None
 
     @pytest.mark.asyncio
     async def test_idempotent_reindex(self, config, db, data_dir):
@@ -603,7 +632,7 @@ class TestCatalogIndexerLocal:
         original_open = indexer_module.os.open
 
         def failed_open(path, flags, *args, **kwargs):
-            if path == root:
+            if path == root.name and kwargs.get("dir_fd") is not None:
                 raise PermissionError("denied")
             return original_open(path, flags, *args, **kwargs)
 

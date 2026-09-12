@@ -273,9 +273,10 @@ def _canonical_storage_alias(uri: str) -> str:
     try:
         return canonicalize_azure_uri(uri)
     except ArtifactIdentityError:
-        literal_uri = CatalogDB._literal_legacy_az_uri(uri)
-        if literal_uri is not None:
-            return literal_uri
+        if not parsed.query and not parsed.fragment:
+            literal_uri = CatalogDB._literal_legacy_az_uri(uri)
+            if literal_uri is not None:
+                return literal_uri
         return sanitize_uri_for_display(uri)
 
 

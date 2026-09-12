@@ -45,16 +45,47 @@ LOGGER = logging.getLogger(__name__)
 _EMBEDDING_BATCH_SIZE = 64
 
 
+def _open_directory_no_follow(path: Path) -> int:
+    """Open an absolute directory by traversing every component without following symlinks."""
+    if os.name != "posix" or not path.is_absolute():
+        raise OSError("Secure local catalog traversal is unavailable on this platform.")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    current = os.open(os.path.sep, flags)
+    try:
+        for part in path.parts[1:]:
+            next_fd = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
 def _stat_regular_file_no_follow(path: str | Path, *, dir_fd: int | None = None) -> os.stat_result:
     """Atomically open and stat a regular file without following a final symlink."""
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+    parent_fd: int | None = None
+    if dir_fd is None:
+        absolute_path = Path(path)
+        parent_fd = _open_directory_no_follow(absolute_path.parent)
+        dir_fd = parent_fd
+        path = absolute_path.name
     try:
-        result = os.fstat(descriptor)
-        if not stat.S_ISREG(result.st_mode):
-            raise OSError("Catalog source entry is not a regular file.")
-        return result
+        descriptor = os.open(
+            path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=dir_fd,
+        )
+        try:
+            result = os.fstat(descriptor)
+            if not stat.S_ISREG(result.st_mode):
+                raise OSError("Catalog source entry is not a regular file.")
+            return result
+        finally:
+            os.close(descriptor)
     finally:
-        os.close(descriptor)
+        if parent_fd is not None:
+            os.close(parent_fd)
 
 
 # Max concurrent blob source enumerations
@@ -1113,10 +1144,7 @@ class CatalogIndexer:
                     )
                 )
             else:
-                root_fd = os.open(
-                    source_path,
-                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                )
+                root_fd = _open_directory_no_follow(source_path)
                 try:
                     self._walk_local_directory(
                         root_fd,

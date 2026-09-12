@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import gc
 import hashlib
+import io
 import logging
 import os
+import threading
+import time
 import tracemalloc
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -32,7 +35,7 @@ from agora_workbench.data_lake import (
     canonicalize_azure_uri,
     validate_managed_revision_path,
 )
-from agora_workbench.data_lake.transfer import await_transfer, safe_artifact_reference, stream_chunks_to_file
+from agora_workbench.data_lake.transfer import await_transfer, hash_file, safe_artifact_reference, stream_chunks_to_file
 
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
@@ -161,6 +164,104 @@ async def test_timeout_cleans_partial_and_preserves_existing_destination(tmp_pat
 
     assert destination.read_bytes() == b"previous"
     assert _part_files(tmp_path) == []
+
+
+async def test_timeout_interrupts_blocking_destination_fsync_and_cleans_partial(tmp_path, monkeypatch):
+    destination = tmp_path / "destination.bin"
+    destination.write_bytes(b"previous")
+
+    async def chunks():
+        yield b"payload"
+
+    def slow_fsync(_descriptor):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(transfer_module.os, "fsync", slow_fsync)
+
+    with pytest.raises(TransferTimeoutError):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(timeout_seconds=0.01),
+            context=RequestContext(),
+        )
+
+    assert destination.read_bytes() == b"previous"
+    assert _part_files(tmp_path) == []
+
+
+async def test_external_cancellation_drains_blocking_destination_io_before_cleanup(tmp_path, monkeypatch):
+    destination = tmp_path / "destination.bin"
+    started = threading.Event()
+    release = threading.Event()
+
+    async def chunks():
+        yield b"payload"
+
+    def blocked_fsync(_descriptor):
+        started.set()
+        assert release.wait(timeout=1)
+
+    monkeypatch.setattr(transfer_module.os, "fsync", blocked_fsync)
+    transfer = asyncio.create_task(
+        stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+    )
+    assert await asyncio.to_thread(started.wait, 1)
+
+    transfer.cancel()
+    await asyncio.sleep(0)
+    assert not transfer.done()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await transfer
+    assert not destination.exists()
+    assert _part_files(tmp_path) == []
+
+
+async def test_timeout_interrupts_blocking_hash_read():
+    class SlowSource(io.BytesIO):
+        def read(self, _size):
+            time.sleep(0.05)
+            return super().read(_size)
+
+    with pytest.raises(TransferTimeoutError):
+        await hash_file(
+            SlowSource(b""),
+            options=TransferOptions(timeout_seconds=0.01),
+            context=RequestContext(),
+            operation="upload",
+        )
+
+
+async def test_non_posix_secure_local_transfer_fallbacks_are_explicitly_unsupported(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+
+    async def chunks():
+        yield b"payload"
+
+    monkeypatch.setattr(transfer_module.os, "name", "nt")
+
+    with pytest.raises(UnsupportedOperationError, match="POSIX"):
+        await stream_chunks_to_file(
+            chunks(),
+            str(tmp_path / "destination.bin"),
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+    with pytest.raises(UnsupportedOperationError, match="POSIX"):
+        await publishers_module._copy_local_path(
+            source,
+            tmp_path / "destination.bin",
+            TransferOptions(),
+            RequestContext(),
+        )
 
 
 async def test_provider_timeout_without_configured_deadline_is_not_masked(tmp_path):

@@ -57,7 +57,6 @@ from agora_workbench.data_lake.transfer import (
     check_transfer_size,
     emit_transfer_diagnostic,
     safe_transfer_resource,
-    stream_chunks_to_file,
 )
 
 if TYPE_CHECKING:
@@ -294,24 +293,11 @@ async def _copy_local_path(
     options: TransferOptions,
     context: RequestContext,
 ) -> TransferResult:
-    """Portable fallback used where descriptor-relative path operations are unavailable."""
-
-    async def chunks():
-        with local_path.open("rb") as source:
-            while True:
-                chunk = source.read(options.chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-                await asyncio.sleep(0)
-
-    return await stream_chunks_to_file(
-        chunks(),
-        destination,
-        options=options,
-        context=context,
+    """Reject platforms that cannot provide descriptor-relative no-follow source traversal."""
+    raise UnsupportedOperationError(
+        "Secure local publishing requires POSIX descriptor-relative path operations.",
+        resource_id=str(local_path),
         operation="upload",
-        resource=str(local_path),
     )
 
 

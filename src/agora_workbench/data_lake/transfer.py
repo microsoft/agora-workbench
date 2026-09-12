@@ -15,7 +15,7 @@ from collections.abc import AsyncIterable, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import BinaryIO
+from typing import BinaryIO, TypeVar
 from urllib.parse import urlsplit
 
 from .errors import (
@@ -23,6 +23,7 @@ from .errors import (
     TransferChecksumError,
     TransferLimitError,
     TransferTimeoutError,
+    UnsupportedOperationError,
 )
 from .identity import sanitize_uri_for_display
 from .models import RequestContext
@@ -31,9 +32,28 @@ DEFAULT_TRANSFER_CHUNK_BYTES = 1024 * 1024
 DEFAULT_TRANSFER_MAX_BYTES = 1024 * 1024 * 1024
 DEFAULT_TRANSFER_TIMEOUT_SECONDS = 300.0
 LOGGER = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None]
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
+
+
+async def _run_blocking_io(function: Callable[[], _T]) -> _T:
+    """Run filesystem I/O off-loop and drain its thread before propagating cancellation."""
+    task = asyncio.create_task(asyncio.to_thread(function))
+    try:
+        return await asyncio.shield(task)
+    except BaseException:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except BaseException:
+                break
+        if task.done() and not task.cancelled():
+            task.exception()
+        raise
 
 
 @dataclass(frozen=True)
@@ -292,6 +312,12 @@ async def stream_chunks_to_file(
     chunk has been written. Peak Workbench-owned payload memory is therefore
     bounded by one provider chunk plus ``options.chunk_size``.
     """
+    if os.name != "posix":
+        raise UnsupportedOperationError(
+            "Secure atomic local transfers require POSIX descriptor-relative path operations.",
+            resource_id=safe_transfer_resource(resource),
+            operation=operation,
+        )
     destination_path = Path(os.path.abspath(os.fspath(destination)))
     temporary_name = f".{destination_path.name}.{secrets.token_hex(8)}.part"
     temporary_path = destination_path.with_name(temporary_name)
@@ -307,9 +333,7 @@ async def stream_chunks_to_file(
 
     async def copy() -> None:
         nonlocal bytes_transferred
-        if parent_fd is None:
-            output_file = temporary_path.open("xb", buffering=0)
-        else:
+        if parent_fd is not None:
             output_descriptor = os.open(
                 temporary_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
@@ -317,7 +341,9 @@ async def stream_chunks_to_file(
                 dir_fd=parent_fd,
             )
             output_file = os.fdopen(output_descriptor, "wb", buffering=0, closefd=True)
-        with output_file as output:
+        else:
+            output_file = temporary_path.open("xb", buffering=0)
+        try:
             async for provider_chunk in chunks:
                 check_transfer_cancelled(options, operation=operation, resource=resource)
                 view = memoryview(provider_chunk)
@@ -331,15 +357,16 @@ async def stream_chunks_to_file(
                     )
                     remaining = chunk
                     while remaining:
-                        written = output.write(remaining)
+                        written = await _run_blocking_io(lambda: output_file.write(remaining))
                         if written is None or written <= 0:
                             raise OSError("Transfer output made no write progress.")
                         written_chunk = remaining[:written]
                         digest.update(written_chunk)
                         bytes_transferred += written
                         remaining = remaining[written:]
-            output.flush()
-            os.fsync(output.fileno())
+            await _run_blocking_io(lambda: (output_file.flush(), os.fsync(output_file.fileno())))
+        finally:
+            await _run_blocking_io(output_file.close)
 
     def cleanup_temporary() -> None:
         try:
@@ -490,7 +517,7 @@ async def hash_file(
         nonlocal total
         while True:
             check_transfer_cancelled(options, operation=operation, resource=resource)
-            chunk = source.read(options.chunk_size)
+            chunk = await _run_blocking_io(lambda: source.read(options.chunk_size))
             if not chunk:
                 break
             total += len(chunk)
