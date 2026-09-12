@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Protocol
@@ -112,7 +113,13 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
                 self._client = None
         finally:
             if self._credential_owned:
-                await self._credential_provider.close()
+                close = getattr(self._credential_provider, "aclose", None) or getattr(
+                    self._credential_provider, "close", None
+                )
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
                 self._credential_owned = False
 
 

@@ -144,3 +144,18 @@ async def test_close_releases_owned_credential():
     await provider.close()
 
     credential.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_supports_owned_sync_credential():
+    credential = SimpleNamespace(close=lambda: None)
+    provider = embeddings.AzureOpenAIEmbeddingProvider(
+        endpoint="https://example.openai.azure.com",
+        deployment="embedding",
+        credential_provider=credential,  # type: ignore[arg-type]
+        credential_owned=True,
+    )
+
+    await provider.close()
+
+    assert not provider._credential_owned

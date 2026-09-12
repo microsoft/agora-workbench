@@ -20,9 +20,10 @@ from pathlib import Path
 from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
 
+from agora_workbench.data_lake import ResourceOwnership
 from agora_workbench.data_lake.errors import UnsupportedOperationError, UnsafePathError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
-from agora_workbench.data_lake.models import RequestContext, ResourceOwnership
+from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
     TransferOptions,
     _run_blocking_io,
@@ -347,16 +348,21 @@ class DataLakeDataManager:
                         lambda: os.fstat(cache_file.fileno()),
                         options=options,
                         operation="download",
-                        resource=str(cache_path),
+                        resource=str(validated_cache_path),
                     )
-                    check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
+                    check_transfer_size(
+                        file_stat.st_size,
+                        options,
+                        operation="download",
+                        resource=str(validated_cache_path),
+                    )
                     if options.expected_sha256 is not None:
                         await hash_file(
                             cache_file,
                             options=options,
                             context=context or RequestContext(),
                             operation="download",
-                            resource=str(cache_path),
+                            resource=str(validated_cache_path),
                         )
                 finally:
                     await _run_blocking_io(cache_file.close)

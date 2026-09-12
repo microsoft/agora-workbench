@@ -65,6 +65,7 @@ _RESERVED_PAYLOAD_FIELDS = frozenset(
         "content_type",
         "size_bytes",
         "load_path",
+        "name",
         "storage_uri",
     }
 )
