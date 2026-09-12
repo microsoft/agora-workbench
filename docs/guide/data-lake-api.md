@@ -636,7 +636,9 @@ session cannot invalidate another session's resolver.
 Discovery tools use `AuthorizedCatalogProvider` and a session-specific
 `RequestContext`; they never expose the legacy raw `query_catalog` SQL surface.
 Use `authorizer_factory(SessionContext)` when policy objects hold mutable
-caller state. `get_catalog_capabilities` and
+caller state. The factory is invoked again on bearer-token rotation, and its
+session-owned authorizers are closed after replacement or session teardown.
+`get_catalog_capabilities` and
 `CodeExecutionServer.get_data_lake_capabilities(session)` expose the effective
 read operations after provider support and caller policy are intersected.
 `CatalogIntegration.capability_extension_factory` can attach session-owned,

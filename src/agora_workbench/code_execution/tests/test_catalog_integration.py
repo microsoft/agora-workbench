@@ -369,6 +369,13 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
         binding = session.extensions["catalog"]
         page = await binding.catalog.search(SearchRequest("blob"), binding.context)
         reference = ArtifactReference("blob-artifact", "blob-source", page.items[0].revision)
+        set_current_request_token("refreshed-token")
+        try:
+            server._refresh_session_token(session)
+        finally:
+            set_current_request_token(None)
+        refreshed_access_token = await session.data_manager._credential.get_token("scope")
+        assert refreshed_access_token.token == "refreshed-token"
         path = await session.data_manager.get_cache_path(f"<blob>{_encode_reference(reference)}</blob>")
         assert path.read_text() == "blob-payload"
         legacy_fetcher = session.data_manager._fetchers[0]
@@ -378,8 +385,9 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
     finally:
         await server.session_manager.aclose_all_sessions()
         await integration.shutdown()
-    assert credentials[0].token == "token"
+    assert [credential.token for credential in credentials] == ["token", "refreshed-token"]
     assert credentials[0].close_calls == 1
+    assert credentials[1].close_calls == 1
 
 
 async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
@@ -466,11 +474,25 @@ async def test_owned_and_borrowed_catalog_lifecycle():
     assert (borrowed_provider.load_calls, borrowed_provider.close_calls) == (0, 0)
 
 
-def test_refreshed_session_token_updates_catalog_request_context(tmp_path):
+async def test_refreshed_session_token_updates_catalog_request_context_and_authorizer(tmp_path):
     provider = _LifecycleProvider()
+    authorizers = []
+
+    class ClaimsAuthorizer:
+        def __init__(self, claims):
+            self.role = claims.get("role")
+            self.close_calls = 0
+            authorizers.append(self)
+
+        async def authorize(self, request, context):
+            return self.role == "writer"
+
+        async def aclose(self):
+            self.close_calls += 1
+
     integration = CatalogIntegration(
         ResourceLease(provider, ResourceOwnership.BORROWED),
-        authorizer=_PerUserAuthorizer("source"),
+        authorizer_factory=lambda context: ClaimsAuthorizer(context.token_claims),
         load_on_startup=False,
     )
     server = CodeExecutionServer(
@@ -497,6 +519,11 @@ def test_refreshed_session_token_updates_catalog_request_context(tmp_path):
     binding = session.extensions["catalog"]
     assert binding.context.attributes["claims"] == {"role": "writer"}
     assert binding.resolver._context is binding.context
+    assert (await binding.catalog.capabilities(binding.context))[0].source_id == "source"
+
+    await server.session_manager.aclose_all_sessions()
+    await integration.shutdown()
+    assert [authorizer.close_calls for authorizer in authorizers] == [1, 1]
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])

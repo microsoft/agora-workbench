@@ -316,7 +316,13 @@ For production, provide an application authorizer or `authorizer_factory`.
 The factory receives a `SessionContext`; each execution session gets a distinct
 policy wrapper, immutable request context, resolver, and data-manager cache.
 Token claims are available to policy as `context.attributes["claims"]`, but
-bearer tokens are not copied into catalog request attributes.
+bearer tokens are not copied into catalog request attributes. When a transport
+session presents a refreshed bearer token, the factory is invoked again before
+the session adopts it, and the previous factory-created authorizer is closed
+through the tracked session cleanup path. The catalog-created data manager also
+rebinds its token-scoped downstream credential while retaining prior providers
+for cleanup at session shutdown. An authorizer passed directly is borrowed and
+continues to evaluate each immutable per-request context.
 
 If the supplied `SessionManager` already has a `data_manager_factory`, the
 server preserves that manager and its resolver. Discovery remains available,
@@ -350,6 +356,8 @@ receives the `SessionContext`, authorized read catalog, and immutable
 `capabilities(request_context)`; those source capabilities are merged into
 `get_catalog_capabilities`, and the extension is closed with the session. The
 read provider remains independently owned and is not treated as a writer.
+Extensions that cache caller state may implement synchronous
+`refresh_context(session_context, request_context)` to rebind on token rotation.
 Extensions may implement async-only `aclose()`. Synchronous session closure and
 timeout cleanup schedule and retain that work; server shutdown waits for it
 before closing the shared provider. Cleanup attempts the manager, every
