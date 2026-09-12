@@ -137,6 +137,8 @@ class Session(Generic[T]):
         self._asset_counter: int = 0
         self._status_history = [("created", datetime.now())]
         self._scheduled_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._claimed_cleanup_errors: list[Exception] = []
+        self._session_file_cleanup_claimed = False
 
         # Initialize data manager for DataLake asset access. Constructing the
         # default lazily matters: DataLakeDataManager.__init__ eagerly allocates
@@ -186,7 +188,7 @@ class Session(Generic[T]):
         Async cleanup tasks are retained until the SessionManager claims them;
         callers that need completion should use :meth:`aclose`.
         """
-        errors: list[Exception] = []
+        errors = self._take_claimed_cleanup_errors()
         cancellations: list[asyncio.CancelledError] = []
         self._cleanup_resource_sync(self.data_manager, "data manager", errors, cancellations)
         for resource in self.extensions.values():
@@ -207,7 +209,7 @@ class Session(Generic[T]):
 
     async def aclose(self) -> None:
         """Attempt all asynchronous cleanup steps, then report aggregated failures."""
-        errors: list[Exception] = []
+        errors = self._take_claimed_cleanup_errors()
         cancellations: list[asyncio.CancelledError] = []
         await self._cleanup_resource_async(self.data_manager, "data manager", errors, cancellations)
         for resource in self.extensions.values():
@@ -341,6 +343,11 @@ class Session(Generic[T]):
 
     def _cleanup_session_file(self) -> None:
         """Remove the session file and its owned directory, if present."""
+        if self._session_file_cleanup_claimed:
+            return
+        self._remove_session_file()
+
+    def _remove_session_file(self) -> None:
         if not isinstance(self.data, dict) or "session_file" not in self.data:
             return
         session_file = Path(self.data["session_file"])
@@ -353,3 +360,18 @@ class Session(Generic[T]):
                 shutil.rmtree(session_dir)
             except OSError:
                 pass
+
+    def claim_session_file_cleanup(self) -> None:
+        """Remove the owned session file before its session ID can be reused."""
+        if self._session_file_cleanup_claimed:
+            return
+        self._session_file_cleanup_claimed = True
+        try:
+            self._remove_session_file()
+        except Exception as exc:
+            self._claimed_cleanup_errors.append(exc)
+
+    def _take_claimed_cleanup_errors(self) -> list[Exception]:
+        errors = self._claimed_cleanup_errors
+        self._claimed_cleanup_errors = []
+        return errors
