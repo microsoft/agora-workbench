@@ -1132,6 +1132,7 @@ class LocalFilePublisher(AssetPublisher):
                 try:
                     os.unlink(temporary_name, dir_fd=parent_fd)
                 except FileNotFoundError:
+                    # A failed operation may already have removed its temporary file.
                     pass
             if parent_fd != root_fd:
                 os.close(parent_fd)
