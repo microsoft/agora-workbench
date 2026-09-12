@@ -35,8 +35,9 @@ from agora_workbench.data_lake import (
     ResourceOwnership,
     SearchRequest,
     SourceCapabilities,
+    stable_source_id,
 )
-from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer
+from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, SourceConfig
 from agora_workbench.data_lake.policy import AuthorizedCatalogProvider
 from agora_workbench.data_lake.providers import SQLiteCatalogProvider
 
@@ -53,6 +54,12 @@ CapabilityExtensionFactory = Callable[
     [SessionContext, AuthorizedCatalogProvider, RequestContext],
     object | tuple[object, ...] | list[object] | None,
 ]
+
+
+def _effective_source_id(source: SourceConfig) -> str:
+    """Match the catalog indexer's public fallback source identity contract."""
+    root = str(Path(source.path).resolve()) if source.source_type == "local" else source.path
+    return source.source_id or stable_source_id(source.source_type, root)
 
 
 class _AsyncCleanupTracker:
@@ -128,7 +135,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         try:
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
-            super().__init__(self._db_owned, tuple(source.source_id or "" for source in config.sources))
+            super().__init__(self._db_owned, tuple(_effective_source_id(source) for source in config.sources))
         except BaseException:
             self._db_owned.close()
             self._closed = True
