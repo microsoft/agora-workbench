@@ -86,9 +86,15 @@ class _AsyncCleanupTracker:
     """Retain async cleanup started from synchronous lifecycle paths."""
 
     def __init__(self) -> None:
-        self._tasks: dict[asyncio.Task[None], Callable[[], Any] | None] = {}
+        self._tasks: dict[asyncio.Task[None], tuple[Callable[[], Any] | None, int]] = {}
 
-    def schedule(self, awaitable: Any, *, retry: Callable[[], Any] | None = None) -> None:
+    def schedule(
+        self,
+        awaitable: Any,
+        *,
+        retry: Callable[[], Any] | None = None,
+        cancellation_retries: int = 1,
+    ) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -98,7 +104,7 @@ class _AsyncCleanupTracker:
             finally:
                 loop.close()
             return
-        self._tasks[loop.create_task(awaitable)] = retry
+        self._tasks[loop.create_task(awaitable)] = (retry, cancellation_retries if retry is not None else 0)
 
     async def drain(self) -> list[Exception]:
         errors: list[Exception] = []
@@ -115,11 +121,15 @@ class _AsyncCleanupTracker:
                 # tracked so a later shutdown/drain still waits for completion.
                 raise
             for task, result in zip(tasks, results):
-                retry = self._tasks.pop(task, None)
+                retry, cancellation_retries = self._tasks.pop(task, (None, 0))
                 if isinstance(result, asyncio.CancelledError):
                     cancelled = cancelled or result
-                    if retry is not None:
-                        self.schedule(retry())
+                    if retry is not None and cancellation_retries > 0:
+                        self.schedule(
+                            retry(),
+                            retry=retry,
+                            cancellation_retries=cancellation_retries - 1,
+                        )
                 elif isinstance(result, Exception):
                     errors.append(result)
         if cancelled is not None:
@@ -779,7 +789,11 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                     ListRequest(page=PageRequest(limit=page_size, cursor=cursor)),
                     current.context,
                 )
-                domains.update(str(item.metadata["domain"]) for item in page.items if item.metadata.get("domain"))
+                domains.update(
+                    _sanitize_metadata_value(str(item.metadata["domain"]))
+                    for item in page.items
+                    if item.metadata.get("domain")
+                )
                 remaining -= len(page.items)
                 cursor = page.next_cursor
                 if cursor is None or not page.items:
