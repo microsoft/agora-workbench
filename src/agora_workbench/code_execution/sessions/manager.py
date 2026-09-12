@@ -691,7 +691,7 @@ class SessionManager:
         await self.await_kernel_shutdown(session_id)
 
         with self._session_lifecycle_lock:
-            if session_generation is not None and self._session_generations.get(session_id) != session_generation:
+            if self._session_generations.get(session_id) != session_generation:
                 raise ValueError(f"Session {session_id} was closed before its kernel could start.")
             existing_kernel = self._kernels.get(session_id)
             kernel_session_generation = self._kernel_session_generations.get(session_id)
@@ -761,9 +761,7 @@ class SessionManager:
 
         # Store in registry
         with self._session_lifecycle_lock:
-            session_is_current = (
-                session_generation is None or self._session_generations.get(session_id) == session_generation
-            )
+            session_is_current = self._session_generations.get(session_id) == session_generation
             if session_is_current:
                 self._kernels[session_id] = (kernel_manager, kernel_client)
                 self._kernel_last_used[session_id] = time.time()
