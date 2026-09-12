@@ -207,6 +207,7 @@ class DataLakeDataManager:
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
+        self._cache_generation = 0
         self._transfer_options = transfer_options or TransferOptions()
 
         self._credential_init_error: str | None = None
@@ -317,6 +318,8 @@ class DataLakeDataManager:
 
         artifact_type = artifact_match.group(1)
         artifact_id = artifact_match.group(2)
+        cache_generation = self._cache_generation
+        generation_scoped = artifact_id.startswith("catalog-v1:")
 
         display_id = sanitize_uri_for_display(artifact_id) if "://" in artifact_id else artifact_id
         LOGGER.info("Resolving %s artifact: %s", artifact_type, display_id)
@@ -354,12 +357,27 @@ class DataLakeDataManager:
                     finally:
                         await _run_blocking_io(cache_file.close)
 
-                await await_transfer(
-                    validate_cached_file(),
-                    options,
-                    operation="download",
-                    resource=str(cache_path),
-                )
+                try:
+                    await await_transfer(
+                        validate_cached_file(),
+                        options,
+                        operation="download",
+                        resource=str(cache_path),
+                    )
+                except Exception:
+                    if generation_scoped and cache_generation != self._cache_generation:
+                        return await self.get_cache_path(
+                            qualified_name,
+                            context=context,
+                            transfer_options=transfer_options,
+                        )
+                    raise
+                if generation_scoped and cache_generation != self._cache_generation:
+                    return await self.get_cache_path(
+                        qualified_name,
+                        context=context,
+                        transfer_options=transfer_options,
+                    )
                 LOGGER.debug(f"Asset already cached: {cache_path}")
                 return cache_path
 
@@ -374,7 +392,10 @@ class DataLakeDataManager:
 
         # Fetch and cache the asset
         LOGGER.debug(f"Fetching and caching {artifact_type} asset")
-        cache_path = self._get_cache_file_path(resource_url)
+        cache_path = self._get_cache_file_path(
+            resource_url,
+            cache_salt=str(cache_generation) if generation_scoped else None,
+        )
 
         # Stream asset directly to file to avoid loading into memory
         bytes_written = await self._fetch_asset_to_file(
@@ -383,6 +404,14 @@ class DataLakeDataManager:
             context=context,
             transfer_options=transfer_options,
         )
+
+        if generation_scoped and cache_generation != self._cache_generation:
+            cache_path.unlink(missing_ok=True)
+            return await self.get_cache_path(
+                qualified_name,
+                context=context,
+                transfer_options=transfer_options,
+            )
 
         # Update index (use artifact_id as key)
         self._cache_index[artifact_id] = cache_path
@@ -447,7 +476,7 @@ class DataLakeDataManager:
             operation="download",
         )
 
-    def _get_cache_file_path(self, qualified_name: str) -> Path:
+    def _get_cache_file_path(self, qualified_name: str, *, cache_salt: str | None = None) -> Path:
         """
         Get cache file path for an asset, preserving original extension.
 
@@ -457,7 +486,8 @@ class DataLakeDataManager:
         Returns:
             Path with appropriate extension based on file type
         """
-        name_hash = hashlib.sha256(qualified_name.encode()).hexdigest()
+        cache_key = qualified_name if cache_salt is None else f"{cache_salt}\0{qualified_name}"
+        name_hash = hashlib.sha256(cache_key.encode()).hexdigest()
 
         # Parse URL to extract path component
         parsed = urlparse(qualified_name)
@@ -504,6 +534,7 @@ class DataLakeDataManager:
         Files are removed best-effort so a subsequent lookup must pass through
         resolution and authorization again instead of reusing stale content.
         """
+        self._cache_generation += 1
         keys = [
             artifact_id
             for artifact_id in self._cache_index
