@@ -966,7 +966,7 @@ class CodeExecutionServer(BaseMCPServer):
         # If transport provided a session_id, prefer it deterministically.
         if session_id:
             try:
-                return await self._get_existing_session(session_id)
+                session = self.session_manager.get_session(session_id)
             except ValueError:
                 try:
                     self.session_manager.create_session(
@@ -980,6 +980,11 @@ class CodeExecutionServer(BaseMCPServer):
                 except MaxSessionsReachedError as e:
                     raise HTTPException(status_code=429, detail=self._max_sessions_error_payload(e)) from e
                 return self.session_manager.get_session(session_id)
+            request_token = get_current_request_token()
+            if not await self._verify_session_ownership(session, request_token):
+                raise PermissionError(f"Not authorized to access session {session_id}.")
+            self._refresh_session_token(session)
+            return session
 
         # Prefer ContextVar-based session injection
         try:

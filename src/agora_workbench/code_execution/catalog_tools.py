@@ -243,6 +243,13 @@ def register_catalog_admin_tools(mcp: "FastMCP", ctx: CatalogToolsContext) -> No
     access control. SQLite read-only mode prevents writes; it does not enforce
     row-, artifact-, source-, or caller-level authorization.
     """
+    registration_state = getattr(mcp, "__dict__", {}).get("_agora_catalog_tool_mode")
+    if registration_state is not None:
+        raise RuntimeError(
+            f"Catalog tools are already registered in {registration_state!r} mode. "
+            "register_catalog_admin_tools() requires a separate administrative MCP surface."
+        )
+    setattr(mcp, "_agora_catalog_tool_mode", "admin")
 
     async def query_catalog(sql: str, max_rows: int = 100) -> list[dict]:
         """Run raw read-only SQL against catalog metadata."""

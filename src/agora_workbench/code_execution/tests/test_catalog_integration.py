@@ -19,7 +19,11 @@ from agora_workbench.code_execution.catalog_integration import (
     _error_payload,
     register_catalog_discovery_tools,
 )
-from agora_workbench.code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
+from agora_workbench.code_execution.catalog_tools import (
+    CatalogToolsContext,
+    register_catalog_admin_tools,
+    register_catalog_tools,
+)
 from agora_workbench.code_execution.data_access.fetchers import AssetFetcher
 from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
 from agora_workbench.code_execution.sessions import (
@@ -28,6 +32,7 @@ from agora_workbench.code_execution.sessions import (
     SessionManager,
     set_current_request_token,
     set_current_token_claims,
+    set_current_user_identity,
 )
 from agora_workbench.data_lake import (
     ArtifactNotFoundError,
@@ -537,21 +542,26 @@ async def test_refreshed_session_token_updates_catalog_request_context_and_autho
     assert binding.resolver._context is binding.context
     assert (await binding.catalog.capabilities(binding.context))[0].source_id == "source"
 
+    server._verify_session_ownership = AsyncMock(return_value=True)
+
     def fail_refresh(context):
         del context
-        raise RuntimeError("credential refresh failed")
+        raise ValueError("credential refresh failed")
 
     binding.add_context_refresher(fail_refresh)
     set_current_request_token("failed-token")
     set_current_token_claims({"role": "reader"})
+    set_current_user_identity("user")
     try:
-        with pytest.raises(RuntimeError, match="credential refresh failed"):
-            server._refresh_session_token(session)
+        with pytest.raises(ValueError, match="credential refresh failed"):
+            await server._get_or_create_session("search_data", session_id=session_id)
     finally:
         set_current_request_token(None)
         set_current_token_claims(None)
+        set_current_user_identity(None)
 
     assert session.user_token == "new-token"
+    assert server.session_manager.get_session(session_id) is session
     assert binding.context.attributes["claims"] == {"role": "writer"}
     assert (await binding.catalog.capabilities(binding.context))[0].source_id == "source"
 
@@ -736,6 +746,9 @@ async def test_catalog_tool_registration_modes_cannot_be_combined():
     register_catalog_discovery_tools(fake_server, cast(CatalogIntegration, SimpleNamespace()))
     with pytest.raises(RuntimeError, match="already registered.*policy-aware"):
         register_catalog_discovery_tools(fake_server, cast(CatalogIntegration, SimpleNamespace()))
+    with pytest.raises(RuntimeError, match="policy-aware.*separate administrative"):
+        register_catalog_admin_tools(cast(Any, fake_server.mcp), cast(Any, SimpleNamespace()))
+    assert fake_server.mcp._agora_catalog_tool_mode == "policy-aware"
 
     db = CatalogDB(":memory:")
     db.open()
@@ -748,6 +761,14 @@ async def test_catalog_tool_registration_modes_cannot_be_combined():
         with pytest.raises(RuntimeError, match="legacy-unscoped.*query_catalog"):
             register_catalog_discovery_tools(
                 SimpleNamespace(mcp=legacy_mcp),
+                cast(CatalogIntegration, SimpleNamespace()),
+            )
+
+        admin_mcp = SimpleNamespace(tool=lambda name, description: lambda function: function)
+        register_catalog_admin_tools(cast(Any, admin_mcp), CatalogToolsContext(db, None, CatalogConfig()))
+        with pytest.raises(RuntimeError, match="admin"):
+            register_catalog_discovery_tools(
+                SimpleNamespace(mcp=admin_mcp),
                 cast(CatalogIntegration, SimpleNamespace()),
             )
     finally:
