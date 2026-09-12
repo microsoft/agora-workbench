@@ -6,7 +6,7 @@ import hashlib
 import posixpath
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
@@ -86,6 +86,7 @@ class AzureBlobScope:
     account: str
     container: str
     prefix: str = ""
+    _descendants_only: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         account = self.account.lower()
@@ -94,14 +95,15 @@ class AzureBlobScope:
             raise _invalid_identity("Azure storage account name is malformed.")
         if container not in _SYSTEM_CONTAINERS and (not _CONTAINER_RE.fullmatch(container) or "--" in container):
             raise _invalid_identity("Azure storage container name is malformed.")
-        prefix = validate_azure_object_path(
-            self.prefix.rstrip("/"),
-            allow_empty=True,
-            allow_reserved=True,
-        )
+        original_prefix = self.prefix
+        prefix = validate_azure_object_path(original_prefix, allow_empty=True, allow_reserved=True)
+        descendants_only = bool(prefix) and prefix.endswith("/")
+        if descendants_only:
+            prefix = prefix[:-1]
         object.__setattr__(self, "account", account)
         object.__setattr__(self, "container", container)
         object.__setattr__(self, "prefix", prefix)
+        object.__setattr__(self, "_descendants_only", descendants_only)
 
     @classmethod
     def from_uri(cls, uri: str) -> "AzureBlobScope":
@@ -113,7 +115,11 @@ class AzureBlobScope:
         """Return whether an object lies on this scope's prefix boundary."""
         if (account, container) != (self.account, self.container):
             return False
-        return not self.prefix or object_path == self.prefix or object_path.startswith(f"{self.prefix}/")
+        if not self.prefix:
+            return True
+        if object_path.startswith(f"{self.prefix}/"):
+            return True
+        return not self._descendants_only and object_path == self.prefix
 
 
 def sanitize_uri_for_display(uri: str) -> str:

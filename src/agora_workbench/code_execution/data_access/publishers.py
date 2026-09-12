@@ -253,6 +253,8 @@ async def _copy_local_descriptors(
             remaining = memoryview(chunk)
             while remaining:
                 written = os.write(output_fd, remaining)
+                if written <= 0:
+                    raise OSError("Transfer output made no write progress.")
                 remaining = remaining[written:]
             await asyncio.sleep(0)
         os.fsync(output_fd)
@@ -458,8 +460,8 @@ class BlobPublisher(AssetPublisher):
         parsed = urlsplit(account_url)
         if parsed.scheme.lower() != "https" or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
             raise ValueError("BlobPublisher account_url must be a credential-free Azure HTTPS account URL.")
-        account, validated_container, _ = parse_azure_uri(f"{account_url.rstrip('/')}/{container}")
-        scope = AzureBlobScope(account, validated_container, prefix)
+        account, _, _ = parse_azure_uri(f"{account_url.rstrip('/')}/container")
+        scope = AzureBlobScope(account, container, prefix)
         self._account_url = f"https://{scope.account}.blob.core.windows.net"
         self._container = scope.container
         self._prefix = scope.prefix

@@ -478,8 +478,14 @@ async def test_local_publisher_failure_has_no_visible_or_partial_output(tmp_path
 def test_blob_scope_validates_account_container_prefix_and_reserved_names():
     scope = AzureBlobScope.from_uri("https://account123.blob.core.windows.net/container/data/")
     assert scope.contains("account123", "container", "data/file.csv")
+    assert not scope.contains("account123", "container", "data")
     assert not scope.contains("account123", "container", "database/file.csv")
     assert not scope.contains("otheraccount", "container", "data/file.csv")
+    inclusive_scope = AzureBlobScope("account123", "container", "data")
+    assert inclusive_scope.contains("account123", "container", "data")
+    for malformed_prefix in ("/", "///"):
+        with pytest.raises(InvalidRequestError, match="empty or dot segments"):
+            AzureBlobScope("account123", "container", malformed_prefix)
 
     with pytest.raises(InvalidRequestError, match="account name is malformed"):
         AzureBlobScope.from_uri("az://x/container/data")
@@ -497,6 +503,25 @@ def test_blob_scope_validates_account_container_prefix_and_reserved_names():
     assert validate_managed_revision_path(".agora/revisions/op-1/data.bin") == (".agora/revisions/op-1/data.bin")
     with pytest.raises(InvalidRequestError, match="revisions prefix"):
         validate_managed_revision_path(".agora/operations/op-1")
+
+
+@pytest.mark.parametrize("container", ["container/path", "container?query", "container#fragment"])
+def test_blob_publisher_rejects_raw_malformed_container(container):
+    with pytest.raises(InvalidRequestError, match="container name is malformed"):
+        BlobPublisher("https://account123.blob.core.windows.net", container)
+
+
+async def test_local_publisher_rejects_zero_progress_descriptor_write(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    monkeypatch.setattr("agora_workbench.code_execution.data_access.publishers.os.write", lambda *_args: 0)
+
+    with pytest.raises(OSError, match="no write progress"):
+        await LocalFilePublisher(output_root).publish(source, "result.bin", "session")
+
+    assert not (output_root / "session" / "result.bin").exists()
+    assert _part_files(output_root / "session") == []
 
 
 def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_keys():

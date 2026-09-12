@@ -45,9 +45,9 @@ LOGGER = logging.getLogger(__name__)
 _EMBEDDING_BATCH_SIZE = 64
 
 
-def _stat_regular_file_no_follow(path: Path) -> os.stat_result:
+def _stat_regular_file_no_follow(path: str | Path, *, dir_fd: int | None = None) -> os.stat_result:
     """Atomically open and stat a regular file without following a final symlink."""
-    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
     try:
         result = os.fstat(descriptor)
         if not stat.S_ISREG(result.st_mode):
@@ -1113,35 +1113,23 @@ class CatalogIndexer:
                     )
                 )
             else:
-                for root, dirs, files in os.walk(source_path, onerror=errors.append):
-                    root_path = Path(root)
-                    dirs[:] = [
-                        directory
-                        for directory in dirs
-                        if not is_scan_excluded_path(str((root_path / directory).relative_to(source_path)))
-                    ]
-                    for filename in files:
-                        filepath = root_path / filename
-                        relative_path = str(filepath.relative_to(source_path))
-                        if is_scan_excluded_path(relative_path):
-                            continue
-                        if filepath.is_symlink():
-                            continue
-                        try:
-                            file_stat = _stat_regular_file_no_follow(filepath)
-                        except OSError:
-                            continue
-                        artifacts.append(
-                            self._make_local_artifact(
-                                filepath,
-                                filename,
-                                source_path,
-                                source_id,
-                                source,
-                                now,
-                                file_stat,
-                            )
-                        )
+                root_fd = os.open(
+                    source_path,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                )
+                try:
+                    self._walk_local_directory(
+                        root_fd,
+                        (),
+                        source_path,
+                        source_id,
+                        source,
+                        now,
+                        artifacts,
+                        errors,
+                    )
+                finally:
+                    os.close(root_fd)
         except OSError as exc:
             errors.append(exc)
         if errors:
@@ -1149,6 +1137,66 @@ class CatalogIndexer:
             LOGGER.error("Failed to enumerate local source '%s': %s", source_path, error)
             return [], error
         return artifacts, None
+
+    def _walk_local_directory(
+        self,
+        directory_fd: int,
+        relative_parts: tuple[str, ...],
+        source_path: Path,
+        source_id: str,
+        source: SourceConfig,
+        indexed_at: str,
+        artifacts: list[dict],
+        errors: list[OSError],
+    ) -> None:
+        """Walk a retained directory descriptor without following swapped symlinks."""
+        try:
+            names = os.listdir(directory_fd)
+        except OSError as exc:
+            errors.append(exc)
+            return
+        for name in names:
+            child_parts = (*relative_parts, name)
+            relative_path = "/".join(child_parts)
+            if is_scan_excluded_path(relative_path):
+                continue
+            try:
+                entry_stat = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISDIR(entry_stat.st_mode):
+                    child_fd = os.open(
+                        name,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=directory_fd,
+                    )
+                    try:
+                        self._walk_local_directory(
+                            child_fd,
+                            child_parts,
+                            source_path,
+                            source_id,
+                            source,
+                            indexed_at,
+                            artifacts,
+                            errors,
+                        )
+                    finally:
+                        os.close(child_fd)
+                elif stat.S_ISREG(entry_stat.st_mode):
+                    file_stat = _stat_regular_file_no_follow(name, dir_fd=directory_fd)
+                    filepath = source_path.joinpath(*child_parts)
+                    artifacts.append(
+                        self._make_local_artifact(
+                            filepath,
+                            name,
+                            source_path,
+                            source_id,
+                            source,
+                            indexed_at,
+                            file_stat,
+                        )
+                    )
+            except OSError:
+                continue
 
     def _make_local_artifact(
         self,

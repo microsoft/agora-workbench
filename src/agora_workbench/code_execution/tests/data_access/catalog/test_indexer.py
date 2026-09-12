@@ -1,7 +1,6 @@
 """Tests for the catalog indexer."""
 
 import sqlite3
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -9,6 +8,7 @@ import pytest
 
 from agora_workbench.data_lake.identity import azure_uri_from_blob_name, canonicalize_azure_uri
 
+from ....data_access.catalog import indexer as indexer_module
 from ....data_access.catalog.config import CatalogConfig, FileOverride, SourceConfig, SearchConfig
 from ....data_access.catalog.db import CatalogDB, artifact_id_from_uri
 from ....data_access.catalog.indexer import CatalogIndexer, _build_indexable_text, _EnumerationResult, _parse_blob_path
@@ -186,19 +186,18 @@ class TestCatalogIndexerLocal:
         outside.write_bytes(b"outside metadata must not be indexed")
         victim = data_dir / "weather" / "race.csv"
         victim.write_bytes(b"inside")
-        original_is_symlink = Path.is_symlink
+        original_open = indexer_module.os.open
         swapped = False
 
-        def swap_after_check(path):
+        def swap_before_open(path, flags, *args, **kwargs):
             nonlocal swapped
-            if path == victim and not swapped:
+            if path == victim.name and kwargs.get("dir_fd") is not None and not swapped:
                 swapped = True
                 victim.unlink()
                 victim.symlink_to(outside)
-                return False
-            return original_is_symlink(path)
+            return original_open(path, flags, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "is_symlink", swap_after_check)
+        monkeypatch.setattr(indexer_module.os, "open", swap_before_open)
         indexer = CatalogIndexer(config, db)
         mock_provider = MagicMock()
         mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]] * 2)
@@ -209,6 +208,64 @@ class TestCatalogIndexerLocal:
 
         assert swapped
         assert not any(record.name == "race.csv" for record in db.list_artifacts(limit=100))
+
+    @pytest.mark.asyncio
+    async def test_directory_symlink_swap_cannot_index_outside_files(self, config, db, data_dir, monkeypatch):
+        nested = data_dir / "weather" / "nested"
+        nested.mkdir()
+        (nested / "inside.csv").write_text("inside")
+        outside = data_dir / "outside"
+        outside.mkdir()
+        (outside / "secret.csv").write_text("outside")
+        original_open = indexer_module.os.open
+        swapped = False
+
+        def swap_before_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            if path == nested.name and kwargs.get("dir_fd") is not None and not swapped:
+                swapped = True
+                nested.rename(data_dir / "original-nested")
+                nested.symlink_to(outside, target_is_directory=True)
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(indexer_module.os, "open", swap_before_open)
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]] * 2)
+        mock_provider.dimensions = 4
+        indexer._embedding_provider = mock_provider
+
+        await indexer.index()
+
+        assert swapped
+        names = {record.name for record in db.list_artifacts(limit=100)}
+        assert "inside.csv" not in names
+        assert "secret.csv" not in names
+
+    @pytest.mark.asyncio
+    async def test_root_symlink_swap_cannot_index_outside_files(self, config, db, data_dir, monkeypatch):
+        root = data_dir / "weather"
+        outside = data_dir / "outside"
+        outside.mkdir()
+        (outside / "secret.csv").write_text("outside")
+        original_open = indexer_module.os.open
+        swapped = False
+
+        def swap_before_open(path, flags, *args, **kwargs):
+            nonlocal swapped
+            if path == root and not swapped:
+                swapped = True
+                root.rename(data_dir / "original-weather")
+                root.symlink_to(outside, target_is_directory=True)
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(indexer_module.os, "open", swap_before_open)
+        indexer = CatalogIndexer(config, db)
+        indexer._embedding_provider = MagicMock(dimensions=4)
+
+        assert await indexer.index() == 0
+        assert swapped
+        assert not any(record.name == "secret.csv" for record in db.list_artifacts(limit=100))
 
     @pytest.mark.asyncio
     async def test_idempotent_reindex(self, config, db, data_dir):
@@ -543,11 +600,14 @@ class TestCatalogIndexerLocal:
             source_type="local",
         )
 
-        def failed_walk(_path, onerror):
-            onerror(PermissionError("denied"))
-            return iter(())
+        original_open = indexer_module.os.open
 
-        monkeypatch.setattr("agora_workbench.code_execution.data_access.catalog.indexer.os.walk", failed_walk)
+        def failed_open(path, flags, *args, **kwargs):
+            if path == root:
+                raise PermissionError("denied")
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(indexer_module.os, "open", failed_open)
         indexer = CatalogIndexer(CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]), db)
         assert await indexer.index() == 0
         assert db.get_artifact("existing") is not None
