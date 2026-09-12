@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 def _open_cached_file_no_follow(path: Path) -> BinaryIO:
     """Open one cached regular file without following symlinks where supported."""
     absolute_path = Path(os.path.abspath(os.fspath(path)))
+    expected_identity: tuple[int, int] | None = None
     try:
         if os.name == "posix":
             flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
@@ -73,15 +74,18 @@ def _open_cached_file_no_follow(path: Path) -> BinaryIO:
             if resolved_path != absolute_path:
                 raise UnsafePathError("Cached asset path cannot contain symlinks.", operation="download")
             expected_stat = resolved_path.stat()
+            expected_identity = (expected_stat.st_dev, expected_stat.st_ino)
             cache_file = resolved_path.open("rb", buffering=0)
+        try:
             opened_stat = os.fstat(cache_file.fileno())
-            if (opened_stat.st_dev, opened_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
-                cache_file.close()
+            if expected_identity is not None and (opened_stat.st_dev, opened_stat.st_ino) != expected_identity:
                 raise UnsafePathError("Cached asset identity changed before open.", operation="download")
-        if not stat.S_ISREG(os.fstat(cache_file.fileno()).st_mode):
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise UnsafePathError("Cached asset must be a regular file.", operation="download")
+            return cache_file
+        except BaseException:
             cache_file.close()
-            raise UnsafePathError("Cached asset must be a regular file.", operation="download")
-        return cache_file
+            raise
     except UnsafePathError:
         raise
     except OSError as exc:
