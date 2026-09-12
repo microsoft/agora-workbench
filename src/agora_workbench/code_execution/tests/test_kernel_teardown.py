@@ -338,6 +338,27 @@ class TestCoalescing:
 
         assert manager.storage.retrieve(session_id) is original
 
+    async def test_storage_delete_failure_releases_closing_session_tombstone(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+        original_delete = manager.storage.delete
+        failed = False
+
+        def fail_once(closing_session_id):
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("delete failed")
+            original_delete(closing_session_id)
+
+        monkeypatch.setattr(manager.storage, "delete", fail_once)
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            manager.close_session(session_id)
+        assert session_id not in manager._closing_session_ids
+
+        await asyncio.wait_for(asyncio.to_thread(manager.close_session, session_id), timeout=1)
+        assert manager.storage.retrieve(session_id) is None
+
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
         class PausingStorage(InMemoryStorage):
             def __init__(self):
