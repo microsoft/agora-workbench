@@ -18,6 +18,7 @@ Authentication:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import inspect
 import logging
@@ -195,6 +196,21 @@ def parse_destination_tag(destination: str) -> tuple[str, str] | None:
     return None
 
 
+def _inspect_publish_capabilities(implementation: Any) -> tuple[bool, bool, bool]:
+    """Return keyword capabilities for one publisher implementation."""
+    signature = inspect.signature(implementation)
+    supports_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+    )
+    return supports_kwargs, "options" in signature.parameters, "context" in signature.parameters
+
+
+@functools.lru_cache(maxsize=128)
+def _publish_capabilities(implementation: Any) -> tuple[bool, bool, bool]:
+    """Return cached keyword capabilities for a stable publisher implementation."""
+    return _inspect_publish_capabilities(implementation)
+
+
 async def publish_compat(
     publisher: Any,
     *,
@@ -205,20 +221,22 @@ async def publish_compat(
     context: RequestContext | None = None,
 ) -> str:
     """Call modern or legacy publishers without masking implementation errors."""
-    signature = inspect.signature(publisher.publish)
-    supports_kwargs = any(
-        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
-    )
+    publish = publisher.publish
+    implementation = getattr(publish, "__func__", None)
+    if implementation is not None and implementation is getattr(type(publisher), "publish", None):
+        supports_kwargs, supports_options, supports_context = _publish_capabilities(implementation)
+    else:
+        supports_kwargs, supports_options, supports_context = _inspect_publish_capabilities(publish)
     kwargs: dict[str, object] = {
         "local_path": local_path,
         "name": name,
         "session_id": session_id,
     }
-    if supports_kwargs or "options" in signature.parameters:
+    if supports_kwargs or supports_options:
         kwargs["options"] = options
-    if supports_kwargs or "context" in signature.parameters:
+    if supports_kwargs or supports_context:
         kwargs["context"] = context
-    return await publisher.publish(**kwargs)
+    return await publish(**kwargs)
 
 
 async def _copy_local_descriptors(
@@ -459,7 +477,15 @@ class BlobPublisher(AssetPublisher):
         """
         super().__init__(credential=credential)
         parsed = urlsplit(account_url)
-        if parsed.scheme.lower() != "https" or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+            or "@" in parsed.netloc
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
             raise ValueError("BlobPublisher account_url must be a credential-free Azure HTTPS account URL.")
         account, _, _ = parse_azure_uri(f"{account_url.rstrip('/')}/container")
         scope = AzureBlobScope(account, container, prefix)

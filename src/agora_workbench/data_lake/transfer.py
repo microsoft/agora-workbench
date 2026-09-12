@@ -349,7 +349,6 @@ async def stream_chunks_to_file(
         )
     destination_path = Path(os.path.abspath(os.fspath(destination)))
     temporary_name = f".{destination_path.name}.{secrets.token_hex(8)}.part"
-    temporary_path = destination_path.with_name(temporary_name)
     parent_fd: int | None = None
     display_resource = safe_transfer_resource(resource)
     started = time.monotonic()
@@ -362,20 +361,19 @@ async def stream_chunks_to_file(
 
     async def copy() -> None:
         nonlocal bytes_transferred
-        if parent_fd is not None:
-            secured_parent_fd = parent_fd
+        if parent_fd is None:
+            raise RuntimeError("Secure transfer parent was not initialized.")
+        secured_parent_fd = parent_fd
 
-            def secure_opener(path: str, flags: int) -> int:
-                return os.open(
-                    path,
-                    flags | getattr(os, "O_NOFOLLOW", 0),
-                    0o600,
-                    dir_fd=secured_parent_fd,
-                )
+        def secure_opener(path: str, flags: int) -> int:
+            return os.open(
+                path,
+                flags | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=secured_parent_fd,
+            )
 
-            output_file = open(temporary_name, "xb", buffering=0, opener=secure_opener)
-        else:
-            output_file = temporary_path.open("xb", buffering=0)
+        output_file = open(temporary_name, "xb", buffering=0, opener=secure_opener)
         with output_file:
             async for provider_chunk in chunks:
                 check_transfer_cancelled(options, operation=operation, resource=resource)
@@ -410,39 +408,35 @@ async def stream_chunks_to_file(
             )
 
     def cleanup_temporary() -> None:
+        if parent_fd is None:
+            return
         try:
-            if parent_fd is None:
-                temporary_path.unlink(missing_ok=True)
-            else:
-                os.unlink(temporary_name, dir_fd=parent_fd)
+            os.unlink(temporary_name, dir_fd=parent_fd)
         except FileNotFoundError:
             return
 
     try:
-        if os.name == "posix":
-            parent_fd = os.open(
-                os.path.sep,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-            )
-            try:
-                for part in destination_path.parts[1:-1]:
-                    try:
-                        os.mkdir(part, mode=0o750, dir_fd=parent_fd)
-                    except FileExistsError:
-                        LOGGER.debug("Transfer destination directory already exists: %s", part)
-                    next_fd = os.open(
-                        part,
-                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                        dir_fd=parent_fd,
-                    )
-                    os.close(parent_fd)
-                    parent_fd = next_fd
-            except BaseException:
+        parent_fd = os.open(
+            os.path.sep,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            for part in destination_path.parts[1:-1]:
+                try:
+                    os.mkdir(part, mode=0o750, dir_fd=parent_fd)
+                except FileExistsError:
+                    LOGGER.debug("Transfer destination directory already exists: %s", part)
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_fd,
+                )
                 os.close(parent_fd)
-                parent_fd = None
-                raise
-        else:
-            destination_path.parent.mkdir(parents=True, exist_ok=True)
+                parent_fd = next_fd
+        except BaseException:
+            os.close(parent_fd)
+            parent_fd = None
+            raise
         if options.timeout_seconds is None:
             await copy()
         else:
@@ -457,28 +451,21 @@ async def stream_chunks_to_file(
                 operation=operation,
             )
         if options.create_exclusive:
-            if parent_fd is None:
-                os.link(temporary_path, destination_path)
-                temporary_path.unlink()
-            else:
-                os.link(
-                    temporary_name,
-                    destination_path.name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                    follow_symlinks=False,
-                )
-                os.unlink(temporary_name, dir_fd=parent_fd)
+            os.link(
+                temporary_name,
+                destination_path.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+            os.unlink(temporary_name, dir_fd=parent_fd)
         else:
-            if parent_fd is None:
-                os.replace(temporary_path, destination_path)
-            else:
-                os.replace(
-                    temporary_name,
-                    destination_path.name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                )
+            os.replace(
+                temporary_name,
+                destination_path.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+            )
     except asyncio.CancelledError:
         cleanup_temporary()
         await emit_transfer_diagnostic(

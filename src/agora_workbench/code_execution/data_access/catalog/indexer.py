@@ -1186,7 +1186,7 @@ class CatalogIndexer:
         except OSError as exc:
             errors.append(exc)
             return
-        for name in names:
+        for name in sorted(names):
             child_parts = (*relative_parts, name)
             relative_path = "/".join(child_parts)
             if is_scan_excluded_path(relative_path):

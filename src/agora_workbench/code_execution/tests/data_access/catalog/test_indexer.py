@@ -175,6 +175,22 @@ class TestCatalogIndexerLocal:
         assert artifacts == []
         assert error is None
 
+    def test_local_enumeration_is_deterministic(self, db, tmp_path, monkeypatch):
+        source_path = tmp_path / "source"
+        source_path.mkdir()
+        (source_path / "b.csv").write_text("b")
+        (source_path / "a.csv").write_text("a")
+        source = SourceConfig(source_id="source", path=str(source_path))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        original_listdir = indexer_module.os.listdir
+
+        monkeypatch.setattr(indexer_module.os, "listdir", lambda descriptor: reversed(original_listdir(descriptor)))
+
+        artifacts, error = indexer._enumerate_local(source)
+
+        assert error is None
+        assert [artifact["logical_path"] for artifact in artifacts] == ["a.csv", "b.csv"]
+
     @pytest.mark.asyncio
     async def test_skips_symlinked_files_that_could_escape_source(self, config, db, data_dir):
         outside = data_dir / "outside.csv"

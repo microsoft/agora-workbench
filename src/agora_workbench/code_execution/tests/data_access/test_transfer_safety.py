@@ -710,6 +710,19 @@ def test_blob_publisher_rejects_raw_malformed_container(container):
         BlobPublisher("https://account123.blob.core.windows.net", container)
 
 
+@pytest.mark.parametrize(
+    "account_url",
+    [
+        "https://user@account123.blob.core.windows.net",
+        "https://user:password@account123.blob.core.windows.net",
+        "https://@account123.blob.core.windows.net",
+    ],
+)
+def test_blob_publisher_rejects_account_url_userinfo(account_url):
+    with pytest.raises(ValueError, match="credential-free"):
+        BlobPublisher(account_url, "container")
+
+
 async def test_local_publisher_rejects_zero_progress_descriptor_write(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -1491,3 +1504,67 @@ async def test_publish_compat_supports_legacy_three_argument_publisher(tmp_path)
     )
 
     assert result == f"{source}:value:session"
+
+
+async def test_publish_compat_caches_stable_type_capabilities(tmp_path, monkeypatch):
+    class LegacyPublisher:
+        async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+            return f"{local_path}:{name}:{session_id}"
+
+    publisher = LegacyPublisher()
+    source = tmp_path / "source.bin"
+    original_signature = publishers_module.inspect.signature
+    calls = 0
+
+    def counting_signature(callable_object):
+        nonlocal calls
+        calls += 1
+        return original_signature(callable_object)
+
+    publishers_module._publish_capabilities.cache_clear()
+    monkeypatch.setattr(publishers_module.inspect, "signature", counting_signature)
+
+    for _ in range(2):
+        await publish_compat(
+            publisher,
+            local_path=source,
+            name="value",
+            session_id="session",
+        )
+
+    assert calls == 1
+
+
+async def test_publish_compat_rechecks_dynamic_instance_callable(tmp_path):
+    class DynamicPublisher:
+        modern = False
+
+        @property
+        def publish(self):
+            if self.modern:
+
+                async def modern(local_path, name, session_id, *, options=None, context=None):
+                    return f"modern:{options is not None}:{context is not None}"
+
+                return modern
+
+            async def legacy(local_path, name, session_id):
+                return f"legacy:{local_path}:{name}:{session_id}"
+
+            return legacy
+
+    publisher = DynamicPublisher()
+    source = tmp_path / "source.bin"
+    legacy = await publish_compat(publisher, local_path=source, name="value", session_id="session")
+    publisher.modern = True
+    modern = await publish_compat(
+        publisher,
+        local_path=source,
+        name="value",
+        session_id="session",
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert legacy.startswith("legacy:")
+    assert modern == "modern:True:True"
