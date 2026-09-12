@@ -646,6 +646,38 @@ async def test_refreshed_session_token_updates_catalog_request_context_and_autho
     assert [authorizer.close_calls for authorizer in authorizers] == [1, 1, 1]
 
 
+async def test_refresh_retains_authorizer_until_request_snapshot_releases():
+    authorizers = []
+
+    class Authorizer:
+        def __init__(self):
+            self.close_calls = 0
+            authorizers.append(self)
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: Authorizer(),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old"), execution_references=True)
+    snapshot = binding.snapshot()
+
+    binding.refresh_context(SessionContext("session", "user", "new"))
+    await asyncio.sleep(0)
+    assert authorizers[0].close_calls == 0
+
+    snapshot.close()
+    await integration._cleanup_tracker.drain()
+    assert authorizers[0].close_calls == 1
+
+    await binding.aclose()
+
+
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])
 async def test_owned_catalog_startup_failure_and_cancellation_close(failure):
     provider = _LifecycleProvider(fail=failure)
