@@ -215,10 +215,19 @@ def _decode_reference(value: str) -> ArtifactReference:
     encoded = value[len(_REFERENCE_PREFIX) :]
     try:
         payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode())
+        artifact_id = payload["artifact_id"]
+        source_id = payload["source_id"]
+        revision = payload.get("revision")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError
+        if not isinstance(source_id, str) or not source_id:
+            raise ValueError
+        if revision is not None and (not isinstance(revision, int) or isinstance(revision, bool)):
+            raise ValueError
         return ArtifactReference(
-            artifact_id=payload["artifact_id"],
-            source_id=payload["source_id"],
-            revision=payload.get("revision"),
+            artifact_id=artifact_id,
+            source_id=source_id,
+            revision=revision,
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("Catalog artifact reference is invalid.") from exc
@@ -306,7 +315,15 @@ class CatalogSessionBinding:
             return
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
-        self.cleanup_tracker.schedule(self.aclose())
+
+        async def close_with_retry() -> None:
+            try:
+                await self.aclose()
+            except asyncio.CancelledError as cancelled:
+                await self.aclose()
+                raise cancelled
+
+        self.cleanup_tracker.schedule(close_with_retry())
 
 
 class CatalogIntegration:
@@ -426,7 +443,14 @@ class CatalogIntegration:
     async def shutdown(self) -> None:
         """Close only resources owned by this integration."""
         self._started = False
-        errors = await self._cleanup_tracker.drain()
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        try:
+            errors.extend(await self._cleanup_tracker.drain())
+        except asyncio.CancelledError as exc:
+            cancelled = exc
+        except Exception as exc:
+            errors.append(exc)
         try:
             if self._provider_lease.should_close:
                 await self._close_provider()
@@ -434,6 +458,10 @@ class CatalogIntegration:
             errors.append(exc)
         finally:
             self._cleanup_private_cache_directory()
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional catalog shutdown failures.", errors)))
+            raise cancelled
         if errors:
             raise ExceptionGroup("Catalog integration shutdown failed.", errors)
 
@@ -516,7 +544,9 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
         if exc.operation is not None:
             payload["operation"] = exc.operation
         if exc.resource_id is not None:
-            payload["resource_id"] = exc.resource_id
+            payload["resource_id"] = (
+                sanitize_uri_for_display(exc.resource_id) if "://" in exc.resource_id else exc.resource_id
+            )
         return payload
     if isinstance(exc, ValueError):
         return {"error": str(exc), "error_type": "invalid_request"}

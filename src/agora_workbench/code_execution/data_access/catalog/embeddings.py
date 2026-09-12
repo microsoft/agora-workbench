@@ -42,10 +42,12 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
         deployment: str,
         credential_provider: CredentialProvider,
         dimensions: int | None = None,
+        credential_owned: bool = False,
     ):
         self._endpoint = endpoint
         self._deployment = deployment
         self._credential_provider = credential_provider
+        self._credential_owned = credential_owned
         self._dimensions = dimensions
         self._client = None
 
@@ -104,9 +106,14 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
 
     async def close(self) -> None:
         """Release client resources."""
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        try:
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
+        finally:
+            if self._credential_owned:
+                await self._credential_provider.close()
+                self._credential_owned = False
 
 
 def create_embedding_provider(
@@ -137,6 +144,7 @@ def create_embedding_provider(
         raise ValueError("Embedding dimensions must be greater than zero.")
     if find_spec("openai") is None:
         raise RuntimeError("Azure OpenAI catalog embeddings require the 'agora-workbench[catalog-vector]' extra.")
+    credential_owned = credential_provider is None
     if credential_provider is None:
         try:
             from ...auth import EntraCredentialProvider
@@ -158,4 +166,5 @@ def create_embedding_provider(
         deployment=azure_openai_deployment,
         credential_provider=credential_provider,
         dimensions=dimensions,
+        credential_owned=credential_owned,
     )

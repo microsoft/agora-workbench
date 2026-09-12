@@ -16,6 +16,7 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     _decode_reference,
     _encode_reference,
+    _error_payload,
     register_catalog_discovery_tools,
 )
 from agora_workbench.code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
@@ -29,6 +30,7 @@ from agora_workbench.code_execution.sessions import (
     set_current_token_claims,
 )
 from agora_workbench.data_lake import (
+    ArtifactNotFoundError,
     ArtifactPresentation,
     ArtifactReference,
     CatalogArtifact,
@@ -124,6 +126,33 @@ def test_data_manager_preserves_positional_artifact_resolver():
         assert manager._owns_credential is False
     finally:
         manager.cleanup()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"artifact_id": ["not", "a", "string"], "source_id": "source"},
+        {"artifact_id": "artifact", "source_id": {"not": "a string"}},
+        {"artifact_id": "artifact", "source_id": "source", "revision": 1.5},
+        {"artifact_id": "artifact", "source_id": "source", "revision": True},
+    ],
+)
+def test_catalog_reference_rejects_invalid_field_types(payload):
+    import base64
+
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    with pytest.raises(ValueError, match="invalid"):
+        _decode_reference(f"catalog-v1:{encoded}")
+
+
+def test_catalog_error_payload_sanitizes_uri_resource_id():
+    error = ArtifactNotFoundError(
+        "Artifact not found.",
+        resource_id="https://user:secret@example.test/data?sig=secret#fragment",
+        operation="get",
+    )
+
+    assert _error_payload(error)["resource_id"] == "https://example.test/data"
 
 
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
