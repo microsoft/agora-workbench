@@ -139,11 +139,38 @@ class _AsyncCleanupTracker:
         return errors
 
 
+async def _close_resources(resources: tuple[object, ...]) -> None:
+    errors: list[Exception] = []
+    cancelled: asyncio.CancelledError | None = None
+    for resource in resources:
+        close = (
+            getattr(resource, "aclose", None) or getattr(resource, "close", None) or getattr(resource, "cleanup", None)
+        )
+        if not callable(close):
+            continue
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError as exc:
+            cancelled = cancelled or exc
+        except Exception as exc:
+            errors.append(exc)
+    if cancelled is not None:
+        if errors:
+            cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
+        raise cancelled
+    if errors:
+        raise ExceptionGroup("Resource cleanup failed.", errors)
+
+
 class SessionCredential:
     """Adapt a workbench credential provider to the async Azure credential shape."""
 
-    def __init__(self, provider: Any):
+    def __init__(self, provider: Any, *, provider_factory: Callable[[str], Any] | None = None):
         self._provider = provider
+        self._provider_factory = provider_factory
+        self._retired_providers: list[Any] = []
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
         del kwargs
@@ -151,8 +178,37 @@ class SessionCredential:
             raise ValueError("At least one scope is required.")
         return await self._provider.get_token(scopes[0])
 
+    def refresh_context(self, context: SessionContext) -> None:
+        """Replace a token-bound provider while retaining the old one for cleanup."""
+        if self._provider_factory is None:
+            return
+        provider = self._provider_factory(context.user_token)
+        self._retired_providers.append(self._provider)
+        self._provider = provider
+
     async def close(self) -> None:
-        await self._provider.close()
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        providers = (*self._retired_providers, self._provider)
+        self._retired_providers.clear()
+        for provider in providers:
+            close = getattr(provider, "aclose", None) or getattr(provider, "close", None)
+            if not callable(close):
+                continue
+            try:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+            except Exception as exc:
+                errors.append(exc)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional credential cleanup failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("Session credential cleanup failed.", errors)
 
     async def __aenter__(self) -> "SessionCredential":
         return self
@@ -305,13 +361,55 @@ class CatalogSessionBinding:
     execution_references: bool
     capability_extensions: tuple[object, ...] = ()
     cleanup_tracker: _AsyncCleanupTracker | None = None
+    authorizer_factory: AuthorizerFactory | None = None
+    owned_authorizer: CatalogAuthorizer | None = None
+    context_refreshers: list[Callable[[SessionContext], None]] | None = None
+    provider: CatalogProvider | None = None
+    policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
+    per_artifact_enforcer: CatalogPolicyEnforcer | None = None
     _closed: bool = False
 
     def refresh_context(self, context: SessionContext) -> None:
         """Refresh authorization inputs when a transport session receives a new token."""
         request_context = _request_context(context)
+        if self.authorizer_factory is not None:
+            authorizer = self.authorizer_factory(context)
+            previous_authorizer = self.owned_authorizer
+            assert self.provider is not None
+            catalog = AuthorizedCatalogProvider(
+                self.provider,
+                authorizer,
+                mode=self.policy_mode,
+                per_artifact_enforcer=self.per_artifact_enforcer,
+            )
+            self.catalog = catalog
+            self.resolver._catalog = catalog
+            self.owned_authorizer = authorizer
+            if previous_authorizer is not None and previous_authorizer is not authorizer:
+                self._schedule_resource_cleanup(previous_authorizer)
+        for extension in self.capability_extensions:
+            refresh = getattr(extension, "refresh_context", None)
+            if callable(refresh):
+                refresh(context, request_context)
+        for refresher in self.context_refreshers or ():
+            refresher(context)
         self.context = request_context
         self.resolver._context = request_context
+
+    def add_context_refresher(self, refresher: Callable[[SessionContext], None]) -> None:
+        """Register a session-owned resource that must rebind when the token changes."""
+        if self.context_refreshers is None:
+            self.context_refreshers = []
+        self.context_refreshers.append(refresher)
+
+    def _schedule_resource_cleanup(self, resource: object) -> None:
+        if self.cleanup_tracker is None:
+            raise RuntimeError("Catalog session binding has no cleanup tracker.")
+
+        def cleanup() -> Any:
+            return _close_resources((resource,))
+
+        self.cleanup_tracker.schedule(cleanup(), retry=cleanup)
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
@@ -326,7 +424,8 @@ class CatalogSessionBinding:
             cancelled = exc
         except Exception as exc:
             errors.append(exc)
-        for extension in self.capability_extensions:
+        resources = (*self.capability_extensions, self.owned_authorizer)
+        for extension in (resource for resource in resources if resource is not None):
             close = (
                 getattr(extension, "aclose", None)
                 or getattr(extension, "close", None)
@@ -549,6 +648,11 @@ class CatalogIntegration:
             execution_references,
             extensions,
             self._cleanup_tracker,
+            authorizer_factory=self._authorizer_factory,
+            owned_authorizer=authorizer if self._authorizer_factory is not None else None,
+            provider=self.provider,
+            policy_mode=self._policy_mode,
+            per_artifact_enforcer=self._per_artifact_enforcer,
         )
 
     async def capabilities(self, binding: CatalogSessionBinding) -> tuple[Any, ...]:

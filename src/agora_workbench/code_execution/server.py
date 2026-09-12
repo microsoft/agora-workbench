@@ -332,7 +332,11 @@ class CodeExecutionServer(BaseMCPServer):
                     credential = None
                     credential_factory = self.auth_config.credential_provider_factory
                     if credential_factory is not None:
-                        credential = SessionCredential(credential_factory(context.user_token))
+                        credential = SessionCredential(
+                            credential_factory(context.user_token),
+                            provider_factory=credential_factory,
+                        )
+                        binding.add_context_refresher(credential.refresh_context)
                     manager = DataLakeDataManager(
                         credential=credential,
                         credential_ownership=ResourceOwnership.OWNED,
@@ -888,20 +892,16 @@ class CodeExecutionServer(BaseMCPServer):
         with the claims from the current request context so that they stay
         consistent with the stored bearer token.
 
-        Note: The default `DataLakeDataManager` uses managed identity (not OBO),
-        so it does not depend on the user's bearer token and is not recreated
-        here. A custom `SessionConfig.data_manager_factory` may bind a manager to
-        the token captured at session creation; such a manager is likewise not
-        rebuilt on refresh, so a factory needing a current token should read it
+        The catalog-created manager refreshes its token-bound credential
+        provider in place. A custom `SessionConfig.data_manager_factory` is not
+        rebuilt, so a custom manager needing the current token should read it
         via `get_current_request_token()` at use time rather than caching it.
         """
         fresh_token = get_current_request_token()
         if fresh_token and fresh_token != session.user_token:
-            session.user_token = fresh_token
             # Keep token_claims in sync so cached claims match the new token.
             fresh_claims = get_current_token_claims()
-            if fresh_claims is not None:
-                session.token_claims = fresh_claims
+            refreshed_claims = fresh_claims if fresh_claims is not None else session.token_claims
             catalog_binding = session.extensions.get("catalog")
             refresh_context = getattr(catalog_binding, "refresh_context", None)
             if callable(refresh_context):
@@ -909,12 +909,14 @@ class CodeExecutionServer(BaseMCPServer):
                     SessionContext(
                         session_id=session.session_id,
                         user_identity=session.user_identity,
-                        user_token=session.user_token,
-                        token_claims=session.token_claims,
+                        user_token=fresh_token,
+                        token_claims=refreshed_claims,
                         session_type=session.session_type,
                         metadata=session.metadata,
                     )
                 )
+            session.user_token = fresh_token
+            session.token_claims = refreshed_claims
             LOGGER.debug(f"Refreshed token for session {session.session_id[:8]}")
 
     async def _get_existing_session(self, session_id: str) -> "Session":
