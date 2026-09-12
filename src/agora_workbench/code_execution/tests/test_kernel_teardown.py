@@ -129,6 +129,35 @@ class TestAtomicClaim:
         await first
         assert km_first.shutdown_finished
 
+    async def test_replacement_closed_while_old_kernel_stops_cannot_start_orphan(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD", gate=gate)
+
+        old_shutdown = manager.close_session(session_id)
+        assert old_shutdown is not None
+        await let_teardown_start()
+
+        manager.create_session(
+            data={},
+            user_identity="u",
+            user_token="replacement-token",
+            token_claims={},
+            session_id=session_id,
+        )
+        replacement_start = asyncio.create_task(manager._get_or_create_kernel(session_id))
+        await asyncio.sleep(0)
+        replacement_close = manager.close_session(session_id)
+        assert replacement_close is old_shutdown
+
+        gate.set()
+        await old_shutdown
+        with pytest.raises(ValueError, match="closed before its kernel could start"):
+            await replacement_start
+
+        assert session_id not in manager._kernels
+        assert manager.storage.retrieve(session_id) is None
+
     async def test_stale_teardown_cannot_evict_a_newer_kernel(self, manager):
         """Regression: the late teardown used to delete whatever occupied the
         session id, orphaning a live kernel and deleting its outputs dir."""
@@ -487,6 +516,13 @@ class TestKernelRebuildWaits:
         from .. import sessions as sessions_pkg
 
         gate = asyncio.Event()
+        manager.create_session(
+            data={},
+            user_identity="u",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
         old_km, _ = register_kernel(manager, "s1", name="OLD", gate=gate)
         teardown = manager._schedule_kernel_shutdown("s1")
         assert teardown is not None

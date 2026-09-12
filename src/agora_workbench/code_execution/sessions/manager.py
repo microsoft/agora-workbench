@@ -261,6 +261,8 @@ class SessionManager:
         # garbage-collected mid-flight).
         self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
         self._resource_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._session_generation_seq = 0
+        self._session_generations: dict[str, int] = {}
 
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
@@ -362,6 +364,8 @@ class SessionManager:
 
             # Store
             self.storage.store(session_id, session)
+            self._session_generation_seq += 1
+            self._session_generations[session_id] = self._session_generation_seq
 
             # Create the per-session outputs directory.  Done eagerly so the
             # kernel can write to it on the very first execute.  Failure to
@@ -532,6 +536,7 @@ class SessionManager:
         session = self.storage.retrieve(session_id)
         if session is not None:
             self.storage.delete(session_id)
+            self._session_generations.pop(session_id, None)
         return shutdown_task, session
 
     async def aclose_session(self, session_id: str) -> None:
@@ -633,7 +638,13 @@ class SessionManager:
         # still hold an entry here if no teardown has started. Waiting for one
         # already in flight avoids building a replacement alongside a kernel
         # that is still releasing its resources.
+        with self._session_lifecycle_lock:
+            session_generation = self._session_generations.get(session_id)
         await self.await_kernel_shutdown(session_id)
+
+        with self._session_lifecycle_lock:
+            if session_generation is not None and self._session_generations.get(session_id) != session_generation:
+                raise ValueError(f"Session {session_id} was closed before its kernel could start.")
 
         if session_id in self._kernels:
             LOGGER.debug(f"Reusing kernel for session {session_id}")
@@ -685,10 +696,20 @@ class SessionManager:
         await kernel_client.wait_for_ready()
 
         # Store in registry
-        self._kernels[session_id] = (kernel_manager, kernel_client)
-        self._kernel_last_used[session_id] = time.time()
-        self._kernel_tokens[session_id] = user_token
-        self._assign_kernel_generation(session_id)
+        with self._session_lifecycle_lock:
+            session_is_current = (
+                session_generation is None or self._session_generations.get(session_id) == session_generation
+            )
+            if session_is_current:
+                self._kernels[session_id] = (kernel_manager, kernel_client)
+                self._kernel_last_used[session_id] = time.time()
+                self._kernel_tokens[session_id] = user_token
+                self._assign_kernel_generation(session_id)
+        if not session_is_current:
+            kernel_client.stop_channels()
+            await kernel_manager.shutdown_kernel(now=True)
+            await kernel_manager.cleanup_resources()
+            raise ValueError(f"Session {session_id} was closed while its kernel was starting.")
 
         LOGGER.info(f"Kernel started for session {session_id}")
         return kernel_manager, kernel_client

@@ -35,6 +35,7 @@ from agora_workbench.data_lake import (
     ResourceOwnership,
     SearchRequest,
     SourceCapabilities,
+    sanitize_uri_for_display,
     stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, SourceConfig
@@ -468,9 +469,25 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
     return {"error": "Catalog operation failed.", "error_type": "internal"}
 
 
+def _sanitize_metadata_value(value: Any) -> Any:
+    if isinstance(value, str) and "://" in value:
+        return sanitize_uri_for_display(value)
+    if isinstance(value, dict):
+        return {key: _sanitize_metadata_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_metadata_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_metadata_value(item) for item in value)
+    return value
+
+
 def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[str, Any]:
     payload = {
-        **{key: value for key, value in artifact.metadata.items() if key not in _RESERVED_PAYLOAD_FIELDS},
+        **{
+            key: _sanitize_metadata_value(value)
+            for key, value in artifact.metadata.items()
+            if key not in _RESERVED_PAYLOAD_FIELDS
+        },
         "id": artifact.reference.artifact_id,
         "source_id": artifact.reference.source_id,
         "name": artifact.presentation.name,
