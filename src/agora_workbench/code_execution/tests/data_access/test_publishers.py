@@ -107,7 +107,7 @@ class TestDestinationName:
     """Tests for the ``destination_name`` property on publishers."""
 
     def test_blob_publisher_destination_name(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.destination_name == "blob"
 
     def test_local_publisher_destination_name(self, tmp_path):
@@ -149,23 +149,23 @@ class TestBlobPublisherCanHandle:
     """Tests for BlobPublisher.can_handle()."""
 
     def test_handles_blob_closed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv</blob>") is True
 
     def test_handles_blob_unclosed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv") is True
 
     def test_rejects_local_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<local>output</local>") is False
 
     def test_rejects_plain_string(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("results.csv") is False
 
     def test_rejects_url(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("https://acct.blob.core.windows.net/c/f") is False
 
 
@@ -182,11 +182,11 @@ class TestBlobPublisherInit:
 
     def test_credential_stored(self, create_mock_credential):
         cred = create_mock_credential()
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c", credential=cred)
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container", credential=cred)
         assert pub.credential is cred
 
     def test_client_lazily_created(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub._client is None
 
 
@@ -235,7 +235,7 @@ class TestBlobPublisherPublish:
 
     @pytest.mark.asyncio
     async def test_publish_raises_if_file_missing(self, tmp_path):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(FileNotFoundError):
@@ -246,7 +246,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="parent traversal"):
@@ -257,7 +257,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="absolute path"):
@@ -268,7 +268,7 @@ class TestBlobPublisherPublish:
         mock_service_client = AsyncMock()
         mock_service_client.close = AsyncMock()
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = mock_service_client
 
         await pub.close()
@@ -597,6 +597,55 @@ class TestSendTool:
         set_current_user_identity(None)
         set_current_request_token(None)
         set_current_token_claims(None)
+
+    @pytest.mark.asyncio
+    async def test_send_sanitizes_custom_publisher_locator_in_response_and_activity(self, tmp_path, monkeypatch):
+        from ... import sessions as sessions_pkg
+        from ...sessions import (
+            SessionConfig,
+            SessionManager,
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        session_manager = SessionManager(SessionConfig())
+        publisher = LocalFilePublisher(base_dir=tmp_path / "published")
+        secret_locator = "https://account.blob.core.windows.net/container/result.csv?sig=DO_NOT_DISCLOSE"
+        publisher.publish = AsyncMock(return_value=secret_locator)
+        server = _make_server_with_publishers([publisher])
+        server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
+
+        session_id = session_manager.create_session(
+            data={},
+            user_identity="u@t",
+            user_token="tok",
+            token_claims={"oid": "u", "tid": "t"},
+        )
+        outputs = session_manager._get_outputs_dir(session_id)
+        artifact = outputs / "result.csv"
+        artifact.write_text("value")
+        session_manager._register_artifacts_from_diff(session_id, {}, session_manager._snapshot_outputs_dir(session_id))
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
+        server._restore_auth_context_for_mcp_session = MagicMock()
+        mock_ctx = MagicMock(session_id=session_id)
+
+        try:
+            mcp_tool = await server.mcp.get_tool("test_send")
+            result = json.loads(await mcp_tool.fn(ctx=mock_ctx, data_ref="result.csv", to="local"))
+        finally:
+            set_current_user_identity(None)
+            set_current_request_token(None)
+            set_current_token_claims(None)
+
+        assert result["remote_uri"] == "https://account.blob.core.windows.net/container/result.csv"
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        assert event["remote_uri"] == result["remote_uri"]
+        assert "DO_NOT_DISCLOSE" not in json.dumps(event)
 
     @pytest.mark.asyncio
     async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch):

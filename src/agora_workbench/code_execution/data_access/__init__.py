@@ -20,6 +20,7 @@ from .publishers import (
     LocalFilePublisher,
     ServerPublisher,
     parse_destination_tag,
+    publish_compat,
 )
 from .resolution import (
     AssetResolutionMiddleware,
@@ -38,6 +39,7 @@ __all__ = [
     "LocalFilePublisher",
     "ServerPublisher",
     "parse_destination_tag",
+    "publish_compat",
     "AssetResolutionMiddleware",
     "looks_like_qualified_name",
     "should_resolve_as_asset",

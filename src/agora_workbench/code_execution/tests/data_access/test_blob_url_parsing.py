@@ -78,7 +78,7 @@ class TestBlobURLParsingValidation:
         """Test az:// URL with only an account is rejected."""
         fetcher = BlobFetcher(credential=mock_credential)
 
-        with pytest.raises(ValueError, match="Malformed az URL"):
+        with pytest.raises(ValueError, match="container name is malformed"):
             fetcher._parse_blob_url("az://account")
 
     def test_az_missing_blob_path(self, mock_credential):
@@ -92,7 +92,7 @@ class TestBlobURLParsingValidation:
         """Test az:// URL with an empty account segment is rejected."""
         fetcher = BlobFetcher(credential=mock_credential)
 
-        with pytest.raises(ValueError, match="Malformed az URL"):
+        with pytest.raises(ValueError, match="account name is malformed"):
             fetcher._parse_blob_url("az:///container/file.csv")
 
     def test_parse_abfss_with_nested_path(self, mock_credential):
@@ -122,7 +122,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://containerstorage.dfs.core.windows.net/path/file.csv"
 
-        with pytest.raises(ValueError, match="missing '@' separator"):
+        with pytest.raises(ValueError, match="Malformed abfss"):
             fetcher._parse_blob_url(url)
 
     def test_abfss_empty_container(self, mock_credential):
@@ -130,7 +130,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://@storage.dfs.core.windows.net/path/file.csv"
 
-        with pytest.raises(ValueError, match="invalid netloc"):
+        with pytest.raises(ValueError, match="container name is malformed"):
             fetcher._parse_blob_url(url)
 
     def test_abfss_empty_storage_account(self, mock_credential):
@@ -138,7 +138,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://container@/path/file.csv"
 
-        with pytest.raises(ValueError, match="invalid netloc"):
+        with pytest.raises(ValueError, match="Unsupported Azure storage URI host"):
             fetcher._parse_blob_url(url)
 
     def test_abfss_malformed_domain(self, mock_credential):
@@ -146,7 +146,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://container@storage/path/file.csv"
 
-        with pytest.raises(ValueError, match="invalid storage domain"):
+        with pytest.raises(ValueError, match="Unsupported Azure storage URI host"):
             fetcher._parse_blob_url(url)
 
     def test_abfss_multiple_at_symbols(self, mock_credential):
@@ -154,7 +154,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://container@extra@storage.dfs.core.windows.net/path/file.csv"
 
-        with pytest.raises(ValueError, match="invalid netloc"):
+        with pytest.raises(ValueError, match="Malformed abfss"):
             fetcher._parse_blob_url(url)
 
     def test_https_empty_netloc(self, mock_credential):
@@ -162,7 +162,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "https:///container/path/file.csv"
 
-        with pytest.raises(ValueError, match="invalid netloc"):
+        with pytest.raises(ValueError, match="Unsupported Azure storage URI host"):
             fetcher._parse_blob_url(url)
 
     def test_https_missing_container(self, mock_credential):
@@ -170,7 +170,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "https://storage.blob.core.windows.net/"
 
-        with pytest.raises(ValueError, match="missing container and path"):
+        with pytest.raises(ValueError, match="container name is malformed"):
             fetcher._parse_blob_url(url)
 
     def test_https_no_path(self, mock_credential):
@@ -178,7 +178,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "https://storage.blob.core.windows.net"
 
-        with pytest.raises(ValueError, match="missing container and path"):
+        with pytest.raises(ValueError, match="container name is malformed"):
             fetcher._parse_blob_url(url)
 
     def test_unsupported_protocol(self, mock_credential):
@@ -194,7 +194,7 @@ class TestBlobURLParsingValidation:
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://container@storage"
 
-        with pytest.raises(ValueError, match="invalid storage domain"):
+        with pytest.raises(ValueError, match="Unsupported Azure storage URI host"):
             fetcher._parse_blob_url(url)
 
     def test_can_handle_valid_abfss(self, mock_credential):

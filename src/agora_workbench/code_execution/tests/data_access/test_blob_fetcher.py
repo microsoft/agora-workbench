@@ -181,9 +181,9 @@ class TestBlobFetcherErrorMessages:
             await fetcher.fetch("abfss://containerstorage.dfs.core.windows.net/file.csv")
 
         error_message = str(exc_info.value)
-        assert "missing '@' separator" in error_message
-        assert "Expected format:" in error_message
-        assert "abfss://container@storage" in error_message
+        assert "Malformed abfss" in error_message
+        assert "Expected az://" in error_message
+        assert "abfss://container@account" in error_message
 
     @pytest.mark.asyncio
     async def test_unsupported_protocol_error_clear(self, mock_credential):
@@ -205,7 +205,7 @@ class TestBlobFetcherErrorMessages:
             fetcher._parse_blob_url(malformed_url)
 
         # Error should mention the URL that failed
-        assert "invalid netloc" in str(exc_info.value)
+        assert "container name is malformed" in str(exc_info.value)
 
 
 class TestBlobFetcherEdgeCases:
@@ -251,27 +251,21 @@ class TestBlobFetcherEdgeCases:
 
         assert fetcher.can_handle(url)
 
-    def test_parse_minimal_valid_abfss_url(self, mock_credential):
-        """Test parsing minimal valid abfss URL."""
+    def test_parse_rejects_too_short_abfss_account_and_container(self, mock_credential):
+        """Azure account and container naming rules are enforced."""
         fetcher = BlobFetcher(credential=mock_credential)
         url = "abfss://c@s.dfs.core.windows.net/f"
 
-        storage, container, path = fetcher._parse_blob_url(url)
+        with pytest.raises(ValueError, match="malformed"):
+            fetcher._parse_blob_url(url)
 
-        assert storage == "s"
-        assert container == "c"
-        assert path == "f"
-
-    def test_parse_minimal_valid_https_url(self, mock_credential):
-        """Test parsing minimal valid https URL."""
+    def test_parse_rejects_too_short_https_account_and_container(self, mock_credential):
+        """Azure account and container naming rules are enforced."""
         fetcher = BlobFetcher(credential=mock_credential)
         url = "https://s.blob.core.windows.net/c"
 
-        storage, container, path = fetcher._parse_blob_url(url)
-
-        assert storage == "s"
-        assert container == "c"
-        assert path == ""
+        with pytest.raises(ValueError, match="malformed"):
+            fetcher._parse_blob_url(url)
 
 
 class TestBlobFetcherDataRetrieval:

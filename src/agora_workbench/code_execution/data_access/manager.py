@@ -11,12 +11,27 @@ import inspect
 import logging
 import os
 import re
+import secrets
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
+
+from agora_workbench.data_lake.errors import UnsupportedOperationError, UnsafePathError
+from agora_workbench.data_lake.identity import sanitize_uri_for_display
+from agora_workbench.data_lake.models import RequestContext
+from agora_workbench.data_lake.transfer import (
+    TransferOptions,
+    _run_blocking_io,
+    await_transfer,
+    check_transfer_cancelled,
+    check_transfer_size,
+    hash_file,
+    safe_artifact_reference,
+)
 
 from .. import agent_guidance
 from ..types import AssetId
@@ -28,6 +43,53 @@ LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
+
+
+def _open_cached_file_no_follow(path: Path) -> BinaryIO:
+    """Open one cached regular file without following symlinks where supported."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    expected_identity: tuple[int, int] | None = None
+    try:
+        if os.name == "posix":
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            parent_fd = os.open(os.path.sep, flags)
+            try:
+                for part in absolute_path.parts[1:-1]:
+                    next_fd = os.open(part, flags, dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+
+                def secure_opener(name: str, open_flags: int) -> int:
+                    return os.open(
+                        name,
+                        open_flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                        dir_fd=parent_fd,
+                    )
+
+                cache_file = open(absolute_path.name, "rb", buffering=0, opener=secure_opener)
+            finally:
+                os.close(parent_fd)
+        else:
+            resolved_path = absolute_path.resolve(strict=True)
+            if resolved_path != absolute_path:
+                raise UnsafePathError("Cached asset path cannot contain symlinks.", operation="download")
+            expected_stat = resolved_path.stat()
+            expected_identity = (expected_stat.st_dev, expected_stat.st_ino)
+            cache_file = resolved_path.open("rb", buffering=0)
+        try:
+            opened_stat = os.fstat(cache_file.fileno())
+            if expected_identity is not None and (opened_stat.st_dev, opened_stat.st_ino) != expected_identity:
+                raise UnsafePathError("Cached asset identity changed before open.", operation="download")
+            if not stat.S_ISREG(opened_stat.st_mode):
+                raise UnsafePathError("Cached asset must be a regular file.", operation="download")
+            return cache_file
+        except BaseException:
+            cache_file.close()
+            raise
+    except UnsafePathError:
+        raise
+    except OSError as exc:
+        raise UnsafePathError("Cached asset path could not be opened safely.", operation="download") from exc
 
 
 def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
@@ -99,6 +161,7 @@ class DataLakeDataManager:
         extra_fetchers: list[AssetFetcher] | None = None,
         credential: "AsyncTokenCredential | None" = None,
         artifact_resolver: ArtifactResolver | None = None,
+        transfer_options: TransferOptions | None = None,
     ):
         """
         Initialize the data manager.
@@ -137,6 +200,7 @@ class DataLakeDataManager:
         """
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
+        self._transfer_options = transfer_options or TransferOptions()
 
         self._credential_init_error: str | None = None
         self._credential: "AsyncTokenCredential | None" = None
@@ -209,7 +273,13 @@ class DataLakeDataManager:
         """
         return await self._artifact_resolver.resolve(artifact_id)
 
-    async def get_cache_path(self, qualified_name: "AssetId") -> Path:
+    async def get_cache_path(
+        self,
+        qualified_name: "AssetId",
+        *,
+        context: RequestContext | None = None,
+        transfer_options: TransferOptions | None = None,
+    ) -> Path:
         """
         Get the filesystem path where the asset is cached.
 
@@ -234,19 +304,55 @@ class DataLakeDataManager:
             artifact_match = re.match(r"^<(\w+)>([^<>]+)$", qualified_name.strip())
         if not artifact_match:
             raise ValueError(
-                f"Invalid artifact format - expected <type>id</type>, got: {qualified_name}. "
+                "Invalid artifact format - expected <type>id</type>. "
                 f"{self._asset_tag_guidance()} {agent_guidance.DISCOVER_DATA}"
             )
 
         artifact_type = artifact_match.group(1)
         artifact_id = artifact_match.group(2)
 
-        LOGGER.info(f"Resolving {artifact_type} artifact: {artifact_id}")
+        display_id = sanitize_uri_for_display(artifact_id) if "://" in artifact_id else artifact_id
+        LOGGER.info("Resolving %s artifact: %s", artifact_type, display_id)
 
         # Check if already cached (use artifact_id as cache key)
         if artifact_id in self._cache_index:
             cache_path = self._cache_index[artifact_id]
             if cache_path.exists():
+                options = transfer_options or self._transfer_options
+
+                async def validate_cached_file() -> None:
+                    check_transfer_cancelled(options, operation="download", resource=str(cache_path))
+                    cache_file = await _run_blocking_io(
+                        lambda: _open_cached_file_no_follow(cache_path),
+                        options=options,
+                        operation="download",
+                        resource=str(cache_path),
+                    )
+                    try:
+                        file_stat = await _run_blocking_io(
+                            lambda: os.fstat(cache_file.fileno()),
+                            options=options,
+                            operation="download",
+                            resource=str(cache_path),
+                        )
+                        check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
+                        if options.expected_sha256 is not None:
+                            await hash_file(
+                                cache_file,
+                                options=options,
+                                context=context or RequestContext(),
+                                operation="download",
+                                resource=str(cache_path),
+                            )
+                    finally:
+                        await _run_blocking_io(cache_file.close)
+
+                await await_transfer(
+                    validate_cached_file(),
+                    options,
+                    operation="download",
+                    resource=str(cache_path),
+                )
                 LOGGER.debug(f"Asset already cached: {cache_path}")
                 return cache_path
 
@@ -264,7 +370,12 @@ class DataLakeDataManager:
         cache_path = self._get_cache_file_path(resource_url)
 
         # Stream asset directly to file to avoid loading into memory
-        bytes_written = await self._fetch_asset_to_file(resource_url, cache_path)
+        bytes_written = await self._fetch_asset_to_file(
+            resource_url,
+            cache_path,
+            context=context,
+            transfer_options=transfer_options,
+        )
 
         # Update index (use artifact_id as key)
         self._cache_index[artifact_id] = cache_path
@@ -272,7 +383,14 @@ class DataLakeDataManager:
         LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
         return cache_path
 
-    async def _fetch_asset_to_file(self, qualified_name: str, dest_path: Path) -> int:
+    async def _fetch_asset_to_file(
+        self,
+        qualified_name: str,
+        dest_path: Path,
+        *,
+        context: RequestContext | None = None,
+        transfer_options: TransferOptions | None = None,
+    ) -> int:
         """
         Fetch asset and stream directly to file using appropriate fetcher.
 
@@ -286,13 +404,36 @@ class DataLakeDataManager:
         # Find appropriate fetcher
         for fetcher in self._fetchers:
             if fetcher.can_handle(qualified_name):
-                LOGGER.info(f"Using {fetcher.__class__.__name__} for {qualified_name}")
-                return await fetcher.fetch_to_file(qualified_name, dest_path)
+                LOGGER.info(
+                    "Using %s for %s",
+                    fetcher.__class__.__name__,
+                    sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
+                )
+                detailed_overridden = type(fetcher).fetch_to_file_result is not AssetFetcher.fetch_to_file_result
+                legacy_instance_override = "fetch_to_file" in vars(fetcher)
+                if detailed_overridden and not legacy_instance_override:
+                    result = await fetcher.fetch_to_file_result(
+                        qualified_name,
+                        dest_path,
+                        options=transfer_options or self._transfer_options,
+                        context=context or RequestContext(),
+                    )
+                    return result.bytes_transferred
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary_path = dest_path.with_name(f".{dest_path.name}.{secrets.token_hex(8)}.legacy-part")
+                try:
+                    bytes_written = await fetcher.fetch_to_file(qualified_name, temporary_path)
+                    os.replace(temporary_path, dest_path)
+                    return bytes_written
+                finally:
+                    temporary_path.unlink(missing_ok=True)
 
-        raise ValueError(
-            f"No fetcher available for asset: {qualified_name}. "
-            f"Supported formats: local paths, file:// URIs, Azure Blob/ADLS (abfss://, https://). "
-            f"{agent_guidance.DISCOVER_DATA}"
+        raise UnsupportedOperationError(
+            "No configured fetcher supports this storage locator. "
+            "Supported built-in formats are local paths, file:// URIs, and Azure Blob/ADLS "
+            "(az://, abfss://, Blob/DFS https://).",
+            resource_id=sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
+            operation="download",
         )
 
     def _get_cache_file_path(self, qualified_name: str) -> Path:
@@ -325,7 +466,7 @@ class DataLakeDataManager:
             Dict with asset metadata
         """
         info = {
-            "qualified_name": qualified_name,
+            "qualified_name": safe_artifact_reference(qualified_name),
             "cached": qualified_name in self._cache_index,
         }
 

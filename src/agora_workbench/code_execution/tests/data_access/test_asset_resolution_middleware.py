@@ -10,6 +10,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
 
+from agora_workbench.data_lake import RequestContext
+
 from ...data_access.resolution import (
     AssetResolutionMiddleware,
     _resolved_assets,
@@ -99,7 +101,11 @@ class TestAssetResolutionMiddleware:
         assert result == "result"
 
         # Verify asset was resolved
-        mock_session.data_manager.get_cache_path.assert_called_once_with("<blob>aHR0cHM6Ly9ncmlk</blob>")
+        mock_session.data_manager.get_cache_path.assert_called_once()
+        (asset_id,) = mock_session.data_manager.get_cache_path.call_args.args
+        context = mock_session.data_manager.get_cache_path.call_args.kwargs["context"]
+        assert asset_id == "<blob>aHR0cHM6Ly9ncmlk</blob>"
+        assert context == RequestContext(request_id="test-session-123")
 
         # Verify argument was replaced with cache path
         assert mock_context.message.arguments["grid_file"] == "/cache/grid.nc"
@@ -126,7 +132,7 @@ class TestAssetResolutionMiddleware:
             "<blob>Y29uZmlnLmpzb24=</blob>": Path("/cache/config.json"),
         }
 
-        async def mock_get_cache_path(asset_id):
+        async def mock_get_cache_path(asset_id, **kwargs):
             return cache_paths_by_id.get(asset_id, Path("/cache/unknown.nc"))
 
         mock_session.data_manager.get_cache_path.side_effect = mock_get_cache_path
@@ -170,6 +176,37 @@ class TestAssetResolutionMiddleware:
         # Verify cleanup was called
         mock_server._clear_auth_context.assert_called_once()
 
+    @pytest.mark.parametrize(
+        "secret_uri",
+        [
+            "https://user:password@example.com/data?sig=secret#fragment",
+            "s3://bucket/object?token=secret#fragment",
+        ],
+    )
+    async def test_asset_resolution_failure_redacts_uri_credentials(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+        secret_uri,
+    ):
+        """Agent-facing resolution failures must not expose credentials from causes."""
+        mock_context.message.arguments = {"grid_file": f"<blob>{secret_uri}</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+        original_error = RuntimeError(f"provider failed for {secret_uri}")
+        mock_session.data_manager.get_cache_path.side_effect = original_error
+
+        middleware = AssetResolutionMiddleware(mock_server)
+
+        with _patch_set_current_session():
+            with pytest.raises(RuntimeError) as exc_info:
+                await middleware.on_call_tool(mock_context, AsyncMock())
+
+        assert "password" not in str(exc_info.value)
+        assert "secret" not in str(exc_info.value)
+        assert "?" not in str(exc_info.value)
+        assert exc_info.value.__cause__ is original_error
+
     async def test_different_asset_types(self, mock_server, mock_context, mock_session):
         """Test resolution of different asset types (blob, sql, etc.)."""
         mock_context.message.arguments = {
@@ -186,7 +223,7 @@ class TestAssetResolutionMiddleware:
             "<delta>ZGVsdGFfdGFibGU=</delta>": Path("/cache/delta_table.parquet"),
         }
 
-        async def mock_get_cache_path(asset_id):
+        async def mock_get_cache_path(asset_id, **kwargs):
             return cache_paths[asset_id]
 
         mock_session.data_manager.get_cache_path.side_effect = mock_get_cache_path

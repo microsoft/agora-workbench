@@ -1878,11 +1878,22 @@ class CodeExecutionServer(BaseMCPServer):
                     pub_instance._transfer_id = transfer_id
 
                 target_session = session_id if is_server_destination else session.session_id
-                remote_uri = await pub_instance.publish(
+                from agora_workbench.data_lake import RequestContext
+                from agora_workbench.data_lake.transfer import safe_artifact_reference
+                from .data_access.publishers import publish_compat
+
+                remote_uri = await publish_compat(
+                    pub_instance,
                     local_path=materialized_path,
                     name=logical_name,
                     session_id=target_session,
+                    context=RequestContext(
+                        request_id=transfer_id,
+                        caller_id=session.user_identity,
+                        attributes={"session_id": session.session_id},
+                    ),
                 )
+                display_remote_uri = safe_artifact_reference(remote_uri)
 
                 # --- Activity event ---
                 # Activity event types: server destinations → object_sent,
@@ -1898,7 +1909,7 @@ class CodeExecutionServer(BaseMCPServer):
                         "name": logical_name,
                         "session_id": session.session_id,
                         "success": True,
-                        "remote_uri": remote_uri,
+                        "remote_uri": display_remote_uri,
                     }
                 )
 
@@ -1908,7 +1919,7 @@ class CodeExecutionServer(BaseMCPServer):
                         "data_ref": data_ref,
                         "destination": to,
                         "name": logical_name,
-                        "remote_uri": remote_uri,
+                        "remote_uri": display_remote_uri,
                         "transfer_id": transfer_id,
                     },
                     indent=2,

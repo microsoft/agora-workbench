@@ -16,6 +16,160 @@ Choose the import path that matches your task:
 Importing `agora_workbench.data_lake` does not start a server, create an
 execution session, or load cloud SDK modules.
 
+## Stream artifact bytes safely
+
+`AssetFetcher.fetch()` is explicitly a full-memory convenience. Use
+`fetch_to_file()` for files that may be large. The built-in local and Azure
+Blob fetchers commit through a sibling partial file, replace the destination
+only after successful validation, and remove the partial after size, quota,
+timeout, cancellation, checksum, or provider failure.
+
+```python
+import asyncio
+from pathlib import Path
+
+from agora_workbench.data_lake import RequestContext, TransferOptions
+from agora_workbench.data_lake.execution import LocalFileFetcher
+
+cancellation = asyncio.Event()
+fetcher = LocalFileFetcher(allowed_roots=["/srv/approved-data"])
+result = await fetcher.fetch_to_file_result(
+    "file:///srv/approved-data/weather.parquet",
+    Path("weather.parquet"),
+    options=TransferOptions(
+        max_bytes=512 * 1024 * 1024,
+        quota_bytes=2 * 1024 * 1024 * 1024,
+        timeout_seconds=120,
+        expected_sha256="...",  # optional 64-character hex digest
+        cancellation_event=cancellation,
+    ),
+    context=RequestContext(request_id="request-42", caller_id="analyst"),
+)
+```
+
+The default limit is 1 GiB per transfer, the default end-to-end timeout is
+300 seconds, and the default Workbench copy chunk is 1 MiB. Blob downloads
+default to four concurrent 4 MiB SDK ranges, so Workbench/provider buffering
+is bounded independently of object size (approximately 17 MiB plus SDK and
+transport overhead). Operators may tune `MCP_BLOB_MAX_CONCURRENCY`,
+`MCP_BLOB_CHUNK_SIZE`, and `MCP_BLOB_MAX_SINGLE_GET`; those values define the
+deployment's memory budget.
+
+`TransferResult` contains the byte count, computed SHA-256, elapsed time,
+credential-free resource display value, and the exact `RequestContext`.
+`TransferOptions.diagnostic_hook` receives start/completion/failure events with
+that same context for audit integration. Query strings, fragments, user-info,
+and SAS credentials are removed from diagnostics. Hooks must not add raw
+credentials themselves. Hook exceptions are logged and ignored: they cannot
+turn a committed transfer into a reported failure or replace the primary
+transfer error.
+
+`AssetPublisher.publish()` streams regular files for the built-in local and
+Blob publishers. `publish_with_result()` additionally returns the
+`TransferResult`; this is the stable byte-transfer seam intended for managed
+catalog commits. Set `TransferOptions(create_exclusive=True)` for conditional
+object creation. Blob uses an `If-None-Match: *` create precondition; local
+publishing uses an atomic create-only link. A successful conditional create
+returns `TransferResult.created == True`. Ordinary overwrite mode returns
+`None` because every provider cannot reliably distinguish create from replace.
+For local conditional creates, successfully linking the validated bytes under
+the final name is the commit point; cleanup of the private temporary link is
+best-effort and cannot turn that committed result into a reported failure.
+Blob publication uploads an immutable disk snapshot, and its byte count and
+checksum describe that exact snapshot rather than a second read of a mutable
+source. The snapshot is created in the publisher-controlled `staging_dir`
+(defaulting below `MCP_ASSET_CACHE_DIR`, or a private working-directory staging
+folder), so publishing requires only read access to the source directory.
+Secure Blob snapshot staging currently requires POSIX descriptor-relative
+filesystem primitives; constructing `BlobPublisher` on other platforms raises
+an explicit unsupported-capability error.
+`TransferOptions.object_metadata` is copied into Azure object metadata and
+returned immutably on `TransferResult`; unsupported providers reject it
+explicitly. Credential-bearing metadata keys are rejected, as are URI values
+containing user information, query parameters, or fragments.
+
+The provider namespace is centralized in `agora_workbench.data_lake.identity`:
+`RESERVED_MANIFEST_PATH`, `RESERVED_OPERATIONS_PREFIX`,
+`RESERVED_REVISIONS_PREFIX`, and `RESERVED_RECEIPTS_PREFIX`. Ordinary transfer
+calls reject all `.agora/` paths. Trusted managed-write code may set
+`TransferOptions(allow_reserved=True)` after validating a revision object path
+with `validate_managed_revision_path()`. This is intentionally narrow:
+authoritative manifest logical artifact paths can never use reserved names,
+while physical revision bytes may live only below `.agora/revisions/`.
+
+The stable #338 write seam is:
+
+```python
+uri, transfer = await blob_publisher.publish_with_result(
+    snapshot,
+    ".agora/revisions/operation-42/data.bin",
+    "",
+    options=TransferOptions(
+        create_exclusive=True,
+        allow_reserved=True,
+        object_metadata={"agora-operation-id": "operation-42"},
+        max_bytes=...,
+        quota_bytes=...,
+        timeout_seconds=...,
+        cancellation_event=...,
+        diagnostic_hook=...,
+    ),
+    context=request_context,
+)
+assert transfer.created is True
+```
+
+The returned checksum and byte count cover the exact uploaded bytes; context,
+timeout, cancellation, quota, diagnostics, metadata, and conditional-create
+state cross the same provider call. Publication does **not** register or
+reconcile a catalog manifest.
+Managed commit/recovery is a separate lifecycle and must not assume that the
+catalog layer owns cleanup of a failed conditional create.
+
+The legacy peer `ServerPublisher` serializes an object into an HTTP request and
+is not a bounded file-streaming provider. Calling `publish_with_result()` on it
+raises `UnsupportedOperationError` rather than silently claiming the
+capability. Custom fetchers that implement only `fetch_to_file()` remain usable
+by the legacy manager, but must implement `fetch_to_file_result()` to advertise
+the bounded streaming contract.
+
+### Storage boundaries
+
+- Local reads may be restricted with `allowed_roots`. On POSIX, each path
+  component is opened relative to a retained, identity-verified trusted root
+  descriptor with
+  no-follow semantics, preventing traversal, symlink escape, and the common
+  check-then-swap race. Because equivalent primitives are unavailable through
+  Python on other platforms, configured `allowed_roots` are explicitly
+  unsupported there; unrestricted local reads remain available.
+- `LocalFilePublisher(base_dir=...)` treats `base_dir` as its write root and
+  creates/opens destination components relative to that root on POSIX. Partial
+  files are never exposed as the final name. Other platforms retain legacy
+  publishing with resolved-containment and parent-identity checks, but do not
+  claim the stronger descriptor-relative guarantee.
+- Local catalog scanning requires POSIX descriptor-relative filesystem
+  primitives and is rejected when those guarantees are unavailable.
+- `BlobFetcher(allowed_locations=[...])` accepts `AzureBlobScope` values or
+  supported Azure URI strings. Account, container, and prefix boundaries are
+  checked before creating a client or making a request.
+- `BlobPublisher` validates its HTTPS account URL, Azure container, and
+  optional `prefix` during construction. Blob paths reject dot segments,
+  backslashes, encoded separators, malformed percent escapes, and provider
+  reserved paths.
+- `.agora/manifest.json` and `.agora/operations/` (and the containing
+  `.agora/` namespace), plus `.agora/revisions/` and `.agora/receipts/`, are
+  reserved for provider metadata. Local and Blob scans prune hidden/dot
+  directories and the complete reserved namespace. Ordinary fetch/publish
+  operations reject reserved paths.
+- Supported Azure locator forms are `az://`, Blob/DFS `https://`, and
+  `abfss://`. The default manager rejects arbitrary web URLs. Add a custom
+  fetcher explicitly when an operator intends to enable another scheme.
+
+Catalog `StorageLocator` and `resolve()` values remain the internal,
+credential-capable locations required by fetchers. Do not sanitize or replace
+those values inside a provider. Sanitize only logs, diagnostics, activity
+events, download/presentation metadata, and other agent-facing references.
+
 ## Represent artifacts
 
 The API separates an artifact's identity, storage location, and display

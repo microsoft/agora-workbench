@@ -12,10 +12,37 @@ Authentication:
 
 import logging
 import os
+import stat
+import asyncio
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlsplit
+
+from agora_workbench.data_lake.errors import (
+    InvalidRequestError,
+    PermissionDeniedError,
+    TransferTimeoutError,
+    UnsupportedOperationError,
+)
+from agora_workbench.data_lake.identity import (
+    AzureBlobScope,
+    RESERVED_PROVIDER_PREFIX,
+    parse_azure_uri,
+    sanitize_uri_for_display,
+    validate_azure_object_path,
+)
+from agora_workbench.data_lake.models import RequestContext
+from agora_workbench.data_lake.transfer import (
+    TransferDiagnostic,
+    TransferOptions,
+    TransferResult,
+    _run_blocking_io,
+    await_transfer,
+    emit_transfer_diagnostic,
+    stream_chunks_to_file,
+)
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
@@ -28,14 +55,21 @@ LOGGER = logging.getLogger(__name__)
 # Tunable via environment variables for deployment-specific optimization.
 # Parallel streams for large blob downloads (default: 4).
 _BLOB_MAX_CONCURRENCY = int(os.getenv("MCP_BLOB_MAX_CONCURRENCY", "4"))
-# Chunk size per range request in bytes (default: 64 MB).
-_BLOB_CHUNK_SIZE = int(os.getenv("MCP_BLOB_CHUNK_SIZE", str(64 * 1024 * 1024)))
-# Files smaller than this are fetched in a single GET (default: 64 MB).
-_BLOB_MAX_SINGLE_GET = int(os.getenv("MCP_BLOB_MAX_SINGLE_GET", str(64 * 1024 * 1024)))
+# Chunk size per range request in bytes (default: 4 MiB). The SDK may retain
+# one chunk per concurrent request, so this is also part of the documented
+# streaming memory budget.
+_BLOB_CHUNK_SIZE = int(os.getenv("MCP_BLOB_CHUNK_SIZE", str(4 * 1024 * 1024)))
+# Files smaller than this are fetched in a single GET (default: 4 MiB).
+_BLOB_MAX_SINGLE_GET = int(os.getenv("MCP_BLOB_MAX_SINGLE_GET", str(4 * 1024 * 1024)))
 
 
 class AssetFetcher(ABC):
-    """Base class for asset fetchers."""
+    """Base class for asset fetchers.
+
+    ``fetch`` is a full-memory convenience. Use ``fetch_to_file`` (or
+    ``fetch_to_file_result`` when diagnostics are needed) for bounded-memory
+    transfer.
+    """
 
     def __init__(self, credential: "AsyncTokenCredential | None" = None):
         """
@@ -63,7 +97,14 @@ class AssetFetcher(ABC):
         pass
 
     @abstractmethod
-    async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
+    async def fetch_to_file(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> int:
         """
         Fetch asset data and stream directly to a file.
 
@@ -77,6 +118,20 @@ class AssetFetcher(ABC):
             Number of bytes written
         """
         pass
+
+    async def fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Return detailed transfer diagnostics when the fetcher supports them."""
+        raise UnsupportedOperationError(
+            f"{type(self).__name__} does not implement bounded streaming.",
+            operation="download",
+        )
 
     @abstractmethod
     def can_handle(self, qualified_name: str) -> bool:
@@ -103,10 +158,19 @@ class BlobFetcher(AssetFetcher):
     # Azure Storage scope for token acquisition
     STORAGE_SCOPE = "https://storage.azure.com/.default"
 
-    def __init__(self, credential: "AsyncTokenCredential | None" = None):
+    def __init__(
+        self,
+        credential: "AsyncTokenCredential | None" = None,
+        *,
+        allowed_locations: list[str | AzureBlobScope] | None = None,
+    ):
         super().__init__(credential=credential)
         # Cache of account_url -> BlobServiceClient for connection reuse
         self._clients: dict[str, "AzureBlobServiceClient"] = {}
+        self._allowed_scopes = tuple(
+            value if isinstance(value, AzureBlobScope) else AzureBlobScope.from_uri(value)
+            for value in (allowed_locations or [])
+        )
 
     def _get_client(self, account_url: str) -> "AzureBlobServiceClient":
         """Get or create a long-lived BlobServiceClient for the given account."""
@@ -144,7 +208,7 @@ class BlobFetcher(AssetFetcher):
         if qualified_name.startswith("https://"):
             # Properly parse URL and check hostname to avoid substring injection
             try:
-                parsed = urlparse(qualified_name)
+                parsed = urlsplit(qualified_name)
                 hostname = parsed.netloc.lower()
                 return hostname.endswith(".blob.core.windows.net") or hostname.endswith(".dfs.core.windows.net")
             except Exception:
@@ -172,6 +236,7 @@ class BlobFetcher(AssetFetcher):
         """
         # Parse the URL first to sanitize for logging (removes query params like SAS tokens)
         storage_account, container, blob_path = self._parse_blob_url(qualified_name)
+        self._require_allowed(storage_account, container, blob_path)
         sanitized_url = f"{storage_account}/{container}/{blob_path}"
         LOGGER.info(f"Fetching blob asset: {sanitized_url}")
 
@@ -187,7 +252,14 @@ class BlobFetcher(AssetFetcher):
         LOGGER.info(f"Successfully fetched {len(data)} bytes from {sanitized_url}")
         return data
 
-    async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
+    async def fetch_to_file(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> int:
         """
         Fetch blob data and stream directly to a file.
 
@@ -204,137 +276,139 @@ class BlobFetcher(AssetFetcher):
         Raises:
             azure.core.exceptions.ClientAuthenticationError: If access is denied
         """
-        from pathlib import Path
+        result = await self.fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+        )
+        return result.bytes_transferred
 
-        dest_path = Path(dest_path)
-
-        # Parse the URL first to sanitize for logging
+    async def fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Download one Blob object with bounded memory and atomic local commit."""
+        options = options or TransferOptions()
+        context = context or RequestContext()
         storage_account, container, blob_path = self._parse_blob_url(qualified_name)
-        sanitized_url = f"{storage_account}/{container}/{blob_path}"
-        LOGGER.info(f"Streaming blob asset to file: {sanitized_url}")
+        self._require_allowed(
+            storage_account,
+            container,
+            blob_path,
+        )
+        sanitized_url = sanitize_uri_for_display(qualified_name)
+        LOGGER.info("Streaming blob asset to file: %s", sanitized_url)
+        inner_options = TransferOptions(
+            max_bytes=options.max_bytes,
+            quota_bytes=options.quota_bytes,
+            timeout_seconds=None,
+            chunk_size=options.chunk_size,
+            expected_sha256=options.expected_sha256,
+            cancellation_event=options.cancellation_event,
+        )
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic("download", "started", context, sanitized_url),
+        )
 
-        # Get or create authenticated client (connection reuse)
-        account_url = f"https://{storage_account}.blob.core.windows.net"
-        client = self._get_client(account_url)
-        blob_client = client.get_blob_client(container=container, blob=blob_path)
+        async def download() -> TransferResult:
+            account_url = f"https://{storage_account}.blob.core.windows.net"
+            client = self._get_client(account_url)
+            blob_client = client.get_blob_client(container=container, blob=blob_path)
+            stream = await await_transfer(
+                blob_client.download_blob(max_concurrency=_BLOB_MAX_CONCURRENCY),
+                inner_options,
+                operation="download",
+                resource=sanitized_url,
+            )
+            return await stream_chunks_to_file(
+                stream.chunks(),
+                dest_path,
+                options=inner_options,
+                context=context,
+                operation="download",
+                resource=sanitized_url,
+            )
 
-        # Ensure parent directory exists
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if options.timeout_seconds is None:
+                result = await download()
+            else:
+                async with asyncio.timeout(options.timeout_seconds):
+                    result = await download()
+        except TimeoutError as exc:
+            message = (
+                "Provider transfer timed out."
+                if options.timeout_seconds is None
+                else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+            )
+            error = TransferTimeoutError(
+                message,
+                resource_id=sanitized_url,
+                operation="download",
+            )
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("download", "failed", context, sanitized_url, error_type=type(error).__name__),
+            )
+            raise error from exc
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("download", "failed", context, sanitized_url, error_type=type(exc).__name__),
+            )
+            raise
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic(
+                "download",
+                "completed",
+                context,
+                sanitized_url,
+                result.bytes_transferred,
+                result.checksum_sha256,
+            ),
+        )
+        LOGGER.info("Successfully streamed %d bytes from %s", result.bytes_transferred, sanitized_url)
+        return result
 
-        # Download with parallel range requests and stream to file
-        bytes_written = 0
-        stream = await blob_client.download_blob(max_concurrency=_BLOB_MAX_CONCURRENCY)
-
-        with open(dest_path, "wb") as f:
-            async for chunk in stream.chunks():
-                f.write(chunk)
-                bytes_written += len(chunk)
-
-        LOGGER.info(f"Successfully streamed {bytes_written} bytes to {dest_path}")
-        return bytes_written
+    def _require_allowed(
+        self,
+        account: str,
+        container: str,
+        blob_path: str,
+    ) -> None:
+        validate_azure_object_path(
+            blob_path,
+        )
+        if self._allowed_scopes and not any(
+            scope.contains(account, container, blob_path) for scope in self._allowed_scopes
+        ):
+            raise PermissionDeniedError(
+                "Azure Blob object is outside the fetcher's configured account/container/prefix.",
+                operation="download",
+            )
 
     def _parse_blob_url(self, url: str) -> tuple[str, str, str]:
-        """
-        Parse blob URL to extract storage account, container, and path.
-
-        Args:
-            url: Blob URL in abfss://, az://, or https:// format
-
-        Returns:
-            Tuple of (storage_account, container, blob_path)
-
-        Raises:
-            ValueError: If URL format is malformed or unsupported
-        """
+        """Parse and decode one supported Azure Blob locator."""
+        scheme = urlsplit(url).scheme.lower()
+        if scheme not in {"az", "abfss", "https"}:
+            raise ValueError(f"Unsupported blob URL format: {sanitize_uri_for_display(url)}")
         try:
-            if url.startswith("abfss://"):
-                # Format: abfss://container@storage.dfs.core.windows.net/path
-                parsed = urlparse(url)
-
-                # Validate netloc contains '@'
-                if "@" not in parsed.netloc:
-                    raise ValueError(
-                        f"Malformed abfss URL: missing '@' separator in '{parsed.netloc}'. "
-                        f"Expected format: abfss://container@storage.dfs.core.windows.net/path"
-                    )
-
-                netloc_parts = parsed.netloc.split("@")
-                if len(netloc_parts) != 2 or not netloc_parts[0] or not netloc_parts[1]:
-                    raise ValueError(
-                        f"Malformed abfss URL: invalid netloc '{parsed.netloc}'. "
-                        f"Expected format: abfss://container@storage.dfs.core.windows.net/path"
-                    )
-
-                container = netloc_parts[0]
-
-                # Parse storage account from domain
-                domain_parts = netloc_parts[1].split(".")
-                if len(domain_parts) < 2 or not domain_parts[0]:
-                    raise ValueError(
-                        f"Malformed abfss URL: invalid storage domain '{netloc_parts[1]}'. "
-                        f"Expected format: storage.dfs.core.windows.net"
-                    )
-
-                storage_account = domain_parts[0]
-                blob_path = parsed.path.lstrip("/")
-
-            elif url.startswith("https://"):
-                # Format: https://storage.blob.core.windows.net/container/path
-                parsed = urlparse(url)
-
-                # Validate netloc
-                if not parsed.netloc or "." not in parsed.netloc:
-                    raise ValueError(
-                        f"Malformed https URL: invalid netloc '{parsed.netloc}'. "
-                        f"Expected format: https://storage.blob.core.windows.net/container/path"
-                    )
-
-                storage_account = parsed.netloc.split(".")[0]
-
-                # Parse container and path
-                path_stripped = parsed.path.lstrip("/")
-                if not path_stripped:
-                    raise ValueError(
-                        f"Malformed https URL: missing container and path in '{url}'. "
-                        f"Expected format: https://storage.blob.core.windows.net/container/path"
-                    )
-
-                path_parts = path_stripped.split("/", 1)
-                container = path_parts[0]
-
-                if not container:
-                    raise ValueError(
-                        f"Malformed https URL: empty container name in '{url}'. "
-                        f"Expected format: https://storage.blob.core.windows.net/container/path"
-                    )
-
-                blob_path = path_parts[1] if len(path_parts) > 1 else ""
-
-            elif url.startswith("az://"):
-                # Format: az://account/container/path
-                # (the scheme emitted by the catalog indexer; mirrors
-                # catalog.indexer._parse_blob_path)
-                remainder = url[len("az://") :]
-                parts = remainder.split("/", 2)
-                if len(parts) < 3 or not parts[0] or not parts[1] or not parts[2].lstrip("/"):
-                    raise ValueError(f"Malformed az URL: '{url}'. Expected format: az://account/container/path")
-
-                storage_account = parts[0]
-                container = parts[1]
-                blob_path = parts[2].lstrip("/")
-
-            else:
-                raise ValueError(f"Unsupported blob URL format: {url}")
-
-            return storage_account, container, blob_path
-
-        except (IndexError, AttributeError) as e:
+            account, container, blob_path = parse_azure_uri(url)
+        except InvalidRequestError as exc:
             raise ValueError(
-                f"Failed to parse blob URL '{url}': {str(e)}. "
-                f"Expected format: abfss://container@storage.dfs.core.windows.net/path, "
-                f"az://account/container/path, "
-                f"or https://storage.blob.core.windows.net/container/path"
-            ) from e
+                f"{exc}. Expected az://account/container/path, "
+                "abfss://container@account.dfs.core.windows.net/path, or Azure Blob/DFS HTTPS."
+            ) from exc
+        if scheme == "az" and not blob_path:
+            raise ValueError("Malformed az URL. Expected az://account/container/path.")
+        return account, container, blob_path
 
 
 class LocalFileFetcher(AssetFetcher):
@@ -362,6 +436,42 @@ class LocalFileFetcher(AssetFetcher):
         """
         super().__init__(credential=None)
         self._allowed_roots: list[Path] = [Path(r).resolve() for r in (allowed_roots or [])]
+        self._allowed_root_fds: list[int] = []
+        self._allowed_root_identities: list[tuple[int, int]] = []
+        if os.name == "posix":
+            try:
+                for root in self._allowed_roots:
+                    descriptor = os.open(
+                        root,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    stat_result = os.fstat(descriptor)
+                    self._allowed_root_fds.append(descriptor)
+                    self._allowed_root_identities.append((stat_result.st_dev, stat_result.st_ino))
+            except BaseException:
+                for descriptor in self._allowed_root_fds:
+                    os.close(descriptor)
+                self._allowed_root_fds.clear()
+                self._allowed_root_identities.clear()
+                raise
+
+    async def close(self) -> None:
+        """Close retained trusted allowed-root descriptors."""
+        self._close_root_descriptors()
+
+    def _close_root_descriptors(self) -> None:
+        """Idempotently release retained allowed-root descriptors."""
+        descriptors = tuple(getattr(self, "_allowed_root_fds", ()))
+        self._allowed_root_fds = []
+        self._allowed_root_identities = []
+        for descriptor in descriptors:
+            with suppress(OSError):
+                os.close(descriptor)
+
+    def __del__(self) -> None:
+        """Defensively release retained descriptors when explicit cleanup is missed."""
+        with suppress(Exception):
+            self._close_root_descriptors()
 
     def can_handle(self, qualified_name: str) -> bool:
         """Check if this is a local filesystem path."""
@@ -386,13 +496,21 @@ class LocalFileFetcher(AssetFetcher):
             FileNotFoundError: If the file does not exist.
             PermissionError: If the resolved path is outside *allowed_roots*.
         """
-        path = self._resolve_and_check(qualified_name)
+        path, descriptor = self._open_checked(qualified_name)
         LOGGER.info(f"Reading local file: {path}")
-        data = path.read_bytes()
+        with os.fdopen(descriptor, "rb", closefd=True) as input_file:
+            data = input_file.read()
         LOGGER.info(f"Read {len(data)} bytes from {path}")
         return data
 
-    async def fetch_to_file(self, qualified_name: str, dest_path: Any) -> int:
+    async def fetch_to_file(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> int:
         """
         Copy a local file to *dest_path*.
 
@@ -407,18 +525,55 @@ class LocalFileFetcher(AssetFetcher):
             FileNotFoundError: If the source file does not exist.
             PermissionError: If the resolved path is outside *allowed_roots*.
         """
-        import shutil
-        from pathlib import Path as P
+        result = await self.fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+        )
+        return result.bytes_transferred
 
-        source = self._resolve_and_check(qualified_name)
-        dest = P(dest_path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
+    async def fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Copy a local file through a descriptor that cannot follow symlinks."""
+        options = options or TransferOptions()
+        context = context or RequestContext()
+        source, descriptor = self._open_checked(qualified_name)
+        LOGGER.info("Streaming local file to cache: %s", source)
 
-        LOGGER.info(f"Copying local file {source} -> {dest}")
-        shutil.copy2(source, dest)
-        size = source.stat().st_size
-        LOGGER.info(f"Copied {size} bytes to {dest}")
-        return size
+        async def chunks():
+            input_descriptor = os.dup(descriptor)
+            try:
+                while True:
+                    chunk = await _run_blocking_io(
+                        lambda: os.read(input_descriptor, options.chunk_size),
+                        options=options,
+                        operation="download",
+                        resource=str(source),
+                    )
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                await _run_blocking_io(lambda: os.close(input_descriptor))
+
+        try:
+            return await stream_chunks_to_file(
+                chunks(),
+                dest_path,
+                options=options,
+                context=context,
+                operation="download",
+                resource=str(source),
+            )
+        finally:
+            os.close(descriptor)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -426,14 +581,12 @@ class LocalFileFetcher(AssetFetcher):
 
     def _resolve_and_check(self, qualified_name: str) -> Path:
         """Resolve the path and validate against allowed roots."""
-        raw = qualified_name
-        if raw.startswith("file://"):
-            raw = raw[7:]
-
-        path = Path(raw).resolve()
+        path = self._parse_local_path(qualified_name).resolve()
 
         if not path.exists():
             raise FileNotFoundError(f"Local file not found: {path}")
+        if RESERVED_PROVIDER_PREFIX.rstrip("/") in path.parts:
+            raise PermissionError("Local asset path is reserved for provider metadata.")
 
         if self._allowed_roots:
             if not any(self._is_within(path, root) for root in self._allowed_roots):
@@ -442,6 +595,81 @@ class LocalFileFetcher(AssetFetcher):
                 )
 
         return path
+
+    def _open_checked(self, qualified_name: str) -> tuple[Path, int]:
+        """Open a contained regular file without following path-component symlinks."""
+        if self._allowed_roots and os.name != "posix":
+            raise UnsupportedOperationError(
+                "Secure allowed-root local fetching requires POSIX descriptor-relative path operations.",
+                operation="download",
+            )
+        path = self._resolve_and_check(qualified_name)
+        if not self._allowed_roots:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(path, flags)
+        else:
+            root_index = next(index for index, root in enumerate(self._allowed_roots) if self._is_within(path, root))
+            root = self._allowed_roots[root_index]
+            relative = path.relative_to(root)
+            if not relative.parts:
+                raise PermissionError("Local asset must be a regular file.")
+            current = os.dup(self._allowed_root_fds[root_index])
+            stat_result = os.fstat(current)
+            if (stat_result.st_dev, stat_result.st_ino) != self._allowed_root_identities[root_index]:
+                os.close(current)
+                raise PermissionError("Configured allowed root identity changed.")
+            try:
+                for part in relative.parts[:-1]:
+                    entry_stat = os.stat(part, dir_fd=current, follow_symlinks=False)
+                    if not stat.S_ISDIR(entry_stat.st_mode):
+                        raise PermissionError("Local asset path component must be a directory.")
+                    next_fd = os.open(
+                        part,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                        dir_fd=current,
+                    )
+                    try:
+                        opened_stat = os.fstat(next_fd)
+                        if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                            raise PermissionError("Local asset directory identity changed during traversal.")
+                    except BaseException:
+                        os.close(next_fd)
+                        raise
+                    os.close(current)
+                    current = next_fd
+                entry_stat = os.stat(relative.parts[-1], dir_fd=current, follow_symlinks=False)
+                descriptor = os.open(
+                    relative.parts[-1],
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=current,
+                )
+                try:
+                    opened_stat = os.fstat(descriptor)
+                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise PermissionError("Local asset identity changed during traversal.")
+                except BaseException:
+                    os.close(descriptor)
+                    raise
+            finally:
+                os.close(current)
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            raise PermissionError("Local asset must be a regular file.")
+        return path, descriptor
+
+    @staticmethod
+    def _parse_local_path(qualified_name: str) -> Path:
+        if not qualified_name.startswith("file://"):
+            return Path(qualified_name)
+        parsed = urlsplit(qualified_name)
+        if parsed.query or parsed.fragment:
+            raise ValueError("Local file URI must not contain a query or fragment.")
+        if parsed.netloc not in {"", "localhost"}:
+            raise ValueError("Local file URI authority must be empty or localhost.")
+        decoded = unquote(parsed.path)
+        if "\x00" in decoded:
+            raise ValueError("Local file URI contains a NUL byte.")
+        return Path(decoded)
 
     @staticmethod
     def _is_within(path: Path, root: Path) -> bool:

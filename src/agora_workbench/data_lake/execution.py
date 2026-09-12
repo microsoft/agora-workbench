@@ -9,7 +9,9 @@ from agora_workbench.code_execution.data_access.publishers import (
     GuiPublisher,
     LocalFilePublisher,
     ServerPublisher,
+    publish_compat,
 )
+from .transfer import TransferDiagnostic, TransferOptions, TransferResult
 
 __all__ = [
     "AssetFetcher",
@@ -22,5 +24,9 @@ __all__ = [
     "LocalFilePublisher",
     "MsalCacheCredential",
     "ServerPublisher",
+    "TransferDiagnostic",
+    "TransferOptions",
+    "TransferResult",
     "create_storage_credential",
+    "publish_compat",
 ]
