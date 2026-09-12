@@ -220,6 +220,29 @@ class TestAtomicClaim:
         # And the fully-unknown-session case still does not raise.
         await manager._shutdown_kernel("never-existed")
 
+    async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD", gate=gate)
+
+        shutdown = manager.close_session(session_id)
+        assert shutdown is not None
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id=session_id,
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        marker = outputs / "replacement.txt"
+        marker.write_text("replacement")
+
+        gate.set()
+        await shutdown
+
+        assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
+
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
         gate = asyncio.Event()
@@ -349,7 +372,8 @@ class TestCoalescing:
 
         # _shutdown_kernel already guards the shutdown calls; force a failure
         # outside that guard to exercise the done-callback.
-        async def failing(session_id):
+        async def failing(session_id, **kwargs):
+            del kwargs
             raise RuntimeError("boom")
 
         manager._shutdown_kernel = failing
@@ -498,6 +522,32 @@ class TestAwaitableClose:
 
         assert attempted == ["manager", "extension", "payload"]
         assert not session_file.exists()
+        assert manager.storage.retrieve(session_id) is None
+
+    @pytest.mark.parametrize("async_close", [False, True])
+    async def test_cancelled_resource_cleanup_is_retried_after_session_removal(self, manager, async_close):
+        attempts = 0
+
+        class CancelsOnce:
+            async def aclose(self):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise asyncio.CancelledError
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, CancelsOnce())
+
+        if async_close:
+            with pytest.raises(asyncio.CancelledError):
+                await manager.aclose_session(session_id)
+        else:
+            manager.close_session(session_id)
+            with pytest.raises(asyncio.CancelledError):
+                await manager.await_resource_cleanup()
+
+        assert attempts == 2
         assert manager.storage.retrieve(session_id) is None
 
     async def test_cancelled_resource_drain_remains_tracked_for_next_drain(self, manager):

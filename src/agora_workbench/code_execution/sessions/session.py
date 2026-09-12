@@ -222,6 +222,19 @@ class Session(Generic[T]):
             self._cleanup_session_file()
         except Exception as exc:
             errors.append(exc)
+        retry_tasks = tuple(self._scheduled_cleanup_tasks)
+        if retry_tasks:
+            results = await asyncio.gather(
+                *(asyncio.shield(task) for task in retry_tasks),
+                return_exceptions=True,
+            )
+            for task, result in zip(retry_tasks, results):
+                if task.done():
+                    self._scheduled_cleanup_tasks.discard(task)
+                if isinstance(result, asyncio.CancelledError):
+                    cancellations.append(result)
+                elif isinstance(result, Exception):
+                    errors.append(result)
         if cancellations:
             if errors:
                 cancellations[0].add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
@@ -262,17 +275,25 @@ class Session(Generic[T]):
             else:
 
                 async def await_cleanup() -> None:
-                    await result
+                    try:
+                        await result
+                    except asyncio.CancelledError as cancelled:
+                        try:
+                            await self._retry_resource_cleanup(resource, label)
+                        except BaseException as retry_error:
+                            cancelled.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
+                        raise cancelled
 
                 task = loop.create_task(await_cleanup())
                 self._scheduled_cleanup_tasks.add(task)
         except asyncio.CancelledError as exc:
             cancellations.append(exc)
+            self._schedule_cleanup_retry(resource, label)
         except Exception as exc:
             errors.append(RuntimeError(f"{label} cleanup failed: {exc}"))
 
-    @staticmethod
     async def _cleanup_resource_async(
+        self,
         resource: object,
         label: str,
         errors: list[Exception],
@@ -289,8 +310,34 @@ class Session(Generic[T]):
                 await result
         except asyncio.CancelledError as exc:
             cancellations.append(exc)
+            retry = asyncio.create_task(self._retry_resource_cleanup(resource, label))
+            self._scheduled_cleanup_tasks.add(retry)
         except Exception as exc:
             errors.append(RuntimeError(f"{label} cleanup failed: {exc}"))
+
+    def _schedule_cleanup_retry(self, resource: object, label: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        retry = loop.create_task(self._retry_resource_cleanup(resource, label))
+        self._scheduled_cleanup_tasks.add(retry)
+
+    @staticmethod
+    async def _retry_resource_cleanup(resource: object, label: str) -> None:
+        close = (
+            getattr(resource, "aclose", None) or getattr(resource, "cleanup", None) or getattr(resource, "close", None)
+        )
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"{label} cleanup retry failed: {exc}") from exc
 
     def _cleanup_session_file(self) -> None:
         """Remove the session file and its owned directory, if present."""

@@ -178,13 +178,17 @@ class SessionCredential:
             raise ValueError("At least one scope is required.")
         return await self._provider.get_token(scopes[0])
 
-    def refresh_context(self, context: SessionContext) -> None:
-        """Replace a token-bound provider while retaining the old one for cleanup."""
+    def prepare_context_refresh(self, context: SessionContext) -> Callable[[], None]:
+        """Build a replacement provider and return a non-failing commit callback."""
         if self._provider_factory is None:
-            return
+            return lambda: None
         provider = self._provider_factory(context.user_token)
-        self._retired_providers.append(self._provider)
-        self._provider = provider
+
+        def commit() -> None:
+            self._retired_providers.append(self._provider)
+            self._provider = provider
+
+        return commit
 
     async def close(self) -> None:
         errors: list[Exception] = []
@@ -363,7 +367,7 @@ class CatalogSessionBinding:
     cleanup_tracker: _AsyncCleanupTracker | None = None
     authorizer_factory: AuthorizerFactory | None = None
     owned_authorizer: CatalogAuthorizer | None = None
-    context_refreshers: list[Callable[[SessionContext], None]] | None = None
+    context_refreshers: list[Callable[[SessionContext], Callable[[], None]]] | None = None
     provider: CatalogProvider | None = None
     policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
@@ -372,9 +376,10 @@ class CatalogSessionBinding:
     def refresh_context(self, context: SessionContext) -> None:
         """Refresh authorization inputs when a transport session receives a new token."""
         request_context = _request_context(context)
+        authorizer = self.owned_authorizer
+        catalog = self.catalog
         if self.authorizer_factory is not None:
             authorizer = self.authorizer_factory(context)
-            previous_authorizer = self.owned_authorizer
             assert self.provider is not None
             catalog = AuthorizedCatalogProvider(
                 self.provider,
@@ -382,22 +387,26 @@ class CatalogSessionBinding:
                 mode=self.policy_mode,
                 per_artifact_enforcer=self.per_artifact_enforcer,
             )
-            self.catalog = catalog
-            self.resolver._catalog = catalog
-            self.owned_authorizer = authorizer
-            if previous_authorizer is not None and previous_authorizer is not authorizer:
-                self._schedule_resource_cleanup(previous_authorizer)
-        for extension in self.capability_extensions:
-            refresh = getattr(extension, "refresh_context", None)
-            if callable(refresh):
-                refresh(context, request_context)
-        for refresher in self.context_refreshers or ():
-            refresher(context)
+        try:
+            commits = [refresher(context) for refresher in self.context_refreshers or ()]
+        except BaseException:
+            if authorizer is not None and authorizer is not self.owned_authorizer:
+                self._schedule_resource_cleanup(authorizer)
+            raise
+
+        previous_authorizer = self.owned_authorizer
+        for commit in commits:
+            commit()
+        self.catalog = catalog
+        self.resolver._catalog = catalog
+        self.owned_authorizer = authorizer
         self.context = request_context
         self.resolver._context = request_context
+        if previous_authorizer is not None and previous_authorizer is not authorizer:
+            self._schedule_resource_cleanup(previous_authorizer)
 
-    def add_context_refresher(self, refresher: Callable[[SessionContext], None]) -> None:
-        """Register a session-owned resource that must rebind when the token changes."""
+    def add_context_refresher(self, refresher: Callable[[SessionContext], Callable[[], None]]) -> None:
+        """Register a side-effect-free preparation step for token rebinding."""
         if self.context_refreshers is None:
             self.context_refreshers = []
         self.context_refreshers.append(refresher)
