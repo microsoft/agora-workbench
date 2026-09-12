@@ -28,6 +28,7 @@ from agora_workbench.data_lake.errors import (
 )
 from agora_workbench.data_lake.identity import (
     AzureBlobScope,
+    RESERVED_PROVIDER_PREFIX,
     parse_azure_uri,
     sanitize_uri_for_display,
     validate_azure_object_path,
@@ -161,7 +162,6 @@ class BlobFetcher(AssetFetcher):
         credential: "AsyncTokenCredential | None" = None,
         *,
         allowed_locations: list[str | AzureBlobScope] | None = None,
-        allow_reserved_paths: bool = False,
     ):
         super().__init__(credential=credential)
         # Cache of account_url -> BlobServiceClient for connection reuse
@@ -170,7 +170,6 @@ class BlobFetcher(AssetFetcher):
             value if isinstance(value, AzureBlobScope) else AzureBlobScope.from_uri(value)
             for value in (allowed_locations or [])
         )
-        self._allow_reserved_paths = allow_reserved_paths
 
     def _get_client(self, account_url: str) -> "AzureBlobServiceClient":
         """Get or create a long-lived BlobServiceClient for the given account."""
@@ -342,8 +341,13 @@ class BlobFetcher(AssetFetcher):
                 async with asyncio.timeout(options.timeout_seconds):
                     result = await download()
         except TimeoutError as exc:
+            message = (
+                "Provider transfer timed out."
+                if options.timeout_seconds is None
+                else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+            )
             error = TransferTimeoutError(
-                f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+                message,
                 resource_id=sanitized_url,
                 operation="download",
             )
@@ -380,7 +384,6 @@ class BlobFetcher(AssetFetcher):
     ) -> None:
         validate_azure_object_path(
             blob_path,
-            allow_reserved=self._allow_reserved_paths,
         )
         if self._allowed_scopes and not any(
             scope.contains(account, container, blob_path) for scope in self._allowed_scopes
@@ -574,6 +577,8 @@ class LocalFileFetcher(AssetFetcher):
 
         if not path.exists():
             raise FileNotFoundError(f"Local file not found: {path}")
+        if RESERVED_PROVIDER_PREFIX.rstrip("/") in path.parts:
+            raise PermissionError("Local asset path is reserved for provider metadata.")
 
         if self._allowed_roots:
             if not any(self._is_within(path, root) for root in self._allowed_roots):
@@ -593,6 +598,8 @@ class LocalFileFetcher(AssetFetcher):
             root_index = next(index for index, root in enumerate(self._allowed_roots) if self._is_within(path, root))
             root = self._allowed_roots[root_index]
             relative = path.relative_to(root)
+            if not relative.parts:
+                raise PermissionError("Local asset must be a regular file.")
             current = os.dup(self._allowed_root_fds[root_index])
             stat_result = os.fstat(current)
             if (stat_result.st_dev, stat_result.st_ino) != self._allowed_root_identities[root_index]:

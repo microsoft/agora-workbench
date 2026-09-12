@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import inspect
 import logging
+import math
 import os
 import re
 import secrets
@@ -63,8 +64,14 @@ class TransferOptions:
             value = getattr(self, name)
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ValueError(f"{name} must be a non-negative integer or None.")
-        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
-            raise ValueError("timeout_seconds must be positive or None.")
+        if self.timeout_seconds is not None:
+            if (
+                isinstance(self.timeout_seconds, bool)
+                or not isinstance(self.timeout_seconds, (int, float))
+                or not math.isfinite(self.timeout_seconds)
+                or self.timeout_seconds <= 0
+            ):
+                raise ValueError("timeout_seconds must be a finite positive number or None.")
         if isinstance(self.chunk_size, bool) or not isinstance(self.chunk_size, int) or self.chunk_size < 1:
             raise ValueError("chunk_size must be at least 1.")
         if self.expected_sha256 is not None:
@@ -240,8 +247,13 @@ async def await_transfer(
         async with asyncio.timeout(options.timeout_seconds):
             return await run()
     except TimeoutError as exc:
+        message = (
+            "Provider transfer timed out."
+            if options.timeout_seconds is None
+            else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+        )
         raise TransferTimeoutError(
-            f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+            message,
             resource_id=safe_transfer_resource(resource),
             operation=operation,
         ) from exc
@@ -384,8 +396,13 @@ async def stream_chunks_to_file(
         raise
     except TimeoutError as exc:
         cleanup_temporary()
+        message = (
+            "Provider transfer timed out."
+            if options.timeout_seconds is None
+            else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+        )
         error = TransferTimeoutError(
-            f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+            message,
             resource_id=display_resource,
             operation=operation,
         )
@@ -464,8 +481,13 @@ async def hash_file(
             async with asyncio.timeout(options.timeout_seconds):
                 await run()
     except TimeoutError as exc:
+        message = (
+            "Provider transfer timed out."
+            if options.timeout_seconds is None
+            else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+        )
         raise TransferTimeoutError(
-            f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+            message,
             resource_id=safe_transfer_resource(resource),
             operation=operation,
         ) from exc

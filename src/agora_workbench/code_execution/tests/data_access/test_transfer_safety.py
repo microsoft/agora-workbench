@@ -32,7 +32,7 @@ from agora_workbench.data_lake import (
     canonicalize_azure_uri,
     validate_managed_revision_path,
 )
-from agora_workbench.data_lake.transfer import safe_artifact_reference, stream_chunks_to_file
+from agora_workbench.data_lake.transfer import await_transfer, safe_artifact_reference, stream_chunks_to_file
 
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
@@ -55,6 +55,12 @@ def test_transfer_options_reject_non_integer_chunk_sizes(chunk_size):
 def test_transfer_options_reject_non_integer_size_bounds(field, value):
     with pytest.raises(ValueError, match=field):
         TransferOptions(**{field: value})
+
+
+@pytest.mark.parametrize("timeout", [True, "1", float("nan"), float("inf"), 0, -1])
+def test_transfer_options_reject_invalid_timeouts(timeout):
+    with pytest.raises(ValueError, match="timeout_seconds"):
+        TransferOptions(timeout_seconds=timeout)
 
 
 def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
@@ -156,6 +162,30 @@ async def test_timeout_cleans_partial_and_preserves_existing_destination(tmp_pat
     assert _part_files(tmp_path) == []
 
 
+async def test_provider_timeout_without_configured_deadline_is_not_masked(tmp_path):
+    async def provider_request():
+        raise TimeoutError("provider deadline")
+
+    with pytest.raises(TransferTimeoutError, match="Provider transfer timed out"):
+        await await_transfer(
+            provider_request(),
+            TransferOptions(timeout_seconds=None),
+            operation="download",
+        )
+
+    async def timed_out_chunks():
+        raise TimeoutError("provider deadline")
+        yield b""  # pragma: no cover
+
+    with pytest.raises(TransferTimeoutError, match="Provider transfer timed out"):
+        await stream_chunks_to_file(
+            timed_out_chunks(),
+            tmp_path / "destination.bin",
+            options=TransferOptions(timeout_seconds=None),
+            context=RequestContext(),
+        )
+
+
 async def test_transfer_cancellation_after_final_chunk_prevents_commit(tmp_path):
     destination = tmp_path / "destination.bin"
     destination.write_bytes(b"previous")
@@ -213,6 +243,20 @@ async def test_local_fetcher_rejects_traversal_and_symlink_escape(tmp_path):
 
     assert not (tmp_path / "copy-a").exists()
     assert not (tmp_path / "copy-b").exists()
+
+
+async def test_local_fetcher_rejects_reserved_component_and_allowed_root_directory(tmp_path):
+    reserved = tmp_path / ".agora"
+    reserved.mkdir()
+    (reserved / "manifest.json").write_text("{}")
+    fetcher = LocalFileFetcher([str(tmp_path)])
+
+    with pytest.raises(PermissionError, match="reserved"):
+        await fetcher.fetch_to_file(str(reserved / "manifest.json"), tmp_path / "copy")
+    with pytest.raises(PermissionError, match="regular file"):
+        await fetcher.fetch_to_file(str(tmp_path), tmp_path / "directory-copy")
+
+    await fetcher.close()
 
 
 async def test_local_fetcher_root_swap_after_containment_uses_retained_verified_root(tmp_path, monkeypatch):
@@ -407,6 +451,11 @@ def test_blob_scope_validates_account_container_prefix_and_reserved_names():
         AzureBlobScope.from_uri("az://x/container/data")
     with pytest.raises(InvalidRequestError, match="container name is malformed"):
         AzureBlobScope.from_uri("az://account123/a/data")
+    for malformed in ("container/path", "container?query", "container#fragment"):
+        with pytest.raises(InvalidRequestError, match="container name is malformed"):
+            AzureBlobScope("account123", malformed)
+    with pytest.raises(InvalidRequestError, match="account name is malformed"):
+        AzureBlobScope("account123/path", "container")
     assert RESERVED_MANIFEST_PATH == ".agora/manifest.json"
     assert RESERVED_OPERATIONS_PREFIX == ".agora/operations/"
     assert RESERVED_REVISIONS_PREFIX == ".agora/revisions/"
@@ -958,6 +1007,24 @@ async def test_default_manager_rejects_arbitrary_remote_urls_without_disclosure(
             )
         assert "DO_NOT_DISCLOSE" not in str(exc.value)
         assert exc.value.resource_id == "https://example.com/file.csv"
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_uses_detailed_builtin_fetcher_and_enforces_transfer_options(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    manager = DataLakeDataManager(
+        credential=None,
+        allowed_local_roots=[str(tmp_path)],
+    )
+    try:
+        with pytest.raises(TransferLimitError):
+            await manager._fetch_asset_to_file(
+                str(source),
+                tmp_path / "destination.bin",
+                transfer_options=TransferOptions(max_bytes=1),
+            )
     finally:
         await manager.aclose()
 

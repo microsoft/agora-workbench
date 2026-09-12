@@ -318,10 +318,9 @@ class DataLakeDataManager:
                     fetcher.__class__.__name__,
                     sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
                 )
-                if (
-                    "fetch_to_file" not in vars(fetcher)
-                    and type(fetcher).fetch_to_file_result is not AssetFetcher.fetch_to_file_result
-                ):
+                detailed_overridden = type(fetcher).fetch_to_file_result is not AssetFetcher.fetch_to_file_result
+                legacy_instance_override = "fetch_to_file" in vars(fetcher)
+                if detailed_overridden and not legacy_instance_override:
                     result = await fetcher.fetch_to_file_result(
                         qualified_name,
                         dest_path,

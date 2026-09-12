@@ -88,16 +88,20 @@ class AzureBlobScope:
     prefix: str = ""
 
     def __post_init__(self) -> None:
-        account, container, prefix = parse_azure_uri(
-            azure_uri_from_blob_name(self.account, self.container, self.prefix)
+        account = self.account.lower()
+        container = self.container.lower()
+        if not _ACCOUNT_RE.fullmatch(account):
+            raise _invalid_identity("Azure storage account name is malformed.")
+        if container not in _SYSTEM_CONTAINERS and (not _CONTAINER_RE.fullmatch(container) or "--" in container):
+            raise _invalid_identity("Azure storage container name is malformed.")
+        prefix = validate_azure_object_path(
+            self.prefix.rstrip("/"),
+            allow_empty=True,
+            allow_reserved=True,
         )
         object.__setattr__(self, "account", account)
         object.__setattr__(self, "container", container)
-        object.__setattr__(
-            self,
-            "prefix",
-            validate_azure_object_path(prefix.rstrip("/"), allow_empty=True, allow_reserved=True),
-        )
+        object.__setattr__(self, "prefix", prefix)
 
     @classmethod
     def from_uri(cls, uri: str) -> "AzureBlobScope":

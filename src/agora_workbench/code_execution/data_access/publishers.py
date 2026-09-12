@@ -264,8 +264,13 @@ async def _copy_local_descriptors(
             async with asyncio.timeout(options.timeout_seconds):
                 await copy()
     except TimeoutError as exc:
+        message = (
+            "Provider transfer timed out."
+            if options.timeout_seconds is None
+            else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+        )
         raise TransferTimeoutError(
-            f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+            message,
             resource_id=str(local_path),
             operation="upload",
         ) from exc
@@ -656,8 +661,13 @@ class BlobPublisher(AssetPublisher):
                     async with asyncio.timeout(options.timeout_seconds):
                         uploaded = await perform_upload()
             except TimeoutError as exc:
+                message = (
+                    "Provider transfer timed out."
+                    if options.timeout_seconds is None
+                    else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+                )
                 raise TransferTimeoutError(
-                    f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+                    message,
                     resource_id=display_uri,
                     operation="upload",
                 ) from exc
