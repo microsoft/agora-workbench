@@ -514,7 +514,12 @@ async def test_owned_catalog_startup_failure_and_cancellation_close(failure):
 async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     artifact = CatalogArtifact(
         ArtifactReference("artifact", "source", revision=3),
-        ArtifactPresentation("data.csv", description="Data", media_type="text/csv", size_bytes=4),
+        ArtifactPresentation(
+            "data.csv",
+            description="See https://example.test/data.csv?sig=secret",
+            media_type="text/csv; source=https://example.test/type?sig=secret",
+            size_bytes=4,
+        ),
         StorageLocator("file:///data/data.csv"),
         metadata={
             "domain": "science",
@@ -577,6 +582,8 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert "storage_uri" not in result[0]
     assert result[0]["documentation_url"] == "https://example.test/docs"
     assert result[0]["related"] == {"url": "https://example.test/related"}
+    assert result[0]["description"] == "See https://example.test/data.csv"
+    assert result[0]["content_type"] == "text/csv; source=https://example.test/type"
     assert result[0]["score"] == 0.75
     assert result[0]["load_path"].startswith("<blob>catalog-v1:")
     encoded_reference = result[0]["load_path"].removeprefix("<blob>").removesuffix("</blob>")
@@ -586,6 +593,13 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     details = await captured["get_artifact"]("artifact")
     assert details["current_revision"] == 2
     assert await captured["list_domains"]() == ["science"]
+
+    catalog.capabilities.return_value = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
+    integration.capabilities.return_value = (
+        SourceCapabilities("source", frozenset({CatalogOperation.SEARCH, CatalogOperation.RESOLVE})),
+    )
+    capabilities = await captured["get_catalog_capabilities"]()
+    assert not capabilities["execution_references"]
 
 
 async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguity():
