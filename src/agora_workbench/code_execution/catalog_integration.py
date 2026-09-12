@@ -12,7 +12,7 @@ import re
 import shutil
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Annotated, cast
@@ -383,15 +383,34 @@ class CatalogSessionBinding:
     policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
     _closed: bool = False
+    _active_snapshots: int = 0
+    _snapshots_drained: asyncio.Event = field(default_factory=asyncio.Event)
+    _deferred_resources: list[object] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self._snapshots_drained.set()
 
     def snapshot(self) -> "CatalogSessionView":
         """Capture one immutable authorization view for a complete operation."""
+        self._active_snapshots += 1
+        self._snapshots_drained.clear()
         return CatalogSessionView(
             self.catalog,
             self.context,
             self.execution_references,
             self.capability_extensions,
+            self._release_snapshot,
         )
+
+    def _release_snapshot(self) -> None:
+        self._active_snapshots -= 1
+        if self._active_snapshots != 0:
+            return
+        self._snapshots_drained.set()
+        if not self._closed:
+            for resource in self._deferred_resources:
+                self._schedule_resource_cleanup(resource)
+            self._deferred_resources.clear()
 
     def refresh_context(self, context: SessionContext) -> None:
         """Refresh authorization inputs when a transport session receives a new token."""
@@ -423,7 +442,10 @@ class CatalogSessionBinding:
         self.context = request_context
         self.resolver._context = request_context
         if previous_authorizer is not None and previous_authorizer is not authorizer:
-            self._schedule_resource_cleanup(previous_authorizer)
+            if self._active_snapshots:
+                self._deferred_resources.append(previous_authorizer)
+            else:
+                self._schedule_resource_cleanup(previous_authorizer)
 
     def add_context_refresher(self, refresher: Callable[[SessionContext], Callable[[], None]]) -> None:
         """Register a side-effect-free preparation step for token rebinding."""
@@ -448,12 +470,17 @@ class CatalogSessionBinding:
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
         try:
+            await self._snapshots_drained.wait()
+        except asyncio.CancelledError:
+            self._closed = False
+            raise
+        try:
             await self.resolver.aclose()
         except asyncio.CancelledError as exc:
             cancelled = exc
         except Exception as exc:
             errors.append(exc)
-        resources = (*self.capability_extensions, self.owned_authorizer)
+        resources = (*self._deferred_resources, *self.capability_extensions, self.owned_authorizer)
         for extension in (resource for resource in resources if resource is not None):
             close = (
                 getattr(extension, "aclose", None)
@@ -477,6 +504,7 @@ class CatalogSessionBinding:
         if errors:
             self._closed = False
             raise ExceptionGroup("Catalog session binding cleanup failed.", errors)
+        self._deferred_resources.clear()
 
     def cleanup(self) -> None:
         """Schedule complete async cleanup from synchronous lifecycle paths."""
@@ -495,6 +523,14 @@ class CatalogSessionView:
     context: RequestContext
     execution_references: bool
     capability_extensions: tuple[object, ...]
+    _release: Callable[[], None] | None = None
+
+    def close(self) -> None:
+        """Release resources retained for this request snapshot."""
+        release = self._release
+        object.__setattr__(self, "_release", None)
+        if release is not None:
+            release()
 
 
 class CatalogIntegration:
@@ -876,6 +912,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         cursor: Annotated[str | None, Field(max_length=8_192)] = None,
         mcp_ctx: Context | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
+        current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("search_data", mcp_ctx))
             page = await current.catalog.search(
@@ -906,6 +943,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         except Exception as exc:
             return _error_payload(exc)
         finally:
+            if current is not None:
+                current.close()
             clear_auth_context()
 
     async def get_artifact(
@@ -914,6 +953,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         revision: Annotated[int | None, Field(ge=1)] = None,
         mcp_ctx: Context | None = None,
     ) -> dict[str, Any]:
+        current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("get_artifact", mcp_ctx))
             capabilities = {
@@ -951,9 +991,12 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         except Exception as exc:
             return _error_payload(exc)
         finally:
+            if current is not None:
+                current.close()
             clear_auth_context()
 
     async def list_domains(mcp_ctx: Context | None = None) -> list[str] | dict[str, Any]:
+        current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("list_domains", mcp_ctx))
             domains: set[str] = set()
@@ -978,9 +1021,12 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         except Exception as exc:
             return _error_payload(exc)
         finally:
+            if current is not None:
+                current.close()
             clear_auth_context()
 
     async def get_catalog_capabilities(mcp_ctx: Context | None = None) -> dict[str, Any]:
+        current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("get_catalog_capabilities", mcp_ctx))
             read_capabilities = await current.catalog.capabilities(current.context)
@@ -1002,6 +1048,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         except Exception as exc:
             return _error_payload(exc)
         finally:
+            if current is not None:
+                current.close()
             clear_auth_context()
 
     server.mcp.tool(
