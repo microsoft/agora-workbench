@@ -347,7 +347,7 @@ async def stream_chunks_to_file(
             output_file = open(temporary_name, "xb", buffering=0, opener=secure_opener)
         else:
             output_file = temporary_path.open("xb", buffering=0)
-        try:
+        with output_file:
             async for provider_chunk in chunks:
                 check_transfer_cancelled(options, operation=operation, resource=resource)
                 view = memoryview(provider_chunk)
@@ -369,8 +369,6 @@ async def stream_chunks_to_file(
                         bytes_transferred += written
                         remaining = remaining[written:]
             await _run_blocking_io(lambda: (output_file.flush(), os.fsync(output_file.fileno())))
-        finally:
-            await _run_blocking_io(output_file.close)
 
     def cleanup_temporary() -> None:
         try:

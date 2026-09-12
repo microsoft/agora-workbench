@@ -701,6 +701,12 @@ async def test_stream_writer_fails_and_cleans_up_when_write_makes_no_progress(tm
         def __init__(self, wrapped):
             self._wrapped = wrapped
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._wrapped.close()
+
         def __getattr__(self, name):
             return getattr(self._wrapped, name)
 
