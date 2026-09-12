@@ -159,6 +159,22 @@ class TestCatalogIndexerLocal:
         names = {record.name for record in db.list_artifacts(limit=100)}
         assert names == {"daily_obs.csv", "hourly_wind.parquet"}
 
+    @pytest.mark.parametrize("source_name", [".agora", ".hidden", ".hidden.csv"])
+    def test_skips_configured_hidden_or_reserved_source_root(self, db, tmp_path, source_name):
+        source_path = tmp_path / source_name
+        if source_path.suffix == ".csv":
+            source_path.write_text("secret")
+        else:
+            source_path.mkdir()
+            (source_path / "secret.csv").write_text("secret")
+        source = SourceConfig(source_id="hidden-source", path=str(source_path))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+
+        artifacts, error = indexer._enumerate_local(source)
+
+        assert artifacts == []
+        assert error is None
+
     @pytest.mark.asyncio
     async def test_skips_symlinked_files_that_could_escape_source(self, config, db, data_dir):
         outside = data_dir / "outside.csv"
@@ -638,6 +654,36 @@ class TestCatalogIndexerLocal:
 
         monkeypatch.setattr(indexer_module.os, "open", failed_open)
         indexer = CatalogIndexer(CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]), db)
+        assert await indexer.index() == 0
+        assert db.get_artifact("existing") is not None
+
+    @pytest.mark.asyncio
+    async def test_unreadable_child_preserves_existing_catalog_records(self, db, tmp_path, monkeypatch):
+        root = tmp_path / "source"
+        root.mkdir()
+        unreadable = root / "unreadable.csv"
+        unreadable.write_text("new")
+        db.upsert_artifact(
+            artifact_id="existing",
+            source_id="source",
+            logical_path="unreadable.csv",
+            name="unreadable.csv",
+            storage_uri=str(unreadable),
+            source_type="local",
+        )
+        original_open = indexer_module.os.open
+
+        def failed_child_open(path, flags, *args, **kwargs):
+            if path == unreadable.name and kwargs.get("dir_fd") is not None:
+                raise PermissionError("denied")
+            return original_open(path, flags, *args, **kwargs)
+
+        monkeypatch.setattr(indexer_module.os, "open", failed_child_open)
+        indexer = CatalogIndexer(
+            CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]),
+            db,
+        )
+
         assert await indexer.index() == 0
         assert db.get_artifact("existing") is not None
 

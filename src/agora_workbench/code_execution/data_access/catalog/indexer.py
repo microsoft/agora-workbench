@@ -1122,6 +1122,9 @@ class CatalogIndexer:
         """Walk a local directory and produce artifact records."""
         source_path = Path(source.path).resolve()
         source_id = _source_id(source)
+        if is_scan_excluded_path(source_path.name):
+            LOGGER.info("Skipping hidden or provider-managed local source: %s", source_path)
+            return [], None
         if not source_path.exists():
             LOGGER.warning("Source path does not exist: %s", source_path)
             return [], "FileNotFoundError: source path does not exist"
@@ -1223,8 +1226,8 @@ class CatalogIndexer:
                             file_stat,
                         )
                     )
-            except OSError:
-                continue
+            except OSError as exc:
+                errors.append(exc)
 
     def _make_local_artifact(
         self,

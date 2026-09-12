@@ -52,6 +52,7 @@ from agora_workbench.data_lake.transfer import (
     TransferDiagnostic,
     TransferOptions,
     TransferResult,
+    _run_blocking_io,
     await_transfer,
     check_transfer_cancelled,
     check_transfer_size,
@@ -243,7 +244,12 @@ async def _copy_local_descriptors(
         check_transfer_size(os.fstat(source_fd).st_size, options, operation="upload", resource=str(local_path))
         while True:
             check_transfer_cancelled(options, operation="upload", resource=str(local_path))
-            chunk = os.read(source_fd, options.chunk_size)
+            chunk = await _run_blocking_io(
+                lambda: os.read(source_fd, options.chunk_size),
+                options=options,
+                operation="upload",
+                resource=str(local_path),
+            )
             if not chunk:
                 break
             total += len(chunk)
@@ -251,12 +257,21 @@ async def _copy_local_descriptors(
             digest.update(chunk)
             remaining = memoryview(chunk)
             while remaining:
-                written = os.write(output_fd, remaining)
+                written = await _run_blocking_io(
+                    lambda: os.write(output_fd, remaining),
+                    options=options,
+                    operation="upload",
+                    resource=str(local_path),
+                )
                 if written <= 0:
                     raise OSError("Transfer output made no write progress.")
                 remaining = remaining[written:]
-            await asyncio.sleep(0)
-        os.fsync(output_fd)
+        await _run_blocking_io(
+            lambda: os.fsync(output_fd),
+            options=options,
+            operation="upload",
+            resource=str(local_path),
+        )
 
     try:
         if options.timeout_seconds is None:

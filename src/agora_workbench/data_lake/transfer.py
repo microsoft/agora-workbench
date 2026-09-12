@@ -38,10 +38,35 @@ TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
 
 
-async def _run_blocking_io(function: Callable[[], _T]) -> _T:
+async def _run_blocking_io(
+    function: Callable[[], _T],
+    *,
+    options: TransferOptions | None = None,
+    operation: str = "transfer",
+    resource: str | None = None,
+) -> _T:
     """Run filesystem I/O off-loop and drain its thread before propagating cancellation."""
     task = asyncio.create_task(asyncio.to_thread(function))
+    cancel_task: asyncio.Task[bool] | None = None
     try:
+        if options is None or options.cancellation_event is None:
+            return await asyncio.shield(task)
+        check_transfer_cancelled(options, operation=operation, resource=resource)
+        cancel_task = asyncio.create_task(options.cancellation_event.wait())
+        done, _ = await asyncio.wait((task, cancel_task), return_when=asyncio.FIRST_COMPLETED)
+        if cancel_task in done:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException:
+                    break
+            raise TransferCancelledError(
+                "Transfer was cancelled.",
+                resource_id=safe_transfer_resource(resource),
+                operation=operation,
+            )
         return await asyncio.shield(task)
     except BaseException:
         while not task.done():
@@ -54,6 +79,10 @@ async def _run_blocking_io(function: Callable[[], _T]) -> _T:
         if task.done() and not task.cancelled():
             task.exception()
         raise
+    finally:
+        if cancel_task is not None:
+            cancel_task.cancel()
+            await asyncio.gather(cancel_task, return_exceptions=True)
 
 
 @dataclass(frozen=True)
@@ -361,14 +390,24 @@ async def stream_chunks_to_file(
                     )
                     remaining = chunk
                     while remaining:
-                        written = await _run_blocking_io(lambda: output_file.write(remaining))
+                        written = await _run_blocking_io(
+                            lambda: output_file.write(remaining),
+                            options=options,
+                            operation=operation,
+                            resource=resource,
+                        )
                         if written is None or written <= 0:
                             raise OSError("Transfer output made no write progress.")
                         written_chunk = remaining[:written]
                         digest.update(written_chunk)
                         bytes_transferred += written
                         remaining = remaining[written:]
-            await _run_blocking_io(lambda: (output_file.flush(), os.fsync(output_file.fileno())))
+            await _run_blocking_io(
+                lambda: (output_file.flush(), os.fsync(output_file.fileno())),
+                options=options,
+                operation=operation,
+                resource=resource,
+            )
 
     def cleanup_temporary() -> None:
         try:
@@ -519,7 +558,12 @@ async def hash_file(
         nonlocal total
         while True:
             check_transfer_cancelled(options, operation=operation, resource=resource)
-            chunk = await _run_blocking_io(lambda: source.read(options.chunk_size))
+            chunk = await _run_blocking_io(
+                lambda: source.read(options.chunk_size),
+                options=options,
+                operation=operation,
+                resource=resource,
+            )
             if not chunk:
                 break
             total += len(chunk)

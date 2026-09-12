@@ -40,6 +40,7 @@ from agora_workbench.data_lake.transfer import await_transfer, hash_file, safe_a
 
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
+from ...data_access import fetchers as fetchers_module
 from ...data_access import publishers as publishers_module
 from agora_workbench.data_lake import transfer as transfer_module
 from ...data_access.publishers import BlobPublisher, LocalFilePublisher, ServerPublisher, publish_compat
@@ -240,6 +241,90 @@ async def test_timeout_interrupts_blocking_hash_read():
         )
 
 
+async def test_local_fetch_timeout_drains_slow_read_and_preserves_destination(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    destination = tmp_path / "destination.bin"
+    destination.write_bytes(b"previous")
+    original_read = fetchers_module.os.read
+
+    def slow_read(descriptor, size):
+        time.sleep(0.05)
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(fetchers_module.os, "read", slow_read)
+    fetcher = LocalFileFetcher([str(tmp_path)])
+    try:
+        with pytest.raises(TransferTimeoutError):
+            await fetcher.fetch_to_file_result(
+                str(source),
+                destination,
+                options=TransferOptions(timeout_seconds=0.01),
+            )
+    finally:
+        await fetcher.close()
+
+    assert destination.read_bytes() == b"previous"
+    assert _part_files(tmp_path) == []
+
+
+async def test_local_fetch_cooperative_cancellation_drains_slow_read(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    destination = tmp_path / "destination.bin"
+    cancellation = asyncio.Event()
+    read_started = threading.Event()
+    original_read = fetchers_module.os.read
+
+    def slow_read(descriptor, size):
+        read_started.set()
+        time.sleep(0.05)
+        return original_read(descriptor, size)
+
+    monkeypatch.setattr(fetchers_module.os, "read", slow_read)
+    fetcher = LocalFileFetcher([str(tmp_path)])
+    transfer = asyncio.create_task(
+        fetcher.fetch_to_file_result(
+            str(source),
+            destination,
+            options=TransferOptions(timeout_seconds=None, cancellation_event=cancellation),
+        )
+    )
+    assert await asyncio.to_thread(read_started.wait, 1)
+    cancellation.set()
+
+    try:
+        with pytest.raises(TransferCancelledError):
+            _ = await transfer
+    finally:
+        await fetcher.close()
+
+    assert not destination.exists()
+    assert _part_files(tmp_path) == []
+
+
+async def test_local_publisher_timeout_drains_slow_fsync_and_cleans_partial(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+
+    def slow_fsync(_descriptor):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(publishers_module.os, "fsync", slow_fsync)
+
+    with pytest.raises(TransferTimeoutError):
+        await LocalFilePublisher(output_root).publish(
+            source,
+            "result.bin",
+            "session",
+            options=TransferOptions(timeout_seconds=0.01),
+        )
+
+    assert not (output_root / "session" / "result.bin").exists()
+    assert _part_files(output_root / "session") == []
+
+
 async def test_non_posix_secure_local_transfer_fallbacks_are_explicitly_unsupported(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -263,6 +348,18 @@ async def test_non_posix_secure_local_transfer_fallbacks_are_explicitly_unsuppor
             TransferOptions(),
             RequestContext(),
         )
+
+
+async def test_non_posix_allowed_root_fetch_is_explicitly_unsupported(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    fetcher = LocalFileFetcher([str(tmp_path)])
+    monkeypatch.setattr(fetchers_module.os, "name", "nt")
+    try:
+        with pytest.raises(UnsupportedOperationError, match="POSIX"):
+            fetcher._open_checked(str(source))
+    finally:
+        await fetcher.close()
 
 
 async def test_provider_timeout_without_configured_deadline_is_not_masked(tmp_path):

@@ -38,6 +38,7 @@ from agora_workbench.data_lake.transfer import (
     TransferDiagnostic,
     TransferOptions,
     TransferResult,
+    _run_blocking_io,
     await_transfer,
     emit_transfer_diagnostic,
     stream_chunks_to_file,
@@ -547,13 +548,20 @@ class LocalFileFetcher(AssetFetcher):
         LOGGER.info("Streaming local file to cache: %s", source)
 
         async def chunks():
-            with os.fdopen(os.dup(descriptor), "rb", closefd=True) as input_file:
+            input_descriptor = os.dup(descriptor)
+            try:
                 while True:
-                    chunk = input_file.read(options.chunk_size)
+                    chunk = await _run_blocking_io(
+                        lambda: os.read(input_descriptor, options.chunk_size),
+                        options=options,
+                        operation="download",
+                        resource=str(source),
+                    )
                     if not chunk:
                         break
                     yield chunk
-                    await asyncio.sleep(0)
+            finally:
+                await _run_blocking_io(lambda: os.close(input_descriptor))
 
         try:
             return await stream_chunks_to_file(
@@ -590,8 +598,13 @@ class LocalFileFetcher(AssetFetcher):
 
     def _open_checked(self, qualified_name: str) -> tuple[Path, int]:
         """Open a contained regular file without following path-component symlinks."""
+        if self._allowed_roots and os.name != "posix":
+            raise UnsupportedOperationError(
+                "Secure allowed-root local fetching requires POSIX descriptor-relative path operations.",
+                operation="download",
+            )
         path = self._resolve_and_check(qualified_name)
-        if not self._allowed_roots or os.name != "posix":
+        if not self._allowed_roots:
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
             descriptor = os.open(path, flags)
         else:
