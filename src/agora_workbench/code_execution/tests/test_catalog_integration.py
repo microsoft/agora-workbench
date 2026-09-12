@@ -646,6 +646,40 @@ async def test_refreshed_session_token_updates_catalog_request_context_and_autho
     assert [authorizer.close_calls for authorizer in authorizers] == [1, 1, 1]
 
 
+async def test_validated_refresh_claims_replace_stale_catalog_claims(tmp_path):
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: _PerUserAuthorizer("source"),
+    )
+    server = CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        catalog=integration,
+    )
+    session_id = server.session_manager.create_session(
+        {},
+        user_identity="user@tenant",
+        user_token="old-token",
+        token_claims={"role": "reader"},
+    )
+    server.validate_token = AsyncMock(return_value={"oid": "user", "tid": "tenant", "role": "writer"})
+
+    set_current_user_identity("user@tenant")
+    set_current_request_token("new-token")
+    set_current_token_claims(None)
+    try:
+        session = await server._get_or_create_session("search_data", session_id=session_id)
+    finally:
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+
+    assert session.token_claims["role"] == "writer"
+    assert session.extensions["catalog"].context.attributes["claims"]["role"] == "writer"
+    await server.session_manager.aclose_all_sessions()
+    await integration.shutdown()
+
+
 async def test_refresh_retains_authorizer_until_request_snapshot_releases():
     authorizers = []
 

@@ -826,6 +826,7 @@ class CodeExecutionServer(BaseMCPServer):
         try:
             # Get cached token claims from context (already validated by AuthMiddleware)
             token_data = get_current_token_claims()
+            claims_validated_here = not token_data
             if not token_data:
                 # No cached claims - validate token now (e.g., in tests or direct calls)
                 LOGGER.debug("Token claims not in context, validating token for ownership check")
@@ -854,6 +855,8 @@ class CodeExecutionServer(BaseMCPServer):
                 )
                 return False
 
+            if claims_validated_here:
+                set_current_token_claims(token_data)
             LOGGER.debug(
                 f"Session {session.session_id} access authorized for app {caller_app_id or 'delegated'} "
                 f"(user: {session.user_identity})"
