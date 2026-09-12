@@ -482,6 +482,39 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     await manager.aclose()
 
 
+async def test_full_cache_invalidation_rejects_in_flight_non_catalog_fetch(tmp_path):
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    fetch_calls = 0
+    source = tmp_path / "source.txt"
+    source.write_text("payload")
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name == str(source)
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            if fetch_calls == 1:
+                started.set()
+                await gate.wait()
+            dest_path.write_text(f"fetch-{fetch_calls}")
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(extra_fetchers=[cast(AssetFetcher, Fetcher())])
+    fetch = asyncio.create_task(manager.get_cache_path(f"<local>{source}</local>"))
+    await started.wait()
+
+    manager.invalidate_cache_entries()
+    gate.set()
+    path = await fetch
+
+    assert path.read_text() == "fetch-2"
+    assert fetch_calls == 2
+    await manager.aclose()
+
+
 @pytest.mark.parametrize(
     "denial",
     [
@@ -960,6 +993,10 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert details["current_revision"] == 2
     assert await captured["list_domains"]() == ["science https://example.test/domain"]
 
+    integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
+    per_artifact = await captured["search_data"]("data")
+    assert per_artifact[0]["load_path"].startswith("<blob>catalog-v1:")
+
     catalog.capabilities.return_value = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
     integration.capabilities.return_value = (
         SourceCapabilities("source", frozenset({CatalogOperation.SEARCH, CatalogOperation.RESOLVE})),
@@ -1003,6 +1040,25 @@ async def test_catalog_discovery_restores_transport_auth_before_session_lookup()
     register_catalog_discovery_tools(server, cast(CatalogIntegration, integration))
 
     assert await captured["search_data"]("data", mcp_ctx=SimpleNamespace(session_id="transport-session")) == []
+
+
+async def test_application_capability_adapter_holds_binding_snapshot():
+    closed = False
+
+    class Snapshot:
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    snapshot = Snapshot()
+    binding = SimpleNamespace(snapshot=lambda: snapshot)
+    catalog = SimpleNamespace(capabilities=AsyncMock(return_value=("capability",)))
+    server = SimpleNamespace(catalog=catalog)
+    session = SimpleNamespace(extensions={"catalog": binding})
+
+    assert await CodeExecutionServer.get_data_lake_capabilities(cast(Any, server), cast(Any, session)) == ("capability",)
+    catalog.capabilities.assert_awaited_once_with(snapshot)
+    assert closed
 
 
 async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguity():

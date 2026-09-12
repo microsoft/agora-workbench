@@ -209,6 +209,7 @@ class DataLakeDataManager:
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
         self._cache_generation = 0
+        self._full_cache_generation = 0
         self._transfer_options = transfer_options or TransferOptions()
 
         self._credential_init_error: str | None = None
@@ -320,7 +321,13 @@ class DataLakeDataManager:
         artifact_type = artifact_match.group(1)
         artifact_id = artifact_match.group(2)
         cache_generation = self._cache_generation
+        full_cache_generation = self._full_cache_generation
         generation_scoped = artifact_id.startswith("catalog-v1:")
+
+        def cache_was_invalidated() -> bool:
+            return full_cache_generation != self._full_cache_generation or (
+                generation_scoped and cache_generation != self._cache_generation
+            )
 
         display_id = sanitize_uri_for_display(artifact_id) if "://" in artifact_id else artifact_id
         LOGGER.info("Resolving %s artifact: %s", artifact_type, display_id)
@@ -390,14 +397,15 @@ class DataLakeDataManager:
                     resource=str(validated_cache_path),
                 )
             except Exception:
-                if not generation_scoped or cache_generation == self._cache_generation:
+                if not cache_was_invalidated():
                     raise
             else:
-                if not generation_scoped or cache_generation == self._cache_generation:
+                if not cache_was_invalidated():
                     LOGGER.debug(f"Asset already cached: {cache_path}")
                     return cache_path
             self._cache_index.pop(artifact_id, None)
             cache_generation = self._cache_generation
+            full_cache_generation = self._full_cache_generation
 
         # Route to appropriate resolver based on artifact type
         if artifact_type == "blob":
@@ -412,7 +420,11 @@ class DataLakeDataManager:
         LOGGER.debug(f"Fetching and caching {artifact_type} asset")
         cache_path = self._get_cache_file_path(
             resource_url,
-            cache_salt=str(cache_generation) if generation_scoped else None,
+            cache_salt=(
+                f"{full_cache_generation}:{cache_generation if generation_scoped else ''}"
+                if full_cache_generation or generation_scoped
+                else None
+            ),
         )
 
         # Stream asset directly to file to avoid loading into memory
@@ -423,7 +435,7 @@ class DataLakeDataManager:
             transfer_options=transfer_options,
         )
 
-        if generation_scoped and cache_generation != self._cache_generation:
+        if cache_was_invalidated():
             cache_path.unlink(missing_ok=True)
             return await self.get_cache_path(
                 qualified_name,
@@ -553,6 +565,8 @@ class DataLakeDataManager:
         resolution and authorization again instead of reusing stale content.
         """
         self._cache_generation += 1
+        if artifact_id_prefix is None:
+            self._full_cache_generation += 1
         keys = [
             artifact_id
             for artifact_id in self._cache_index

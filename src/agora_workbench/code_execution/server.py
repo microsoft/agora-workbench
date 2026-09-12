@@ -792,7 +792,11 @@ class CodeExecutionServer(BaseMCPServer):
         binding: "CatalogSessionBinding | None" = session.extensions.get("catalog")
         if binding is None:
             return ()
-        return await self.catalog.capabilities(binding)
+        snapshot = binding.snapshot()
+        try:
+            return await self.catalog.capabilities(snapshot)
+        finally:
+            snapshot.close()
 
     # ========================================================================
     # Session Management Helpers
