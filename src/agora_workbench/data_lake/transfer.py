@@ -54,12 +54,14 @@ class TransferOptions:
     diagnostic_hook: TransferDiagnosticHook | None = field(default=None, repr=False, compare=False)
     create_exclusive: bool = False
     object_metadata: Mapping[str, str] = field(default_factory=dict)
+    # Trusted managed-write escape. Providers must restrict this to a validated
+    # .agora/revisions/ destination; it never grants read access.
     allow_reserved: bool = False
 
     def __post_init__(self) -> None:
         for name in ("max_bytes", "quota_bytes"):
             value = getattr(self, name)
-            if value is not None and (isinstance(value, bool) or value < 0):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
                 raise ValueError(f"{name} must be a non-negative integer or None.")
         if self.timeout_seconds is not None and self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive or None.")
@@ -139,7 +141,9 @@ def safe_transfer_resource(value: str | os.PathLike[str] | None) -> str | None:
 def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
     match = _TAGGED_REFERENCE_RE.fullmatch(value.strip())
-    if match is None or "://" not in match.group(2):
+    if match is None:
+        return sanitize_uri_for_display(value) if "://" in value else value
+    if "://" not in match.group(2):
         return value
     closing = match.group(3) or ""
     return f"{match.group(1)}{sanitize_uri_for_display(match.group(2))}{closing}"

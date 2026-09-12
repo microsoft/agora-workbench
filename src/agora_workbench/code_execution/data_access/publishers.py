@@ -44,6 +44,7 @@ from agora_workbench.data_lake.identity import (
     azure_uri_from_blob_name,
     normalize_logical_path,
     parse_azure_uri,
+    validate_managed_revision_path,
     validate_azure_object_path,
 )
 from agora_workbench.data_lake.models import RequestContext
@@ -134,6 +135,39 @@ def _open_posix_path_no_follow(path: Path, *, directory: bool = False) -> int:
     except BaseException:
         os.close(current)
         raise
+
+
+def _open_or_create_posix_directory(path: Path) -> int:
+    """Create and open a directory through no-follow descriptor traversal."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    current = os.open(
+        os.path.sep,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        for part in absolute_path.parts[1:]:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=current)
+            except FileExistsError:
+                LOGGER.debug("Secure directory component already exists: %s", part)
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=current,
+            )
+            os.close(current)
+            current = next_fd
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _validate_publish_path(path: str, *, allow_reserved: bool) -> str:
+    """Validate an ordinary path or the narrow trusted managed-revision seam."""
+    if allow_reserved:
+        return validate_managed_revision_path(path)
+    return validate_azure_object_path(path)
 
 
 # Regex for parsing tag-based destination strings.
@@ -428,7 +462,12 @@ class BlobPublisher(AssetPublisher):
             Path(os.getenv("MCP_ASSET_CACHE_DIR", os.getcwd())) / ".agora-transfer-staging"
         )
         self._staging_dir = Path(os.path.abspath(os.fspath(configured_staging)))
-        self._cleanup_staging_dir = staging_dir is None
+        self._staging_fd: int | None = None
+        self._staging_identity: tuple[int, int] | None = None
+        if os.name == "posix":
+            self._staging_fd = _open_or_create_posix_directory(self._staging_dir)
+            stat_result = os.fstat(self._staging_fd)
+            self._staging_identity = (stat_result.st_dev, stat_result.st_ino)
         self._client = None  # lazily initialised
 
     def _get_client(self):
@@ -444,9 +483,32 @@ class BlobPublisher(AssetPublisher):
 
     async def close(self) -> None:
         """Close the underlying BlobServiceClient."""
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        try:
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
+        finally:
+            if self._staging_fd is not None:
+                os.close(self._staging_fd)
+                self._staging_fd = None
+
+    def _open_verified_staging_root(self) -> int:
+        """Return the retained staging root after verifying its configured identity."""
+        if os.name != "posix":
+            self._staging_dir.mkdir(parents=True, exist_ok=True)
+            return -1
+        if self._staging_fd is None or self._staging_identity is None:
+            raise UnsafePathError("Blob publisher staging root is unavailable.", operation="upload")
+        current_fd = _open_posix_path_no_follow(self._staging_dir, directory=True)
+        try:
+            stat_result = os.fstat(current_fd)
+            if (stat_result.st_dev, stat_result.st_ino) != self._staging_identity:
+                raise UnsafePathError(
+                    "Blob publisher staging root was replaced after configuration.", operation="upload"
+                )
+        finally:
+            os.close(current_fd)
+        return os.dup(self._staging_fd)
 
     def can_handle(self, destination: str) -> bool:
         """Return ``True`` for ``<blob>…</blob>`` destinations."""
@@ -504,7 +566,7 @@ class BlobPublisher(AssetPublisher):
         if session_id:
             _validate_artifact_name(session_id)
         relative_path = "/".join(part for part in (self._prefix, session_id, name) if part)
-        blob_path = validate_azure_object_path(relative_path, allow_reserved=options.allow_reserved)
+        blob_path = _validate_publish_path(relative_path, allow_reserved=options.allow_reserved)
         remote_uri = azure_uri_from_blob_name(
             parse_azure_uri(f"{self._account_url}/{self._container}")[0],
             self._container,
@@ -523,15 +585,28 @@ class BlobPublisher(AssetPublisher):
         blob_client = client.get_blob_client(container=self._container, blob=blob_path)
         started = time.monotonic()
         await emit_transfer_diagnostic(options, TransferDiagnostic("upload", "started", context, display_uri))
-        self._staging_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_path = self._staging_dir / f"{secrets.token_hex(16)}.upload"
+        snapshot_name = f"{secrets.token_hex(16)}.upload"
+        snapshot_path = self._staging_dir / snapshot_name
+        staging_fd: int | None = None
         snapshot_fd: int | None = None
+        snapshot_created = False
         try:
-            snapshot_fd = os.open(
-                snapshot_path,
-                os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                0o600,
-            )
+            staging_fd = self._open_verified_staging_root()
+            if staging_fd == -1:
+                snapshot_fd = os.open(
+                    snapshot_path,
+                    os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+                snapshot_created = True
+            else:
+                snapshot_fd = os.open(
+                    snapshot_name,
+                    os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=staging_fd,
+                )
+                snapshot_created = True
 
             async def perform_upload() -> TransferResult:
                 snapshot = await _copy_local_descriptors(local_path, snapshot_fd, options, context)
@@ -595,12 +670,15 @@ class BlobPublisher(AssetPublisher):
         finally:
             if snapshot_fd is not None:
                 os.close(snapshot_fd)
-            snapshot_path.unlink(missing_ok=True)
-            if self._cleanup_staging_dir:
+            if snapshot_created and (staging_fd is None or staging_fd == -1):
+                snapshot_path.unlink(missing_ok=True)
+            elif snapshot_created and staging_fd is not None:
                 try:
-                    self._staging_dir.rmdir()
-                except OSError:
-                    LOGGER.debug("BlobPublisher staging directory could not be removed", exc_info=True)
+                    os.unlink(snapshot_name, dir_fd=staging_fd)
+                except FileNotFoundError:
+                    LOGGER.debug("BlobPublisher snapshot was already removed: %s", snapshot_name)
+            if staging_fd is not None and staging_fd != -1:
+                os.close(staging_fd)
         result = TransferResult(
             uploaded.bytes_transferred,
             uploaded.checksum_sha256,
@@ -862,7 +940,9 @@ class LocalFilePublisher(AssetPublisher):
                 "LocalFilePublisher does not support object metadata.",
                 operation="upload",
             )
-        relative = Path(normalize_logical_path("/".join(part for part in (session_id, name) if part)))
+        relative_text = normalize_logical_path("/".join(part for part in (session_id, name) if part))
+        _validate_publish_path(relative_text, allow_reserved=options.allow_reserved)
+        relative = Path(relative_text)
         destination = self._base_dir / relative
         started = time.monotonic()
         await emit_transfer_diagnostic(
@@ -941,6 +1021,7 @@ class LocalFilePublisher(AssetPublisher):
             result = await _copy_local_descriptors(local_path, output_fd, options, context)
             os.close(output_fd)
             output_fd = None
+            check_transfer_cancelled(options, operation="upload", resource=str(local_path))
             if options.create_exclusive:
                 os.link(
                     temporary_name,

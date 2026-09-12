@@ -176,6 +176,25 @@ class TestAssetResolutionMiddleware:
         # Verify cleanup was called
         mock_server._clear_auth_context.assert_called_once()
 
+    async def test_asset_resolution_failure_redacts_uri_credentials(self, mock_server, mock_context, mock_session):
+        """Agent-facing resolution failures must not expose credentials from causes."""
+        secret_uri = "https://user:password@example.com/data?sig=secret#fragment"
+        mock_context.message.arguments = {"grid_file": f"<blob>{secret_uri}</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+        original_error = RuntimeError(f"provider failed for {secret_uri}")
+        mock_session.data_manager.get_cache_path.side_effect = original_error
+
+        middleware = AssetResolutionMiddleware(mock_server)
+
+        with _patch_set_current_session():
+            with pytest.raises(RuntimeError) as exc_info:
+                await middleware.on_call_tool(mock_context, AsyncMock())
+
+        assert "password" not in str(exc_info.value)
+        assert "sig=secret" not in str(exc_info.value)
+        assert "https://example.com/data" in str(exc_info.value)
+        assert exc_info.value.__cause__ is original_error
+
     async def test_different_asset_types(self, mock_server, mock_context, mock_session):
         """Test resolution of different asset types (blob, sql, etc.)."""
         mock_context.message.arguments = {

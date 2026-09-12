@@ -33,7 +33,14 @@ from agora_workbench.data_lake.identity import (
     validate_azure_object_path,
 )
 from agora_workbench.data_lake.models import RequestContext
-from agora_workbench.data_lake.transfer import TransferOptions, TransferResult, await_transfer, stream_chunks_to_file
+from agora_workbench.data_lake.transfer import (
+    TransferDiagnostic,
+    TransferOptions,
+    TransferResult,
+    await_transfer,
+    emit_transfer_diagnostic,
+    stream_chunks_to_file,
+)
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
@@ -293,13 +300,9 @@ class BlobFetcher(AssetFetcher):
             storage_account,
             container,
             blob_path,
-            allow_reserved=options.allow_reserved,
         )
         sanitized_url = sanitize_uri_for_display(qualified_name)
         LOGGER.info("Streaming blob asset to file: %s", sanitized_url)
-        account_url = f"https://{storage_account}.blob.core.windows.net"
-        client = self._get_client(account_url)
-        blob_client = client.get_blob_client(container=container, blob=blob_path)
         inner_options = TransferOptions(
             max_bytes=options.max_bytes,
             quota_bytes=options.quota_bytes,
@@ -307,10 +310,16 @@ class BlobFetcher(AssetFetcher):
             chunk_size=options.chunk_size,
             expected_sha256=options.expected_sha256,
             cancellation_event=options.cancellation_event,
-            diagnostic_hook=options.diagnostic_hook,
+        )
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic("download", "started", context, sanitized_url),
         )
 
         async def download() -> TransferResult:
+            account_url = f"https://{storage_account}.blob.core.windows.net"
+            client = self._get_client(account_url)
+            blob_client = client.get_blob_client(container=container, blob=blob_path)
             stream = await await_transfer(
                 blob_client.download_blob(max_concurrency=_BLOB_MAX_CONCURRENCY),
                 inner_options,
@@ -333,11 +342,33 @@ class BlobFetcher(AssetFetcher):
                 async with asyncio.timeout(options.timeout_seconds):
                     result = await download()
         except TimeoutError as exc:
-            raise TransferTimeoutError(
+            error = TransferTimeoutError(
                 f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
                 resource_id=sanitized_url,
                 operation="download",
-            ) from exc
+            )
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("download", "failed", context, sanitized_url, error_type=type(error).__name__),
+            )
+            raise error from exc
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("download", "failed", context, sanitized_url, error_type=type(exc).__name__),
+            )
+            raise
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic(
+                "download",
+                "completed",
+                context,
+                sanitized_url,
+                result.bytes_transferred,
+                result.checksum_sha256,
+            ),
+        )
         LOGGER.info("Successfully streamed %d bytes from %s", result.bytes_transferred, sanitized_url)
         return result
 
@@ -346,12 +377,10 @@ class BlobFetcher(AssetFetcher):
         account: str,
         container: str,
         blob_path: str,
-        *,
-        allow_reserved: bool = False,
     ) -> None:
         validate_azure_object_path(
             blob_path,
-            allow_reserved=self._allow_reserved_paths or allow_reserved,
+            allow_reserved=self._allow_reserved_paths,
         )
         if self._allowed_scopes and not any(
             scope.contains(account, container, blob_path) for scope in self._allowed_scopes

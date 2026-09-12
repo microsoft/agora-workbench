@@ -32,10 +32,11 @@ from agora_workbench.data_lake import (
     canonicalize_azure_uri,
     validate_managed_revision_path,
 )
-from agora_workbench.data_lake.transfer import stream_chunks_to_file
+from agora_workbench.data_lake.transfer import safe_artifact_reference, stream_chunks_to_file
 
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
+from ...data_access import publishers as publishers_module
 from ...data_access.publishers import BlobPublisher, LocalFilePublisher, ServerPublisher, publish_compat
 
 
@@ -47,6 +48,20 @@ def _part_files(parent: Path) -> list[Path]:
 def test_transfer_options_reject_non_integer_chunk_sizes(chunk_size):
     with pytest.raises(ValueError, match="chunk_size"):
         TransferOptions(chunk_size=chunk_size)
+
+
+@pytest.mark.parametrize("field", ["max_bytes", "quota_bytes"])
+@pytest.mark.parametrize("value", [True, 1.5, float("nan")])
+def test_transfer_options_reject_non_integer_size_bounds(field, value):
+    with pytest.raises(ValueError, match=field):
+        TransferOptions(**{field: value})
+
+
+def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
+    raw = "https://user:password@example.com/data?sig=secret#fragment"
+
+    assert safe_artifact_reference(raw) == "https://example.com/data"
+    assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>https://example.com/data</blob>"
 
 
 async def test_local_streaming_peak_memory_is_independent_of_file_size(tmp_path):
@@ -331,6 +346,7 @@ async def test_publishers_reject_source_paths_with_symlinked_parent(tmp_path, pu
         blob_client.upload_blob = AsyncMock()
         service_client = MagicMock()
         service_client.get_blob_client.return_value = blob_client
+        service_client.close = AsyncMock()
         publisher = BlobPublisher(
             "https://account123.blob.core.windows.net",
             "container",
@@ -473,7 +489,27 @@ async def test_blob_fetcher_rejects_prefix_and_reserved_paths_before_network(tmp
         await fetcher.fetch_to_file(
             "az://account123/container/.agora/manifest.json",
             tmp_path / "reserved.bin",
+            options=TransferOptions(allow_reserved=True),
         )
+
+
+async def test_blob_fetcher_diagnostics_cover_stream_acquisition_failure(tmp_path):
+    diagnostics = []
+    blob_client = MagicMock()
+    blob_client.download_blob = AsyncMock(side_effect=RuntimeError("authentication failed"))
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    fetcher = BlobFetcher(credential=MagicMock())
+    fetcher._clients["https://account123.blob.core.windows.net"] = service_client
+
+    with pytest.raises(RuntimeError, match="authentication failed"):
+        await fetcher.fetch_to_file(
+            "az://account123/container/data.bin",
+            tmp_path / "blob.bin",
+            options=TransferOptions(diagnostic_hook=diagnostics.append),
+        )
+
+    assert [diagnostic.state for diagnostic in diagnostics] == ["started", "failed"]
 
 
 async def test_blob_streaming_checksum_cleanup_and_credential_safe_diagnostics(tmp_path, caplog):
@@ -679,6 +715,29 @@ async def test_blob_publisher_stages_outside_read_only_source_directory(tmp_path
     assert list(staging.glob("*.upload")) == []
 
 
+async def test_blob_publisher_rejects_replaced_staging_root(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    staging = tmp_path / "staging"
+    publisher = BlobPublisher(
+        "https://account123.blob.core.windows.net",
+        "container",
+        staging_dir=staging,
+    )
+    original_staging = tmp_path / "staging-original"
+    staging.rename(original_staging)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    staging.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises((OSError, UnsafePathError)):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert list(outside.iterdir()) == []
+    assert list(original_staging.iterdir()) == []
+    await publisher.close()
+
+
 async def test_blob_conditional_create_seam_uses_create_only_precondition(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -743,6 +802,42 @@ async def test_reserved_blob_write_requires_explicit_trusted_option(tmp_path):
     assert result.created is True
 
 
+@pytest.mark.parametrize(
+    "reserved_path",
+    [
+        RESERVED_MANIFEST_PATH,
+        f"{RESERVED_OPERATIONS_PREFIX}operation-1",
+        f"{RESERVED_RECEIPTS_PREFIX}operation-1",
+    ],
+)
+async def test_trusted_reserved_write_option_only_allows_revision_paths(tmp_path, reserved_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    blob_client = MagicMock()
+    blob_client.upload_blob = AsyncMock()
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    service_client.close = AsyncMock()
+    blob = BlobPublisher(
+        "https://account123.blob.core.windows.net",
+        "container",
+        staging_dir=tmp_path / "staging",
+    )
+    blob._client = service_client
+    local = LocalFilePublisher(tmp_path / "outputs")
+    options = TransferOptions(allow_reserved=True)
+
+    with pytest.raises(InvalidRequestError, match="revisions prefix"):
+        await blob.publish(source, reserved_path, "", options=options)
+    with pytest.raises(InvalidRequestError, match="revisions prefix"):
+        await local.publish(source, reserved_path, "", options=options)
+
+    blob_client.upload_blob.assert_not_awaited()
+    assert not (tmp_path / "outputs" / reserved_path).exists()
+    await blob.close()
+    await local.close()
+
+
 async def test_local_conditional_create_does_not_replace_existing_object(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"new")
@@ -761,6 +856,36 @@ async def test_local_conditional_create_does_not_replace_existing_object(tmp_pat
 
     assert output.read_bytes() == b"existing"
     assert _part_files(output.parent) == []
+    await publisher.close()
+
+
+async def test_local_publisher_cancellation_after_copy_prevents_commit(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    destination = tmp_path / "outputs" / "session" / "result.bin"
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"previous")
+    cancellation = asyncio.Event()
+    original_copy = publishers_module._copy_local_descriptors
+
+    async def copy_then_cancel(*args, **kwargs):
+        result = await original_copy(*args, **kwargs)
+        cancellation.set()
+        return result
+
+    monkeypatch.setattr(publishers_module, "_copy_local_descriptors", copy_then_cancel)
+    publisher = LocalFilePublisher(tmp_path / "outputs")
+
+    with pytest.raises(TransferCancelledError):
+        await publisher.publish(
+            source,
+            "result.bin",
+            "session",
+            options=TransferOptions(cancellation_event=cancellation),
+        )
+
+    assert destination.read_bytes() == b"previous"
+    assert _part_files(destination.parent) == []
     await publisher.close()
 
 

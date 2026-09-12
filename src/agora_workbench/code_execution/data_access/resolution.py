@@ -18,6 +18,13 @@ if TYPE_CHECKING:
     from ..server import CodeExecutionServer
 
 LOGGER = logging.getLogger(__name__)
+_URI_IN_ERROR_RE = re.compile(r"(?:https?|az|abfss)://[^\s'\"<>]+", re.IGNORECASE)
+
+
+def _safe_error_detail(error: BaseException) -> str:
+    """Redact credentials from URI-like values embedded in exception text."""
+    return _URI_IN_ERROR_RE.sub(lambda match: safe_artifact_reference(match.group(0)), str(error))
+
 
 # ContextVar for passing asset resolution metadata from middleware to tool callback.
 # The middleware populates this before FastMCP/Pydantic validation; the tool
@@ -159,7 +166,8 @@ class AssetResolutionMiddleware(Middleware):
                 if error:
                     safe_reference = safe_artifact_reference(qualified_name)
                     raise RuntimeError(
-                        f"Failed to resolve DataLake asset '{safe_reference}' for parameter '{param_name}': {error}"
+                        f"Failed to resolve DataLake asset '{safe_reference}' for parameter "
+                        f"'{param_name}': {_safe_error_detail(error)}"
                     ) from error
 
             # Replace argument values in-place and build injection metadata
