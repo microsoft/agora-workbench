@@ -14,6 +14,7 @@ import pytest
 from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServer, ServerConfig
 from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
+    SessionCredential,
     _decode_reference,
     _encode_reference,
     _error_payload,
@@ -459,6 +460,31 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     assert resolve_calls == 2
     assert fetch_calls == 2
     await manager.aclose()
+
+
+async def test_session_credential_retries_cancelled_retired_provider_cleanup():
+    class CredentialProvider:
+        def __init__(self, *, cancel_once=False):
+            self.cancel_once = cancel_once
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+            if self.cancel_once:
+                self.cancel_once = False
+                raise asyncio.CancelledError
+
+    retired = CredentialProvider(cancel_once=True)
+    current = CredentialProvider()
+    credential = SessionCredential(retired, provider_factory=lambda token: current)
+    credential.prepare_context_refresh(SessionContext("session", "user", "token"))()
+
+    with pytest.raises(asyncio.CancelledError):
+        await credential.close()
+    await credential.close()
+
+    assert retired.close_calls == 2
+    assert current.close_calls == 1
 
 
 async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
