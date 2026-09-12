@@ -171,6 +171,7 @@ class SessionCredential:
         self._provider = provider
         self._provider_factory = provider_factory
         self._retired_providers: list[Any] = []
+        self._provider_closed = False
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
         del kwargs
@@ -187,26 +188,35 @@ class SessionCredential:
         def commit() -> None:
             self._retired_providers.append(self._provider)
             self._provider = provider
+            self._provider_closed = False
 
         return commit
 
     async def close(self) -> None:
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
-        providers = (*self._retired_providers, self._provider)
-        self._retired_providers.clear()
-        for provider in providers:
+        providers = tuple((provider, False) for provider in self._retired_providers)
+        if not self._provider_closed:
+            providers += ((self._provider, True),)
+        for provider, is_current in providers:
             close = getattr(provider, "aclose", None) or getattr(provider, "close", None)
-            if not callable(close):
-                continue
             try:
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
             except Exception as exc:
                 errors.append(exc)
+            else:
+                if is_current:
+                    self._provider_closed = True
+                else:
+                    for index, retired in enumerate(self._retired_providers):
+                        if retired is provider:
+                            self._retired_providers.pop(index)
+                            break
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional credential cleanup failures.", errors)))
