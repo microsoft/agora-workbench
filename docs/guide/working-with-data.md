@@ -342,8 +342,10 @@ Catalog refresh remains an administrative/application operation; no agent
 reindex or filesystem-watcher tool is registered.
 
 `capability_extension_factory` is a narrow session-scoped composition seam for
-applications that add separately authorized capabilities, such as a managed
-writer. It receives the `SessionContext`, authorized read catalog, and immutable
+applications that add separately authorized capabilities. It is intentionally
+writer-neutral today; a managed writer can use the seam after its write
+operations are added to the public `CatalogOperation` contract. The factory
+receives the `SessionContext`, authorized read catalog, and immutable
 `RequestContext`. Returned extension objects may provide
 `capabilities(request_context)`; those source capabilities are merged into
 `get_catalog_capabilities`, and the extension is closed with the session. The

@@ -564,7 +564,10 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     async def effective_capabilities(current):
         return await current.catalog.capabilities()
 
-    integration = SimpleNamespace(capabilities=AsyncMock(side_effect=effective_capabilities))
+    integration = SimpleNamespace(
+        capabilities=AsyncMock(side_effect=effective_capabilities),
+        _policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
     register_catalog_discovery_tools(fake_server, cast(CatalogIntegration, integration))
 
     result = await captured["search_data"]("data")
@@ -627,7 +630,10 @@ async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguit
     async def effective_capabilities(current):
         return await current.catalog.capabilities()
 
-    integration = SimpleNamespace(capabilities=AsyncMock(side_effect=effective_capabilities))
+    integration = SimpleNamespace(
+        capabilities=AsyncMock(side_effect=effective_capabilities),
+        _policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
     register_catalog_discovery_tools(fake_server, cast(CatalogIntegration, integration))
 
     unique = await captured["get_artifact"]("shared-id")
