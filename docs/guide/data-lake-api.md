@@ -72,6 +72,9 @@ object creation. Blob uses an `If-None-Match: *` create precondition; local
 publishing uses an atomic create-only link. A successful conditional create
 returns `TransferResult.created == True`. Ordinary overwrite mode returns
 `None` because every provider cannot reliably distinguish create from replace.
+For local conditional creates, successfully linking the validated bytes under
+the final name is the commit point; cleanup of the private temporary link is
+best-effort and cannot turn that committed result into a reported failure.
 Blob publication uploads an immutable disk snapshot, and its byte count and
 checksum describe that exact snapshot rather than a second read of a mutable
 source. The snapshot is created in the publisher-controlled `staging_dir`

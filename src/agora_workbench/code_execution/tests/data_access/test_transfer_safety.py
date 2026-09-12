@@ -75,6 +75,7 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
 
     assert safe_artifact_reference(raw) == "https://example.com/data"
     assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>https://example.com/data</blob>"
+    assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"
 
 
 async def test_local_streaming_peak_memory_is_independent_of_file_size(tmp_path):
@@ -745,6 +746,29 @@ async def test_local_publisher_success_does_not_retry_partial_cleanup(tmp_path, 
     assert (output_root / "session" / "result.bin").read_bytes() == b"content"
 
 
+async def test_local_conditional_publish_succeeds_when_post_link_cleanup_fails(tmp_path, monkeypatch, caplog):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    output_root = tmp_path / "outputs"
+
+    def fail_unlink(*args, **kwargs):
+        raise PermissionError("injected temporary cleanup failure")
+
+    monkeypatch.setattr(publishers_module.os, "unlink", fail_unlink)
+
+    with caplog.at_level(logging.WARNING):
+        _, result = await LocalFilePublisher(output_root).publish_with_result(
+            source,
+            "result.bin",
+            "session",
+            options=TransferOptions(create_exclusive=True),
+        )
+
+    assert result.created is True
+    assert (output_root / "session" / "result.bin").read_bytes() == b"content"
+    assert "Could not remove committed local publish temporary file" in caplog.text
+
+
 def test_blob_scope_validates_account_container_prefix_and_reserved_names():
     scope = AzureBlobScope.from_uri("https://account123.blob.core.windows.net/container/data/")
     assert scope.contains("account123", "container", "data/file.csv")
@@ -915,6 +939,30 @@ async def test_stream_writer_fails_and_cleans_up_when_write_makes_no_progress(tm
 
     assert not destination.exists()
     assert _part_files(tmp_path) == []
+
+
+async def test_conditional_stream_succeeds_when_post_link_cleanup_fails(tmp_path, monkeypatch, caplog):
+    destination = tmp_path / "destination.bin"
+
+    async def chunks():
+        yield b"content"
+
+    def fail_unlink(*args, **kwargs):
+        raise PermissionError("injected temporary cleanup failure")
+
+    monkeypatch.setattr(transfer_module.os, "unlink", fail_unlink)
+
+    with caplog.at_level(logging.WARNING):
+        result = await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(create_exclusive=True),
+            context=RequestContext(),
+        )
+
+    assert result.created is True
+    assert destination.read_bytes() == b"content"
+    assert "Could not remove committed transfer temporary file" in caplog.text
 
 
 @pytest.mark.parametrize(

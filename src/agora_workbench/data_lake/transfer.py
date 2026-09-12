@@ -37,6 +37,7 @@ _USE_POSIX_DIR_FDS = os.name == "posix"
 
 TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None]
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
+_REDACTED_URI_RE = re.compile(r"^\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#].*)?$")
 
 
 async def _run_blocking_io(
@@ -211,13 +212,23 @@ def safe_transfer_resource(value: str | os.PathLike[str] | None) -> str | None:
 
 def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
+
+    def sanitize_reference(reference: str) -> str:
+        if "://" in reference:
+            return sanitize_uri_for_display(reference)
+        redacted = _REDACTED_URI_RE.fullmatch(reference)
+        if redacted is not None:
+            return sanitize_uri_for_display(f"https://{redacted.group('location')}")
+        return reference
+
     match = _TAGGED_REFERENCE_RE.fullmatch(value.strip())
     if match is None:
-        return sanitize_uri_for_display(value) if "://" in value else value
-    if "://" not in match.group(2):
+        return sanitize_reference(value)
+    sanitized = sanitize_reference(match.group(2))
+    if sanitized == match.group(2):
         return value
     closing = match.group(3) or ""
-    return f"{match.group(1)}{sanitize_uri_for_display(match.group(2))}{closing}"
+    return f"{match.group(1)}{sanitized}{closing}"
 
 
 async def emit_transfer_diagnostic(options: TransferOptions, diagnostic: TransferDiagnostic) -> None:
@@ -348,6 +359,7 @@ async def stream_chunks_to_file(
     portable_parent: Path | None = None
     portable_destination: Path | None = None
     portable_parent_identity: tuple[int, int] | None = None
+    committed = False
     display_resource = safe_transfer_resource(resource)
     started = time.monotonic()
     bytes_transferred = 0
@@ -482,7 +494,15 @@ async def stream_chunks_to_file(
                 dst_dir_fd=parent_fd,
                 follow_symlinks=False,
             )
-            os.unlink(temporary_name, dir_fd=parent_fd)
+            # The exclusive link is the commit point. The final name now owns
+            # the validated bytes; removing the temporary name is best-effort.
+            committed = True
+            try:
+                os.unlink(temporary_name, dir_fd=parent_fd)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                LOGGER.warning("Could not remove committed transfer temporary file %s.", temporary_name, exc_info=True)
         elif parent_fd is not None:
             os.replace(
                 temporary_name,
@@ -490,6 +510,7 @@ async def stream_chunks_to_file(
                 src_dir_fd=parent_fd,
                 dst_dir_fd=parent_fd,
             )
+            committed = True
         else:
             if portable_parent is None or portable_destination is None or portable_parent_identity is None:
                 raise RuntimeError("Portable transfer destination was not initialized.")
@@ -507,9 +528,21 @@ async def stream_chunks_to_file(
             portable_temporary = portable_parent / temporary_name
             if options.create_exclusive:
                 os.link(portable_temporary, portable_destination)
-                portable_temporary.unlink()
+                # As above, successful exclusive creation commits the result.
+                committed = True
+                try:
+                    portable_temporary.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.warning(
+                        "Could not remove committed transfer temporary file %s.",
+                        portable_temporary.name,
+                        exc_info=True,
+                    )
             else:
                 os.replace(portable_temporary, portable_destination)
+                committed = True
     except asyncio.CancelledError:
         cleanup_temporary()
         await emit_transfer_diagnostic(
@@ -537,7 +570,8 @@ async def stream_chunks_to_file(
         )
         raise error from exc
     except BaseException as exc:
-        cleanup_temporary()
+        if not committed:
+            cleanup_temporary()
         await emit_transfer_diagnostic(
             options,
             TransferDiagnostic(

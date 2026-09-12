@@ -1159,10 +1159,22 @@ class LocalFilePublisher(AssetPublisher):
                     dst_dir_fd=parent_fd,
                     follow_symlinks=False,
                 )
-                os.unlink(temporary_name, dir_fd=parent_fd)
+                # Linking the validated bytes under the final name commits the
+                # publish; removal of the temporary name is best-effort.
+                committed = True
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    LOGGER.warning(
+                        "Could not remove committed local publish temporary file %s.",
+                        temporary_name,
+                        exc_info=True,
+                    )
             else:
                 os.replace(temporary_name, relative.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
-            committed = True
+                committed = True
             return TransferResult(
                 result.bytes_transferred,
                 result.checksum_sha256,
