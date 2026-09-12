@@ -787,6 +787,56 @@ async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguit
     assert "matches multiple sources" in ambiguous["error"]
 
 
+async def test_discovery_request_keeps_immutable_authorization_snapshot():
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    artifact = CatalogArtifact(ArtifactReference("artifact", "source"), ArtifactPresentation("data.csv"))
+
+    async def old_capabilities(context):
+        assert context == "reader-context"
+        started.set()
+        await gate.wait()
+        return (SourceCapabilities("source", frozenset({CatalogOperation.GET})),)
+
+    old_catalog = SimpleNamespace(
+        capabilities=AsyncMock(side_effect=old_capabilities),
+        get=AsyncMock(return_value=artifact),
+    )
+    new_catalog = SimpleNamespace(
+        capabilities=AsyncMock(return_value=(SourceCapabilities("source", frozenset({CatalogOperation.GET})),)),
+        get=AsyncMock(return_value=artifact),
+    )
+    binding = SimpleNamespace(
+        catalog=old_catalog,
+        context="reader-context",
+        execution_references=False,
+        capability_extensions=(),
+    )
+    captured = {}
+    server = SimpleNamespace(
+        mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
+        _get_or_create_session=AsyncMock(
+            return_value=SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+        ),
+    )
+    integration = SimpleNamespace(
+        capabilities=AsyncMock(),
+        _policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
+    register_catalog_discovery_tools(server, cast(CatalogIntegration, integration))
+
+    request = asyncio.create_task(captured["get_artifact"]("artifact", source_id="source"))
+    await started.wait()
+    binding.catalog = new_catalog
+    binding.context = "writer-context"
+    gate.set()
+    assert (await request)["id"] == "artifact"
+
+    old_catalog.get.assert_awaited_once()
+    assert old_catalog.get.await_args.args[1] == "reader-context"
+    new_catalog.get.assert_not_awaited()
+
+
 async def test_catalog_tool_registration_modes_cannot_be_combined():
     captured = {}
     fake_mcp = SimpleNamespace(
@@ -869,8 +919,9 @@ async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
             nonlocal closed
             closed = True
 
+    provider = _LifecycleProvider()
     integration = CatalogIntegration(
-        ResourceLease(_LifecycleProvider()),
+        ResourceLease(provider, ResourceOwnership.OWNED),
         authorizer=_PerUserAuthorizer("source"),
         capability_extension_factory=lambda context, catalog, request_context: (
             CancelledExtension(),
@@ -976,10 +1027,11 @@ async def test_binding_factory_failure_closes_factory_authorizer():
     authorizer.aclose.assert_awaited_once()
 
 
-async def test_cancelled_catalog_drain_remains_tracked_for_next_shutdown():
+async def test_cancelled_catalog_shutdown_waits_for_cleanup_before_provider():
     started = asyncio.Event()
     gate = asyncio.Event()
     finished = asyncio.Event()
+    provider = _LifecycleProvider()
 
     class Extension:
         async def aclose(self):
@@ -988,7 +1040,7 @@ async def test_cancelled_catalog_drain_remains_tracked_for_next_shutdown():
             finished.set()
 
     integration = CatalogIntegration(
-        ResourceLease(_LifecycleProvider()),
+        ResourceLease(provider, ResourceOwnership.OWNED),
         authorizer=_PerUserAuthorizer("source"),
         capability_extension_factory=lambda context, catalog, request_context: Extension(),
     )
@@ -999,15 +1051,47 @@ async def test_cancelled_catalog_drain_remains_tracked_for_next_shutdown():
     first_shutdown = asyncio.create_task(integration.shutdown())
     await asyncio.sleep(0)
     first_shutdown.cancel()
+    await asyncio.sleep(0)
+    assert not first_shutdown.done()
+    assert provider.close_calls == 0
+    gate.set()
     with pytest.raises(asyncio.CancelledError):
         await first_shutdown
-
-    second_shutdown = asyncio.create_task(integration.shutdown())
-    await asyncio.sleep(0)
-    assert not second_shutdown.done()
-    gate.set()
-    await second_shutdown
     assert finished.is_set()
+    assert provider.close_calls == 1
+
+    await integration.shutdown()
+
+
+async def test_cancelled_catalog_drain_remains_tracked_for_next_drain():
+    started = asyncio.Event()
+    gate = asyncio.Event()
+
+    class Extension:
+        async def aclose(self):
+            started.set()
+            await gate.wait()
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: Extension(),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding.cleanup()
+    await started.wait()
+
+    first_drain = asyncio.create_task(integration._cleanup_tracker.drain())
+    await asyncio.sleep(0)
+    first_drain.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first_drain
+
+    second_drain = asyncio.create_task(integration._cleanup_tracker.drain())
+    await asyncio.sleep(0)
+    assert not second_drain.done()
+    gate.set()
+    await second_drain
 
 
 async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes():

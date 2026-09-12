@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Annotated
+from typing import Any, Annotated, cast
 
 from fastmcp import Context
 from pydantic import Field
@@ -373,6 +373,15 @@ class CatalogSessionBinding:
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
     _closed: bool = False
 
+    def snapshot(self) -> "CatalogSessionView":
+        """Capture one immutable authorization view for a complete operation."""
+        return CatalogSessionView(
+            self.catalog,
+            self.context,
+            self.execution_references,
+            self.capability_extensions,
+        )
+
     def refresh_context(self, context: SessionContext) -> None:
         """Refresh authorization inputs when a transport session receives a new token."""
         request_context = _request_context(context)
@@ -465,6 +474,16 @@ class CatalogSessionBinding:
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
         self.cleanup_tracker.schedule(self.aclose(), retry=self.aclose)
+
+
+@dataclass(frozen=True)
+class CatalogSessionView:
+    """Immutable per-request view of a caller's catalog binding."""
+
+    catalog: AuthorizedCatalogProvider
+    context: RequestContext
+    execution_references: bool
+    capability_extensions: tuple[object, ...]
 
 
 class CatalogIntegration:
@@ -590,6 +609,12 @@ class CatalogIntegration:
             errors.extend(await self._cleanup_tracker.drain())
         except asyncio.CancelledError as exc:
             cancelled = exc
+            try:
+                errors.extend(await asyncio.shield(self._cleanup_tracker.drain()))
+            except asyncio.CancelledError as drain_cancelled:
+                cancelled = cancelled or drain_cancelled
+            except Exception as drain_error:
+                errors.append(drain_error)
         except Exception as exc:
             errors.append(exc)
         try:
@@ -677,7 +702,7 @@ class CatalogIntegration:
                     bind_error.add_note(f"Catalog session binding rollback also failed: {cleanup_error!r}")
             raise
 
-    async def capabilities(self, binding: CatalogSessionBinding) -> tuple[Any, ...]:
+    async def capabilities(self, binding: CatalogSessionBinding | CatalogSessionView) -> tuple[Any, ...]:
         by_source = {
             capability.source_id: set(capability.supported_operations)
             for capability in await binding.catalog.capabilities(binding.context)
@@ -804,9 +829,20 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         if callable(clear_auth):
             clear_auth()
 
+    def snapshot(current: Any) -> CatalogSessionView:
+        take_snapshot = getattr(current, "snapshot", None)
+        if callable(take_snapshot):
+            return cast(CatalogSessionView, take_snapshot())
+        return CatalogSessionView(
+            current.catalog,
+            current.context,
+            current.execution_references,
+            tuple(getattr(current, "capability_extensions", ())),
+        )
+
     def execution_reference(
         artifact: Any,
-        current: CatalogSessionBinding,
+        current: CatalogSessionBinding | CatalogSessionView,
         capabilities: dict[str, SourceCapabilities],
     ) -> str | None:
         if not current.execution_references:
@@ -830,7 +866,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         mcp_ctx: Context | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
         try:
-            current = await binding("search_data", mcp_ctx)
+            current = snapshot(await binding("search_data", mcp_ctx))
             page = await current.catalog.search(
                 SearchRequest(
                     query=query,
@@ -868,7 +904,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         mcp_ctx: Context | None = None,
     ) -> dict[str, Any]:
         try:
-            current = await binding("get_artifact", mcp_ctx)
+            current = snapshot(await binding("get_artifact", mcp_ctx))
             capabilities = {
                 capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
             }
@@ -908,7 +944,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
 
     async def list_domains(mcp_ctx: Context | None = None) -> list[str] | dict[str, Any]:
         try:
-            current = await binding("list_domains", mcp_ctx)
+            current = snapshot(await binding("list_domains", mcp_ctx))
             domains: set[str] = set()
             cursor: str | None = None
             remaining = _MAX_DOMAIN_SCAN
@@ -935,7 +971,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
 
     async def get_catalog_capabilities(mcp_ctx: Context | None = None) -> dict[str, Any]:
         try:
-            current = await binding("get_catalog_capabilities", mcp_ctx)
+            current = snapshot(await binding("get_catalog_capabilities", mcp_ctx))
             read_capabilities = await current.catalog.capabilities(current.context)
             capabilities = await integration.capabilities(current)
             return {
