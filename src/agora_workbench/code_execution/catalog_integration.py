@@ -540,11 +540,9 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         source = capabilities.get(artifact.reference.source_id)
         if source is None or not source.supports(CatalogOperation.RESOLVE):
             return None
-        reference = ArtifactReference(
-            artifact.reference.artifact_id,
-            artifact.reference.source_id,
-            artifact.revision,
-        )
+        reference = artifact.reference
+        if reference.revision is None and artifact.revision is not None:
+            reference = ArtifactReference(reference.artifact_id, reference.source_id, artifact.revision)
         return f"<blob>{_encode_reference(reference)}</blob>"
 
     async def search_data(
