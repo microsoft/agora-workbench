@@ -1266,6 +1266,40 @@ def test_local_manifest_parent_swap_cannot_escape_source(tmp_path, monkeypatch):
     assert error is not None
 
 
+def test_local_manifest_root_swap_during_artifact_construction_is_rejected(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    (root / "approved").mkdir(parents=True)
+    (root / "approved" / "data.csv").write_text("original")
+    (root / "manifest.json").write_text(json.dumps(_manifest()))
+    source = _local_config(root).sources[0]
+    db = CatalogDB(":memory:")
+    db.open()
+    indexer = CatalogIndexer(_local_config(root), db)
+    original_make_artifact = indexer._make_manifest_artifact
+    swapped = False
+
+    def swap_then_make(*args, **kwargs):
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            root.rename(tmp_path / "original-source")
+            (root / "approved").mkdir(parents=True)
+            (root / "approved" / "data.csv").write_text("replacement")
+        return original_make_artifact(*args, **kwargs)
+
+    monkeypatch.setattr(indexer, "_make_manifest_artifact", swap_then_make)
+
+    try:
+        artifacts, error = indexer._enumerate_local_manifest(source)
+
+        assert swapped
+        assert artifacts == []
+        assert error is not None
+        assert error == "source_unavailable: source refresh failed"
+    finally:
+        db.close()
+
+
 def test_local_catalog_configuration_rejects_non_posix_scan(tmp_path, monkeypatch):
     monkeypatch.setattr(indexer_module, "_USE_POSIX_DIR_FDS", False)
 

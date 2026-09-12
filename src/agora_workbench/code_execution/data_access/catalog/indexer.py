@@ -899,25 +899,35 @@ class CatalogIndexer:
     def _enumerate_local_manifest(self, source: SourceConfig) -> tuple[list[dict], str | None]:
         source_root = Path(source.path).resolve()
         source_id = _source_id(source)
+        root_fd: int | None = None
         try:
             observed_root = source_root.stat(follow_symlinks=False)
             if not stat.S_ISDIR(observed_root.st_mode):
                 raise FileNotFoundError("source root does not exist or is not a directory")
             manifest_path = self._local_manifest_path(source, source_root)
             root_fd = _open_directory_no_follow(source_root)
-            try:
-                opened_root = os.fstat(root_fd)
-                if (opened_root.st_dev, opened_root.st_ino) != (observed_root.st_dev, observed_root.st_ino):
-                    raise OSError("Catalog source root identity changed before manifest read.")
-                payload = self._read_local_manifest(root_fd, manifest_path.relative_to(source_root))
-            finally:
-                os.close(root_fd)
+            opened_root = os.fstat(root_fd)
+            root_identity = (opened_root.st_dev, opened_root.st_ino)
+            if root_identity != (observed_root.st_dev, observed_root.st_ino):
+                raise OSError("Catalog source root identity changed before manifest read.")
+
+            def verify_live_root() -> None:
+                current_fd = _open_directory_no_follow(source_root)
+                try:
+                    current_root = os.fstat(current_fd)
+                    if (current_root.st_dev, current_root.st_ino) != root_identity:
+                        raise OSError("Catalog source root identity changed during manifest enumeration.")
+                finally:
+                    os.close(current_fd)
+
+            payload = self._read_local_manifest(root_fd, manifest_path.relative_to(source_root))
             manifest = self._parse_manifest(payload, str(manifest_path))
             manifest_etag = hashlib.sha256(payload).hexdigest()
             self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
             now = datetime.now(timezone.utc).isoformat()
             artifacts = []
             for entry in manifest.artifacts:
+                verify_live_root()
                 if is_reserved_provider_path(entry.path):
                     raise ValueError(f"Manifest artifact uses a reserved provider path: {entry.path}")
                 storage_path = (source_root / entry.path).resolve()
@@ -937,6 +947,7 @@ class CatalogIndexer:
                     )
                 )
             self._validate_manifest_artifacts(source_id, artifacts)
+            verify_live_root()
             return artifacts, None
         except Exception as exc:
             error = _safe_source_error(exc)
@@ -947,6 +958,9 @@ class CatalogIndexer:
                 exc,
             )
             return [], error
+        finally:
+            if root_fd is not None:
+                os.close(root_fd)
 
     @staticmethod
     def _blob_manifest_name(source: SourceConfig) -> tuple[str, str, str]:
