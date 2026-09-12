@@ -498,6 +498,26 @@ class DataLakeDataManager:
         """
         return list(self._cache_index.keys())
 
+    def invalidate_cache_entries(self, *, artifact_id_prefix: str | None = None) -> None:
+        """Forget cached artifacts matching a resolver namespace.
+
+        Files are removed best-effort so a subsequent lookup must pass through
+        resolution and authorization again instead of reusing stale content.
+        """
+        keys = [
+            artifact_id
+            for artifact_id in self._cache_index
+            if artifact_id_prefix is None or artifact_id.startswith(artifact_id_prefix)
+        ]
+        for artifact_id in keys:
+            cache_path = self._cache_index.pop(artifact_id, None)
+            if cache_path is None:
+                continue
+            try:
+                cache_path.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.debug("Failed to remove invalidated cache entry %s", cache_path, exc_info=True)
+
     def cleanup(self) -> None:
         """
         Clean up cache directory, credentials, and resources.

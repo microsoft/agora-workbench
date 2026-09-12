@@ -390,14 +390,19 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
         binding = session.extensions["catalog"]
         page = await binding.catalog.search(SearchRequest("blob"), binding.context)
         reference = ArtifactReference("blob-artifact", "blob-source", page.items[0].revision)
+        encoded_reference = _encode_reference(reference)
+        initial_path = await session.data_manager.get_cache_path(f"<blob>{encoded_reference}</blob>")
+        assert initial_path.read_text() == "blob-payload"
+        assert encoded_reference in session.data_manager._cache_index
         set_current_request_token("refreshed-token")
         try:
             server._refresh_session_token(session)
         finally:
             set_current_request_token(None)
+        assert encoded_reference not in session.data_manager._cache_index
         refreshed_access_token = await session.data_manager._credential.get_token("scope")
         assert refreshed_access_token.token == "refreshed-token"
-        path = await session.data_manager.get_cache_path(f"<blob>{_encode_reference(reference)}</blob>")
+        path = await session.data_manager.get_cache_path(f"<blob>{encoded_reference}</blob>")
         assert path.read_text() == "blob-payload"
         legacy_fetcher = session.data_manager._fetchers[0]
         assert legacy_fetcher.destination != path
