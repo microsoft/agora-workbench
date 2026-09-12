@@ -614,7 +614,7 @@ def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[st
         },
         "id": artifact.reference.artifact_id,
         "source_id": artifact.reference.source_id,
-        "name": artifact.presentation.name,
+        "name": _sanitize_metadata_value(artifact.presentation.name),
         "current_revision": artifact.revision,
         "content_revision": artifact.content_revision,
         "metadata_revision": artifact.metadata_revision,
@@ -622,8 +622,8 @@ def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[st
         "score": artifact.score,
     }
     for key, value in {
-        "description": artifact.presentation.description,
-        "content_type": artifact.presentation.media_type,
+        "description": _sanitize_metadata_value(artifact.presentation.description),
+        "content_type": _sanitize_metadata_value(artifact.presentation.media_type),
         "size_bytes": artifact.presentation.size_bytes,
     }.items():
         if value is not None:
@@ -793,6 +793,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
     async def get_catalog_capabilities(mcp_ctx: Context | None = None) -> dict[str, Any]:
         try:
             current = await binding("get_catalog_capabilities", mcp_ctx)
+            read_capabilities = await current.catalog.capabilities(current.context)
             capabilities = await integration.capabilities(current)
             return {
                 "sources": [
@@ -803,7 +804,9 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                     for capability in capabilities
                 ],
                 "execution_references": (
-                    current.execution_references and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
+                    current.execution_references
+                    and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
+                    and any(capability.supports(CatalogOperation.RESOLVE) for capability in read_capabilities)
                 ),
             }
         except Exception as exc:
