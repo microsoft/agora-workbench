@@ -334,13 +334,17 @@ async def stream_chunks_to_file(
     async def copy() -> None:
         nonlocal bytes_transferred
         if parent_fd is not None:
-            output_descriptor = os.open(
-                temporary_name,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                0o600,
-                dir_fd=parent_fd,
-            )
-            output_file = os.fdopen(output_descriptor, "wb", buffering=0, closefd=True)
+            secured_parent_fd = parent_fd
+
+            def secure_opener(path: str, flags: int) -> int:
+                return os.open(
+                    path,
+                    flags | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                    dir_fd=secured_parent_fd,
+                )
+
+            output_file = open(temporary_name, "xb", buffering=0, opener=secure_opener)
         else:
             output_file = temporary_path.open("xb", buffering=0)
         try:

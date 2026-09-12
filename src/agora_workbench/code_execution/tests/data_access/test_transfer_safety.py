@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import gc
 import hashlib
 import io
@@ -219,7 +220,7 @@ async def test_external_cancellation_drains_blocking_destination_io_before_clean
     release.set()
 
     with pytest.raises(asyncio.CancelledError):
-        await transfer
+        _ = await transfer
     assert not destination.exists()
     assert _part_files(tmp_path) == []
 
@@ -694,17 +695,11 @@ async def test_stream_writer_retries_short_writes_and_hashes_committed_bytes(tmp
 
 async def test_stream_writer_fails_and_cleans_up_when_write_makes_no_progress(tmp_path, monkeypatch):
     destination = tmp_path / "destination.bin"
-    original_fdopen = transfer_module.os.fdopen
+    original_open = builtins.open
 
     class StalledWriter:
         def __init__(self, wrapped):
             self._wrapped = wrapped
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            self._wrapped.close()
 
         def __getattr__(self, name):
             return getattr(self._wrapped, name)
@@ -713,9 +708,10 @@ async def test_stream_writer_fails_and_cleans_up_when_write_makes_no_progress(tm
             return 0
 
     monkeypatch.setattr(
-        transfer_module.os,
-        "fdopen",
-        lambda *args, **kwargs: StalledWriter(original_fdopen(*args, **kwargs)),
+        transfer_module,
+        "open",
+        lambda *args, **kwargs: StalledWriter(original_open(*args, **kwargs)),
+        raising=False,
     )
 
     async def chunks():
