@@ -43,11 +43,12 @@ LOGGER = logging.getLogger(__name__)
 
 # Batch size for embedding computation
 _EMBEDDING_BATCH_SIZE = 64
+_USE_POSIX_DIR_FDS = os.name == "posix"
 
 
 def _open_directory_no_follow(path: Path) -> int:
     """Open an absolute directory by traversing every component without following symlinks."""
-    if os.name != "posix" or not path.is_absolute():
+    if not _USE_POSIX_DIR_FDS or not path.is_absolute():
         raise OSError("Secure local catalog traversal is unavailable on this platform.")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     current = os.open(os.path.sep, flags)
@@ -86,6 +87,33 @@ def _stat_regular_file_no_follow(path: str | Path, *, dir_fd: int | None = None)
     finally:
         if parent_fd is not None:
             os.close(parent_fd)
+
+
+def _open_relative_regular_file_no_follow(root_fd: int, relative_path: Path) -> int:
+    """Open a regular file beneath a retained root without following any symlinks."""
+    if not relative_path.parts:
+        raise OSError("Local path must identify a regular file.")
+    current = os.dup(root_fd)
+    try:
+        for part in relative_path.parts[:-1]:
+            next_fd = os.open(
+                part,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=current,
+            )
+            os.close(current)
+            current = next_fd
+        descriptor = os.open(
+            relative_path.parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=current,
+        )
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            os.close(descriptor)
+            raise OSError("Catalog source entry is not a regular file.")
+        return descriptor
+    finally:
+        os.close(current)
 
 
 # Max concurrent blob source enumerations
@@ -273,6 +301,8 @@ class CatalogIndexer:
         self._credential_provider = credential_provider
         self._embedding_provider: Optional[EmbeddingProvider] = embedding_provider
         self._manifest_revisions: dict[str, tuple[int, str]] = {}
+        if not _USE_POSIX_DIR_FDS and any(source.source_type == "local" for source in config.sources):
+            raise ValueError("Local catalog sources require POSIX descriptor-relative path operations.")
 
     @property
     def embedding_provider(self) -> Optional[EmbeddingProvider]:
@@ -816,18 +846,23 @@ class CatalogIndexer:
             raise ValueError(f"Invalid manifest at {location}: {exc}") from exc
 
     @staticmethod
-    def _read_local_manifest(manifest_path: Path) -> bytes:
+    def _read_local_manifest(root_fd: int, manifest_path: Path) -> bytes:
+        descriptor = _open_relative_regular_file_no_follow(root_fd, manifest_path)
         try:
-            declared_size = manifest_path.stat().st_size
-        except OSError:
-            raise
-        if declared_size > MAX_MANIFEST_BYTES:
-            raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
-        with manifest_path.open("rb") as manifest_file:
-            payload = manifest_file.read(MAX_MANIFEST_BYTES + 1)
+            declared_size = os.fstat(descriptor).st_size
+            if declared_size > MAX_MANIFEST_BYTES:
+                raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
+            payload = bytearray()
+            while len(payload) <= MAX_MANIFEST_BYTES:
+                chunk = os.read(descriptor, MAX_MANIFEST_BYTES + 1 - len(payload))
+                if not chunk:
+                    break
+                payload.extend(chunk)
+        finally:
+            os.close(descriptor)
         if len(payload) > MAX_MANIFEST_BYTES:
             raise ValueError(f"Manifest exceeds the {MAX_MANIFEST_BYTES}-byte size limit")
-        return payload
+        return bytes(payload)
 
     @staticmethod
     async def _read_blob_manifest(download: object) -> bytes:
@@ -865,10 +900,18 @@ class CatalogIndexer:
         source_root = Path(source.path).resolve()
         source_id = _source_id(source)
         try:
-            if not source_root.is_dir():
+            observed_root = source_root.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(observed_root.st_mode):
                 raise FileNotFoundError("source root does not exist or is not a directory")
             manifest_path = self._local_manifest_path(source, source_root)
-            payload = self._read_local_manifest(manifest_path)
+            root_fd = _open_directory_no_follow(source_root)
+            try:
+                opened_root = os.fstat(root_fd)
+                if (opened_root.st_dev, opened_root.st_ino) != (observed_root.st_dev, observed_root.st_ino):
+                    raise OSError("Catalog source root identity changed before manifest read.")
+                payload = self._read_local_manifest(root_fd, manifest_path.relative_to(source_root))
+            finally:
+                os.close(root_fd)
             manifest = self._parse_manifest(payload, str(manifest_path))
             manifest_etag = hashlib.sha256(payload).hexdigest()
             self._record_manifest_revision(source_id, manifest.generation, manifest_etag)
@@ -1133,8 +1176,11 @@ class CatalogIndexer:
         now = datetime.now(timezone.utc).isoformat()
         errors: list[OSError] = []
         try:
-            if source_path.is_file():
+            observed_stat = source_path.stat(follow_symlinks=False)
+            if stat.S_ISREG(observed_stat.st_mode):
                 file_stat = _stat_regular_file_no_follow(source_path)
+                if (file_stat.st_dev, file_stat.st_ino) != (observed_stat.st_dev, observed_stat.st_ino):
+                    raise OSError("Catalog source file identity changed during enumeration.")
                 artifacts.append(
                     self._make_local_artifact(
                         source_path,
@@ -1146,9 +1192,12 @@ class CatalogIndexer:
                         file_stat,
                     )
                 )
-            else:
+            elif stat.S_ISDIR(observed_stat.st_mode):
                 root_fd = _open_directory_no_follow(source_path)
                 try:
+                    root_stat = os.fstat(root_fd)
+                    if (root_stat.st_dev, root_stat.st_ino) != (observed_stat.st_dev, observed_stat.st_ino):
+                        raise OSError("Catalog source root identity changed during enumeration.")
                     self._walk_local_directory(
                         root_fd,
                         (),
@@ -1161,6 +1210,8 @@ class CatalogIndexer:
                     )
                 finally:
                     os.close(root_fd)
+            else:
+                raise OSError("Catalog source must be a regular file or directory.")
         except OSError as exc:
             errors.append(exc)
         if errors:
@@ -1214,6 +1265,8 @@ class CatalogIndexer:
                         os.close(child_fd)
                 elif stat.S_ISREG(entry_stat.st_mode):
                     file_stat = _stat_regular_file_no_follow(name, dir_fd=directory_fd)
+                    if (file_stat.st_dev, file_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise OSError("Catalog source entry identity changed during enumeration.")
                     filepath = source_path.joinpath(*child_parts)
                     current_stat = _stat_regular_file_no_follow(filepath)
                     if (current_stat.st_dev, current_stat.st_ino) != (file_stat.st_dev, file_stat.st_ino):

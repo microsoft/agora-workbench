@@ -330,6 +330,60 @@ class TestCatalogIndexerLocal:
         assert swapped
         assert not any(record.name == "secret.csv" for record in db.list_artifacts(limit=100))
 
+    def test_real_root_replacement_is_rejected_by_identity(self, db, tmp_path, monkeypatch):
+        root = tmp_path / "source"
+        root.mkdir()
+        (root / "inside.csv").write_text("inside")
+        source = SourceConfig(source_id="source", path=str(root))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        original_open_root = indexer_module._open_directory_no_follow
+        swapped = False
+
+        def swap_before_root_open(path):
+            nonlocal swapped
+            if path == root and not swapped:
+                swapped = True
+                root.rename(tmp_path / "original-source")
+                root.mkdir()
+                (root / "replacement.csv").write_text("replacement")
+            return original_open_root(path)
+
+        monkeypatch.setattr(indexer_module, "_open_directory_no_follow", swap_before_root_open)
+
+        artifacts, error = indexer._enumerate_local(source)
+
+        assert swapped
+        assert artifacts == []
+        assert error is not None
+
+    def test_entry_replacement_between_stat_and_open_is_rejected(self, db, tmp_path, monkeypatch):
+        root = tmp_path / "source"
+        root.mkdir()
+        victim = root / "asset.csv"
+        victim.write_text("inside")
+        replacement = tmp_path / "replacement.csv"
+        replacement.write_text("replacement")
+        source = SourceConfig(source_id="source", path=str(root))
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        original_stat_file = indexer_module._stat_regular_file_no_follow
+        swapped = False
+
+        def swap_before_descriptor_open(path, *, dir_fd=None):
+            nonlocal swapped
+            if path == victim.name and dir_fd is not None and not swapped:
+                swapped = True
+                victim.unlink()
+                replacement.rename(victim)
+            return original_stat_file(path, dir_fd=dir_fd)
+
+        monkeypatch.setattr(indexer_module, "_stat_regular_file_no_follow", swap_before_descriptor_open)
+
+        artifacts, error = indexer._enumerate_local(source)
+
+        assert swapped
+        assert artifacts == []
+        assert error is not None
+
     def test_single_file_parent_swap_cannot_index_outside_metadata(self, db, tmp_path, monkeypatch):
         source_parent = tmp_path / "source"
         source_parent.mkdir()

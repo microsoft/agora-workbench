@@ -13,13 +13,14 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import tempfile
 from collections.abc import Callable, Coroutine
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from agora_workbench.data_lake.errors import UnsupportedOperationError
+from agora_workbench.data_lake.errors import UnsupportedOperationError, UnsafePathError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
@@ -42,6 +43,49 @@ LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
+
+
+def _open_cached_file_no_follow(path: Path) -> BinaryIO:
+    """Open one cached regular file without following symlinks where supported."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    try:
+        if os.name == "posix":
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            parent_fd = os.open(os.path.sep, flags)
+            try:
+                for part in absolute_path.parts[1:-1]:
+                    next_fd = os.open(part, flags, dir_fd=parent_fd)
+                    os.close(parent_fd)
+                    parent_fd = next_fd
+
+                def secure_opener(name: str, open_flags: int) -> int:
+                    return os.open(
+                        name,
+                        open_flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+                        dir_fd=parent_fd,
+                    )
+
+                cache_file = open(absolute_path.name, "rb", buffering=0, opener=secure_opener)
+            finally:
+                os.close(parent_fd)
+        else:
+            resolved_path = absolute_path.resolve(strict=True)
+            if resolved_path != absolute_path:
+                raise UnsafePathError("Cached asset path cannot contain symlinks.", operation="download")
+            expected_stat = resolved_path.stat()
+            cache_file = resolved_path.open("rb", buffering=0)
+            opened_stat = os.fstat(cache_file.fileno())
+            if (opened_stat.st_dev, opened_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
+                cache_file.close()
+                raise UnsafePathError("Cached asset identity changed before open.", operation="download")
+        if not stat.S_ISREG(os.fstat(cache_file.fileno()).st_mode):
+            cache_file.close()
+            raise UnsafePathError("Cached asset must be a regular file.", operation="download")
+        return cache_file
+    except UnsafePathError:
+        raise
+    except OSError as exc:
+        raise UnsafePathError("Cached asset path could not be opened safely.", operation="download") from exc
 
 
 def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
@@ -274,29 +318,28 @@ class DataLakeDataManager:
 
                 async def validate_cached_file() -> None:
                     check_transfer_cancelled(options, operation="download", resource=str(cache_path))
-                    file_stat = await _run_blocking_io(
-                        cache_path.stat,
-                        options=options,
-                        operation="download",
-                        resource=str(cache_path),
-                    )
-                    check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
-                    if options.expected_sha256 is None:
-                        return
                     cache_file = await _run_blocking_io(
-                        lambda: cache_path.open("rb", buffering=0),
+                        lambda: _open_cached_file_no_follow(cache_path),
                         options=options,
                         operation="download",
                         resource=str(cache_path),
                     )
                     try:
-                        await hash_file(
-                            cache_file,
+                        file_stat = await _run_blocking_io(
+                            lambda: os.fstat(cache_file.fileno()),
                             options=options,
-                            context=context or RequestContext(),
                             operation="download",
                             resource=str(cache_path),
                         )
+                        check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
+                        if options.expected_sha256 is not None:
+                            await hash_file(
+                                cache_file,
+                                options=options,
+                                context=context or RequestContext(),
+                                operation="download",
+                                resource=str(cache_path),
+                            )
                     finally:
                         await _run_blocking_io(cache_file.close)
 

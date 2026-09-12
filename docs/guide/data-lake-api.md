@@ -141,6 +141,8 @@ the bounded streaming contract.
   files are never exposed as the final name. Other platforms retain legacy
   publishing with resolved-containment and parent-identity checks, but do not
   claim the stronger descriptor-relative guarantee.
+- Local catalog scanning requires POSIX descriptor-relative filesystem
+  primitives and is rejected when those guarantees are unavailable.
 - `BlobFetcher(allowed_locations=[...])` accepts `AzureBlobScope` values or
   supported Azure URI strings. Account, container, and prefix boundaries are
   checked before creating a client or making a request.

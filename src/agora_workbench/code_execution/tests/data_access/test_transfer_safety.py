@@ -1504,6 +1504,20 @@ async def test_manager_uses_detailed_builtin_fetcher_and_enforces_transfer_optio
         await manager.aclose()
 
 
+async def test_manager_cache_hit_rejects_symlinked_cache_entry(tmp_path):
+    outside = tmp_path / "secret.bin"
+    outside.write_bytes(b"secret")
+    cached = tmp_path / "cached.bin"
+    cached.symlink_to(outside)
+    manager = DataLakeDataManager(credential=None)
+    manager._cache_index["cached-id"] = cached
+    try:
+        with pytest.raises(UnsafePathError, match="opened safely"):
+            await manager.get_cache_path("<local>cached-id</local>")
+    finally:
+        await manager.aclose()
+
+
 async def test_manager_legacy_fetcher_failure_preserves_existing_destination(tmp_path):
     class FailingLegacyFetcher(AssetFetcher):
         async def fetch(self, qualified_name: str):

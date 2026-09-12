@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import io
 import json
+import os
 import sqlite3
+import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agora_workbench.code_execution.data_access.catalog import indexer as indexer_module
 from agora_workbench.code_execution.data_access.catalog.indexer import _EnumerationResult
 from agora_workbench.data_lake import (
     ArtifactReference,
@@ -1213,24 +1215,62 @@ async def test_blob_manifest_falls_back_to_downloaded_content_digest_without_res
         await provider.aclose()
 
 
-def test_local_manifest_read_is_bounded_when_declared_size_lies():
+def test_local_manifest_read_is_bounded_when_declared_size_lies(tmp_path, monkeypatch):
     payload = b"x" * (MAX_MANIFEST_BYTES + 2)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_bytes(payload)
+    root_fd = os.open(tmp_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    original_fstat = indexer_module.os.fstat
 
-    class BoundedBytesIO(io.BytesIO):
-        def read(self, size=-1):
-            assert size == MAX_MANIFEST_BYTES + 1
-            return super().read(size)
+    def lying_fstat(descriptor):
+        result = original_fstat(descriptor)
+        if stat.S_ISREG(result.st_mode):
+            return SimpleNamespace(st_mode=result.st_mode, st_size=1)
+        return result
 
-    class ManifestPath:
-        def stat(self):
-            return SimpleNamespace(st_size=1)
+    monkeypatch.setattr(indexer_module.os, "fstat", lying_fstat)
+    try:
+        with pytest.raises(ValueError, match="size limit"):
+            CatalogIndexer._read_local_manifest(root_fd, Path("manifest.json"))
+    finally:
+        os.close(root_fd)
 
-        def open(self, mode):
-            assert mode == "rb"
-            return BoundedBytesIO(payload)
 
-    with pytest.raises(ValueError, match="size limit"):
-        CatalogIndexer._read_local_manifest(cast(Path, ManifestPath()))
+def test_local_manifest_parent_swap_cannot_escape_source(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    manifest_parent = root / "metadata"
+    manifest_parent.mkdir(parents=True)
+    (manifest_parent / "manifest.json").write_text(json.dumps(_manifest()))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "manifest.json").write_text(json.dumps(_manifest(description="outside")))
+    source = _local_config(root, manifest="metadata/manifest.json").sources[0]
+    indexer = CatalogIndexer(_local_config(root, manifest="metadata/manifest.json"), CatalogDB(":memory:"))
+    original_open = indexer_module.os.open
+    swapped = False
+
+    def swap_before_parent_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == manifest_parent.name and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            manifest_parent.rename(root / "original-metadata")
+            manifest_parent.symlink_to(outside, target_is_directory=True)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(indexer_module.os, "open", swap_before_parent_open)
+
+    artifacts, error = indexer._enumerate_local_manifest(source)
+
+    assert swapped
+    assert artifacts == []
+    assert error is not None
+
+
+def test_local_catalog_configuration_rejects_non_posix_scan(tmp_path, monkeypatch):
+    monkeypatch.setattr(indexer_module, "_USE_POSIX_DIR_FDS", False)
+
+    with pytest.raises(ValueError, match="POSIX descriptor-relative"):
+        CatalogIndexer(_local_config(tmp_path), CatalogDB(":memory:"))
 
 
 async def test_blob_manifest_read_is_bounded_when_declared_size_lies():
