@@ -249,8 +249,10 @@ class TestAtomicClaim:
         manager._kernel_last_used[session_id] = 0.0
         original_shutdown = manager._shutdown_kernel
         marker = manager._get_outputs_dir(session_id) / "replacement.txt"
+        replacement_kernel = None
 
         async def replace_then_shutdown(closing_session_id, **kwargs):
+            nonlocal replacement_kernel
             manager.create_session(
                 data={},
                 user_identity="new",
@@ -259,6 +261,7 @@ class TestAtomicClaim:
                 session_id=closing_session_id,
             )
             marker.write_text("replacement")
+            replacement_kernel = register_kernel(manager, closing_session_id, name="NEW")
             await original_shutdown(closing_session_id, **kwargs)
 
         monkeypatch.setattr(manager, "_shutdown_kernel", replace_then_shutdown)
@@ -266,6 +269,7 @@ class TestAtomicClaim:
         await manager.cleanup_idle_kernels(max_idle_time=-1)
 
         assert marker.read_text() == "replacement"
+        assert manager._kernels[session_id] == replacement_kernel
 
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
