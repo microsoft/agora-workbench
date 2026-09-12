@@ -99,6 +99,7 @@ class _AsyncCleanupTracker:
 
     async def drain(self) -> list[Exception]:
         errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
         while self._tasks:
             tasks = tuple(self._tasks)
             try:
@@ -111,7 +112,15 @@ class _AsyncCleanupTracker:
                 # tracked so a later shutdown/drain still waits for completion.
                 raise
             self._tasks.difference_update(tasks)
-            errors.extend(result for result in results if isinstance(result, Exception))
+            for result in results:
+                if isinstance(result, asyncio.CancelledError):
+                    cancelled = cancelled or result
+                elif isinstance(result, Exception):
+                    errors.append(result)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional catalog cleanup failures.", errors)))
+            raise cancelled
         return errors
 
 
@@ -152,7 +161,8 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         try:
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
-            super().__init__(self._db_owned, tuple(_effective_source_id(source) for source in config.sources))
+            self._configured_source_ids = tuple(_effective_source_id(source) for source in config.sources)
+            super().__init__(self._db_owned, self._configured_source_ids)
         except BaseException:
             self._db_owned.close()
             self._closed = True
@@ -161,12 +171,28 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
     async def load(self) -> int:
         if self._closed:
             raise RuntimeError("Catalog provider is closed.")
-        return await self._indexer.index()
+        indexed = await self._indexer.index()
+        unavailable = []
+        for source_id in self._configured_source_ids:
+            state = self._db_owned.get_source_refresh_state(source_id)
+            if state is None or state.successful_generation < 1:
+                unavailable.append(source_id)
+        if unavailable:
+            raise RuntimeError(f"Catalog sources are not ready: {', '.join(sorted(unavailable))}")
+        return indexed
 
     async def aclose(self) -> None:
         if not self._closed:
             self._closed = True
-            self._db_owned.close()
+            try:
+                embedding_provider = vars(self._indexer).get("_embedding_provider")
+                close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
+            finally:
+                self._db_owned.close()
 
 
 def _encode_reference(reference: ArtifactReference) -> str:
@@ -248,8 +274,11 @@ class CatalogSessionBinding:
             return
         self._closed = True
         errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
         try:
             await self.resolver.aclose()
+        except asyncio.CancelledError as exc:
+            cancelled = exc
         except Exception as exc:
             errors.append(exc)
         for extension in self.capability_extensions:
@@ -259,8 +288,14 @@ class CatalogSessionBinding:
                     result = close()
                     if inspect.isawaitable(result):
                         await result
+                except asyncio.CancelledError as exc:
+                    cancelled = cancelled or exc
                 except Exception as exc:
                     errors.append(exc)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))
+            raise cancelled
         if errors:
             raise ExceptionGroup("Catalog session binding cleanup failed.", errors)
 
@@ -374,10 +409,17 @@ class CatalogIntegration:
                     await result
             await self.provider.capabilities()
             self._started = True
-        except BaseException:
-            if self._provider_lease.should_close:
-                await asyncio.shield(self._close_provider())
-            self._cleanup_private_cache_directory()
+        except BaseException as startup_error:
+            close_error: BaseException | None = None
+            try:
+                if self._provider_lease.should_close:
+                    await asyncio.shield(self._close_provider())
+            except BaseException as exc:
+                close_error = exc
+            finally:
+                self._cleanup_private_cache_directory()
+            if close_error is not None:
+                startup_error.add_note(f"Catalog startup rollback also failed: {close_error!r}")
             raise
 
     async def shutdown(self) -> None:
@@ -535,12 +577,23 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
     setattr(server.mcp, "_agora_catalog_tool_mode", "policy-aware")
 
     async def binding(tool_name: str, mcp_ctx: Context | None) -> CatalogSessionBinding:
-        session_id = getattr(mcp_ctx, "session_id", None) if mcp_ctx is not None else None
+        try:
+            session_id = mcp_ctx.session_id if mcp_ctx is not None else None
+        except (AttributeError, RuntimeError):
+            session_id = None
+        restore_auth = getattr(server, "_restore_auth_context_for_mcp_session", None)
+        if callable(restore_auth):
+            restore_auth(session_id)
         session = await server._get_or_create_session(tool_name, session_id=session_id)
         catalog_binding = session.extensions.get("catalog")
         if catalog_binding is None:
             raise RuntimeError("Catalog session binding is unavailable.")
         return catalog_binding
+
+    def clear_auth_context() -> None:
+        clear_auth = getattr(server, "_clear_auth_context", None)
+        if callable(clear_auth):
+            clear_auth()
 
     def execution_reference(
         artifact: Any,
@@ -592,6 +645,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
             return hits
         except Exception as exc:
             return _error_payload(exc)
+        finally:
+            clear_auth_context()
 
     async def get_artifact(
         artifact_id: Annotated[str, Field(min_length=1, max_length=2_000)],
@@ -633,6 +688,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
             )
         except Exception as exc:
             return _error_payload(exc)
+        finally:
+            clear_auth_context()
 
     async def list_domains(mcp_ctx: Context | None = None) -> list[str] | dict[str, Any]:
         try:
@@ -654,6 +711,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
             return sorted(domains)
         except Exception as exc:
             return _error_payload(exc)
+        finally:
+            clear_auth_context()
 
     async def get_catalog_capabilities(mcp_ctx: Context | None = None) -> dict[str, Any]:
         try:
@@ -671,6 +730,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
             }
         except Exception as exc:
             return _error_payload(exc)
+        finally:
+            clear_auth_context()
 
     server.mcp.tool(
         name="search_data",

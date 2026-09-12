@@ -2792,20 +2792,22 @@ else:
                 await self.activity_publisher.start()
             except Exception:
                 LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
-        except BaseException:
-            try:
-                await self._sidecar_manager.stop_all()
-            except Exception:
-                LOGGER.debug("Sidecar rollback raised after startup failure", exc_info=True)
-            try:
-                await self._close_tool_search_backends()
-            except Exception:
-                LOGGER.debug("Tool-search rollback raised after startup failure", exc_info=True)
+        except BaseException as startup_error:
+            rollback_cancellation = await self._await_catalog_cleanup(
+                self._sidecar_manager.stop_all(),
+                "Sidecar rollback",
+            )
+            rollback_cancellation = rollback_cancellation or await self._await_catalog_cleanup(
+                self._close_tool_search_backends(),
+                "Tool-search rollback",
+            )
             if self.catalog is not None:
-                try:
-                    await asyncio.shield(self.catalog.shutdown())
-                except Exception:
-                    LOGGER.debug("Catalog rollback raised after startup failure", exc_info=True)
+                rollback_cancellation = rollback_cancellation or await self._await_catalog_cleanup(
+                    self.catalog.shutdown(),
+                    "Catalog rollback",
+                )
+            if rollback_cancellation is not None and not isinstance(startup_error, asyncio.CancelledError):
+                startup_error.add_note(f"Startup rollback was cancelled: {rollback_cancellation!r}")
             raise
 
         LOGGER.info("Server initialization complete")
