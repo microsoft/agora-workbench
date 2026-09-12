@@ -209,10 +209,10 @@ async def test_await_transfer_cancels_provider_on_timeout_and_external_cancellat
         if cancel_outer:
             operation.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await operation
+                _ = await operation
         else:
             with pytest.raises(TransferTimeoutError):
-                await operation
+                _ = await operation
         assert provider_finished.is_set()
 
     await run_case(timeout_seconds=0.01, cancel_outer=False)
@@ -827,7 +827,7 @@ async def test_blob_publisher_cancels_upload_before_closing_snapshot(tmp_path):
     await upload_started.wait()
     publish_task.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await publish_task
+        _ = await publish_task
 
     assert upload_cancelled_with_open_stream.is_set()
     assert list((tmp_path / "staging").glob("*.upload")) == []
