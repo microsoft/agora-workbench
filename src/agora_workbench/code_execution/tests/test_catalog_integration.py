@@ -13,7 +13,11 @@ import pytest
 
 from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServer, ServerConfig
 from agora_workbench.code_execution.auth import create_noop_auth_config
-from agora_workbench.code_execution.catalog_integration import _encode_reference, register_catalog_discovery_tools
+from agora_workbench.code_execution.catalog_integration import (
+    _decode_reference,
+    _encode_reference,
+    register_catalog_discovery_tools,
+)
 from agora_workbench.code_execution.catalog_tools import CatalogToolsContext, register_catalog_tools
 from agora_workbench.code_execution.data_access.fetchers import AssetFetcher
 from agora_workbench.code_execution.data_access.manager import DataLakeDataManager
@@ -400,7 +404,7 @@ async def test_owned_catalog_startup_failure_and_cancellation_close(failure):
 
 async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     artifact = CatalogArtifact(
-        ArtifactReference("artifact", "source"),
+        ArtifactReference("artifact", "source", revision=3),
         ArtifactPresentation("data.csv", description="Data", media_type="text/csv", size_bytes=4),
         StorageLocator("file:///data/data.csv"),
         metadata={
@@ -463,6 +467,8 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert result[0]["related"] == {"url": "https://example.test/related"}
     assert result[0]["score"] == 0.75
     assert result[0]["load_path"].startswith("<blob>catalog-v1:")
+    encoded_reference = result[0]["load_path"].removeprefix("<blob>").removesuffix("</blob>")
+    assert _decode_reference(encoded_reference).revision == 3
     assert catalog.resolve.await_count == 0
     assert catalog.capabilities.await_count == 1
     details = await captured["get_artifact"]("artifact")
