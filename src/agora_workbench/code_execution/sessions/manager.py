@@ -1751,6 +1751,7 @@ class SessionManager:
         *,
         cleanup_artifacts: bool = True,
         expected_session_generation: int | None = None,
+        expected_kernel_generation: int | None = None,
     ):
         """Shut down the session's current kernel and drop its registry state.
 
@@ -1768,20 +1769,25 @@ class SessionManager:
 
         Idempotent: calling it for a session with no kernel is a no-op.
         """
-        entry = self._kernels.pop(session_id, None)
-        if entry is None:
-            LOGGER.debug("No kernel to shut down for session %s", session_id)
-            return
+        with self._session_lifecycle_lock:
+            current_kernel_generation = self._kernel_generations.get(session_id)
+            if expected_kernel_generation is not None and current_kernel_generation != expected_kernel_generation:
+                LOGGER.debug("Skipping stale kernel teardown for session %s", session_id)
+                return
+            entry = self._kernels.pop(session_id, None)
+            if entry is None:
+                LOGGER.debug("No kernel to shut down for session %s", session_id)
+                return
 
-        km, kc = entry
-        # Drop the rest of the per-kernel state in the same synchronous step.
-        # Deferring any of it past an await would risk clobbering the state of
-        # a *replacement* kernel started for this session in the meantime.
-        self._kernel_last_used.pop(session_id, None)
-        self._kernel_tokens.pop(session_id, None)
-        self._kernel_execute_locks.pop(session_id, None)
-        self._kernel_session_generations.pop(session_id, None)
-        self._discard_kernel_generation(session_id)
+            km, kc = entry
+            # Drop the rest of the per-kernel state in the same synchronous step.
+            # Deferring any of it past an await would risk clobbering the state of
+            # a *replacement* kernel started for this session in the meantime.
+            self._kernel_last_used.pop(session_id, None)
+            self._kernel_tokens.pop(session_id, None)
+            self._kernel_execute_locks.pop(session_id, None)
+            self._kernel_session_generations.pop(session_id, None)
+            self._discard_kernel_generation(session_id)
         if cleanup_artifacts:
             with self._session_lifecycle_lock:
                 current_session_generation = self._session_generations.get(session_id)
@@ -1863,11 +1869,13 @@ class SessionManager:
             return None
 
         expected_session_generation = self._kernel_session_generations.get(session_id)
+        expected_kernel_generation = self._kernel_generations.get(session_id)
         task = loop.create_task(
             self._shutdown_kernel(
                 session_id,
                 cleanup_artifacts=cleanup_artifacts,
                 expected_session_generation=expected_session_generation,
+                expected_kernel_generation=expected_kernel_generation,
             )
         )
         self._kernel_shutdown_tasks[session_id] = task
@@ -1906,16 +1914,21 @@ class SessionManager:
         """Cleanup kernels that have been idle for too long."""
         now = time.time()
         idle_sessions = [
-            (sid, self._kernel_session_generations.get(sid))
+            (
+                sid,
+                self._kernel_session_generations.get(sid),
+                self._kernel_generations.get(sid),
+            )
             for sid, last_used in self._kernel_last_used.items()
             if now - last_used > max_idle_time
         ]
 
-        for session_id, session_generation in idle_sessions:
+        for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
             await self._shutdown_kernel(
                 session_id,
                 expected_session_generation=session_generation,
+                expected_kernel_generation=kernel_generation,
             )
 
     # ========================================================================
