@@ -160,7 +160,7 @@ class SessionConfig:
         timeout_minutes: int = 30,
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
-        data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager"]] = None,
+        data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager | SessionResources"]] = None,
     ):
         """
         Initialize session manager configuration.
@@ -177,11 +177,12 @@ class SessionConfig:
                 a custom artifact resolver, extra fetchers, or configuration
                 derived from ``user_identity`` / ``user_token``.
 
-                The factory **must return a fresh instance per call**. The
-                session takes ownership of the manager and calls ``cleanup()``
-                on it when the session ends, so returning a shared singleton
-                would let the first session torn down destroy a manager still
-                in use by the others.
+                The factory **must return a fresh data manager or
+                :class:`SessionResources` bundle per call**. The session takes
+                ownership of the manager and extensions and cleans them up when
+                the session ends, so returning shared resources would let the
+                first session torn down destroy resources still in use by
+                others.
 
                 When omitted, each session builds a default
                 ``DataLakeDataManager()``, matching previous behavior.
@@ -232,6 +233,7 @@ class SessionManager:
         self._kernels: dict[str, Tuple[AsyncKernelManager, "AsyncKernelClient"]] = {}
         self._kernel_last_used: dict[str, float] = {}  # session_id -> timestamp
         self._kernel_tokens: dict[str, Optional[str]] = {}  # session_id -> last injected user token
+        self._kernel_session_generations: dict[str, int | None] = {}
         # Per-session lock that serializes execute_code_for_session calls so the
         # shared Jupyter kernel client (single iopub queue) cannot be raced by
         # concurrent callers (e.g. four parallel push_object MCP calls).
@@ -595,11 +597,12 @@ class SessionManager:
             await self.await_resource_cleanup()
             return
         completion = asyncio.gather(*tasks, return_exceptions=True)
+        outer_cancellation: asyncio.CancelledError | None = None
         try:
             results = await asyncio.shield(completion)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
+            outer_cancellation = exc
             results = await asyncio.shield(completion)
-            raise
         finally:
             for session_id, task in zip(session_ids, tasks):
                 if task.done() and not task.cancelled() and task.exception() is not None:
@@ -611,7 +614,7 @@ class SessionManager:
         ]
         cancelled = next(
             (result for result in results if isinstance(result, asyncio.CancelledError)),
-            None,
+            outer_cancellation,
         )
         try:
             await self.await_resource_cleanup()
@@ -661,9 +664,18 @@ class SessionManager:
                 raise ValueError(f"Session {session_id} was closed before its kernel could start.")
 
         if session_id in self._kernels:
-            LOGGER.debug(f"Reusing kernel for session {session_id}")
-            self._kernel_last_used[session_id] = time.time()
-            return self._kernels[session_id]
+            kernel_session_generation = self._kernel_session_generations.get(session_id)
+            if (
+                session_generation is None
+                or kernel_session_generation is None
+                or kernel_session_generation == session_generation
+            ):
+                LOGGER.debug(f"Reusing kernel for session {session_id}")
+                self._kernel_last_used[session_id] = time.time()
+                return self._kernels[session_id]
+            stale_shutdown = self._schedule_kernel_shutdown(session_id, caller="_get_or_create_kernel()")
+            if stale_shutdown is not None:
+                await stale_shutdown
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
@@ -719,6 +731,7 @@ class SessionManager:
                 self._kernel_last_used[session_id] = time.time()
                 self._kernel_tokens[session_id] = user_token
                 self._assign_kernel_generation(session_id)
+                self._kernel_session_generations[session_id] = session_generation
         if not session_is_current:
             kernel_client.stop_channels()
             await kernel_manager.shutdown_kernel(now=True)
@@ -1736,6 +1749,7 @@ class SessionManager:
         self._kernel_last_used.pop(session_id, None)
         self._kernel_tokens.pop(session_id, None)
         self._kernel_execute_locks.pop(session_id, None)
+        self._kernel_session_generations.pop(session_id, None)
         self._discard_kernel_generation(session_id)
         self._cleanup_session_artifacts(session_id)
 
