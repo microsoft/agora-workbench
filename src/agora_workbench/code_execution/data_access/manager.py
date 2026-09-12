@@ -160,9 +160,9 @@ class DataLakeDataManager:
         allowed_local_roots: list[str] | None = None,
         extra_fetchers: list[AssetFetcher] | None = None,
         credential: "AsyncTokenCredential | None" = None,
-        credential_ownership: ResourceOwnership = ResourceOwnership.BORROWED,
         artifact_resolver: ArtifactResolver | None = None,
         transfer_options: TransferOptions | None = None,
+        credential_ownership: ResourceOwnership = ResourceOwnership.BORROWED,
     ):
         """
         Initialize the data manager.
@@ -187,10 +187,6 @@ class DataLakeDataManager:
                 Storage and Azure AI Search access. When omitted, the manager
                 creates the same storage credential chain as before, resolving
                 ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.
-            credential_ownership: Whether the manager closes a supplied
-                credential. Existing callers retain borrowed semantics by
-                default; integrations that create one credential per session
-                can explicitly transfer ownership.
             artifact_resolver: Optional resolver turning ``<blob>id</blob>``
                 identifiers into fetchable URLs, for deployments whose catalog
                 is not an Azure AI Search index. When omitted, a
@@ -198,6 +194,12 @@ class DataLakeDataManager:
                 preserving existing behavior. A supplied resolver is used as-is
                 and is *not* given the manager's credential, so it must arrange
                 its own authentication.
+            transfer_options: Default bounded-transfer policy used when a call
+                does not provide an explicit override.
+            credential_ownership: Whether the manager closes a supplied
+                credential. Existing callers retain borrowed semantics by
+                default; integrations that create one credential per session
+                can explicitly transfer ownership.
 
         Raises:
             TypeError: If ``artifact_resolver`` does not implement the

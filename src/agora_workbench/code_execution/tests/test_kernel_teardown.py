@@ -18,6 +18,7 @@ See https://github.com/microsoft/agora-workbench/issues/314.
 
 import asyncio
 import logging
+import threading
 import time
 from datetime import timedelta
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ import pytest
 
 from ..server import CodeExecutionServer
 from ..sessions.manager import KERNEL_BOOTSTRAP_TOOL_PROXIES, SessionManager, _BackgroundJob
+from ..sessions.storage import InMemoryStorage
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +246,49 @@ class TestAtomicClaim:
 
 @pytest.mark.unit
 class TestCoalescing:
+    async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
+        class PausingStorage(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.pause_retrieve = False
+                self.retrieve_started = threading.Event()
+                self.resume_retrieve = threading.Event()
+
+            def retrieve(self, session_id):
+                session = super().retrieve(session_id)
+                if self.pause_retrieve:
+                    self.retrieve_started.set()
+                    self.resume_retrieve.wait(timeout=5)
+                return session
+
+        storage = PausingStorage()
+        manager.storage = storage
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        storage.pause_retrieve = True
+
+        close_task = asyncio.create_task(asyncio.to_thread(manager.close_session, session_id))
+        assert await asyncio.to_thread(storage.retrieve_started.wait, 5)
+        replacement_task = asyncio.create_task(
+            asyncio.to_thread(
+                manager.create_session,
+                {},
+                "new",
+                "t",
+                {},
+                None,
+                session_id,
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not replacement_task.done()
+
+        storage.pause_retrieve = False
+        storage.resume_retrieve.set()
+        await close_task
+        await replacement_task
+
+        assert manager.storage.retrieve(session_id).user_identity == "new"
+
     async def test_double_close_does_not_raise(self, manager):
         """Regression: the loser used to die on ``del self._kernels[...]``
         inside a task nobody was watching."""
