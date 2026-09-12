@@ -465,9 +465,14 @@ class SessionManager:
         session_id: str,
         *,
         caller: str,
+        expected_generation: int | None = None,
     ) -> "Optional[asyncio.Task[None]]":
         """Shared synchronous close path with caller-specific diagnostics."""
-        shutdown_task, session = self._claim_session_close(session_id, caller=caller)
+        shutdown_task, session = self._claim_session_close(
+            session_id,
+            caller=caller,
+            expected_generation=expected_generation,
+        )
         if session:
             cleanup_failed = False
             try:
@@ -2001,14 +2006,20 @@ class SessionManager:
     def _cleanup_expired(self):
         """Remove expired sessions and their kernels."""
         now = datetime.now()
-        sessions = self.storage.list_all()
+        with self._session_lifecycle_lock:
+            sessions = self.storage.list_all()
+            expired = [
+                (session_id, self._session_generations.get(session_id))
+                for session_id, session in sessions.items()
+                if now - session.last_accessed > self.config.timeout
+            ]
 
-        expired = [
-            session_id for session_id, session in sessions.items() if now - session.last_accessed > self.config.timeout
-        ]
-
-        for session_id in expired:
-            self._close_session_sync(session_id, caller="Expired-session cleanup")
+        for session_id, generation in expired:
+            self._close_session_sync(
+                session_id,
+                caller="Expired-session cleanup",
+                expected_generation=generation,
+            )
 
     def _enforce_max_sessions(self):
         """
