@@ -668,10 +668,14 @@ async def test_session_capability_extension_merges_and_closes():
 
 async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
     closed = False
+    cancelled_attempts = 0
 
     class CancelledExtension:
         async def aclose(self):
-            raise asyncio.CancelledError()
+            nonlocal cancelled_attempts
+            cancelled_attempts += 1
+            if cancelled_attempts == 1:
+                raise asyncio.CancelledError()
 
     class LaterExtension:
         async def aclose(self):
@@ -692,6 +696,10 @@ async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
         await binding.aclose()
 
     assert closed
+    assert not binding._closed
+    await binding.aclose()
+    assert cancelled_attempts == 2
+    assert binding._closed
 
 
 async def test_sync_session_close_tracks_async_only_extension_until_shutdown(tmp_path):
