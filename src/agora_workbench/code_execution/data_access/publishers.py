@@ -200,7 +200,10 @@ def parse_destination_tag(destination: str) -> tuple[str, str] | None:
 
 def _inspect_publish_capabilities(implementation: Any) -> tuple[bool, bool, bool]:
     """Return keyword capabilities for one publisher implementation."""
-    signature = inspect.signature(implementation)
+    try:
+        signature = inspect.signature(implementation)
+    except (TypeError, ValueError):
+        return False, False, False
     supports_kwargs = any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
     )
@@ -1076,6 +1079,7 @@ class LocalFilePublisher(AssetPublisher):
         parent_fd = root_fd
         temporary_name = f".{relative.name}.{secrets.token_hex(8)}.part"
         output_fd: int | None = None
+        committed = False
         try:
             for part in relative.parts[:-1]:
                 try:
@@ -1111,6 +1115,7 @@ class LocalFilePublisher(AssetPublisher):
                 os.unlink(temporary_name, dir_fd=parent_fd)
             else:
                 os.replace(temporary_name, relative.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+            committed = True
             return TransferResult(
                 result.bytes_transferred,
                 result.checksum_sha256,
@@ -1123,10 +1128,11 @@ class LocalFilePublisher(AssetPublisher):
         finally:
             if output_fd is not None:
                 os.close(output_fd)
-            try:
-                os.unlink(temporary_name, dir_fd=parent_fd)
-            except FileNotFoundError:
-                LOGGER.debug("Local publisher temporary file was already committed or removed: %s", temporary_name)
+            if not committed:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
             if parent_fd != root_fd:
                 os.close(parent_fd)
             os.close(root_fd)

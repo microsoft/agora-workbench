@@ -41,6 +41,7 @@ from agora_workbench.data_lake.transfer import await_transfer, hash_file, safe_a
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
 from ...data_access import fetchers as fetchers_module
+from ...data_access import manager as manager_module
 from ...data_access import publishers as publishers_module
 from agora_workbench.data_lake import transfer as transfer_module
 from ...data_access.publishers import BlobPublisher, LocalFilePublisher, ServerPublisher, publish_compat
@@ -671,6 +672,25 @@ async def test_local_publisher_failure_has_no_visible_or_partial_output(tmp_path
 
     assert not (output_root / "session" / "result.bin").exists()
     assert _part_files(output_root / "session") == []
+
+
+async def test_local_publisher_success_does_not_retry_partial_cleanup(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    output_root = tmp_path / "outputs"
+    original_unlink = publishers_module.os.unlink
+    unlinked_names = []
+
+    def recording_unlink(path, *args, **kwargs):
+        unlinked_names.append(path)
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(publishers_module.os, "unlink", recording_unlink)
+
+    await LocalFilePublisher(output_root).publish(source, "result.bin", "session")
+
+    assert unlinked_names == []
+    assert (output_root / "session" / "result.bin").read_bytes() == b"content"
 
 
 def test_blob_scope_validates_account_container_prefix_and_reserved_names():
@@ -1418,6 +1438,11 @@ async def test_manager_revalidates_cached_file_against_per_call_transfer_options
                 "<local>cached-id</local>",
                 transfer_options=TransferOptions(max_bytes=1),
             )
+        with pytest.raises(TransferLimitError):
+            await manager.get_cache_path(
+                "<local>cached-id</local>",
+                transfer_options=TransferOptions(max_bytes=None, quota_bytes=1),
+            )
         with pytest.raises(TransferChecksumError):
             await manager.get_cache_path(
                 "<local>cached-id</local>",
@@ -1437,6 +1462,26 @@ async def test_manager_revalidates_cached_file_against_per_call_transfer_options
         )
         assert result == cached
         assert cached.read_bytes() == b"content"
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_cache_hit_uses_defaults_and_skips_hash_without_checksum(tmp_path, monkeypatch):
+    cached = tmp_path / "cached.bin"
+    cached.write_bytes(b"content")
+    manager = DataLakeDataManager(credential=None, transfer_options=TransferOptions(max_bytes=1))
+    manager._cache_index["cached-id"] = cached
+    hash_file = AsyncMock(side_effect=AssertionError("cache hit must not hash without an expected checksum"))
+    monkeypatch.setattr(manager_module, "hash_file", hash_file)
+    try:
+        with pytest.raises(TransferLimitError):
+            await manager.get_cache_path("<local>cached-id</local>")
+        hash_file.assert_not_awaited()
+
+        manager._transfer_options = TransferOptions(max_bytes=100)
+        result = await manager.get_cache_path("<local>cached-id</local>")
+        assert result == cached
+        hash_file.assert_not_awaited()
     finally:
         await manager.aclose()
 
@@ -1602,3 +1647,29 @@ async def test_publish_compat_rechecks_dynamic_instance_callable(tmp_path):
 
     assert legacy.startswith("legacy:")
     assert modern == "modern:True:True"
+
+
+async def test_publish_compat_falls_back_to_legacy_when_signature_is_unavailable(tmp_path, monkeypatch):
+    class LegacyPublisher:
+        async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+            return f"{local_path}:{name}:{session_id}"
+
+    publisher = LegacyPublisher()
+    source = tmp_path / "source.bin"
+    publishers_module._publish_capabilities.cache_clear()
+    monkeypatch.setattr(
+        publishers_module.inspect,
+        "signature",
+        MagicMock(side_effect=ValueError("signature unavailable")),
+    )
+
+    result = await publish_compat(
+        publisher,
+        local_path=source,
+        name="value",
+        session_id="session",
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert result == f"{source}:value:session"

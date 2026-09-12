@@ -22,7 +22,15 @@ from urllib.parse import urlparse
 from agora_workbench.data_lake.errors import UnsupportedOperationError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
-from agora_workbench.data_lake.transfer import TransferOptions, _run_blocking_io, hash_file, safe_artifact_reference
+from agora_workbench.data_lake.transfer import (
+    TransferOptions,
+    _run_blocking_io,
+    await_transfer,
+    check_transfer_cancelled,
+    check_transfer_size,
+    hash_file,
+    safe_artifact_reference,
+)
 
 from .. import agent_guidance
 from ..types import AssetId
@@ -262,23 +270,42 @@ class DataLakeDataManager:
         if artifact_id in self._cache_index:
             cache_path = self._cache_index[artifact_id]
             if cache_path.exists():
-                options = transfer_options or TransferOptions()
-                cache_file = await _run_blocking_io(
-                    lambda: cache_path.open("rb", buffering=0),
-                    options=options,
-                    operation="download",
-                    resource=str(cache_path),
-                )
-                try:
-                    await hash_file(
-                        cache_file,
+                options = transfer_options or self._transfer_options
+
+                async def validate_cached_file() -> None:
+                    check_transfer_cancelled(options, operation="download", resource=str(cache_path))
+                    file_stat = await _run_blocking_io(
+                        cache_path.stat,
                         options=options,
-                        context=context or RequestContext(),
                         operation="download",
                         resource=str(cache_path),
                     )
-                finally:
-                    await _run_blocking_io(cache_file.close)
+                    check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
+                    if options.expected_sha256 is None:
+                        return
+                    cache_file = await _run_blocking_io(
+                        lambda: cache_path.open("rb", buffering=0),
+                        options=options,
+                        operation="download",
+                        resource=str(cache_path),
+                    )
+                    try:
+                        await hash_file(
+                            cache_file,
+                            options=options,
+                            context=context or RequestContext(),
+                            operation="download",
+                            resource=str(cache_path),
+                        )
+                    finally:
+                        await _run_blocking_io(cache_file.close)
+
+                await await_transfer(
+                    validate_cached_file(),
+                    options,
+                    operation="download",
+                    resource=str(cache_path),
+                )
                 LOGGER.debug(f"Asset already cached: {cache_path}")
                 return cache_path
 
