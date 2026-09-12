@@ -293,6 +293,7 @@ class CatalogSessionBinding:
                 except Exception as exc:
                     errors.append(exc)
         if cancelled is not None:
+            self._closed = False
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))
             raise cancelled
