@@ -789,6 +789,43 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert not capabilities["execution_references"]
 
 
+async def test_catalog_discovery_restores_transport_auth_before_session_lookup():
+    auth_state = {"identity": "stale-user"}
+    binding = SimpleNamespace(
+        catalog=SimpleNamespace(
+            search=AsyncMock(return_value=Page(())),
+            capabilities=AsyncMock(return_value=()),
+        ),
+        context=RequestContext(),
+        execution_references=False,
+    )
+    session = SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+    captured = {}
+
+    def restore_auth(session_id):
+        assert session_id == "transport-session"
+        auth_state["identity"] = "session-user"
+
+    async def get_session(tool_name, *, session_id):
+        assert tool_name == "search_data"
+        assert session_id == "transport-session"
+        assert auth_state["identity"] == "session-user"
+        return session
+
+    server = SimpleNamespace(
+        mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
+        _restore_auth_context_for_mcp_session=restore_auth,
+        _get_or_create_session=get_session,
+    )
+    integration = SimpleNamespace(
+        capabilities=AsyncMock(),
+        _policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
+    register_catalog_discovery_tools(server, cast(CatalogIntegration, integration))
+
+    assert await captured["search_data"]("data", mcp_ctx=SimpleNamespace(session_id="transport-session")) == []
+
+
 async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguity():
     first = CatalogArtifact(
         ArtifactReference("shared-id", "first"),
