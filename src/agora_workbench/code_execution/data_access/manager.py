@@ -324,62 +324,59 @@ class DataLakeDataManager:
         display_id = sanitize_uri_for_display(artifact_id) if "://" in artifact_id else artifact_id
         LOGGER.info("Resolving %s artifact: %s", artifact_type, display_id)
 
-        # Check if already cached (use artifact_id as cache key)
-        if artifact_id in self._cache_index:
-            cache_path = self._cache_index[artifact_id]
-            if cache_path.exists():
-                options = transfer_options or self._transfer_options
+        # Check if already cached (use artifact_id as cache key). A concurrent
+        # authorization refresh invalidates catalog entries; retry once against
+        # the new generation, then fall through to a fresh resolution.
+        for _ in range(2):
+            cache_path = self._cache_index.get(artifact_id)
+            if cache_path is None or not cache_path.exists():
+                break
+            validated_cache_path = cache_path
+            options = transfer_options or self._transfer_options
 
-                async def validate_cached_file() -> None:
-                    check_transfer_cancelled(options, operation="download", resource=str(cache_path))
-                    cache_file = await _run_blocking_io(
-                        lambda: _open_cached_file_no_follow(cache_path),
+            async def validate_cached_file() -> None:
+                check_transfer_cancelled(options, operation="download", resource=str(validated_cache_path))
+                cache_file = await _run_blocking_io(
+                    lambda: _open_cached_file_no_follow(validated_cache_path),
+                    options=options,
+                    operation="download",
+                    resource=str(validated_cache_path),
+                )
+                try:
+                    file_stat = await _run_blocking_io(
+                        lambda: os.fstat(cache_file.fileno()),
                         options=options,
                         operation="download",
                         resource=str(cache_path),
                     )
-                    try:
-                        file_stat = await _run_blocking_io(
-                            lambda: os.fstat(cache_file.fileno()),
+                    check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
+                    if options.expected_sha256 is not None:
+                        await hash_file(
+                            cache_file,
                             options=options,
+                            context=context or RequestContext(),
                             operation="download",
                             resource=str(cache_path),
                         )
-                        check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
-                        if options.expected_sha256 is not None:
-                            await hash_file(
-                                cache_file,
-                                options=options,
-                                context=context or RequestContext(),
-                                operation="download",
-                                resource=str(cache_path),
-                            )
-                    finally:
-                        await _run_blocking_io(cache_file.close)
+                finally:
+                    await _run_blocking_io(cache_file.close)
 
-                try:
-                    await await_transfer(
-                        validate_cached_file(),
-                        options,
-                        operation="download",
-                        resource=str(cache_path),
-                    )
-                except Exception:
-                    if generation_scoped and cache_generation != self._cache_generation:
-                        return await self.get_cache_path(
-                            qualified_name,
-                            context=context,
-                            transfer_options=transfer_options,
-                        )
+            try:
+                await await_transfer(
+                    validate_cached_file(),
+                    options,
+                    operation="download",
+                    resource=str(validated_cache_path),
+                )
+            except Exception:
+                if not generation_scoped or cache_generation == self._cache_generation:
                     raise
-                if generation_scoped and cache_generation != self._cache_generation:
-                    return await self.get_cache_path(
-                        qualified_name,
-                        context=context,
-                        transfer_options=transfer_options,
-                    )
-                LOGGER.debug(f"Asset already cached: {cache_path}")
-                return cache_path
+            else:
+                if not generation_scoped or cache_generation == self._cache_generation:
+                    LOGGER.debug(f"Asset already cached: {cache_path}")
+                    return cache_path
+            self._cache_index.pop(artifact_id, None)
+            cache_generation = self._cache_generation
 
         # Route to appropriate resolver based on artifact type
         if artifact_type == "blob":
