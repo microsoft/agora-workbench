@@ -522,21 +522,22 @@ class SessionManager:
         caller: str,
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
-        running_job_id = self._get_running_job_for_session(session_id)
-        if running_job_id:
-            job = self._background_jobs.get(running_job_id)
-            if job:
-                job.success = False
-                job.error = f"Session {session_id} was closed while job {running_job_id} was running"
-                job.status = "failed"
-                if job.task and not job.task.done():
-                    job.task.cancel()
+        with self._session_lifecycle_lock:
+            running_job_id = self._get_running_job_for_session(session_id)
+            if running_job_id:
+                job = self._background_jobs.get(running_job_id)
+                if job:
+                    job.success = False
+                    job.error = f"Session {session_id} was closed while job {running_job_id} was running"
+                    job.status = "failed"
+                    if job.task and not job.task.done():
+                        job.task.cancel()
 
-        shutdown_task = self._schedule_kernel_shutdown(session_id, caller=caller)
-        session = self.storage.retrieve(session_id)
-        if session is not None:
-            self.storage.delete(session_id)
-            self._session_generations.pop(session_id, None)
+            shutdown_task = self._schedule_kernel_shutdown(session_id, caller=caller)
+            session = self.storage.retrieve(session_id)
+            if session is not None:
+                self.storage.delete(session_id)
+                self._session_generations.pop(session_id, None)
         return shutdown_task, session
 
     async def aclose_session(self, session_id: str) -> None:

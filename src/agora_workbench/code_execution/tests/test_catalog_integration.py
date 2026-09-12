@@ -103,6 +103,17 @@ async def test_no_catalog_preserves_session_factory_and_tool_surface(tmp_path):
     assert "get_catalog_capabilities" not in tool_names
 
 
+def test_data_manager_preserves_positional_artifact_resolver():
+    resolver = cast(Any, SimpleNamespace(resolve=AsyncMock(), unavailable_reason="unavailable"))
+    credential = cast(Any, SimpleNamespace(close=AsyncMock(), get_token=AsyncMock()))
+    manager = DataLakeDataManager([], [], credential, resolver)
+    try:
+        assert manager._artifact_resolver is resolver
+        assert manager._owns_credential is False
+    finally:
+        manager.cleanup()
+
+
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
     root = tmp_path / "implicit-source"
     root.mkdir()
