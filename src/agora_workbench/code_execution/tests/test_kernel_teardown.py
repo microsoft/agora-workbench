@@ -81,6 +81,7 @@ def register_kernel(manager: SessionManager, session_id: str, name: str = "k", g
     manager._kernel_tokens[session_id] = "token"
     manager._kernel_execute_locks[session_id] = asyncio.Lock()
     manager._assign_kernel_generation(session_id)
+    manager._kernel_session_generations[session_id] = manager._session_generations.get(session_id)
     return km, kc
 
 
