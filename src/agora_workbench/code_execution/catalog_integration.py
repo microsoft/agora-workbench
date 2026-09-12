@@ -932,8 +932,6 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
     ) -> str | None:
         if not current.execution_references:
             return None
-        if integration._policy_mode is CatalogPolicyMode.PER_ARTIFACT:
-            return None
         source = capabilities.get(artifact.reference.source_id)
         if source is None or not source.supports(CatalogOperation.RESOLVE):
             return None
@@ -1079,7 +1077,6 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                 ],
                 "execution_references": (
                     current.execution_references
-                    and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
                     and any(capability.supports(CatalogOperation.RESOLVE) for capability in read_capabilities)
                 ),
             }
