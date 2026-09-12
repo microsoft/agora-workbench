@@ -416,6 +416,51 @@ async def test_blob_reference_resolves_and_streams_through_session_manager(tmp_p
     assert credentials[1].close_calls == 1
 
 
+async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    resolve_calls = 0
+    fetch_calls = 0
+
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            if fetch_calls == 1:
+                started.set()
+                await gate.wait()
+            dest_path.write_text(f"fetch-{fetch_calls}")
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    fetch = asyncio.create_task(manager.get_cache_path(reference))
+    await started.wait()
+
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+    gate.set()
+    path = await fetch
+
+    assert path.read_text() == "fetch-2"
+    assert resolve_calls == 2
+    assert fetch_calls == 2
+    await manager.aclose()
+
+
 async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     class CustomResolver:
         unavailable_reason = None
