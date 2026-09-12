@@ -712,6 +712,25 @@ async def test_refresh_retains_authorizer_until_request_snapshot_releases():
     await binding.aclose()
 
 
+async def test_closing_binding_rejects_new_request_snapshots():
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    snapshot = binding.snapshot()
+    closing = asyncio.create_task(binding.aclose())
+    await asyncio.sleep(0)
+
+    with pytest.raises(RuntimeError, match="closed"):
+        binding.snapshot()
+    with pytest.raises(RuntimeError, match="closed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+
+    snapshot.close()
+    await closing
+
+
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])
 async def test_owned_catalog_startup_failure_and_cancellation_close(failure):
     provider = _LifecycleProvider(fail=failure)

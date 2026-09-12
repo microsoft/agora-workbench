@@ -392,6 +392,8 @@ class CatalogSessionBinding:
 
     def snapshot(self) -> "CatalogSessionView":
         """Capture one immutable authorization view for a complete operation."""
+        if self._closed:
+            raise RuntimeError("Catalog session binding is closed.")
         self._active_snapshots += 1
         self._snapshots_drained.clear()
         return CatalogSessionView(
@@ -414,6 +416,8 @@ class CatalogSessionBinding:
 
     def refresh_context(self, context: SessionContext) -> None:
         """Refresh authorization inputs when a transport session receives a new token."""
+        if self._closed:
+            raise RuntimeError("Catalog session binding is closed.")
         request_context = _request_context(context)
         authorizer = self.owned_authorizer
         catalog = self.catalog

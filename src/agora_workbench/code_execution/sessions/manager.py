@@ -569,7 +569,12 @@ class SessionManager:
                 session.claim_session_file_cleanup()
                 self._closing_session_ids.add(session_id)
                 cleanup_artifacts = True
-                self.storage.delete(session_id)
+                try:
+                    self.storage.delete(session_id)
+                except BaseException:
+                    self._closing_session_ids.discard(session_id)
+                    self._session_lifecycle_condition.notify_all()
+                    raise
                 self._session_generations.pop(session_id, None)
         if cleanup_artifacts:
             try:
