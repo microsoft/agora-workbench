@@ -923,6 +923,37 @@ class TestNoRunningLoop:
             "the warning should name the sweep, not misattribute the leak to close_session()"
         )
 
+    def test_expired_cleanup_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
+        manager.config.timeout = timedelta(seconds=-1)
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        original_close = manager._close_session_sync
+        replacement = None
+
+        def replace_then_close(closing_session_id, *, caller, expected_generation=None):
+            nonlocal replacement
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            return original_close(
+                closing_session_id,
+                caller=caller,
+                expected_generation=expected_generation,
+            )
+
+        monkeypatch.setattr(manager, "_close_session_sync", replace_then_close)
+        manager._cleanup_expired()
+
+        assert manager.storage.retrieve(session_id) is replacement
+
     def test_no_warning_when_there_is_simply_no_kernel(self, manager, caplog):
         """The benign ``None`` (nothing to tear down) must stay quiet, or the
         warning becomes noise operators learn to ignore."""
