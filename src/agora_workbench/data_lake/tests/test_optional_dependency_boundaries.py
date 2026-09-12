@@ -134,6 +134,37 @@ def test_local_manifest_provider_does_not_require_azure_sdk():
     assert result.returncode == 0, result.stderr
 
 
+def test_catalog_import_does_not_eagerly_import_code_execution_integration():
+    result = _run_isolated(
+        """
+        import importlib.abc
+        import sys
+
+        class BlockAzure(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "azure" or fullname.startswith("azure."):
+                    raise ModuleNotFoundError(f"blocked Azure SDK import: {fullname}", name=fullname)
+                return None
+
+        sys.meta_path.insert(0, BlockAzure())
+
+        from agora_workbench.data_lake.catalog import CatalogConfig
+
+        assert CatalogConfig is not None
+        assert "agora_workbench.code_execution.catalog_integration" not in sys.modules
+
+        # The supported convenience export remains available, but only when
+        # explicitly requested after the data-lake package finished importing.
+        from agora_workbench.code_execution import CatalogIntegration
+
+        assert CatalogIntegration.__name__ == "CatalogIntegration"
+        assert not any(name == "azure" or name.startswith("azure.") for name in sys.modules)
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_vector_selection_reports_missing_sqlite_vec():
     result = _run_isolated(
         """

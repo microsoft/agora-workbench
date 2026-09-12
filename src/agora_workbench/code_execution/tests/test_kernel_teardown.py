@@ -18,6 +18,7 @@ See https://github.com/microsoft/agora-workbench/issues/314.
 
 import asyncio
 import logging
+import threading
 import time
 from datetime import timedelta
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ import pytest
 
 from ..server import CodeExecutionServer
 from ..sessions.manager import KERNEL_BOOTSTRAP_TOOL_PROXIES, SessionManager, _BackgroundJob
+from ..sessions.storage import InMemoryStorage
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +81,7 @@ def register_kernel(manager: SessionManager, session_id: str, name: str = "k", g
     manager._kernel_tokens[session_id] = "token"
     manager._kernel_execute_locks[session_id] = asyncio.Lock()
     manager._assign_kernel_generation(session_id)
+    manager._kernel_session_generations[session_id] = manager._session_generations.get(session_id)
     return km, kc
 
 
@@ -128,6 +131,35 @@ class TestAtomicClaim:
         gate.set()
         await first
         assert km_first.shutdown_finished
+
+    async def test_replacement_closed_while_old_kernel_stops_cannot_start_orphan(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD", gate=gate)
+
+        old_shutdown = manager.close_session(session_id)
+        assert old_shutdown is not None
+        await let_teardown_start()
+
+        manager.create_session(
+            data={},
+            user_identity="u",
+            user_token="replacement-token",
+            token_claims={},
+            session_id=session_id,
+        )
+        replacement_start = asyncio.create_task(manager._get_or_create_kernel(session_id))
+        await asyncio.sleep(0)
+        replacement_close = manager.close_session(session_id)
+        assert replacement_close is old_shutdown
+
+        gate.set()
+        await old_shutdown
+        with pytest.raises(ValueError, match="closed before its kernel could start"):
+            await replacement_start
+
+        assert session_id not in manager._kernels
+        assert manager.storage.retrieve(session_id) is None
 
     async def test_stale_teardown_cannot_evict_a_newer_kernel(self, manager):
         """Regression: the late teardown used to delete whatever occupied the
@@ -188,6 +220,75 @@ class TestAtomicClaim:
         # And the fully-unknown-session case still does not raise.
         await manager._shutdown_kernel("never-existed")
 
+    async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager, tmp_path):
+        gate = asyncio.Event()
+        session_id = "reused-session"
+        session_dir = tmp_path / f"session_{session_id}"
+        session_dir.mkdir()
+        session_file = session_dir / "state.json"
+        session_file.write_text("old")
+        manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="old",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        register_kernel(manager, session_id, name="OLD", gate=gate)
+
+        shutdown = manager.close_session(session_id)
+        assert shutdown is not None
+        session_dir.mkdir(exist_ok=True)
+        session_file.write_text("replacement")
+        manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id=session_id,
+        )
+        outputs = manager._get_outputs_dir(session_id)
+        marker = outputs / "replacement.txt"
+        marker.write_text("replacement")
+
+        gate.set()
+        await shutdown
+
+        assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
+        assert session_file.read_text() == "replacement", "stale cleanup deleted a live session file"
+
+    async def test_idle_cleanup_generation_snapshot_preserves_replacement_outputs(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD")
+        manager._kernel_last_used[session_id] = 0.0
+        original_shutdown = manager._shutdown_kernel
+        marker = manager._get_outputs_dir(session_id) / "replacement.txt"
+        replacement_kernel = None
+
+        async def replace_then_shutdown(closing_session_id, **kwargs):
+            nonlocal replacement_kernel
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="new",
+                user_token="replacement-token",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            marker.write_text("replacement")
+            replacement_kernel = register_kernel(manager, closing_session_id, name="NEW")
+            await original_shutdown(closing_session_id, **kwargs)
+
+        monkeypatch.setattr(manager, "_shutdown_kernel", replace_then_shutdown)
+
+        await manager.cleanup_idle_kernels(max_idle_time=-1)
+
+        assert marker.read_text() == "replacement"
+        assert manager._kernels[session_id] == replacement_kernel
+
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
         gate = asyncio.Event()
@@ -215,6 +316,115 @@ class TestAtomicClaim:
 
 @pytest.mark.unit
 class TestCoalescing:
+    async def test_duplicate_explicit_session_id_does_not_replace_owned_resources(self, manager):
+        session_id = "explicit-session"
+        manager.create_session(
+            data={"owner": "original"},
+            user_identity="original",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        original = manager.storage.retrieve(session_id)
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager.create_session(
+                data={"owner": "replacement"},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        assert manager.storage.retrieve(session_id) is original
+
+    async def test_storage_delete_failure_releases_closing_session_tombstone(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+        original_delete = manager.storage.delete
+        failed = False
+
+        def fail_once(closing_session_id):
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("delete failed")
+            original_delete(closing_session_id)
+
+        monkeypatch.setattr(manager.storage, "delete", fail_once)
+
+        with pytest.raises(RuntimeError, match="delete failed"):
+            manager.close_session(session_id)
+        assert session_id not in manager._closing_session_ids
+
+        await asyncio.wait_for(asyncio.to_thread(manager.close_session, session_id), timeout=1)
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
+        class PausingStorage(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.pause_retrieve = False
+                self.retrieve_started = threading.Event()
+                self.resume_retrieve = threading.Event()
+
+            def retrieve(self, session_id):
+                session = super().retrieve(session_id)
+                if self.pause_retrieve:
+                    self.retrieve_started.set()
+                    self.resume_retrieve.wait(timeout=5)
+                return session
+
+        storage = PausingStorage()
+        manager.storage = storage
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        storage.pause_retrieve = True
+
+        close_task = asyncio.create_task(asyncio.to_thread(manager.close_session, session_id))
+        assert await asyncio.to_thread(storage.retrieve_started.wait, 5)
+        replacement_task = asyncio.create_task(
+            asyncio.to_thread(
+                manager.create_session,
+                {},
+                "new",
+                "t",
+                {},
+                None,
+                session_id,
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert not replacement_task.done()
+
+        storage.pause_retrieve = False
+        storage.resume_retrieve.set()
+        await close_task
+        await replacement_task
+
+        assert manager.storage.retrieve(session_id).user_identity == "new"
+
+    async def test_slow_artifact_cleanup_does_not_block_unrelated_session_creation(self, manager, monkeypatch):
+        cleanup_started = threading.Event()
+        resume_cleanup = threading.Event()
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+
+        def slow_cleanup(closing_session_id):
+            assert closing_session_id == session_id
+            cleanup_started.set()
+            resume_cleanup.wait(timeout=5)
+
+        monkeypatch.setattr(manager, "_cleanup_session_artifacts", slow_cleanup)
+        close_task = asyncio.create_task(asyncio.to_thread(manager.close_session, session_id))
+        assert await asyncio.to_thread(cleanup_started.wait, 5)
+
+        replacement = await asyncio.wait_for(
+            asyncio.to_thread(manager.create_session, {}, "other", "t", {}),
+            timeout=1,
+        )
+        resume_cleanup.set()
+        await close_task
+
+        assert manager.storage.retrieve(replacement) is not None
+
     async def test_double_close_does_not_raise(self, manager):
         """Regression: the loser used to die on ``del self._kernels[...]``
         inside a task nobody was watching."""
@@ -274,7 +484,8 @@ class TestCoalescing:
 
         # _shutdown_kernel already guards the shutdown calls; force a failure
         # outside that guard to exercise the done-callback.
-        async def failing(session_id):
+        async def failing(session_id, **kwargs):
+            del kwargs
             raise RuntimeError("boom")
 
         manager._shutdown_kernel = failing
@@ -321,6 +532,192 @@ class TestAwaitableClose:
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         await manager.aclose_session(session_id)
 
+    async def test_aclose_session_claims_kernel_before_blocked_resource_cleanup(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
+        cleanup_gate = asyncio.Event()
+        cleanup_started = asyncio.Event()
+        session = manager.storage.retrieve(session_id)
+
+        async def blocked_cleanup():
+            cleanup_started.set()
+            await cleanup_gate.wait()
+
+        session.aclose = blocked_cleanup
+        close_task = asyncio.create_task(manager.aclose_session(session_id))
+        await cleanup_started.wait()
+
+        assert session_id not in manager._kernels
+        assert km.shutdown_finished is True
+        assert manager.storage.retrieve(session_id) is None
+
+        cleanup_gate.set()
+        await close_task
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):
+        session_ids = [
+            manager.create_session(data={}, user_identity="u", user_token="t", token_claims={}) for _ in range(2)
+        ]
+        started = [asyncio.Event(), asyncio.Event()]
+        gates = [asyncio.Event(), asyncio.Event()]
+        for index, session_id in enumerate(session_ids):
+            register_kernel(manager, session_id)
+            session = manager.storage.retrieve(session_id)
+
+            async def blocked_cleanup(i=index):
+                started[i].set()
+                await gates[i].wait()
+
+            session.aclose = blocked_cleanup
+
+        close_task = asyncio.create_task(manager.aclose_all_sessions())
+        await asyncio.gather(*(event.wait() for event in started))
+        assert all(session_id not in manager._kernels for session_id in session_ids)
+
+        for gate in gates:
+            gate.set()
+        await close_task
+        assert manager.storage.count() == 0
+
+    async def test_aclose_all_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        original_close = manager.aclose_session
+        replacement = None
+
+        async def replace_then_close(closing_session_id, *, expected_generation=None):
+            nonlocal replacement
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            await original_close(closing_session_id, expected_generation=expected_generation)
+
+        monkeypatch.setattr(manager, "aclose_session", replace_then_close)
+        await manager.aclose_all_sessions()
+
+        assert manager.storage.retrieve(session_id) is replacement
+
+    @pytest.mark.parametrize("async_close", [False, True])
+    async def test_session_cleanup_attempts_every_resource_before_reporting(self, manager, tmp_path, async_close):
+        attempted = []
+        session_file = tmp_path / "session_cleanup.txt"
+        session_file.write_text("payload")
+
+        class FailingManager:
+            def cleanup(self):
+                attempted.append("manager")
+                raise RuntimeError("manager failed")
+
+            async def aclose(self):
+                attempted.append("manager")
+                raise RuntimeError("manager failed")
+
+        class FailingExtension:
+            def cleanup(self):
+                attempted.append("extension")
+                raise RuntimeError("extension failed")
+
+            async def aclose(self):
+                attempted.append("extension")
+                raise RuntimeError("extension failed")
+
+        class FailingPayload(dict):
+            def cleanup(self):
+                attempted.append("payload")
+                raise RuntimeError("payload failed")
+
+            async def aclose(self):
+                attempted.append("payload")
+                raise RuntimeError("payload failed")
+
+        payload = FailingPayload(session_file=str(session_file))
+        session_id = manager.create_session(
+            payload,
+            user_identity="u",
+            user_token="t",
+            token_claims={},
+        )
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, FailingManager())
+        session.extensions["failing"] = FailingExtension()
+
+        if async_close:
+            with pytest.raises(ExceptionGroup, match="Session cleanup failed"):
+                await manager.aclose_session(session_id)
+        else:
+            manager.close_session(session_id)
+            with pytest.raises(ExceptionGroup, match="Session resource cleanup failed"):
+                await manager.await_resource_cleanup()
+
+        assert attempted == ["manager", "extension", "payload"]
+        assert not session_file.exists()
+        assert manager.storage.retrieve(session_id) is None
+
+    @pytest.mark.parametrize("async_close", [False, True])
+    async def test_cancelled_resource_cleanup_is_retried_after_session_removal(self, manager, async_close):
+        attempts = 0
+
+        class CancelsOnce:
+            async def aclose(self):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise asyncio.CancelledError
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, CancelsOnce())
+
+        if async_close:
+            with pytest.raises(asyncio.CancelledError):
+                await manager.aclose_session(session_id)
+        else:
+            manager.close_session(session_id)
+            with pytest.raises(asyncio.CancelledError):
+                await manager.await_resource_cleanup()
+
+        assert attempts == 2
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_cancelled_resource_drain_remains_tracked_for_next_drain(self, manager):
+        started = asyncio.Event()
+        gate = asyncio.Event()
+        finished = asyncio.Event()
+
+        async def cleanup():
+            started.set()
+            await gate.wait()
+            finished.set()
+
+        task = asyncio.create_task(cleanup())
+        manager._resource_cleanup_tasks.add(task)
+        first_drain = asyncio.create_task(manager.await_resource_cleanup())
+        await started.wait()
+
+        first_drain.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first_drain
+        assert task in manager._resource_cleanup_tasks
+        assert not task.cancelled()
+
+        second_drain = asyncio.create_task(manager.await_resource_cleanup())
+        await asyncio.sleep(0)
+        assert not second_drain.done()
+        gate.set()
+        await second_drain
+
+        assert finished.is_set()
+        assert not manager._resource_cleanup_tasks
+
     async def test_await_kernel_shutdown_is_a_noop_when_idle(self, manager):
         await manager.await_kernel_shutdown("never-existed")
 
@@ -349,10 +746,32 @@ class TestAwaitableClose:
 
 @pytest.mark.unit
 class TestKernelRebuildWaits:
+    async def test_untracked_kernel_start_is_rejected_before_teardown_wait(self, manager, monkeypatch):
+        shutdown_waited = False
+
+        async def wait_for_shutdown(_session_id):
+            nonlocal shutdown_waited
+            shutdown_waited = True
+
+        monkeypatch.setattr(manager, "await_kernel_shutdown", wait_for_shutdown)
+
+        with pytest.raises(ValueError, match="does not exist"):
+            await manager._get_or_create_kernel("s1")
+
+        assert not shutdown_waited
+        assert "s1" not in manager._kernels
+
     async def test_get_or_create_waits_for_pending_teardown(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg
 
         gate = asyncio.Event()
+        manager.create_session(
+            data={},
+            user_identity="u",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
         old_km, _ = register_kernel(manager, "s1", name="OLD", gate=gate)
         teardown = manager._schedule_kernel_shutdown("s1")
         assert teardown is not None
@@ -393,6 +812,72 @@ class TestKernelRebuildWaits:
 
         assert created_while_old_alive == [True], "replacement was built before the old kernel finished shutting down"
         assert "s1" in manager._kernels
+
+    async def test_idle_cleanup_registers_teardown_for_kernel_rebuild_waiters(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+        register_kernel(manager, session_id, gate=gate)
+        manager._kernel_last_used[session_id] = 0
+
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=-1))
+        await let_teardown_start()
+        assert session_id in manager._kernel_shutdown_tasks
+
+        gate.set()
+        await cleanup
+
+    async def test_generation_mismatch_teardown_preserves_replacement_outputs(self, manager, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        manager.create_session(
+            data={},
+            user_identity="old",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
+        register_kernel(manager, "s1", name="OLD")
+        old_session = manager.storage.retrieve("s1")
+        assert old_session is not None
+        manager.storage.delete("s1")
+        old_session.cleanup()
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id="s1",
+        )
+        outputs = manager._get_outputs_dir("s1")
+        marker = outputs / "replacement.txt"
+        marker.write_text("replacement")
+
+        class FakeKernelManager:
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                pass
+
+            def client(self):
+                return FakeKernelClient()
+
+        class FakeKernelClient:
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                pass
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", FakeKernelManager)
+
+        await manager._get_or_create_kernel("s1")
+
+        assert marker.read_text() == "replacement"
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +922,37 @@ class TestNoRunningLoop:
         assert any("Expired-session cleanup" in m for m in messages), (
             "the warning should name the sweep, not misattribute the leak to close_session()"
         )
+
+    def test_expired_cleanup_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
+        manager.config.timeout = timedelta(seconds=-1)
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        original_close = manager._close_session_sync
+        replacement = None
+
+        def replace_then_close(closing_session_id, *, caller, expected_generation=None):
+            nonlocal replacement
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            return original_close(
+                closing_session_id,
+                caller=caller,
+                expected_generation=expected_generation,
+            )
+
+        monkeypatch.setattr(manager, "_close_session_sync", replace_then_close)
+        manager._cleanup_expired()
+
+        assert manager.storage.retrieve(session_id) is replacement
 
     def test_no_warning_when_there_is_simply_no_kernel(self, manager, caplog):
         """The benign ``None`` (nothing to tear down) must stay quiet, or the

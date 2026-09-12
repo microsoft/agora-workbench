@@ -125,6 +125,7 @@ def _artifact(record: ArtifactRecord, *, requested_reference: ArtifactReference 
             }.items()
             if value is not None
         },
+        score=record.score,
         revision=record.current_revision,
         content_revision=record.content_revision,
         metadata_revision=record.metadata_revision,
