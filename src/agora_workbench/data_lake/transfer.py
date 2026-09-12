@@ -275,15 +275,15 @@ def check_transfer_size(
 
 
 async def await_transfer(
-    awaitable: Awaitable[object],
+    awaitable: Awaitable[_T],
     options: TransferOptions,
     *,
     operation: str,
     resource: str | None = None,
-) -> object:
+) -> _T:
     """Await an SDK operation with timeout and cooperative cancellation."""
 
-    async def run() -> object:
+    async def run() -> _T:
         task = asyncio.ensure_future(awaitable)
         cancel_task: asyncio.Task[bool] | None = None
         try:
@@ -376,31 +376,46 @@ async def stream_chunks_to_file(
         else:
             raise RuntimeError("Transfer destination parent was not initialized.")
         with output_file:
-            async for provider_chunk in chunks:
-                check_transfer_cancelled(options, operation=operation, resource=resource)
-                view = memoryview(provider_chunk)
-                for offset in range(0, len(view), options.chunk_size):
-                    chunk = view[offset : offset + options.chunk_size]
-                    check_transfer_size(
-                        bytes_transferred + len(chunk),
-                        options,
-                        operation=operation,
-                        resource=resource,
-                    )
-                    remaining = chunk
-                    while remaining:
-                        written = await _run_blocking_io(
-                            lambda: output_file.write(remaining),
-                            options=options,
+            iterator = chunks.__aiter__()
+            try:
+                while True:
+                    try:
+                        provider_chunk = await await_transfer(
+                            iterator.__anext__(),
+                            options,
                             operation=operation,
                             resource=resource,
                         )
-                        if written is None or written <= 0:
-                            raise OSError("Transfer output made no write progress.")
-                        written_chunk = remaining[:written]
-                        digest.update(written_chunk)
-                        bytes_transferred += written
-                        remaining = remaining[written:]
+                    except StopAsyncIteration:
+                        break
+                    check_transfer_cancelled(options, operation=operation, resource=resource)
+                    view = memoryview(provider_chunk)
+                    for offset in range(0, len(view), options.chunk_size):
+                        chunk = view[offset : offset + options.chunk_size]
+                        check_transfer_size(
+                            bytes_transferred + len(chunk),
+                            options,
+                            operation=operation,
+                            resource=resource,
+                        )
+                        remaining = chunk
+                        while remaining:
+                            written = await _run_blocking_io(
+                                lambda: output_file.write(remaining),
+                                options=options,
+                                operation=operation,
+                                resource=resource,
+                            )
+                            if written is None or written <= 0:
+                                raise OSError("Transfer output made no write progress.")
+                            written_chunk = remaining[:written]
+                            digest.update(written_chunk)
+                            bytes_transferred += written
+                            remaining = remaining[written:]
+            finally:
+                close_iterator = getattr(iterator, "aclose", None)
+                if callable(close_iterator):
+                    await close_iterator()
             await _run_blocking_io(
                 lambda: (output_file.flush(), os.fsync(output_file.fileno())),
                 options=options,

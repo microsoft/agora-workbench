@@ -893,8 +893,55 @@ class LocalFilePublisher(AssetPublisher):
         self._anchor_fd: int | None = None
         self._root_parts: tuple[str, ...] = ()
         self._root_identity: tuple[int, int] | None = None
+        self._portable_anchor_path: Path | None = None
+        self._portable_anchor_identity: tuple[int, int] | None = None
         if _USE_POSIX_DIR_FDS:
             self._initialize_root_anchor()
+        else:
+            self._initialize_portable_root()
+
+    def _initialize_portable_root(self) -> None:
+        """Capture the existing root or nearest ancestor for best-effort non-POSIX validation."""
+        candidate = self._base_dir
+        while not candidate.exists():
+            if candidate == candidate.parent:
+                raise FileNotFoundError(f"No existing ancestor for local publisher root: {self._base_dir}")
+            candidate = candidate.parent
+        if candidate.is_symlink() or not candidate.is_dir():
+            raise UnsafePathError("Local publisher root ancestor must be a real directory.", operation="upload")
+        resolved_anchor = candidate.resolve(strict=True)
+        anchor_stat = resolved_anchor.stat()
+        self._portable_anchor_path = resolved_anchor
+        self._portable_anchor_identity = (anchor_stat.st_dev, anchor_stat.st_ino)
+        if self._base_dir.exists():
+            resolved_root = self._base_dir.resolve(strict=True)
+            if resolved_root != self._base_dir:
+                raise UnsafePathError("Local publisher root must not be a symlink.", operation="upload")
+            root_stat = resolved_root.stat()
+            self._root_identity = (root_stat.st_dev, root_stat.st_ino)
+
+    def _verify_portable_root(self) -> Path:
+        """Resolve the non-POSIX root while checking identities captured at construction."""
+        if self._portable_anchor_path is None or self._portable_anchor_identity is None:
+            raise UnsafePathError("Local publisher root is unavailable.", operation="upload")
+        current_anchor = self._portable_anchor_path.resolve(strict=True)
+        anchor_stat = current_anchor.stat()
+        if (
+            current_anchor != self._portable_anchor_path
+            or (anchor_stat.st_dev, anchor_stat.st_ino) != self._portable_anchor_identity
+        ):
+            raise UnsafePathError("Local publisher root ancestor identity changed.", operation="upload")
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+        resolved_root = self._base_dir.resolve(strict=True)
+        if not resolved_root.is_relative_to(self._portable_anchor_path):
+            raise UnsafePathError("Local publisher root escapes its configured ancestor.", operation="upload")
+        root_stat = resolved_root.stat()
+        identity = (root_stat.st_dev, root_stat.st_ino)
+        if self._root_identity is None:
+            self._root_identity = identity
+        elif identity != self._root_identity:
+            raise UnsafePathError("Local publisher root was replaced after configuration.", operation="upload")
+        return resolved_root
 
     def _initialize_root_anchor(self) -> None:
         """Retain a trusted ancestor descriptor for no-follow root traversal."""
@@ -1068,7 +1115,7 @@ class LocalFilePublisher(AssetPublisher):
         context: RequestContext,
     ) -> TransferResult:
         if not _USE_POSIX_DIR_FDS:
-            resolved_base = self._base_dir.resolve()
+            resolved_base = self._verify_portable_root()
             destination = (resolved_base / relative).resolve()
             if not destination.is_relative_to(resolved_base):
                 raise UnsafePathError("Local publish path escapes the configured root.", operation="upload")

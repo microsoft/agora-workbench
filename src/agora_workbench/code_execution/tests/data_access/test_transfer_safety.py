@@ -350,6 +350,23 @@ async def test_non_posix_unrestricted_local_transfer_fallbacks_remain_functional
     assert Path(published).read_bytes() == b"payload"
 
 
+async def test_non_posix_local_publisher_rejects_replaced_existing_root(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+    publisher = LocalFilePublisher(output_root)
+    output_root.rename(tmp_path / "original-outputs")
+    output_root.mkdir()
+
+    with pytest.raises(UnsafePathError, match="identity changed"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert not (output_root / "session" / "result.bin").exists()
+
+
 async def test_non_posix_allowed_root_fetch_is_explicitly_unsupported(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -360,6 +377,41 @@ async def test_non_posix_allowed_root_fetch_is_explicitly_unsupported(tmp_path, 
             fetcher._open_checked(str(source))
     finally:
         await fetcher.close()
+
+
+async def test_stream_cancellation_closes_stalled_provider_iterator(tmp_path):
+    cancellation = asyncio.Event()
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    class StalledChunks:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            started.set()
+            await asyncio.Event().wait()
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            closed.set()
+
+    transfer = asyncio.create_task(
+        stream_chunks_to_file(
+            StalledChunks(),
+            tmp_path / "destination.bin",
+            options=TransferOptions(timeout_seconds=None, cancellation_event=cancellation),
+            context=RequestContext(),
+        )
+    )
+    await started.wait()
+    cancellation.set()
+
+    with pytest.raises(TransferCancelledError):
+        _ = await transfer
+    assert closed.is_set()
+    assert not (tmp_path / "destination.bin").exists()
+    assert _part_files(tmp_path) == []
 
 
 async def test_provider_timeout_without_configured_deadline_is_not_masked(tmp_path):
