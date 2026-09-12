@@ -267,6 +267,10 @@ class TestAtomicClaim:
 
         async def replace_then_shutdown(closing_session_id, **kwargs):
             nonlocal replacement_kernel
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
             manager.create_session(
                 data={},
                 user_identity="new",
@@ -312,6 +316,28 @@ class TestAtomicClaim:
 
 @pytest.mark.unit
 class TestCoalescing:
+    async def test_duplicate_explicit_session_id_does_not_replace_owned_resources(self, manager):
+        session_id = "explicit-session"
+        manager.create_session(
+            data={"owner": "original"},
+            user_identity="original",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        original = manager.storage.retrieve(session_id)
+
+        with pytest.raises(ValueError, match="already exists"):
+            manager.create_session(
+                data={"owner": "replacement"},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        assert manager.storage.retrieve(session_id) is original
+
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
         class PausingStorage(InMemoryStorage):
             def __init__(self):
@@ -736,6 +762,10 @@ class TestKernelRebuildWaits:
             session_id="s1",
         )
         register_kernel(manager, "s1", name="OLD")
+        old_session = manager.storage.retrieve("s1")
+        assert old_session is not None
+        manager.storage.delete("s1")
+        old_session.cleanup()
         manager.create_session(
             data={},
             user_identity="new",
