@@ -81,14 +81,28 @@ class TransferOptions:
             object.__setattr__(self, "expected_sha256", checksum)
         metadata = dict(self.object_metadata)
         for key, value in metadata.items():
-            if not isinstance(key, str) or not key or not isinstance(value, str):
+            if not isinstance(key, str) or not key or not isinstance(value, str) or not value:
                 raise ValueError("object_metadata keys and values must be non-empty strings.")
             if "\r" in key or "\n" in key or "\r" in value or "\n" in value:
                 raise ValueError("object_metadata must not contain line breaks.")
-            if any(
-                sensitive in key.lower()
-                for sensitive in ("authorization", "credential", "password", "secret", "token", "sas")
-            ):
+            normalized_key = re.sub(r"[^a-z0-9]", "", key.lower())
+            credential_markers = (
+                "authorization",
+                "credential",
+                "password",
+                "passwd",
+                "secret",
+                "token",
+                "sas",
+                "apikey",
+                "accesskey",
+                "privatekey",
+                "accountkey",
+                "sharedkey",
+                "signingkey",
+                "connectionstring",
+            )
+            if any(marker in normalized_key for marker in credential_markers):
                 raise ValueError("object_metadata keys must not describe credential-bearing values.")
             if "://" in value:
                 parsed = urlsplit(value)
@@ -315,9 +329,15 @@ async def stream_chunks_to_file(
                         operation=operation,
                         resource=resource,
                     )
-                    output.write(chunk)
-                    digest.update(chunk)
-                    bytes_transferred += len(chunk)
+                    remaining = chunk
+                    while remaining:
+                        written = output.write(remaining)
+                        if written is None or written <= 0:
+                            raise OSError("Transfer output made no write progress.")
+                        written_chunk = remaining[:written]
+                        digest.update(written_chunk)
+                        bytes_transferred += written
+                        remaining = remaining[written:]
             output.flush()
             os.fsync(output.fileno())
 

@@ -1,6 +1,7 @@
 """Tests for the catalog indexer."""
 
 import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -172,6 +173,42 @@ class TestCatalogIndexerLocal:
         await indexer.index()
 
         assert not any(record.name == "escape.csv" for record in db.list_artifacts(limit=100))
+
+    @pytest.mark.asyncio
+    async def test_symlink_swap_before_stat_cannot_index_outside_metadata(
+        self,
+        config,
+        db,
+        data_dir,
+        monkeypatch,
+    ):
+        outside = data_dir / "outside.csv"
+        outside.write_bytes(b"outside metadata must not be indexed")
+        victim = data_dir / "weather" / "race.csv"
+        victim.write_bytes(b"inside")
+        original_is_symlink = Path.is_symlink
+        swapped = False
+
+        def swap_after_check(path):
+            nonlocal swapped
+            if path == victim and not swapped:
+                swapped = True
+                victim.unlink()
+                victim.symlink_to(outside)
+                return False
+            return original_is_symlink(path)
+
+        monkeypatch.setattr(Path, "is_symlink", swap_after_check)
+        indexer = CatalogIndexer(config, db)
+        mock_provider = MagicMock()
+        mock_provider.embed = AsyncMock(return_value=[[0.1, 0.2, 0.3, 0.4]] * 2)
+        mock_provider.dimensions = 4
+        indexer._embedding_provider = mock_provider
+
+        await indexer.index()
+
+        assert swapped
+        assert not any(record.name == "race.csv" for record in db.list_artifacts(limit=100))
 
     @pytest.mark.asyncio
     async def test_idempotent_reindex(self, config, db, data_dir):

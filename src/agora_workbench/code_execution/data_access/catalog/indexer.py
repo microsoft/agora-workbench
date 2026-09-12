@@ -8,6 +8,7 @@ import json
 import logging
 import mimetypes
 import os
+import stat
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,19 @@ LOGGER = logging.getLogger(__name__)
 
 # Batch size for embedding computation
 _EMBEDDING_BATCH_SIZE = 64
+
+
+def _stat_regular_file_no_follow(path: Path) -> os.stat_result:
+    """Atomically open and stat a regular file without following a final symlink."""
+    descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        result = os.fstat(descriptor)
+        if not stat.S_ISREG(result.st_mode):
+            raise OSError("Catalog source entry is not a regular file.")
+        return result
+    finally:
+        os.close(descriptor)
+
 
 # Max concurrent blob source enumerations
 _MAX_BLOB_CONCURRENCY = 8
@@ -1086,6 +1100,7 @@ class CatalogIndexer:
         errors: list[OSError] = []
         try:
             if source_path.is_file():
+                file_stat = _stat_regular_file_no_follow(source_path)
                 artifacts.append(
                     self._make_local_artifact(
                         source_path,
@@ -1094,6 +1109,7 @@ class CatalogIndexer:
                         source_id,
                         source,
                         now,
+                        file_stat,
                     )
                 )
             else:
@@ -1111,8 +1127,20 @@ class CatalogIndexer:
                             continue
                         if filepath.is_symlink():
                             continue
+                        try:
+                            file_stat = _stat_regular_file_no_follow(filepath)
+                        except OSError:
+                            continue
                         artifacts.append(
-                            self._make_local_artifact(filepath, filename, source_path, source_id, source, now)
+                            self._make_local_artifact(
+                                filepath,
+                                filename,
+                                source_path,
+                                source_id,
+                                source,
+                                now,
+                                file_stat,
+                            )
                         )
         except OSError as exc:
             errors.append(exc)
@@ -1130,6 +1158,7 @@ class CatalogIndexer:
         source_id: str,
         source: SourceConfig,
         indexed_at: str,
+        file_stat: os.stat_result,
     ) -> dict:
         """Build an artifact dict from a local file."""
         storage_uri = str(filepath)
@@ -1151,7 +1180,6 @@ class CatalogIndexer:
                 custom_id = override.artifact_id
                 custom_aliases = override.aliases
 
-        stat = filepath.stat()
         content_type = _infer_content_type(filename)
         legacy_id = artifact_id_from_uri(storage_uri)
         artifact_id = (
@@ -1172,9 +1200,9 @@ class CatalogIndexer:
             "domain": domain,
             "source_type": "local",
             "content_type": content_type,
-            "size_bytes": stat.st_size,
+            "size_bytes": file_stat.st_size,
             "indexed_at": indexed_at,
-            "content_revision": _revision_digest([stat.st_size, stat.st_mtime_ns]),
+            "content_revision": _revision_digest([file_stat.st_size, file_stat.st_mtime_ns]),
             "metadata_revision": _revision_digest(
                 [rel_name, description, domain, "local", content_type, custom_id, custom_aliases]
             ),

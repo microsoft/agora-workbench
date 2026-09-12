@@ -37,6 +37,7 @@ from agora_workbench.data_lake.transfer import await_transfer, safe_artifact_ref
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
 from ...data_access import publishers as publishers_module
+from agora_workbench.data_lake import transfer as transfer_module
 from ...data_access.publishers import BlobPublisher, LocalFilePublisher, ServerPublisher, publish_compat
 
 
@@ -508,6 +509,11 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
         options.object_metadata["other"] = "value"  # type: ignore[index]
     with pytest.raises(ValueError, match="credential-bearing"):
         TransferOptions(object_metadata={"authorization-token": "secret"})
+    for key in ("api-key", "apikey", "access_key", "private-key", "connection-string"):
+        with pytest.raises(ValueError, match="credential-bearing"):
+            TransferOptions(object_metadata={key: "secret"})
+    with pytest.raises(ValueError, match="non-empty"):
+        TransferOptions(object_metadata={"agora-operation-id": ""})
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(
             object_metadata={"source": "https://account123.blob.core.windows.net/container/data?sig=secret"}
@@ -517,6 +523,88 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
     assert TransferOptions(
         object_metadata={"source": "abfss://container@account123.dfs.core.windows.net/data"}
     ).object_metadata
+
+
+async def test_stream_writer_retries_short_writes_and_hashes_committed_bytes(tmp_path, monkeypatch):
+    destination = tmp_path / "destination.bin"
+    original_fdopen = transfer_module.os.fdopen
+
+    class ShortWriter:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._wrapped.close()
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+        def write(self, data):
+            return self._wrapped.write(data[:2])
+
+    monkeypatch.setattr(
+        transfer_module.os,
+        "fdopen",
+        lambda *args, **kwargs: ShortWriter(original_fdopen(*args, **kwargs)),
+    )
+
+    async def chunks():
+        yield b"complete"
+
+    result = await stream_chunks_to_file(
+        chunks(),
+        destination,
+        options=TransferOptions(chunk_size=8),
+        context=RequestContext(),
+    )
+
+    assert destination.read_bytes() == b"complete"
+    assert result.bytes_transferred == len(b"complete")
+    assert result.checksum_sha256 == hashlib.sha256(b"complete").hexdigest()
+
+
+async def test_stream_writer_fails_and_cleans_up_when_write_makes_no_progress(tmp_path, monkeypatch):
+    destination = tmp_path / "destination.bin"
+    original_fdopen = transfer_module.os.fdopen
+
+    class StalledWriter:
+        def __init__(self, wrapped):
+            self._wrapped = wrapped
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self._wrapped.close()
+
+        def __getattr__(self, name):
+            return getattr(self._wrapped, name)
+
+        def write(self, data):
+            return 0
+
+    monkeypatch.setattr(
+        transfer_module.os,
+        "fdopen",
+        lambda *args, **kwargs: StalledWriter(original_fdopen(*args, **kwargs)),
+    )
+
+    async def chunks():
+        yield b"content"
+
+    with pytest.raises(OSError, match="no write progress"):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert _part_files(tmp_path) == []
 
 
 @pytest.mark.parametrize(
