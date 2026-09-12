@@ -314,15 +314,17 @@ class SessionManager:
         self._maybe_cleanup()
 
         with self._session_lifecycle_lock:
-            # Enforce max sessions limit
-            self._enforce_max_sessions()
-
             # Generate session ID
             if session_id is None:
                 session_id = str(uuid.uuid4())
             else:
                 while session_id in self._closing_session_ids:
                     self._session_lifecycle_condition.wait()
+                if self.storage.retrieve(session_id) is not None:
+                    raise ValueError(f"Session {session_id} already exists.")
+
+            # Enforce max sessions limit
+            self._enforce_max_sessions()
 
             # Build a customized data manager when a factory is configured, so
             # the Session never constructs (and immediately discards) a default
