@@ -820,6 +820,13 @@ def _sanitize_metadata_value(value: Any) -> Any:
     return value
 
 
+def _agent_safe_identifier(value: str, field_name: str) -> str:
+    """Reject locator-shaped identifiers that cannot be safely round-tripped."""
+    if _URI_IN_TEXT_RE.search(value):
+        raise ValueError(f"Catalog {field_name} must be a logical identifier, not a URI.")
+    return value
+
+
 def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[str, Any]:
     payload = {
         **{
@@ -827,8 +834,8 @@ def _artifact_payload(artifact: Any, *, load_path: str | None = None) -> dict[st
             for key, value in artifact.metadata.items()
             if key not in _RESERVED_PAYLOAD_FIELDS
         },
-        "id": artifact.reference.artifact_id,
-        "source_id": artifact.reference.source_id,
+        "id": _agent_safe_identifier(artifact.reference.artifact_id, "artifact ID"),
+        "source_id": _agent_safe_identifier(artifact.reference.source_id, "source ID"),
         "name": _sanitize_metadata_value(artifact.presentation.name),
         "current_revision": artifact.revision,
         "content_revision": artifact.content_revision,
@@ -1038,7 +1045,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
             return {
                 "sources": [
                     {
-                        "source_id": capability.source_id,
+                        "source_id": _agent_safe_identifier(capability.source_id, "source ID"),
                         "operations": sorted(operation.value for operation in capability.supported_operations),
                     }
                     for capability in capabilities

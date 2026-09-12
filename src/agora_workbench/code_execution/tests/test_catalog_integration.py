@@ -15,6 +15,7 @@ from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServ
 from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     SessionCredential,
+    _artifact_payload,
     _decode_reference,
     _encode_reference,
     _error_payload,
@@ -159,6 +160,25 @@ def test_catalog_error_payload_sanitizes_uri_resource_id():
     )
 
     assert _error_payload(error)["resource_id"] == "https://example.test/data"
+
+
+@pytest.mark.parametrize(
+    ("artifact_id", "source_id"),
+    [
+        ("https://user:secret@example.test/artifact?sig=secret", "source"),
+        ("artifact", "https://user:secret@example.test/source?sig=secret"),
+    ],
+)
+def test_catalog_payload_rejects_locator_shaped_identifiers(artifact_id, source_id):
+    artifact = CatalogArtifact(
+        ArtifactReference(artifact_id, source_id),
+        ArtifactPresentation("data.csv"),
+    )
+
+    with pytest.raises(ValueError, match="logical identifier") as error:
+        _artifact_payload(artifact)
+
+    assert "secret" not in str(error.value)
 
 
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
