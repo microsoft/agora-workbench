@@ -1165,6 +1165,7 @@ class LocalFilePublisher(AssetPublisher):
                 try:
                     os.unlink(temporary_name, dir_fd=parent_fd)
                 except FileNotFoundError:
+                    # The final link is committed and no temporary name remains.
                     pass
                 except OSError:
                     LOGGER.warning(

@@ -500,6 +500,7 @@ async def stream_chunks_to_file(
             try:
                 os.unlink(temporary_name, dir_fd=parent_fd)
             except FileNotFoundError:
+                # The final link is committed and no temporary name remains.
                 pass
             except OSError:
                 LOGGER.warning("Could not remove committed transfer temporary file %s.", temporary_name, exc_info=True)
@@ -510,7 +511,6 @@ async def stream_chunks_to_file(
                 src_dir_fd=parent_fd,
                 dst_dir_fd=parent_fd,
             )
-            committed = True
         else:
             if portable_parent is None or portable_destination is None or portable_parent_identity is None:
                 raise RuntimeError("Portable transfer destination was not initialized.")
@@ -533,6 +533,7 @@ async def stream_chunks_to_file(
                 try:
                     portable_temporary.unlink()
                 except FileNotFoundError:
+                    # The final link is committed and no temporary name remains.
                     pass
                 except OSError:
                     LOGGER.warning(
@@ -542,7 +543,6 @@ async def stream_chunks_to_file(
                     )
             else:
                 os.replace(portable_temporary, portable_destination)
-                committed = True
     except asyncio.CancelledError:
         cleanup_temporary()
         await emit_transfer_diagnostic(
