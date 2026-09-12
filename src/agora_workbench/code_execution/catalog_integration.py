@@ -642,7 +642,17 @@ class CatalogIntegration:
             close_error: BaseException | None = None
             try:
                 if self._provider_lease.should_close:
-                    await asyncio.shield(self._close_provider())
+                    close_task = asyncio.create_task(self._close_provider())
+                    try:
+                        await asyncio.shield(close_task)
+                    except asyncio.CancelledError as exc:
+                        close_error = exc
+                        if close_task.cancelled():
+                            close_task = asyncio.create_task(self._close_provider())
+                        try:
+                            await asyncio.shield(close_task)
+                        except BaseException as retry_error:
+                            close_error = retry_error
             except BaseException as exc:
                 close_error = exc
             finally:
