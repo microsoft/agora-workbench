@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import asyncio
 import inspect
 import json
@@ -10,7 +11,7 @@ import logging
 import re
 import shutil
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
@@ -85,9 +86,9 @@ class _AsyncCleanupTracker:
     """Retain async cleanup started from synchronous lifecycle paths."""
 
     def __init__(self) -> None:
-        self._tasks: set[asyncio.Task[None]] = set()
+        self._tasks: dict[asyncio.Task[None], Callable[[], Any] | None] = {}
 
-    def schedule(self, awaitable: Any) -> None:
+    def schedule(self, awaitable: Any, *, retry: Callable[[], Any] | None = None) -> None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -97,7 +98,7 @@ class _AsyncCleanupTracker:
             finally:
                 loop.close()
             return
-        self._tasks.add(loop.create_task(awaitable))
+        self._tasks[loop.create_task(awaitable)] = retry
 
     async def drain(self) -> list[Exception]:
         errors: list[Exception] = []
@@ -113,10 +114,12 @@ class _AsyncCleanupTracker:
                 # The shielded tasks continue running. Keep every task strongly
                 # tracked so a later shutdown/drain still waits for completion.
                 raise
-            self._tasks.difference_update(tasks)
-            for result in results:
+            for task, result in zip(tasks, results):
+                retry = self._tasks.pop(task, None)
                 if isinstance(result, asyncio.CancelledError):
                     cancelled = cancelled or result
+                    if retry is not None:
+                        self.schedule(retry())
                 elif isinstance(result, Exception):
                     errors.append(result)
         if cancelled is not None:
@@ -252,7 +255,7 @@ def _decode_reference(value: str) -> ArtifactReference:
             source_id=source_id,
             revision=revision,
         )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (binascii.Error, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("Catalog artifact reference is invalid.") from exc
 
 
@@ -314,7 +317,11 @@ class CatalogSessionBinding:
         except Exception as exc:
             errors.append(exc)
         for extension in self.capability_extensions:
-            close = getattr(extension, "aclose", None) or getattr(extension, "close", None)
+            close = (
+                getattr(extension, "aclose", None)
+                or getattr(extension, "close", None)
+                or getattr(extension, "cleanup", None)
+            )
             if callable(close):
                 try:
                     result = close()
@@ -339,15 +346,7 @@ class CatalogSessionBinding:
             return
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
-
-        async def close_with_retry() -> None:
-            try:
-                await self.aclose()
-            except asyncio.CancelledError as cancelled:
-                await self.aclose()
-                raise cancelled
-
-        self.cleanup_tracker.schedule(close_with_retry())
+        self.cleanup_tracker.schedule(self.aclose(), retry=self.aclose)
 
 
 class CatalogIntegration:
@@ -477,7 +476,19 @@ class CatalogIntegration:
             errors.append(exc)
         try:
             if self._provider_lease.should_close:
-                await self._close_provider()
+                close_task = asyncio.create_task(self._close_provider())
+                try:
+                    await asyncio.shield(close_task)
+                except asyncio.CancelledError as exc:
+                    cancelled = cancelled or exc
+                    if close_task.cancelled():
+                        close_task = asyncio.create_task(self._close_provider())
+                    try:
+                        await asyncio.shield(close_task)
+                    except asyncio.CancelledError as close_cancelled:
+                        cancelled = cancelled or close_cancelled
+                    except Exception as close_error:
+                        errors.append(close_error)
         except Exception as exc:
             errors.append(exc)
         finally:
@@ -574,7 +585,7 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
         return payload
     if isinstance(exc, ValueError):
         return {"error": _sanitize_error_message(str(exc)), "error_type": "invalid_request"}
-    LOGGER.exception("Catalog tool failed", exc_info=exc)
+    LOGGER.error("Catalog tool failed (%s)", type(exc).__name__)
     return {"error": "Catalog operation failed.", "error_type": "internal"}
 
 
@@ -583,9 +594,9 @@ def _sanitize_error_message(message: str) -> str:
 
 
 def _sanitize_metadata_value(value: Any) -> Any:
-    if isinstance(value, str) and "://" in value:
-        return sanitize_uri_for_display(value)
-    if isinstance(value, dict):
+    if isinstance(value, str):
+        return _sanitize_error_message(value)
+    if isinstance(value, Mapping):
         return {key: _sanitize_metadata_value(item) for key, item in value.items()}
     if isinstance(value, list):
         return [_sanitize_metadata_value(item) for item in value]
@@ -791,7 +802,9 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                     }
                     for capability in capabilities
                 ],
-                "execution_references": current.execution_references,
+                "execution_references": (
+                    current.execution_references and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
+                ),
             }
         except Exception as exc:
             return _error_payload(exc)

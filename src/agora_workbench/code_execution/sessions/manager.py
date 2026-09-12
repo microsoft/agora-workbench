@@ -662,20 +662,23 @@ class SessionManager:
         with self._session_lifecycle_lock:
             if session_generation is not None and self._session_generations.get(session_id) != session_generation:
                 raise ValueError(f"Session {session_id} was closed before its kernel could start.")
-
-        if session_id in self._kernels:
+            existing_kernel = self._kernels.get(session_id)
             kernel_session_generation = self._kernel_session_generations.get(session_id)
-            if (
+            if existing_kernel is not None and (
                 session_generation is None
                 or kernel_session_generation is None
                 or kernel_session_generation == session_generation
             ):
                 LOGGER.debug(f"Reusing kernel for session {session_id}")
                 self._kernel_last_used[session_id] = time.time()
-                return self._kernels[session_id]
-            stale_shutdown = self._schedule_kernel_shutdown(session_id, caller="_get_or_create_kernel()")
-            if stale_shutdown is not None:
-                await stale_shutdown
+                return existing_kernel
+            stale_shutdown = (
+                self._schedule_kernel_shutdown(session_id, caller="_get_or_create_kernel()")
+                if existing_kernel is not None
+                else None
+            )
+        if stale_shutdown is not None:
+            await stale_shutdown
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
