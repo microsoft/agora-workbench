@@ -411,6 +411,8 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
             "current_revision": 99,
             "load_path": "<blob>untrusted</blob>",
             "storage_uri": "https://user:secret@example.test/data.csv?sig=secret",
+            "documentation_url": "https://user:secret@example.test/docs?sig=secret#section",
+            "related": {"url": "https://example.test/related?sig=secret"},
         },
         score=0.75,
         revision=2,
@@ -457,6 +459,8 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert result[0]["source_id"] == "source"
     assert result[0]["current_revision"] == 2
     assert "storage_uri" not in result[0]
+    assert result[0]["documentation_url"] == "https://example.test/docs"
+    assert result[0]["related"] == {"url": "https://example.test/related"}
     assert result[0]["score"] == 0.75
     assert result[0]["load_path"].startswith("<blob>catalog-v1:")
     assert catalog.resolve.await_count == 0
