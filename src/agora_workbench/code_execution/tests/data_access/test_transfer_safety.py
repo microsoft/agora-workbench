@@ -1112,6 +1112,11 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
         )
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(object_metadata={"source": "https://user:secret@example.com/data"})
+    redacted_locator = "*" * 6 + "example.com/data?sig=secret"
+    with pytest.raises(ValueError, match="redacted locator"):
+        TransferOptions(object_metadata={"source": f"copied from {redacted_locator} during migration"})
+    assert TransferOptions(object_metadata={"description": "quality ****** stars"}).object_metadata
+    assert TransferOptions(object_metadata={"description": "multiply *** values"}).object_metadata
     assert TransferOptions(
         object_metadata={"source": "abfss://container@account123.dfs.core.windows.net/data"}
     ).object_metadata

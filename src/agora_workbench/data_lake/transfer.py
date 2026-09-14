@@ -158,6 +158,8 @@ class TransferOptions:
             )
             if any(marker in normalized_key for marker in credential_markers):
                 raise ValueError("object_metadata keys must not describe credential-bearing values.")
+            if _REDACTED_URI_IN_TEXT_RE.search(value):
+                raise ValueError("object_metadata values must not contain redacted locator references.")
             for uri_match in _URI_IN_TEXT_RE.finditer(value):
                 parsed = urlsplit(uri_match.group(0))
                 has_userinfo = parsed.password is not None or (
