@@ -6,7 +6,9 @@ import base64
 import dill
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 
 import pytest
 import tracemalloc
@@ -962,6 +964,66 @@ def test_legacy_endpoint_rejects_declared_oversized_body_before_streaming(tmp_pa
 
     assert response.status_code == 413
     assert not stream_called
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_point", ["lstat", "open", "fstat"])
+def test_receive_endpoint_cleans_private_stage_when_initialization_fails(tmp_path, monkeypatch, failure_point):
+    from starlette.testclient import TestClient
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    created: list[Path] = []
+    original_mkdtemp = tempfile.mkdtemp
+    original_lstat = Path.lstat
+    original_open = server_module.os.open
+    original_fstat = server_module.os.fstat
+
+    def tracked_mkdtemp(*args, **kwargs):
+        path = Path(original_mkdtemp(dir=tmp_path, *args, **kwargs))
+        created.append(path)
+        return str(path)
+
+    def fail_lstat(path):
+        if failure_point == "lstat" and created and Path(path) == created[0]:
+            raise OSError("injected stage lstat failure")
+        return original_lstat(path)
+
+    def fail_open(path, flags, *args, **kwargs):
+        if failure_point == "open" and created and Path(path) == created[0]:
+            raise OSError("injected stage open failure")
+        return original_open(path, flags, *args, **kwargs)
+
+    def fail_fstat(descriptor):
+        if failure_point == "fstat" and created:
+            try:
+                if Path(os.readlink(f"/proc/self/fd/{descriptor}")) == created[0]:
+                    raise OSError("injected stage fstat failure")
+            except FileNotFoundError:
+                pass
+        return original_fstat(descriptor)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", tracked_mkdtemp)
+    monkeypatch.setattr(Path, "lstat", fail_lstat)
+    monkeypatch.setattr(server_module.os, "open", fail_open)
+    monkeypatch.setattr(server_module.os, "fstat", fail_fstat)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post("/object-transfer/receive", content=b'{"variable_name":"value","data":""}')
+
+    assert response.status_code == 500
+    assert len(created) == 1
+    assert not created[0].exists()
 
 
 @pytest.mark.unit

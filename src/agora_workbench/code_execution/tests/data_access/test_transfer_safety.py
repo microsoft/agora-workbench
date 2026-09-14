@@ -1972,6 +1972,33 @@ async def test_local_publisher_cancellation_after_copy_prevents_commit(tmp_path,
     await publisher.close()
 
 
+async def test_local_publisher_rejects_parent_moved_out_of_configured_root_during_copy(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    session = output_root / "session"
+    session.mkdir(parents=True)
+    displaced_root = tmp_path / "outputs-displaced"
+    publisher = LocalFilePublisher(output_root)
+    original_copy = publishers_module._copy_local_descriptors
+
+    async def copy_then_move_root(*args, **kwargs):
+        result = await original_copy(*args, **kwargs)
+        output_root.rename(displaced_root)
+        (output_root / "session").mkdir(parents=True)
+        return result
+
+    monkeypatch.setattr(publishers_module, "_copy_local_descriptors", copy_then_move_root)
+
+    with pytest.raises(UnsafePathError, match="root (ancestor )?was replaced|outside the configured root"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert not (output_root / "session" / "result.bin").exists()
+    assert not (displaced_root / "session" / "result.bin").exists()
+    assert _part_files(displaced_root / "session") == []
+    await publisher.close()
+
+
 async def test_local_publisher_rejects_unsupported_object_metadata_before_write(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"new")

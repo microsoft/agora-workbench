@@ -1132,6 +1132,38 @@ class LocalFilePublisher(AssetPublisher):
             os.close(current)
             raise
 
+    def _verify_destination_parent_binding(self, relative_parent: Path, expected_fd: int) -> None:
+        """Verify the retained destination parent is still reachable through the configured root."""
+        current = self._open_verified_root()
+        try:
+            for part in relative_parent.parts:
+                entry_stat = os.stat(part, dir_fd=current, follow_symlinks=False)
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    raise UnsafePathError("Local publish path component is not a directory.", operation="upload")
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=current,
+                )
+                try:
+                    opened_stat = os.fstat(next_fd)
+                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise UnsafePathError("Directory identity changed during traversal.", operation="upload")
+                except BaseException:
+                    os.close(next_fd)
+                    raise
+                os.close(current)
+                current = next_fd
+            current_stat = os.fstat(current)
+            expected_stat = os.fstat(expected_fd)
+            if (current_stat.st_dev, current_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
+                raise UnsafePathError(
+                    "Local publish destination moved outside the configured root.",
+                    operation="upload",
+                )
+        finally:
+            os.close(current)
+
     async def close(self) -> None:
         """Close the retained trusted root descriptor."""
         if self._anchor_fd is not None:
@@ -1289,6 +1321,7 @@ class LocalFilePublisher(AssetPublisher):
             os.close(output_fd)
             output_fd = None
             check_transfer_cancelled(options, operation="upload", resource=str(local_path))
+            self._verify_destination_parent_binding(relative.parent, parent_fd)
             if options.create_exclusive:
                 os.link(
                     temporary_name,

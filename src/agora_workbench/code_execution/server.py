@@ -2810,23 +2810,40 @@ else:
             def create_transfer_stage() -> Path:
                 nonlocal stage_directory, stage_directory_fd, stage_directory_identity, temp_path
                 stage_directory = Path(tempfile.mkdtemp(prefix="_mcp_transfer_receive_"))
-                entry_stat = stage_directory.lstat()
-                descriptor = os.open(
-                    stage_directory,
-                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                )
-                opened_stat = os.fstat(descriptor)
-                if (
-                    not stat.S_ISDIR(entry_stat.st_mode)
-                    or not stat.S_ISDIR(opened_stat.st_mode)
-                    or (entry_stat.st_dev, entry_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino)
-                ):
-                    os.close(descriptor)
-                    raise RuntimeError("Object transfer staging directory identity changed.")
-                stage_directory_fd = descriptor
-                stage_directory_identity = (opened_stat.st_dev, opened_stat.st_ino)
-                temp_path = str(stage_directory / "payload.pkl")
-                return Path(temp_path)
+                descriptor: int | None = None
+                try:
+                    entry_stat = stage_directory.lstat()
+                    descriptor = os.open(
+                        stage_directory,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    opened_stat = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(entry_stat.st_mode)
+                        or not stat.S_ISDIR(opened_stat.st_mode)
+                        or (entry_stat.st_dev, entry_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino)
+                    ):
+                        raise RuntimeError("Object transfer staging directory identity changed.")
+                    stage_directory_fd = descriptor
+                    descriptor = None
+                    stage_directory_identity = (opened_stat.st_dev, opened_stat.st_ino)
+                    temp_path = str(stage_directory / "payload.pkl")
+                    return Path(temp_path)
+                except BaseException:
+                    if descriptor is not None:
+                        os.close(descriptor)
+                    try:
+                        stage_directory.rmdir()
+                    except FileNotFoundError:
+                        # The failed initialization no longer owns a directory entry.
+                        pass
+                    except OSError:
+                        LOGGER.warning(
+                            "Could not remove failed object transfer staging directory.",
+                            exc_info=True,
+                        )
+                    stage_directory = None
+                    raise
 
             def pin_transfer_stage() -> os.stat_result:
                 nonlocal stage_file_fd, stage_file_identity
