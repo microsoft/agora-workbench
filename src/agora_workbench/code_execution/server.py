@@ -2785,6 +2785,7 @@ else:
                 STREAMING_TRANSFER_VERSION_HEADER,
                 ObjectSerializer,
                 decode_streaming_transfer_info,
+                parse_transfer_correlation_metadata,
                 receive_streaming_transfer,
             )
 
@@ -2872,6 +2873,11 @@ else:
                         status_code=413,
                     )
 
+            try:
+                source_server, transfer_id = parse_transfer_correlation_metadata(transfer_metadata)
+            except ValueError as exc:
+                return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
+
             # Validate variable_name is a safe Python identifier
             if not variable_name.isidentifier() or keyword.iskeyword(variable_name):
                 return JSONResponse(
@@ -2949,7 +2955,7 @@ else:
                                 expected_sha256=expected_sha256,
                             ),
                             context=RequestContext(
-                                request_id=transfer_metadata.get("transfer_id"),
+                                request_id=transfer_id,
                                 caller_id=caller_identity,
                                 attributes={"session_id": session.session_id},
                             ),
@@ -3012,8 +3018,8 @@ else:
                         "session=%s variable=%s source=%s transfer_id=%s: %s",
                         session.session_id,
                         variable_name,
-                        transfer_metadata.get("source_server"),
-                        transfer_metadata.get("transfer_id"),
+                        source_server,
+                        transfer_id,
                         error_msg,
                     )
                     self.activity_publisher.publish_nowait(
@@ -3021,12 +3027,11 @@ else:
                             "type": "object_received",
                             "description": (
                                 f"Receive '{variable_name}' from "
-                                f"{transfer_metadata.get('source_server') or 'another server'} "
-                                f"failed: kernel injection error"
+                                f"{source_server or 'another server'} failed: kernel injection error"
                             ),
-                            "transfer_id": transfer_metadata.get("transfer_id"),
+                            "transfer_id": transfer_id,
                             "variable_name": variable_name,
-                            "source_server": transfer_metadata.get("source_server"),
+                            "source_server": source_server,
                             "session_id": session.session_id,
                             "success": False,
                             "error": error_msg,
@@ -3053,13 +3058,10 @@ else:
                 self.activity_publisher.publish_nowait(
                     {
                         "type": "object_received",
-                        "description": (
-                            f"Received '{variable_name}' from "
-                            f"{transfer_metadata.get('source_server') or 'another server'}"
-                        ),
-                        "transfer_id": transfer_metadata.get("transfer_id"),
+                        "description": (f"Received '{variable_name}' from {source_server or 'another server'}"),
+                        "transfer_id": transfer_id,
                         "variable_name": variable_name,
-                        "source_server": transfer_metadata.get("source_server"),
+                        "source_server": source_server,
                         "session_id": session.session_id,
                         "success": True,
                     }

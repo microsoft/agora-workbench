@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import os
+import re
 from collections.abc import AsyncIterable
 from dataclasses import replace
 from pathlib import Path
@@ -47,6 +48,8 @@ STREAMING_TRANSFER_VERSION_HEADER = "X-Agora-Object-Transfer-Version"
 STREAMING_TRANSFER_INFO_HEADER = "X-Agora-Object-Transfer-Info"
 _STREAMING_DATA_MARKER = b',"data":"'
 _MAX_STREAMING_ENVELOPE_BYTES = 64 * 1024
+_MAX_CORRELATION_ID_LENGTH = 128
+_CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 
 # Loopback hostnames that are always permitted for local development / testing.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -86,6 +89,27 @@ def decode_streaming_transfer_info(value: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Invalid streaming transfer metadata.")
     return payload
+
+
+def parse_transfer_correlation_metadata(metadata: Any) -> tuple[str | None, str | None]:
+    """Validate optional opaque identifiers used in peer transfer diagnostics."""
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid object transfer correlation metadata.")
+
+    identifiers: list[str | None] = []
+    for field in ("source_server", "transfer_id"):
+        value = metadata.get(field)
+        if value in (None, ""):
+            identifiers.append(None)
+            continue
+        if (
+            not isinstance(value, str)
+            or len(value) > _MAX_CORRELATION_ID_LENGTH
+            or _CORRELATION_ID_RE.fullmatch(value) is None
+        ):
+            raise ValueError("Invalid object transfer correlation metadata.")
+        identifiers.append(value)
+    return identifiers[0], identifiers[1]
 
 
 async def receive_streaming_transfer(

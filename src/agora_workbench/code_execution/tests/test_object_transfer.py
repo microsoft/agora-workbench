@@ -23,6 +23,7 @@ from ..object_transfer import (
     STREAMING_TRANSFER_VERSION_HEADER,
     decode_streaming_transfer_info,
     encode_streaming_transfer_info,
+    parse_transfer_correlation_metadata,
     receive_streaming_transfer,
 )
 from ..sessions.objects import ObjectStore
@@ -35,6 +36,39 @@ def _streaming_envelope(data: bytes) -> bytes:
 async def _body_chunks(body: bytes, chunk_size: int = 64 * 1024):
     for offset in range(0, len(body), chunk_size):
         yield body[offset : offset + chunk_size]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_server", "https://user:password@example.com/source"),
+        ("transfer_id", "https://example.com/object?sig=secret"),
+        ("source_server", "source\nforged-log-entry"),
+        ("transfer_id", "transfer\rforged-header"),
+        ("source_server", "x" * 129),
+        ("transfer_id", "x" * 129),
+    ],
+)
+def test_transfer_correlation_metadata_rejects_unsafe_identifiers(field, value):
+    metadata = {"source_server": "source-1", "transfer_id": "transfer_1:retry.2"}
+    metadata[field] = value
+
+    with pytest.raises(ValueError, match=r"\AInvalid object transfer correlation metadata\.\Z"):
+        parse_transfer_correlation_metadata(metadata)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({}, (None, None)),
+        ({"source_server": "", "transfer_id": ""}, (None, None)),
+        ({"source_server": "source-1", "transfer_id": "transfer_1:retry.2"}, ("source-1", "transfer_1:retry.2")),
+    ],
+)
+def test_transfer_correlation_metadata_preserves_valid_compatibility(metadata, expected):
+    assert parse_transfer_correlation_metadata(metadata) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +407,73 @@ def test_streaming_receive_endpoint_uses_versioned_incremental_path(tmp_path, mo
     assert response.status_code == 200
     assert response.json()["size_bytes"] == len(data)
     server.session_manager.execute_code_for_session.assert_awaited_once()
+    activity = server.activity_publisher.publish_nowait.call_args.args[0]
+    assert activity["source_server"] == "source"
+    assert activity["transfer_id"] == "transfer-1"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming_transfer", [True, False])
+def test_receive_endpoint_rejects_unsafe_correlation_metadata_without_disclosure(
+    tmp_path, monkeypatch, caplog, streaming_transfer
+):
+    from starlette.testclient import TestClient
+    from unittest.mock import MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    server.session_manager = MagicMock()
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+
+    data = dill.dumps({"value": 1})
+    query_secret = "top-" + "secret"
+    unsafe_source = f"https://user:password@example.com/source?sig={query_secret}"
+    metadata = {"source_server": unsafe_source, "transfer_id": "transfer-1"}
+    headers = {"Content-Type": "application/json"}
+    if streaming_transfer:
+        headers.update(
+            {
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: encode_streaming_transfer_info(
+                    variable_name="received",
+                    session_id="session-1",
+                    metadata=metadata,
+                    size_bytes=len(data),
+                    checksum_sha256=hashlib.sha256(data).hexdigest(),
+                ),
+            }
+        )
+        content = _streaming_envelope(data).replace(b'"value"', b'"received"', 1)
+    else:
+        content = json.dumps(
+            {
+                "variable_name": "received",
+                "session_id": "session-1",
+                "metadata": metadata,
+                "data": base64.b64encode(data).decode(),
+            }
+        ).encode()
+
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    with caplog.at_level("DEBUG"), TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=content, headers=headers)
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Invalid object transfer correlation metadata."}
+    assert query_secret not in response.text
+    assert query_secret not in caplog.text
+    server.activity_publisher.publish_nowait.assert_not_called()
+    server.session_manager.get_session.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
