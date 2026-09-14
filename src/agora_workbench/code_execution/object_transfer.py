@@ -175,9 +175,39 @@ async def receive_legacy_streaming_transfer(
     reading_data = False
     data_complete = False
     total_body_bytes = 0
+    validated_envelope: dict[str, Any] | None = None
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ValueError("Invalid legacy object transfer envelope.")
+            parsed[key] = value
+        return parsed
+
+    def validate_envelope() -> dict[str, Any]:
+        try:
+            envelope = json.loads(
+                bytes(prefix) + b',"data":""' + bytes(suffix),
+                object_pairs_hook=reject_duplicate_keys,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("Invalid legacy object transfer envelope.") from exc
+        expected_keys = {"variable_name", "data", "metadata"}
+        if isinstance(envelope, dict) and "session_id" in envelope:
+            expected_keys.add("session_id")
+        if (
+            not isinstance(envelope, dict)
+            or set(envelope) != expected_keys
+            or not isinstance(envelope.get("variable_name"), str)
+            or not isinstance(envelope.get("metadata"), dict)
+            or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
+        ):
+            raise ValueError("Invalid legacy object transfer envelope.")
+        return envelope
 
     async def decoded_chunks():
-        nonlocal remainder, reading_data, data_complete, total_body_bytes
+        nonlocal remainder, reading_data, data_complete, total_body_bytes, validated_envelope
         async for chunk in chunks:
             total_body_bytes += len(chunk)
             if total_body_bytes > MAX_TRANSFER_BODY_BYTES:
@@ -223,6 +253,7 @@ async def receive_legacy_streaming_transfer(
 
         if not reading_data or not data_complete or remainder:
             raise ValueError("Invalid legacy object transfer envelope.")
+        validated_envelope = validate_envelope()
 
     result = await stream_chunks_to_file(
         decoded_chunks(),
@@ -232,39 +263,11 @@ async def receive_legacy_streaming_transfer(
         operation="receive",
         resource="peer object transfer",
     )
-
-    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        parsed: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in parsed:
-                raise ValueError("Invalid legacy object transfer envelope.")
-            parsed[key] = value
-        return parsed
-
-    try:
-        envelope = json.loads(
-            bytes(prefix) + b',"data":""' + bytes(suffix),
-            object_pairs_hook=reject_duplicate_keys,
-        )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        destination.unlink(missing_ok=True)
-        raise ValueError("Invalid legacy object transfer envelope.") from exc
-    expected_keys = {"variable_name", "data", "metadata"}
-    if isinstance(envelope, dict) and "session_id" in envelope:
-        expected_keys.add("session_id")
-    if (
-        not isinstance(envelope, dict)
-        or set(envelope) != expected_keys
-        or not isinstance(envelope.get("variable_name"), str)
-        or not isinstance(envelope.get("metadata"), dict)
-        or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
-    ):
-        destination.unlink(missing_ok=True)
-        raise ValueError("Invalid legacy object transfer envelope.")
+    assert validated_envelope is not None
     return LegacyTransferEnvelope(
-        variable_name=envelope["variable_name"],
-        session_id=envelope.get("session_id", ""),
-        metadata=envelope["metadata"],
+        variable_name=validated_envelope["variable_name"],
+        session_id=validated_envelope.get("session_id", ""),
+        metadata=validated_envelope["metadata"],
         result=result,
     )
 

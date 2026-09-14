@@ -273,6 +273,7 @@ async def test_legacy_receiver_peak_memory_is_independent_of_payload_size(tmp_pa
     [
         b'{"variable_name":"value","data":"!!!!","metadata":{}}',
         b'{"variable_name":"value","data":"',
+        b'garbage,"data":"YQ==","metadata":{}}',
         b'{"variable_name":"value","data":"YQ==","metadata":{},"extra":true}',
         b'{"variable_name":"value","data":"YQ==","metadata":{},"metadata":{}}',
     ],
