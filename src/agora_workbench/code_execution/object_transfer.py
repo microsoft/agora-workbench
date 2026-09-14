@@ -22,7 +22,7 @@ import math
 import os
 import re
 from collections.abc import AsyncIterable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -47,7 +47,9 @@ STREAMING_TRANSFER_VERSION = "2"
 STREAMING_TRANSFER_VERSION_HEADER = "X-Agora-Object-Transfer-Version"
 STREAMING_TRANSFER_INFO_HEADER = "X-Agora-Object-Transfer-Info"
 _STREAMING_DATA_MARKER = b',"data":"'
+_LEGACY_DATA_MARKER_RE = re.compile(rb',\s*"data"\s*:\s*"')
 _MAX_STREAMING_ENVELOPE_BYTES = 64 * 1024
+MAX_TRANSFER_BODY_BYTES = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4 + (2 * _MAX_STREAMING_ENVELOPE_BYTES)
 _MAX_CORRELATION_ID_LENGTH = 128
 _CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 
@@ -147,6 +149,124 @@ def _validate_streaming_envelope_suffix(suffix: bytes) -> None:
         or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
     ):
         raise ValueError("Invalid streaming object transfer envelope.")
+
+
+@dataclass(frozen=True)
+class LegacyTransferEnvelope:
+    """Validated legacy v1 metadata accompanying a streamed payload."""
+
+    variable_name: str
+    session_id: str
+    metadata: dict[str, Any]
+    result: TransferResult
+
+
+async def receive_legacy_streaming_transfer(
+    chunks: AsyncIterable[bytes],
+    destination: Path,
+    *,
+    options: TransferOptions,
+    context: RequestContext,
+) -> LegacyTransferEnvelope:
+    """Incrementally decode a legacy v1 JSON/base64 envelope with bounded memory."""
+    prefix = bytearray()
+    suffix = bytearray()
+    remainder = b""
+    reading_data = False
+    data_complete = False
+    total_body_bytes = 0
+
+    async def decoded_chunks():
+        nonlocal remainder, reading_data, data_complete, total_body_bytes
+        async for chunk in chunks:
+            total_body_bytes += len(chunk)
+            if total_body_bytes > MAX_TRANSFER_BODY_BYTES:
+                raise TransferLimitError(
+                    "Object transfer request body exceeds the maximum encoded size.",
+                    resource_id="peer object transfer",
+                    operation="receive",
+                )
+            if data_complete:
+                suffix.extend(chunk)
+                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid legacy object transfer envelope.")
+                continue
+            data = chunk
+            if not reading_data:
+                prefix.extend(data)
+                marker = _LEGACY_DATA_MARKER_RE.search(prefix)
+                if marker is None:
+                    if len(prefix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                        raise ValueError("Invalid legacy object transfer envelope.")
+                    continue
+                data = bytes(prefix[marker.end() :])
+                del prefix[marker.start() :]
+                reading_data = True
+
+            closing_quote = data.find(b'"')
+            encoded = data if closing_quote < 0 else data[:closing_quote]
+            if closing_quote >= 0:
+                data_complete = True
+                suffix.extend(data[closing_quote + 1 :])
+                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid legacy object transfer envelope.")
+            encoded = remainder + encoded
+            complete_length = len(encoded) if data_complete else len(encoded) - (len(encoded) % 4)
+            if complete_length:
+                try:
+                    decoded = base64.b64decode(encoded[:complete_length], validate=True)
+                except binascii.Error as exc:
+                    raise ValueError("Invalid base64 data.") from exc
+                if decoded:
+                    yield decoded
+            remainder = encoded[complete_length:]
+
+        if not reading_data or not data_complete or remainder:
+            raise ValueError("Invalid legacy object transfer envelope.")
+
+    result = await stream_chunks_to_file(
+        decoded_chunks(),
+        destination,
+        options=options,
+        context=context,
+        operation="receive",
+        resource="peer object transfer",
+    )
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ValueError("Invalid legacy object transfer envelope.")
+            parsed[key] = value
+        return parsed
+
+    try:
+        envelope = json.loads(
+            bytes(prefix) + b',"data":""' + bytes(suffix),
+            object_pairs_hook=reject_duplicate_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        destination.unlink(missing_ok=True)
+        raise ValueError("Invalid legacy object transfer envelope.") from exc
+    expected_keys = {"variable_name", "data", "metadata"}
+    if isinstance(envelope, dict) and "session_id" in envelope:
+        expected_keys.add("session_id")
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != expected_keys
+        or not isinstance(envelope.get("variable_name"), str)
+        or not isinstance(envelope.get("metadata"), dict)
+        or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
+    ):
+        destination.unlink(missing_ok=True)
+        raise ValueError("Invalid legacy object transfer envelope.")
+    return LegacyTransferEnvelope(
+        variable_name=envelope["variable_name"],
+        session_id=envelope.get("session_id", ""),
+        metadata=envelope["metadata"],
+        result=result,
+    )
 
 
 async def receive_streaming_transfer(

@@ -2763,7 +2763,6 @@ else:
             it by variable name in subsequent code execution calls.
             """
             import keyword
-            import math
             import os
             import tempfile
 
@@ -2780,12 +2779,13 @@ else:
 
             from .object_transfer import (
                 MAX_TRANSFER_SIZE_BYTES,
+                MAX_TRANSFER_BODY_BYTES,
                 STREAMING_TRANSFER_INFO_HEADER,
                 STREAMING_TRANSFER_VERSION_HEADER,
-                ObjectSerializer,
                 decode_streaming_transfer_info,
                 parse_object_transfer_version,
                 parse_transfer_correlation_metadata,
+                receive_legacy_streaming_transfer,
                 receive_streaming_transfer,
             )
 
@@ -2797,9 +2797,13 @@ else:
                     {"success": False, "error": str(exc)},
                     status_code=400,
                 )
-            serialized_data: bytes | None = None
+            legacy_temp_path: str | None = None
             expected_size: int | None = None
             expected_sha256: str | None = None
+
+            def discard_legacy_stage() -> None:
+                if legacy_temp_path is not None:
+                    Path(legacy_temp_path).unlink(missing_ok=True)
 
             if streaming_transfer:
                 try:
@@ -2835,58 +2839,69 @@ else:
                         status_code=400,
                     )
             else:
+                content_length = request.headers.get("content-length")
                 try:
-                    body = await request.json()
-                except Exception:
-                    return JSONResponse({"success": False, "error": "Invalid JSON body"}, status_code=400)
-
-                variable_name = body.get("variable_name")
-                data_b64 = body.get("data")
-                session_id = body.get("session_id")
-                transfer_metadata = body.get("metadata") or {}
-
-                if not isinstance(variable_name, str) or not isinstance(data_b64, str):
-                    return JSONResponse(
-                        {"success": False, "error": "'variable_name' and 'data' must be strings"},
-                        status_code=400,
-                    )
-
-                if not variable_name or not data_b64:
-                    return JSONResponse(
-                        {"success": False, "error": "Missing required fields: 'variable_name' and 'data'"},
-                        status_code=400,
-                    )
-
-                # Enforce size limit on the base64 payload before decoding.
-                # Base64 encodes 3 bytes as 4 chars, so ceil(n * 4/3) + padding.
-                max_b64_len = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4
-                if len(data_b64) > max_b64_len:
+                    declared_length = int(content_length) if content_length is not None else None
+                except ValueError:
+                    return JSONResponse({"success": False, "error": "Invalid Content-Length header"}, status_code=400)
+                if declared_length is not None and (declared_length < 0 or declared_length > MAX_TRANSFER_BODY_BYTES):
                     return JSONResponse(
                         {"success": False, "error": "Payload exceeds maximum transfer size"},
                         status_code=413,
                     )
-
+                fd, legacy_temp_path = tempfile.mkstemp(prefix="_mcp_transfer_v1_", suffix=".pkl")
+                os.close(fd)
+                Path(legacy_temp_path).unlink()
                 try:
-                    serialized_data = ObjectSerializer.from_base64(data_b64)
-                except Exception as e:
-                    return JSONResponse(
-                        {"success": False, "error": f"Invalid base64 data: {e}"},
-                        status_code=400,
+                    legacy_envelope = await receive_legacy_streaming_transfer(
+                        request.stream(),
+                        Path(legacy_temp_path),
+                        options=TransferOptions(
+                            max_bytes=MAX_TRANSFER_SIZE_BYTES,
+                            quota_bytes=MAX_TRANSFER_SIZE_BYTES,
+                        ),
+                        context=RequestContext(),
                     )
-
-                if len(serialized_data) > MAX_TRANSFER_SIZE_BYTES:
+                except TransferLimitError:
+                    discard_legacy_stage()
                     return JSONResponse(
-                        {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
+                        {"success": False, "error": "Payload exceeds maximum transfer size"},
                         status_code=413,
                     )
+                except ClientDisconnect:
+                    discard_legacy_stage()
+                    return JSONResponse(
+                        {"success": False, "error": "Object transfer client disconnected"},
+                        status_code=499,
+                    )
+                except (TransferTimeoutError, TransferCancelledError):
+                    discard_legacy_stage()
+                    return JSONResponse(
+                        {"success": False, "error": "Object transfer receive was interrupted"},
+                        status_code=408,
+                    )
+                except ValueError as exc:
+                    discard_legacy_stage()
+                    error_message = str(exc)
+                    if error_message == "Invalid legacy object transfer envelope.":
+                        error_message = "Invalid JSON body"
+                    return JSONResponse(
+                        {"success": False, "error": error_message},
+                        status_code=400,
+                    )
+                variable_name = legacy_envelope.variable_name
+                session_id = legacy_envelope.session_id
+                transfer_metadata = legacy_envelope.metadata
 
             try:
                 source_server, transfer_id = parse_transfer_correlation_metadata(transfer_metadata)
             except ValueError as exc:
+                discard_legacy_stage()
                 return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
 
             # Validate variable_name is a safe Python identifier
             if not variable_name.isidentifier() or keyword.iskeyword(variable_name):
+                discard_legacy_stage()
                 return JSONResponse(
                     {"success": False, "error": f"Invalid Python variable name: '{variable_name}'"},
                     status_code=400,
@@ -2895,6 +2910,7 @@ else:
             # Get the authenticated user identity from context (set by AuthMiddleware)
             caller_identity = get_current_user_identity()
             if not caller_identity:
+                discard_legacy_stage()
                 return JSONResponse(
                     {"success": False, "error": "Authentication required"},
                     status_code=401,
@@ -2906,6 +2922,7 @@ else:
                 try:
                     session = self.session_manager.get_session(session_id)
                 except (ValueError, KeyError):
+                    discard_legacy_stage()
                     return JSONResponse(
                         {"success": False, "error": f"Session '{session_id}' not found"},
                         status_code=404,
@@ -2923,6 +2940,7 @@ else:
                         continue
 
             if not session:
+                discard_legacy_stage()
                 return JSONResponse(
                     {
                         "success": False,
@@ -2934,6 +2952,7 @@ else:
 
             # Verify session ownership: caller must own the target session
             if session.user_identity != caller_identity:
+                discard_legacy_stage()
                 LOGGER.warning(
                     f"Object transfer rejected: caller {caller_identity} does not own "
                     f"session {session.session_id} (owner: {session.user_identity})"
@@ -2944,8 +2963,11 @@ else:
                 )
 
             # Inject the object into the kernel namespace via temp file
-            fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
-            os.close(fd)
+            if legacy_temp_path is None:
+                fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
+                os.close(fd)
+            else:
+                temp_path = legacy_temp_path
             try:
                 if streaming_transfer:
                     assert expected_size is not None
@@ -2999,12 +3021,7 @@ else:
                         )
                     received_size = transfer_result.bytes_transferred
                 else:
-                    # Legacy v1 compatibility path. Version 2 senders use the
-                    # bounded streaming branch above.
-                    assert serialized_data is not None
-                    with open(temp_path, "wb") as f:
-                        f.write(serialized_data)
-                    received_size = len(serialized_data)
+                    received_size = Path(temp_path).stat().st_size
 
                 # Deserialize and assign in the kernel
                 deserialize_code = (

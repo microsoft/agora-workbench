@@ -17,6 +17,7 @@ from agora_workbench.data_lake import (
     TransferTimeoutError,
 )
 from ..object_transfer import (
+    MAX_TRANSFER_BODY_BYTES,
     ObjectSerializer,
     STREAMING_TRANSFER_INFO_HEADER,
     STREAMING_TRANSFER_VERSION,
@@ -25,6 +26,7 @@ from ..object_transfer import (
     encode_streaming_transfer_info,
     parse_object_transfer_version,
     parse_transfer_correlation_metadata,
+    receive_legacy_streaming_transfer,
     receive_streaming_transfer,
 )
 from ..sessions.objects import ObjectStore
@@ -237,6 +239,121 @@ async def test_streaming_receiver_peak_memory_is_independent_of_payload_size(tmp
     assert result.bytes_transferred == len(data)
     assert destination.stat().st_size == len(data)
     assert peak < 2 * 1024 * 1024
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_peak_memory_is_independent_of_payload_size(tmp_path):
+    data = b"x" * (16 * 1024 * 1024)
+    body = _streaming_envelope(data)
+    destination = tmp_path / "received.pkl"
+
+    tracemalloc.start()
+    try:
+        envelope = await receive_legacy_streaming_transfer(
+            _body_chunks(body),
+            destination,
+            options=TransferOptions(max_bytes=len(data), chunk_size=64 * 1024),
+            context=RequestContext(),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert envelope.variable_name == "value"
+    assert envelope.result.bytes_transferred == len(data)
+    assert destination.stat().st_size == len(data)
+    assert peak < 2 * 1024 * 1024
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"variable_name":"value","data":"!!!!","metadata":{}}',
+        b'{"variable_name":"value","data":"',
+        b'{"variable_name":"value","data":"YQ==","metadata":{},"extra":true}',
+        b'{"variable_name":"value","data":"YQ==","metadata":{},"metadata":{}}',
+    ],
+)
+async def test_legacy_receiver_rejects_malformed_envelopes_and_cleans_partial(tmp_path, body):
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(ValueError):
+        await receive_legacy_streaming_transfer(
+            _body_chunks(body, 2),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_rejects_chunked_encoded_overflow_and_cleans_partial(tmp_path, monkeypatch):
+    from .. import object_transfer as object_transfer_module
+
+    monkeypatch.setattr(object_transfer_module, "MAX_TRANSFER_BODY_BYTES", 32)
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(TransferLimitError):
+        await receive_legacy_streaming_transfer(
+            _body_chunks(_streaming_envelope(b"x" * 64), 5),
+            destination,
+            options=TransferOptions(max_bytes=64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_accepts_exact_encoded_body_boundary(tmp_path, monkeypatch):
+    from .. import object_transfer as object_transfer_module
+
+    body = _streaming_envelope(b"content")
+    monkeypatch.setattr(object_transfer_module, "MAX_TRANSFER_BODY_BYTES", len(body))
+    destination = tmp_path / "received.pkl"
+
+    envelope = await receive_legacy_streaming_transfer(
+        _body_chunks(body, 3),
+        destination,
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert envelope.result.bytes_transferred == len(b"content")
+    assert destination.read_bytes() == b"content"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_accepts_json_whitespace_compatibility(tmp_path):
+    data = b"content"
+    body = json.dumps(
+        {
+            "variable_name": "value",
+            "data": base64.b64encode(data).decode(),
+            "metadata": {},
+        }
+    ).encode()
+    destination = tmp_path / "received.pkl"
+
+    envelope = await receive_legacy_streaming_transfer(
+        _body_chunks(body, 3),
+        destination,
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert envelope.variable_name == "value"
+    assert destination.read_bytes() == data
 
 
 @pytest.mark.unit
@@ -584,7 +701,54 @@ def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legac
 
 
 @pytest.mark.unit
-def test_receive_endpoint_without_version_header_preserves_legacy_json_path(tmp_path, monkeypatch):
+def test_receive_endpoint_without_version_header_streams_legacy_without_request_json(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from starlette.requests import Request
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    async def fail_if_json_called(_request):
+        raise AssertionError("legacy v1 must not materialize request.json")
+
+    monkeypatch.setattr(Request, "json", fail_if_json_called)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.session_manager.execute_code_for_session = AsyncMock(return_value=("", "", True, [], []))
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    data = dill.dumps({"value": 1})
+    body = json.dumps(
+        {
+            "variable_name": "received",
+            "data": base64.b64encode(data).decode(),
+            "metadata": {"source_server": "source", "transfer_id": "transfer-1"},
+            "session_id": "session-1",
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    with TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=body)
+
+    assert response.status_code == 200
+    assert response.json()["size_bytes"] == len(data)
+    server.session_manager.execute_code_for_session.assert_awaited_once()
+
+
+@pytest.mark.unit
+def test_legacy_endpoint_rejects_declared_oversized_body_before_streaming(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     from starlette.requests import Request
 
@@ -592,14 +756,15 @@ def test_receive_endpoint_without_version_header_preserves_legacy_json_path(tmp_
     from ..code_execution_models import ServerConfig
     from ..server import CodeExecutionServer
 
-    json_called = False
+    stream_called = False
 
-    async def track_legacy_json(_request):
-        nonlocal json_called
-        json_called = True
-        raise ValueError("injected invalid legacy body")
+    async def fail_if_streamed(_request):
+        nonlocal stream_called
+        stream_called = True
+        raise AssertionError("declared oversized body must not be consumed")
+        yield b""
 
-    monkeypatch.setattr(Request, "json", track_legacy_json)
+    monkeypatch.setattr(Request, "stream", fail_if_streamed)
     server = CodeExecutionServer(
         server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
         auth_config=create_noop_auth_config(),
@@ -609,11 +774,37 @@ def test_receive_endpoint_without_version_header_preserves_legacy_json_path(tmp_
     server._add_custom_endpoints(app)
 
     with TestClient(app) as client:
-        response = client.post("/object-transfer/receive", content=b"legacy body")
+        response = client.post(
+            "/object-transfer/receive",
+            content=b"x",
+            headers={"Content-Length": str(MAX_TRANSFER_BODY_BYTES + 1)},
+        )
 
-    assert json_called
-    assert response.status_code == 400
-    assert response.json() == {"success": False, "error": "Invalid JSON body"}
+    assert response.status_code == 413
+    assert not stream_called
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_disconnect_cleans_partial(tmp_path):
+    from starlette.requests import ClientDisconnect
+
+    destination = tmp_path / "received.pkl"
+
+    async def disconnected_body():
+        yield b'{"variable_name":"value","data":"YQ'
+        raise ClientDisconnect()
+
+    with pytest.raises(ClientDisconnect):
+        await receive_legacy_streaming_transfer(
+            disconnected_body(),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
 
 
 # ---------------------------------------------------------------------------

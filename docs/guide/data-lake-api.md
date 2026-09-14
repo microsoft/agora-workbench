@@ -137,6 +137,9 @@ streams its base64 JSON body with backpressure under the remaining timeout.
 It marks that backward-compatible JSON body as protocol version 2 so updated
 receivers incrementally decode it directly to a bounded temporary file; older
 receivers can continue parsing the same JSON envelope through the legacy path.
+Updated receivers also incrementally parse absent-version legacy v1 envelopes,
+enforcing declared and observed encoded-body limits before bounded base64
+decoding; they never materialize the full JSON request body.
 The peer protocol does not expose a durable storage locator or conditional
 creation result, so `publish_with_result()` still raises
 `UnsupportedOperationError` rather than claiming that detailed capability.
