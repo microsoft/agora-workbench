@@ -919,6 +919,34 @@ class TestServerPublisher:
         with pytest.raises(RuntimeError, match="_user_token"):
             await publisher.publish(local_path=pkl_file, name="var", session_id="")
 
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "target_url",
+        [
+            "https://user:password@allowed.example",
+            "https://user%40tenant:password@allowed.example",
+            "https://@allowed.example",
+        ],
+    )
+    async def test_publish_rejects_userinfo_before_client_or_token_forwarding(self, tmp_path, monkeypatch, target_url):
+        from unittest.mock import patch
+
+        from ..data_access.publishers import ServerPublisher
+
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "allowed.example")
+        publisher = ServerPublisher(server_name="gis", target_url=target_url)
+        publisher._user_token = "must-not-be-forwarded"
+        publisher._source_server = "src"
+        publisher._transfer_id = "transfer-1"
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        with patch("httpx.AsyncClient") as mock_client_cls, pytest.raises(ValueError, match="user information"):
+            await publisher.publish(local_path=pkl_file, name="var", session_id="")
+
+        mock_client_cls.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # URL validation tests
@@ -936,6 +964,8 @@ class TestValidateTargetUrl:
         # Should not raise
         _validate_target_url("https://example.azurecontainerapps.io")
         _validate_target_url("https://example.azure.com/path")
+        _validate_target_url("https://example.azure.com:8443/mcp")
+        _validate_target_url("https://[2001:db8::1]:8443/mcp")
 
     @pytest.mark.unit
     def test_http_loopback_accepted(self):
@@ -1013,6 +1043,48 @@ class TestValidateTargetUrl:
 
         with pytest.raises(ValueError, match="hostname"):
             _validate_target_url("https:///path")
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user@allowed.example",
+            "https://user:password@allowed.example",
+            "https://@allowed.example",
+            "https://:password@allowed.example",
+            "https://user:@allowed.example",
+            "https://user%40tenant@allowed.example",
+            "https://user%3Apassword@allowed.example",
+            "https://user@[::1]:8000",
+        ],
+    )
+    def test_userinfo_authorities_are_rejected(self, monkeypatch, url):
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "allowed.example ::1")
+        with pytest.raises(ValueError, match="user information"):
+            _validate_target_url(url)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("url", "message"),
+        [
+            ("https://allowed.example%40evil.example", "percent-encoding"),
+            ("https://allowed.example%5cevil.example", "percent-encoding"),
+            ("https://allowed.example\\@evil.example", "ambiguous"),
+            ("https://allowed.example\\evil/path", "ambiguous"),
+            ("https://allowed.example/path\nforged", "ambiguous"),
+            ("https://allowed.example/path?sig=secret", "query string or fragment"),
+            ("https://allowed.example/path#secret", "query string or fragment"),
+            ("https://allowed.example:99999/path", "invalid authority"),
+            ("https://allowed.example:not-a-port/path", "invalid authority"),
+        ],
+    )
+    def test_ambiguous_or_credential_bearing_target_components_are_rejected(self, url, message):
+        from ..object_transfer import _validate_target_url
+
+        with pytest.raises(ValueError, match=message):
+            _validate_target_url(url)
 
     @pytest.mark.unit
     def test_non_http_scheme_rejected(self):

@@ -276,11 +276,27 @@ def _validate_target_url(url: str, trust_http: bool = False) -> None:
     Raises:
         ValueError: If the URL fails any validation rule.
     """
+    if "\\" in url or any(ord(char) <= 32 or ord(char) == 127 for char in url):
+        raise ValueError("Object transfer target URL contains an invalid or ambiguous character.")
     parsed = urlparse(url)
-    host = parsed.hostname or ""
+    try:
+        username = parsed.username
+        password = parsed.password
+        port = parsed.port
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError as exc:
+        raise ValueError("Object transfer target URL has an invalid authority.") from exc
 
     if not host:
         raise ValueError("Object transfer target URL must include a hostname.")
+    if username is not None or password is not None or "@" in parsed.netloc:
+        raise ValueError("Object transfer target URL must not include user information.")
+    if "%" in host:
+        raise ValueError("Object transfer target URL hostname must not contain percent-encoding.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Object transfer target URL must not include a query string or fragment.")
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("Object transfer target URL has an invalid port.")
 
     is_loopback = host in _LOOPBACK_HOSTS
 
