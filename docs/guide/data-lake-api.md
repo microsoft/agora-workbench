@@ -89,7 +89,9 @@ an explicit unsupported-capability error.
 `TransferOptions.object_metadata` is copied into Azure object metadata and
 returned immutably on `TransferResult`; unsupported providers reject it
 explicitly. Credential-bearing metadata keys are rejected, as are URI values
-containing user information, query parameters, or fragments.
+containing user information, query parameters, or fragments. Blob metadata
+keys must use Azure's identifier syntax: an ASCII letter or underscore followed
+only by ASCII letters, digits, and underscores.
 
 The provider namespace is centralized in `agora_workbench.data_lake.identity`:
 `RESERVED_MANIFEST_PATH`, `RESERVED_OPERATIONS_PREFIX`,
@@ -110,7 +112,7 @@ uri, transfer = await blob_publisher.publish_with_result(
     options=TransferOptions(
         create_exclusive=True,
         allow_reserved=True,
-        object_metadata={"agora-operation-id": "operation-42"},
+        object_metadata={"agora_operation_id": "operation-42"},
         max_bytes=...,
         quota_bytes=...,
         timeout_seconds=...,

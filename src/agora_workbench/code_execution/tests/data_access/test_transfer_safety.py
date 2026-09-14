@@ -1105,11 +1105,11 @@ async def test_local_publisher_rejects_zero_progress_descriptor_write(tmp_path, 
 
 
 def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_keys():
-    metadata = {"agora-operation-id": "operation-1"}
+    metadata = {"agora_operation_id": "operation-1"}
     options = TransferOptions(object_metadata=metadata)
-    metadata["agora-operation-id"] = "changed"
+    metadata["agora_operation_id"] = "changed"
 
-    assert options.object_metadata == {"agora-operation-id": "operation-1"}
+    assert options.object_metadata == {"agora_operation_id": "operation-1"}
     with pytest.raises(TypeError):
         options.object_metadata["other"] = "value"  # type: ignore[index]
     with pytest.raises(ValueError, match="credential-bearing"):
@@ -1118,7 +1118,7 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
         with pytest.raises(ValueError, match="credential-bearing"):
             TransferOptions(object_metadata={key: "secret"})
     with pytest.raises(ValueError, match="non-empty"):
-        TransferOptions(object_metadata={"agora-operation-id": ""})
+        TransferOptions(object_metadata={"agora_operation_id": ""})
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(
             object_metadata={"source": "https://account123.blob.core.windows.net/container/data?sig=secret"}
@@ -1431,6 +1431,31 @@ async def test_blob_streaming_cancellation_cleans_partial(tmp_path):
     assert _part_files(tmp_path) == []
 
 
+async def test_blob_fetcher_preserves_create_exclusive_at_local_commit(tmp_path):
+    class Stream:
+        async def chunks(self):
+            yield b"new content"
+
+    blob_client = MagicMock()
+    blob_client.download_blob = AsyncMock(return_value=Stream())
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    fetcher = BlobFetcher(credential=MagicMock())
+    fetcher._clients["https://account123.blob.core.windows.net"] = service_client
+    destination = tmp_path / "blob.bin"
+    destination.write_bytes(b"existing")
+
+    with pytest.raises(FileExistsError):
+        await fetcher.fetch_to_file(
+            "az://account123/container/data.bin",
+            destination,
+            options=TransferOptions(create_exclusive=True),
+        )
+
+    assert destination.read_bytes() == b"existing"
+    assert _part_files(tmp_path) == []
+
+
 async def test_blob_publisher_streams_file_and_returns_auditable_result(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -1665,6 +1690,23 @@ async def test_blob_publisher_rejects_replaced_staging_root(tmp_path):
     await publisher.close()
 
 
+async def test_blob_publisher_rejects_metadata_keys_unsupported_by_azure(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
+    publisher._client = MagicMock()
+
+    with pytest.raises(ValueError, match="Azure Blob metadata keys"):
+        await publisher.publish_with_result(
+            source,
+            "result.bin",
+            "session",
+            options=TransferOptions(object_metadata={"agora-operation-id": "operation-1"}),
+        )
+
+    publisher._client.get_blob_client.assert_not_called()
+
+
 async def test_blob_conditional_create_seam_uses_create_only_precondition(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -1682,7 +1724,7 @@ async def test_blob_conditional_create_seam_uses_create_only_precondition(tmp_pa
         "session",
         options=TransferOptions(
             create_exclusive=True,
-            object_metadata={"agora-operation-id": "operation-1"},
+            object_metadata={"agora_operation_id": "operation-1"},
         ),
         context=context,
     )
@@ -1690,11 +1732,11 @@ async def test_blob_conditional_create_seam_uses_create_only_precondition(tmp_pa
     assert blob_client.upload_blob.await_args.kwargs == {
         "overwrite": False,
         "if_none_match": "*",
-        "metadata": {"agora-operation-id": "operation-1"},
+        "metadata": {"agora_operation_id": "operation-1"},
     }
     assert result.created is True
     assert result.context is context
-    assert result.object_metadata == {"agora-operation-id": "operation-1"}
+    assert result.object_metadata == {"agora_operation_id": "operation-1"}
 
 
 async def test_reserved_blob_write_requires_explicit_trusted_option(tmp_path):
@@ -1721,7 +1763,7 @@ async def test_reserved_blob_write_requires_explicit_trusted_option(tmp_path):
         options=TransferOptions(
             create_exclusive=True,
             allow_reserved=True,
-            object_metadata={"agora-operation-id": "operation-1"},
+            object_metadata={"agora_operation_id": "operation-1"},
         ),
     )
 
@@ -1856,7 +1898,7 @@ async def test_local_publisher_rejects_unsupported_object_metadata_before_write(
             source,
             "result.bin",
             "session",
-            options=TransferOptions(object_metadata={"agora-operation-id": "operation-1"}),
+            options=TransferOptions(object_metadata={"agora_operation_id": "operation-1"}),
         )
 
     assert not (tmp_path / "outputs").exists()

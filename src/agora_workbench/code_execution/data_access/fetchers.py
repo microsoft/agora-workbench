@@ -310,6 +310,7 @@ class BlobFetcher(AssetFetcher):
             chunk_size=options.chunk_size,
             expected_sha256=options.expected_sha256,
             cancellation_event=options.cancellation_event,
+            create_exclusive=options.create_exclusive,
         )
         await emit_transfer_diagnostic(
             options,

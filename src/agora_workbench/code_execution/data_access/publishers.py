@@ -147,6 +147,16 @@ def _validate_artifact_name(name: str, *, allow_reserved: bool = False) -> None:
         raise ValueError("Artifact name is reserved for provider metadata.")
 
 
+def _validate_blob_metadata(metadata: dict[str, str]) -> None:
+    """Validate Azure Blob metadata keys before any upload side effects."""
+    for key in metadata:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
+            raise ValueError(
+                "Azure Blob metadata keys must start with an ASCII letter or underscore "
+                "and contain only ASCII letters, digits, and underscores."
+            )
+
+
 def _open_posix_path_no_follow(path: Path, *, directory: bool = False) -> int:
     """Open an absolute or relative path without following any symlink component."""
     absolute_path = Path(os.path.abspath(os.fspath(path)))
@@ -670,6 +680,7 @@ class BlobPublisher(AssetPublisher):
         """Upload a regular file with bounded reads, timeout, cancellation, and checksum."""
         options = options or TransferOptions()
         context = context or RequestContext()
+        _validate_blob_metadata(dict(options.object_metadata))
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
         _validate_artifact_name(name, allow_reserved=options.allow_reserved)
