@@ -545,7 +545,9 @@ class SessionManager:
         )
         try:
             self._start_session_cleanup(cleanup_session)
-        except BaseException as exc:
+        except asyncio.CancelledError as exc:
+            return exc
+        except Exception as exc:
             return exc
         return None
 
