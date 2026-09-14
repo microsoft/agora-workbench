@@ -398,6 +398,10 @@ class DataLakeDataManager:
                             validated_cache_path,
                             exc_info=True,
                         )
+                    if cache_was_invalidated():
+                        cache_generation = self._cache_generation
+                        full_cache_generation = self._full_cache_generation
+                        continue
                     raise
 
             async def validate_cached_file() -> None:

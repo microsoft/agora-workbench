@@ -304,6 +304,8 @@ relevance `score` when supplied by the provider. They do not eagerly resolve or
 expose credential-bearing storage locators. A `load_path` is returned only when
 the session uses the integration-provided resolver; paste that opaque,
 revision-pinned tag into `execute_*_code`, where resolution occurs on demand.
+Per-artifact policy sessions conservatively omit `load_path` because source
+capabilities alone cannot prove that the caller may resolve a specific result.
 
 Do not also call the legacy `register_catalog_tools()` on the same MCP server:
 both surfaces own `search_data`, `get_artifact`, and `list_domains`, so
@@ -343,8 +345,9 @@ catalog = CatalogIntegration(
 ```
 
 Borrowed providers are neither loaded nor closed by the server by default.
-Owned providers are loaded at startup and closed at shutdown. Override
-`load_on_startup` only when the application has a different refresh owner.
+Owned providers are loaded at startup and must expose `aclose()`, `close()`, or
+`cleanup()` for shutdown. Override `load_on_startup` only when the application
+has a different refresh owner.
 Catalog refresh remains an administrative/application operation; no agent
 reindex or filesystem-watcher tool is registered.
 

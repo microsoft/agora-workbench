@@ -386,6 +386,8 @@ class CatalogSessionBinding:
     _active_snapshots: int = 0
     _snapshots_drained: asyncio.Event = field(default_factory=asyncio.Event)
     _deferred_resources: list[object] = field(default_factory=list)
+    _resolver_closed: bool = False
+    _pending_cleanup_resources: list[object] | None = None
 
     def __post_init__(self) -> None:
         self._snapshots_drained.set()
@@ -468,7 +470,7 @@ class CatalogSessionBinding:
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
-        if self._closed:
+        if self._closed and self._resolver_closed and self._pending_cleanup_resources == []:
             return
         self._closed = True
         errors: list[Exception] = []
@@ -479,13 +481,22 @@ class CatalogSessionBinding:
             self._closed = False
             raise
         try:
-            await self.resolver.aclose()
+            if not self._resolver_closed:
+                await self.resolver.aclose()
+                self._resolver_closed = True
         except asyncio.CancelledError as exc:
             cancelled = exc
         except Exception as exc:
             errors.append(exc)
-        resources = (*self._deferred_resources, *self.capability_extensions, self.owned_authorizer)
-        for extension in (resource for resource in resources if resource is not None):
+        if self._pending_cleanup_resources is None:
+            resources = (*self._deferred_resources, *self.capability_extensions, self.owned_authorizer)
+            seen: set[int] = set()
+            self._pending_cleanup_resources = []
+            for resource in (resource for resource in resources if resource is not None):
+                if id(resource) not in seen:
+                    seen.add(id(resource))
+                    self._pending_cleanup_resources.append(resource)
+        for extension in tuple(self._pending_cleanup_resources):
             close = (
                 getattr(extension, "aclose", None)
                 or getattr(extension, "close", None)
@@ -500,19 +511,23 @@ class CatalogSessionBinding:
                     cancelled = cancelled or exc
                 except Exception as exc:
                     errors.append(exc)
+                else:
+                    self._pending_cleanup_resources.remove(extension)
+            else:
+                self._pending_cleanup_resources.remove(extension)
         if cancelled is not None:
-            self._closed = False
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))
             raise cancelled
         if errors:
-            self._closed = False
             raise ExceptionGroup("Catalog session binding cleanup failed.", errors)
         self._deferred_resources.clear()
+        self.capability_extensions = ()
+        self.owned_authorizer = None
 
     def cleanup(self) -> None:
         """Schedule complete async cleanup from synchronous lifecycle paths."""
-        if self._closed:
+        if self._closed and self._resolver_closed and self._pending_cleanup_resources == []:
             return
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
@@ -713,11 +728,16 @@ class CatalogIntegration:
         if task is None:
 
             async def close_once() -> None:
-                close = getattr(self.provider, "aclose", None) or getattr(self.provider, "close", None)
-                if callable(close):
-                    result = close()
-                    if inspect.isawaitable(result):
-                        await result
+                close = (
+                    getattr(self.provider, "aclose", None)
+                    or getattr(self.provider, "close", None)
+                    or getattr(self.provider, "cleanup", None)
+                )
+                if not callable(close):
+                    raise TypeError("Owned catalog providers must define aclose(), close(), or cleanup().")
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
                 self._provider_closed = True
 
             task = asyncio.create_task(close_once())
@@ -930,7 +950,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         current: CatalogSessionBinding | CatalogSessionView,
         capabilities: dict[str, SourceCapabilities],
     ) -> str | None:
-        if not current.execution_references:
+        if not current.execution_references or integration._policy_mode is CatalogPolicyMode.PER_ARTIFACT:
             return None
         source = capabilities.get(artifact.reference.source_id)
         if source is None or not source.supports(CatalogOperation.RESOLVE):
@@ -1077,6 +1097,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                 ],
                 "execution_references": (
                     current.execution_references
+                    and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
                     and any(capability.supports(CatalogOperation.RESOLVE) for capability in read_capabilities)
                 ),
             }

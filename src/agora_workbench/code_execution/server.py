@@ -201,8 +201,11 @@ class CodeExecutionServer(BaseMCPServer):
         self.states: list["State"] = list(states or [])
         self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
         self._tool_search_backends: list[Any] = []
+        self._closed_tool_search_backends: set[int] = set()
         self._custom_tool_search_backend = tool_search_backend
         self._publishers: "list[AssetPublisher]" = list(publishers or [])
+        self._closed_publishers: set[int] = set()
+        self._activity_publisher_stopped = False
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -2771,12 +2774,39 @@ else:
 
     async def _close_tool_search_backends(self) -> None:
         """Close registered tool search backends."""
+        cancelled: asyncio.CancelledError | None = None
         for backend in self._tool_search_backends:
-            close = getattr(backend, "close", None)
-            if callable(close):
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._close_tool_search_backend(backend),
+                f"Tool-search backend {type(backend).__name__} shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+        if cancelled is not None:
+            raise cancelled
+
+    async def _close_tool_search_backend(self, backend: Any) -> None:
+        resource_id = id(backend)
+        if resource_id in self._closed_tool_search_backends:
+            return
+        close = getattr(backend, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+        self._closed_tool_search_backends.add(resource_id)
+
+    async def _close_publisher(self, publisher: "AssetPublisher") -> None:
+        resource_id = id(publisher)
+        if resource_id in self._closed_publishers:
+            return
+        await publisher.close()
+        self._closed_publishers.add(resource_id)
+
+    async def _stop_activity_publisher(self) -> None:
+        if self._activity_publisher_stopped:
+            return
+        await self.activity_publisher.stop()
+        self._activity_publisher_stopped = True
 
     async def _startup(self):
         """Initialize environment and register kernel on server startup."""
@@ -2844,25 +2874,22 @@ else:
                 "Sidecar shutdown",
             )
             cancelled = cancelled or cleanup_cancelled
-            try:
-                await self._close_tool_search_backends()
-            except asyncio.CancelledError as exc:
-                cancelled = cancelled or exc
-            except Exception:
-                LOGGER.warning("Tool-search shutdown raised; continuing", exc_info=True)
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._close_tool_search_backends(),
+                "Tool-search shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
             for publisher in self._publishers:
-                try:
-                    await publisher.close()
-                except asyncio.CancelledError as exc:
-                    cancelled = cancelled or exc
-                except Exception:
-                    LOGGER.debug("Publisher close raised; ignoring during shutdown", exc_info=True)
-            try:
-                await self.activity_publisher.stop()
-            except asyncio.CancelledError as exc:
-                cancelled = cancelled or exc
-            except Exception:
-                LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
+                cleanup_cancelled = await self._await_catalog_cleanup(
+                    self._close_publisher(publisher),
+                    f"Publisher {publisher.destination_name} shutdown",
+                )
+                cancelled = cancelled or cleanup_cancelled
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._stop_activity_publisher(),
+                "Activity publisher shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
         finally:
             cleanup_cancelled = await self._await_catalog_cleanup(
                 self.session_manager.aclose_all_sessions(),

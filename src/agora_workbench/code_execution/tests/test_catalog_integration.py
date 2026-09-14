@@ -281,6 +281,78 @@ async def test_server_shutdown_cancellation_still_closes_sessions_and_catalog(tm
     assert provider.close_calls == 1
 
 
+@pytest.mark.parametrize("cancelled_stage", ["tool_search", "publisher", "activity"])
+async def test_server_shutdown_drains_each_cancelled_resource_once(tmp_path, cancelled_stage):
+    started = asyncio.Event()
+    gate = asyncio.Event()
+
+    class CloseResource:
+        def __init__(self, name, *, block=False):
+            self.destination_name = name
+            self.block = block
+            self.close_calls = 0
+            self.closed = False
+
+        async def close(self):
+            self.close_calls += 1
+            if self.close_calls > 1:
+                raise RuntimeError(f"{self.destination_name} closed twice")
+            if self.block:
+                started.set()
+                await gate.wait()
+            self.closed = True
+
+    class ActivityResource:
+        def __init__(self, *, block=False):
+            self.block = block
+            self.stop_calls = 0
+            self.stopped = False
+
+        async def stop(self):
+            self.stop_calls += 1
+            if self.stop_calls > 1:
+                raise RuntimeError("activity publisher stopped twice")
+            if self.block:
+                started.set()
+                await gate.wait()
+            self.stopped = True
+
+    server = CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+    )
+    tool_backends = [
+        CloseResource("tool-blocking", block=cancelled_stage == "tool_search"),
+        CloseResource("tool-later"),
+    ]
+    publishers = [
+        CloseResource("publisher-blocking", block=cancelled_stage == "publisher"),
+        CloseResource("publisher-later"),
+    ]
+    activity = ActivityResource(block=cancelled_stage == "activity")
+    server._tool_search_backends = tool_backends
+    server._publishers = cast(Any, publishers)
+    server.activity_publisher = cast(Any, activity)
+    server._sidecar_manager.stop_all = AsyncMock()
+    server.session_manager.aclose_all_sessions = AsyncMock()
+
+    shutdown = asyncio.create_task(server._shutdown())
+    await started.wait()
+    shutdown.cancel()
+    await asyncio.sleep(0)
+    assert not shutdown.done()
+    gate.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await shutdown
+
+    assert all(resource.closed for resource in (*tool_backends, *publishers))
+    assert activity.stopped
+    await server._shutdown()
+    assert [resource.close_calls for resource in (*tool_backends, *publishers)] == [1, 1, 1, 1]
+    assert activity.stop_calls == 1
+
+
 async def test_two_sessions_isolate_policy_and_resolve_catalog_references(tmp_path):
     first_source = _write_manifest(tmp_path / "alice", "alice-source", "alice.txt", "alice-artifact")
     second_source = _write_manifest(tmp_path / "bob", "bob-source", "bob.txt", "bob-artifact")
@@ -482,6 +554,54 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     await manager.aclose()
 
 
+async def test_catalog_cache_reauthorization_retries_after_concurrent_refresh():
+    reauthorization_started = asyncio.Event()
+    reauthorization_gate = asyncio.Event()
+    resolve_calls = 0
+    fetch_calls = 0
+
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            if resolve_calls == 2:
+                reauthorization_started.set()
+                await reauthorization_gate.wait()
+                raise PermissionError("stale authorization")
+            return f"az://account/container/blob-{resolve_calls}.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            dest_path.write_text(f"fetch-{fetch_calls}")
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    assert (await manager.get_cache_path(reference)).read_text() == "fetch-1"
+    refreshed = asyncio.create_task(manager.get_cache_path(reference))
+    await reauthorization_started.wait()
+
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+    reauthorization_gate.set()
+    refreshed_path = await refreshed
+
+    assert refreshed_path.read_text() == "fetch-2"
+    assert resolve_calls == 3
+    assert fetch_calls == 2
+    assert manager._cache_index["catalog-v1:opaque"] == refreshed_path
+    await manager.aclose()
+
+
 async def test_full_cache_invalidation_rejects_in_flight_non_catalog_fetch(tmp_path):
     started = asyncio.Event()
     gate = asyncio.Event()
@@ -666,6 +786,27 @@ async def test_owned_and_borrowed_catalog_lifecycle():
     await borrowed.startup()
     await borrowed.shutdown()
     assert (borrowed_provider.load_calls, borrowed_provider.close_calls) == (0, 0)
+
+
+async def test_owned_catalog_provider_supports_cleanup_lifecycle():
+    class Provider:
+        def __init__(self):
+            self.cleanup_calls = 0
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+
+    provider = Provider()
+    integration = CatalogIntegration(
+        ResourceLease(cast(Any, provider), ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+
+    await integration.shutdown()
+    await integration.shutdown()
+
+    assert provider.cleanup_calls == 1
 
 
 async def test_owned_provider_closes_once_across_concurrent_and_repeated_shutdown():
@@ -995,7 +1136,9 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
 
     integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
     per_artifact = await captured["search_data"]("data")
-    assert per_artifact[0]["load_path"].startswith("<blob>catalog-v1:")
+    assert "load_path" not in per_artifact[0]
+    per_artifact_capabilities = await captured["get_catalog_capabilities"]()
+    assert not per_artifact_capabilities["execution_references"]
 
     catalog.capabilities.return_value = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
     integration.capabilities.return_value = (
@@ -1238,8 +1381,8 @@ async def test_session_capability_extension_merges_and_closes():
 
 
 async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
-    closed = False
     cancelled_attempts = 0
+    resolver_close_calls = 0
 
     class CancelledExtension:
         async def aclose(self):
@@ -1249,28 +1392,45 @@ async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
                 raise asyncio.CancelledError()
 
     class LaterExtension:
-        async def aclose(self):
-            nonlocal closed
-            closed = True
+        def __init__(self):
+            self.close_calls = 0
 
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls > 1:
+                raise RuntimeError("extension closed twice")
+
+    later_extension = LaterExtension()
     provider = _LifecycleProvider()
     integration = CatalogIntegration(
         ResourceLease(provider, ResourceOwnership.OWNED),
         authorizer=_PerUserAuthorizer("source"),
         capability_extension_factory=lambda context, catalog, request_context: (
             CancelledExtension(),
-            LaterExtension(),
+            later_extension,
         ),
     )
     binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
 
+    async def close_resolver():
+        nonlocal resolver_close_calls
+        resolver_close_calls += 1
+        if resolver_close_calls > 1:
+            raise RuntimeError("resolver closed twice")
+
+    binding.resolver.aclose = close_resolver
+
     with pytest.raises(asyncio.CancelledError):
         await binding.aclose()
 
-    assert closed
-    assert not binding._closed
+    assert later_extension.close_calls == 1
+    assert binding._closed
+    with pytest.raises(RuntimeError, match="closed"):
+        binding.snapshot()
     await binding.aclose()
     assert cancelled_attempts == 2
+    assert resolver_close_calls == 1
+    assert later_extension.close_calls == 1
     assert binding._closed
 
 

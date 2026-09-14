@@ -643,6 +643,7 @@ but must not close a credential or other resource borrowed from its caller.
 SQLite provider and loads it at server startup. Passing
 `ResourceLease(provider, ResourceOwnership.BORROWED)` mounts an
 application-managed provider without refreshing or closing it by default.
+An owned provider must expose `aclose()`, `close()`, or `cleanup()`.
 Startup failure and cancellation close owned providers and remove their private
 cache. Shutdown closes execution sessions before the shared provider, so one
 session cannot invalidate another session's resolver.
@@ -655,6 +656,9 @@ session-owned authorizers are closed after replacement or session teardown.
 `get_catalog_capabilities` and
 `CodeExecutionServer.get_data_lake_capabilities(session)` expose the effective
 read operations after provider support and caller policy are intersected.
+Discovery omits executable `load_path` references in `PER_ARTIFACT` mode unless
+artifact-level resolve authorization can be established; source-level
+`RESOLVE` capability alone is not advertised as proof.
 `CatalogIntegration.capability_extension_factory` can attach session-owned,
 authorized capability providers without changing the read provider lifecycle.
 Their `SourceCapabilities` are merged by source, allowing a later managed
