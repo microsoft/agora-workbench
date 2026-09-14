@@ -330,6 +330,9 @@ async def _copy_local_path(
     destination: Path,
     options: TransferOptions,
     context: RequestContext,
+    *,
+    portable_root: Path | None = None,
+    portable_root_identity: tuple[int, int] | None = None,
 ) -> TransferResult:
     """Best-effort fallback for unrestricted local publishing on non-POSIX platforms."""
 
@@ -370,6 +373,8 @@ async def _copy_local_path(
             context=context,
             operation="upload",
             resource=str(source_path),
+            _portable_root=portable_root,
+            _portable_root_identity=portable_root_identity,
         )
     finally:
         await _run_blocking_io(source_file.close)
@@ -741,14 +746,24 @@ class BlobPublisher(AssetPublisher):
             raise
         finally:
             if snapshot_fd is not None:
-                os.close(snapshot_fd)
-            if snapshot_created and staging_fd is not None:
                 try:
-                    os.unlink(snapshot_name, dir_fd=staging_fd)
-                except FileNotFoundError:
-                    LOGGER.debug("BlobPublisher snapshot was already removed: %s", snapshot_name)
-            if staging_fd is not None:
-                os.close(staging_fd)
+                    os.close(snapshot_fd)
+                except OSError:
+                    LOGGER.warning("Could not close BlobPublisher snapshot descriptor.", exc_info=True)
+            try:
+                if snapshot_created and staging_fd is not None:
+                    try:
+                        os.unlink(snapshot_name, dir_fd=staging_fd)
+                    except FileNotFoundError:
+                        LOGGER.debug("BlobPublisher snapshot was already removed: %s", snapshot_name)
+                    except OSError:
+                        LOGGER.warning("Could not remove BlobPublisher snapshot %s.", snapshot_name, exc_info=True)
+            finally:
+                if staging_fd is not None:
+                    try:
+                        os.close(staging_fd)
+                    except OSError:
+                        LOGGER.warning("Could not close BlobPublisher staging descriptor.", exc_info=True)
         result = TransferResult(
             uploaded.bytes_transferred,
             uploaded.checksum_sha256,
@@ -1108,11 +1123,26 @@ class LocalFilePublisher(AssetPublisher):
     ) -> TransferResult:
         if not _USE_POSIX_DIR_FDS:
             resolved_base = self._verify_portable_root()
-            destination = (resolved_base / relative).resolve()
-            if not destination.is_relative_to(resolved_base):
+            root_stat = resolved_base.stat()
+            root_identity = (root_stat.st_dev, root_stat.st_ino)
+            lexical_parent = resolved_base / relative.parent
+            if lexical_parent.resolve(strict=False) != lexical_parent:
+                raise UnsafePathError("Local publish parent must not contain symlinks.", operation="upload")
+            if not lexical_parent.is_relative_to(resolved_base):
                 raise UnsafePathError("Local publish path escapes the configured root.", operation="upload")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            return await _copy_local_path(local_path, destination, options, context)
+            lexical_parent.mkdir(parents=True, exist_ok=True)
+            resolved_parent = lexical_parent.resolve(strict=True)
+            if resolved_parent != lexical_parent or not resolved_parent.is_relative_to(resolved_base):
+                raise UnsafePathError("Local publish parent changed during creation.", operation="upload")
+            destination = resolved_parent / relative.name
+            return await _copy_local_path(
+                local_path,
+                destination,
+                options,
+                context,
+                portable_root=resolved_base,
+                portable_root_identity=root_identity,
+            )
 
         root_fd = self._open_verified_root()
         parent_fd = root_fd
@@ -1125,11 +1155,24 @@ class LocalFilePublisher(AssetPublisher):
                     os.mkdir(part, mode=0o750, dir_fd=parent_fd)
                 except FileExistsError:
                     LOGGER.debug("Local publisher destination directory already exists: %s", part)
+                entry_stat = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    raise UnsafePathError("Local publish path component is not a directory.", operation="upload")
                 next_fd = os.open(
                     part,
                     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
                     dir_fd=parent_fd,
                 )
+                try:
+                    opened_stat = os.fstat(next_fd)
+                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise UnsafePathError(
+                            "Local publish directory identity changed during traversal.",
+                            operation="upload",
+                        )
+                except BaseException:
+                    os.close(next_fd)
+                    raise
                 if parent_fd != root_fd:
                     os.close(parent_fd)
                 parent_fd = next_fd
@@ -1186,6 +1229,10 @@ class LocalFilePublisher(AssetPublisher):
                 except FileNotFoundError:
                     # A failed operation may already have removed its temporary file.
                     pass
+                except OSError:
+                    LOGGER.warning(
+                        "Could not remove failed local publish temporary file %s.", temporary_name, exc_info=True
+                    )
             if parent_fd != root_fd:
                 os.close(parent_fd)
             os.close(root_fd)

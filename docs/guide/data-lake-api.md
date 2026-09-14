@@ -63,6 +63,9 @@ and SAS credentials are removed from diagnostics. Hooks must not add raw
 credentials themselves. Hook exceptions are logged and ignored: they cannot
 turn a committed transfer into a reported failure or replace the primary
 transfer error.
+When an upstream layer has already replaced URI user-info with the
+scheme-less `******` marker, presentation sanitization emits only the
+credential-free `host/path`; it does not invent a replacement scheme.
 
 `AssetPublisher.publish()` streams regular files for the built-in local and
 Blob publishers. `publish_with_result()` additionally returns the

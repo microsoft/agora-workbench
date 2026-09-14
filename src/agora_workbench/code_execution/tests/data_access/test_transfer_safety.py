@@ -81,6 +81,8 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
     )
     embedded_uri = "failed <broken " + "s3" + "://" + "user:secret@" + "example.com/data?token=secret retry"
     assert safe_artifact_reference(embedded_uri) == "failed <broken s3://example.com/data retry"
+    redacted_marker = "failed <broken " + "*" * 6 + "example.com/data?token=secret retry"
+    assert safe_artifact_reference(redacted_marker) == "failed <broken example.com/data retry"
     assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"
 
 
@@ -357,6 +359,79 @@ async def test_non_posix_unrestricted_local_transfer_fallbacks_remain_functional
     assert Path(published).read_bytes() == b"payload"
 
 
+async def test_non_posix_stream_rejects_preexisting_symlink_parent(tmp_path, monkeypatch):
+    safe = tmp_path / "safe"
+    outside = tmp_path / "outside"
+    safe.mkdir()
+    outside.mkdir()
+    (safe / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+
+    async def chunks():
+        yield b"payload"
+
+    with pytest.raises(UnsafePathError, match="must not contain symlinks"):
+        await stream_chunks_to_file(
+            chunks(),
+            safe / "link" / "result.bin",
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert list(outside.iterdir()) == []
+
+
+async def test_non_posix_local_publisher_replaces_final_symlink_entry_not_target(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"new")
+    output_root = tmp_path / "outputs"
+    target = output_root / "target.bin"
+    destination = output_root / "session" / "result.bin"
+    destination.parent.mkdir(parents=True)
+    target.write_bytes(b"original")
+    destination.symlink_to(target)
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+    publisher = LocalFilePublisher(output_root)
+
+    await publisher.publish(source, "result.bin", "session")
+
+    assert not destination.is_symlink()
+    assert destination.read_bytes() == b"new"
+    assert target.read_bytes() == b"original"
+
+
+async def test_non_posix_local_publisher_rejects_parent_swap_during_creation(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    output_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+    monkeypatch.setattr(publishers_module, "_USE_POSIX_DIR_FDS", False)
+    publisher = LocalFilePublisher(output_root)
+    original_mkdir = Path.mkdir
+    swapped = False
+
+    def mkdir_then_swap(path, *args, **kwargs):
+        nonlocal swapped
+        result = original_mkdir(path, *args, **kwargs)
+        if path == output_root / "session" and not swapped:
+            swapped = True
+            path.rename(output_root / "original-session")
+            path.symlink_to(outside, target_is_directory=True)
+        return result
+
+    monkeypatch.setattr(Path, "mkdir", mkdir_then_swap)
+
+    with pytest.raises(UnsafePathError, match="changed during creation"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert swapped
+    assert list(outside.iterdir()) == []
+
+
 async def test_non_posix_local_publisher_rejects_replaced_existing_root(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -506,6 +581,23 @@ async def test_await_transfer_cancels_provider_on_timeout_and_external_cancellat
     await run_case(timeout_seconds=None, cancel_outer=True)
 
 
+async def test_await_transfer_prefers_completed_provider_over_simultaneous_cancellation():
+    cancellation = asyncio.Event()
+
+    async def provider():
+        cancellation.set()
+        return "committed"
+
+    assert (
+        await await_transfer(
+            provider(),
+            TransferOptions(timeout_seconds=None, cancellation_event=cancellation),
+            operation="upload",
+        )
+        == "committed"
+    )
+
+
 async def test_transfer_cancellation_after_final_chunk_prevents_commit(tmp_path):
     destination = tmp_path / "destination.bin"
     destination.write_bytes(b"previous")
@@ -537,7 +629,7 @@ async def test_transfer_rejects_symlinked_destination_parent(tmp_path):
     async def chunks():
         yield b"content"
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, UnsafePathError)):
         await stream_chunks_to_file(
             chunks(),
             safe / "link" / "destination.bin",
@@ -647,7 +739,7 @@ async def test_local_fetcher_closes_source_when_destination_setup_fails(tmp_path
     checked_path, descriptor = fetcher._open_checked(str(source))
     monkeypatch.setattr(fetcher, "_open_checked", lambda _qualified_name: (checked_path, descriptor))
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, UnsafePathError)):
         await fetcher.fetch_to_file(str(source), safe / "link" / "destination.bin")
 
     with pytest.raises(OSError):
@@ -675,7 +767,7 @@ async def test_local_publisher_rejects_symlink_parent_before_writing(tmp_path):
     outside.mkdir()
     (output_root / "session").symlink_to(outside, target_is_directory=True)
 
-    with pytest.raises(OSError):
+    with pytest.raises((OSError, UnsafePathError)):
         await LocalFilePublisher(output_root).publish(source, "result.bin", "session")
 
     assert list(outside.iterdir()) == []
@@ -789,6 +881,31 @@ async def test_local_publisher_failure_has_no_visible_or_partial_output(tmp_path
 
     assert not (output_root / "session" / "result.bin").exists()
     assert _part_files(output_root / "session") == []
+
+
+async def test_local_publisher_partial_cleanup_failure_preserves_primary_error(tmp_path, monkeypatch, caplog):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    output_root = tmp_path / "outputs"
+    original_unlink = publishers_module.os.unlink
+
+    def fail_partial_unlink(path, *args, **kwargs):
+        if str(path).endswith(".part"):
+            raise PermissionError("injected partial cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(publishers_module.os, "unlink", fail_partial_unlink)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(TransferChecksumError):
+        await LocalFilePublisher(output_root).publish(
+            source,
+            "result.bin",
+            "session",
+            options=TransferOptions(expected_sha256="0" * 64),
+        )
+
+    assert not (output_root / "session" / "result.bin").exists()
+    assert "Could not remove failed local publish temporary file" in caplog.text
 
 
 async def test_local_publisher_success_does_not_retry_partial_cleanup(tmp_path, monkeypatch):
@@ -913,6 +1030,10 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(
             object_metadata={"source": "https://account123.blob.core.windows.net/container/data?sig=secret"}
+        )
+    with pytest.raises(ValueError, match="URI values"):
+        TransferOptions(
+            object_metadata={"source": "copied from https://account123.blob.core.windows.net/container/data?sig=secret"}
         )
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(object_metadata={"source": "https://user:secret@example.com/data"})
@@ -1307,6 +1428,65 @@ async def test_blob_publisher_stages_outside_read_only_source_directory(tmp_path
     assert list(staging.glob("*.upload")) == []
 
 
+@pytest.mark.parametrize("checksum_matches", [True, False])
+async def test_blob_snapshot_cleanup_failure_preserves_primary_outcome_and_closes_staging_fd(
+    tmp_path,
+    monkeypatch,
+    caplog,
+    checksum_matches,
+):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    staging = tmp_path / "staging"
+    blob_client = MagicMock()
+    blob_client.upload_blob = AsyncMock()
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    service_client.close = AsyncMock()
+    publisher = BlobPublisher(
+        "https://account123.blob.core.windows.net",
+        "container",
+        staging_dir=staging,
+    )
+    publisher._client = service_client
+    opened_staging_fds = []
+    original_open_staging = publisher._open_verified_staging_root
+    original_unlink = publishers_module.os.unlink
+
+    def record_open_staging():
+        descriptor = original_open_staging()
+        opened_staging_fds.append(descriptor)
+        return descriptor
+
+    def fail_snapshot_unlink(path, *args, **kwargs):
+        if str(path).endswith(".upload"):
+            raise PermissionError("injected snapshot cleanup failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(publisher, "_open_verified_staging_root", record_open_staging)
+    monkeypatch.setattr(publishers_module.os, "unlink", fail_snapshot_unlink)
+    options = TransferOptions(
+        expected_sha256=hashlib.sha256(b"payload" if checksum_matches else b"different").hexdigest()
+    )
+
+    with caplog.at_level(logging.WARNING):
+        if checksum_matches:
+            _, result = await publisher.publish_with_result(source, "result.bin", "session", options=options)
+            assert result.checksum_sha256 == hashlib.sha256(b"payload").hexdigest()
+        else:
+            with pytest.raises(TransferChecksumError):
+                await publisher.publish_with_result(source, "result.bin", "session", options=options)
+
+    assert "Could not remove BlobPublisher snapshot" in caplog.text
+    assert len(opened_staging_fds) == 1
+    with pytest.raises(OSError):
+        os.fstat(opened_staging_fds[0])
+    monkeypatch.setattr(publishers_module.os, "unlink", original_unlink)
+    for snapshot in staging.glob("*.upload"):
+        snapshot.unlink()
+    await publisher.close()
+
+
 async def test_blob_publisher_cancels_upload_before_closing_snapshot(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -1485,6 +1665,36 @@ async def test_local_conditional_create_does_not_replace_existing_object(tmp_pat
 
     assert output.read_bytes() == b"existing"
     assert _part_files(output.parent) == []
+    await publisher.close()
+
+
+async def test_local_publisher_rejects_real_directory_swap_during_destination_traversal(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+    output_root = tmp_path / "outputs"
+    session = output_root / "session"
+    session.mkdir(parents=True)
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    publisher = LocalFilePublisher(output_root)
+    original_open = publishers_module.os.open
+    swapped = False
+
+    def swap_before_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == "session" and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            session.rename(output_root / "original-session")
+            replacement.rename(session)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(publishers_module.os, "open", swap_before_open)
+
+    with pytest.raises(UnsafePathError, match="identity changed"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert swapped
+    assert not (session / "result.bin").exists()
     await publisher.close()
 
 
@@ -1701,6 +1911,60 @@ async def test_manager_legacy_fetcher_failure_preserves_existing_destination(tmp
         with pytest.raises(RuntimeError, match="failed"):
             await manager._fetch_asset_to_file("legacy://object", destination)
         assert destination.read_bytes() == b"committed"
+        assert list(tmp_path.glob(".*.legacy-part")) == []
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_legacy_fetcher_enforces_transfer_options_before_commit(tmp_path):
+    class LegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b"content"
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            Path(dest_path).write_bytes(b"content")
+            return len(b"content")
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    manager = DataLakeDataManager(extra_fetchers=[LegacyFetcher()])
+    existing = tmp_path / "existing.bin"
+    existing.write_bytes(b"existing")
+    try:
+        with pytest.raises(TransferLimitError):
+            await manager._fetch_asset_to_file(
+                "legacy://oversized",
+                existing,
+                transfer_options=TransferOptions(max_bytes=1),
+            )
+        assert existing.read_bytes() == b"existing"
+
+        with pytest.raises(TransferChecksumError):
+            await manager._fetch_asset_to_file(
+                "legacy://checksum",
+                existing,
+                transfer_options=TransferOptions(expected_sha256="0" * 64),
+            )
+        assert existing.read_bytes() == b"existing"
+
+        with pytest.raises(FileExistsError):
+            await manager._fetch_asset_to_file(
+                "legacy://exclusive",
+                existing,
+                transfer_options=TransferOptions(create_exclusive=True),
+            )
+        assert existing.read_bytes() == b"existing"
+
+        cancellation = asyncio.Event()
+        cancellation.set()
+        with pytest.raises(TransferCancelledError):
+            await manager._fetch_asset_to_file(
+                "legacy://cancelled",
+                tmp_path / "cancelled.bin",
+                transfer_options=TransferOptions(cancellation_event=cancellation),
+            )
+        assert not (tmp_path / "cancelled.bin").exists()
         assert list(tmp_path.glob(".*.legacy-part")) == []
     finally:
         await manager.aclose()

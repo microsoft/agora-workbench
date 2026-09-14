@@ -422,9 +422,33 @@ class DataLakeDataManager:
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 temporary_path = dest_path.with_name(f".{dest_path.name}.{secrets.token_hex(8)}.legacy-part")
                 try:
-                    bytes_written = await fetcher.fetch_to_file(qualified_name, temporary_path)
-                    os.replace(temporary_path, dest_path)
-                    return bytes_written
+                    await fetcher.fetch_to_file(qualified_name, temporary_path)
+                    options = transfer_options or self._transfer_options
+                    check_transfer_cancelled(options, operation="download", resource=qualified_name)
+                    file_stat = temporary_path.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(file_stat.st_mode):
+                        raise UnsafePathError("Legacy fetcher output must be a regular file.", operation="download")
+                    check_transfer_size(
+                        file_stat.st_size,
+                        options,
+                        operation="download",
+                        resource=qualified_name,
+                    )
+                    if options.expected_sha256 is not None:
+                        with temporary_path.open("rb", buffering=0) as source:
+                            await hash_file(
+                                source,
+                                options=options,
+                                context=context or RequestContext(),
+                                operation="download",
+                                resource=qualified_name,
+                            )
+                    check_transfer_cancelled(options, operation="download", resource=qualified_name)
+                    if options.create_exclusive:
+                        os.link(temporary_path, dest_path)
+                    else:
+                        os.replace(temporary_path, dest_path)
+                    return file_stat.st_size
                 finally:
                     temporary_path.unlink(missing_ok=True)
 

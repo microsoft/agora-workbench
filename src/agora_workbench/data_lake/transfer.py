@@ -10,6 +10,7 @@ import math
 import os
 import re
 import secrets
+import stat
 import time
 from collections.abc import AsyncIterable, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
@@ -157,8 +158,8 @@ class TransferOptions:
             )
             if any(marker in normalized_key for marker in credential_markers):
                 raise ValueError("object_metadata keys must not describe credential-bearing values.")
-            if "://" in value:
-                parsed = urlsplit(value)
+            for uri_match in _URI_IN_TEXT_RE.finditer(value):
+                parsed = urlsplit(uri_match.group(0))
                 has_userinfo = parsed.password is not None or (
                     parsed.username is not None and parsed.scheme.lower() != "abfss"
                 )
@@ -218,10 +219,10 @@ def safe_artifact_reference(value: str) -> str:
     def sanitize_reference(reference: str) -> str:
         redacted = _REDACTED_URI_RE.fullmatch(reference)
         if redacted is not None:
-            return sanitize_uri_for_display(f"https://{redacted.group('location')}")
+            return redacted.group("location")
         sanitized = _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), reference)
         return _REDACTED_URI_IN_TEXT_RE.sub(
-            lambda match: sanitize_uri_for_display(f"https://{match.group('location')}"),
+            lambda match: match.group("location"),
             sanitized,
         )
 
@@ -307,6 +308,8 @@ async def await_transfer(
                 return await task
             cancel_task = asyncio.create_task(options.cancellation_event.wait())
             done, _ = await asyncio.wait((task, cancel_task), return_when=asyncio.FIRST_COMPLETED)
+            if task in done:
+                return await task
             if cancel_task in done:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -350,6 +353,8 @@ async def stream_chunks_to_file(
     context: RequestContext,
     operation: str = "download",
     resource: str | None = None,
+    _portable_root: Path | None = None,
+    _portable_root_identity: tuple[int, int] | None = None,
 ) -> TransferResult:
     """Stream chunks into an atomically published file and remove partials on failure.
 
@@ -460,11 +465,29 @@ async def stream_chunks_to_file(
                         os.mkdir(part, mode=0o750, dir_fd=parent_fd)
                     except FileExistsError:
                         LOGGER.debug("Transfer destination directory already exists: %s", part)
+                    entry_stat = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
+                    if not stat.S_ISDIR(entry_stat.st_mode):
+                        raise UnsafePathError(
+                            "Transfer destination path component is not a directory.",
+                            resource_id=display_resource,
+                            operation=operation,
+                        )
                     next_fd = os.open(
                         part,
                         os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
                         dir_fd=parent_fd,
                     )
+                    try:
+                        opened_stat = os.fstat(next_fd)
+                        if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                            raise UnsafePathError(
+                                "Transfer destination directory identity changed during traversal.",
+                                resource_id=display_resource,
+                                operation=operation,
+                            )
+                    except BaseException:
+                        os.close(next_fd)
+                        raise
                     os.close(parent_fd)
                     parent_fd = next_fd
             except BaseException:
@@ -472,8 +495,40 @@ async def stream_chunks_to_file(
                 parent_fd = None
                 raise
         else:
+            lexical_parent = Path(os.path.abspath(os.fspath(destination_path.parent)))
+            if lexical_parent.resolve(strict=False) != lexical_parent:
+                raise UnsafePathError(
+                    "Transfer destination parent must not contain symlinks.",
+                    resource_id=display_resource,
+                    operation=operation,
+                )
+            if _portable_root is not None:
+                if not lexical_parent.is_relative_to(_portable_root):
+                    raise UnsafePathError(
+                        "Transfer destination parent escapes its configured root.",
+                        resource_id=display_resource,
+                        operation=operation,
+                    )
+                current_root = _portable_root.resolve(strict=True)
+                root_stat = current_root.stat()
+                if (
+                    current_root != _portable_root
+                    or _portable_root_identity is None
+                    or (root_stat.st_dev, root_stat.st_ino) != _portable_root_identity
+                ):
+                    raise UnsafePathError(
+                        "Transfer destination root identity changed.",
+                        resource_id=display_resource,
+                        operation=operation,
+                    )
             destination_path.parent.mkdir(parents=True, exist_ok=True)
             portable_parent = destination_path.parent.resolve(strict=True)
+            if portable_parent != lexical_parent:
+                raise UnsafePathError(
+                    "Transfer destination parent changed during creation.",
+                    resource_id=display_resource,
+                    operation=operation,
+                )
             portable_destination = portable_parent / destination_path.name
             parent_stat = portable_parent.stat()
             portable_parent_identity = (parent_stat.st_dev, parent_stat.st_ino)
@@ -520,6 +575,20 @@ async def stream_chunks_to_file(
                 raise RuntimeError("Portable transfer destination was not initialized.")
             current_parent = destination_path.parent.resolve(strict=True)
             current_stat = current_parent.stat()
+            if _portable_root is not None:
+                current_root = _portable_root.resolve(strict=True)
+                root_stat = current_root.stat()
+                if (
+                    current_root != _portable_root
+                    or _portable_root_identity is None
+                    or (root_stat.st_dev, root_stat.st_ino) != _portable_root_identity
+                    or not current_parent.is_relative_to(current_root)
+                ):
+                    raise UnsafePathError(
+                        "Transfer destination root identity changed before commit.",
+                        resource_id=display_resource,
+                        operation=operation,
+                    )
             if (
                 current_parent != portable_parent
                 or (current_stat.st_dev, current_stat.st_ino) != portable_parent_identity
