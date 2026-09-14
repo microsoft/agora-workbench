@@ -648,6 +648,66 @@ class TestSendTool:
         assert "DO_NOT_DISCLOSE" not in json.dumps(event)
 
     @pytest.mark.asyncio
+    async def test_send_sanitizes_custom_publisher_failure_in_logs_response_and_activity(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        from ... import sessions as sessions_pkg
+        from ...sessions import (
+            SessionConfig,
+            SessionManager,
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        session_manager = SessionManager(SessionConfig())
+        publisher = LocalFilePublisher(base_dir=tmp_path / "published")
+        secret = "DO_NOT_DISCLOSE"
+        unsafe_uri = "https" + f"://user:{secret}@example.com/result.csv?sig={secret}"
+        publisher.publish = AsyncMock(side_effect=RuntimeError(f"upload failed for <blob>{unsafe_uri}</blob>"))
+        server = _make_server_with_publishers([publisher])
+        server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
+
+        session_id = session_manager.create_session(
+            data={},
+            user_identity="u@t",
+            user_token="tok",
+            token_claims={"oid": "u", "tid": "t"},
+        )
+        outputs = session_manager._get_outputs_dir(session_id)
+        artifact = outputs / "result.csv"
+        artifact.write_text("value")
+        session_manager._register_artifacts_from_diff(session_id, {}, session_manager._snapshot_outputs_dir(session_id))
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
+        server._restore_auth_context_for_mcp_session = MagicMock()
+        mock_ctx = MagicMock(session_id=session_id)
+
+        try:
+            with caplog.at_level("ERROR"):
+                result = json.loads(
+                    await (await server.mcp.get_tool("test_send")).fn(
+                        ctx=mock_ctx,
+                        data_ref="result.csv",
+                        to="local",
+                    )
+                )
+        finally:
+            set_current_user_identity(None)
+            set_current_request_token(None)
+            set_current_token_claims(None)
+
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        serialized = json.dumps({"result": result, "event": event, "logs": caplog.text})
+        assert secret not in serialized
+        assert "sig=" not in serialized
+        assert "https://example.com/result.csv" in serialized
+        assert all(record.exc_info is None for record in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch):
         """The send result exposes actionable fields returned by a peer."""
         from ... import sessions as sessions_pkg

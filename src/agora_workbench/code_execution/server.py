@@ -1941,7 +1941,8 @@ class CodeExecutionServer(BaseMCPServer):
                 )
                 return _json.dumps(error_payload, indent=2)
             except Exception as exc:
-                LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                safe_error = f"{type(exc).__name__}: {safe_artifact_reference(str(exc))}"
+                LOGGER.error("send tool failed: %s", safe_error)
                 event_type = "object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
@@ -1952,11 +1953,11 @@ class CodeExecutionServer(BaseMCPServer):
                         "destination": to,
                         "session_id": session.session_id if session else mcp_session_id,
                         "success": False,
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "error": safe_error,
                     }
                 )
                 return _json.dumps(
-                    {"success": False, "error": f"{type(exc).__name__}: {exc}"},
+                    {"success": False, "error": safe_error},
                     indent=2,
                 )
             finally:

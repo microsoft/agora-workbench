@@ -36,7 +36,13 @@ from agora_workbench.data_lake import (
     canonicalize_azure_uri,
     validate_managed_revision_path,
 )
-from agora_workbench.data_lake.transfer import await_transfer, hash_file, safe_artifact_reference, stream_chunks_to_file
+from agora_workbench.data_lake.transfer import (
+    await_transfer,
+    hash_file,
+    safe_artifact_reference,
+    safe_transfer_resource,
+    stream_chunks_to_file,
+)
 
 from ...data_access.fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 from ...data_access.manager import DataLakeDataManager
@@ -75,6 +81,10 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
 
     assert safe_artifact_reference(raw) == "https://example.com/data"
     assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>https://example.com/data</blob>"
+
+    raw = "*" * 6 + "example.com/data?sig=secret#fragment"
+    assert safe_artifact_reference(raw) == "example.com/data"
+    assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>example.com/data</blob>"
     assert (
         safe_artifact_reference("failed <broken s3://user:secret@example.com/data?token=secret retry")
         == "failed <broken s3://example.com/data retry"
@@ -84,6 +94,12 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
     redacted_marker = "failed <broken " + "*" * 6 + "example.com/data?token=secret retry"
     assert safe_artifact_reference(redacted_marker) == "failed <broken example.com/data retry"
     assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"
+
+
+def test_safe_transfer_resource_sanitizes_tagged_uri():
+    tagged = "<blob>" + "https" + "://user:secret@example.com/data?sig=secret</blob>"
+
+    assert safe_transfer_resource(tagged) == "<blob>https://example.com/data</blob>"
 
 
 async def test_local_streaming_peak_memory_is_independent_of_file_size(tmp_path):
@@ -106,6 +122,65 @@ async def test_local_streaming_peak_memory_is_independent_of_file_size(tmp_path)
     assert result.bytes_transferred == source.stat().st_size
     assert destination.stat().st_size == source.stat().st_size
     assert peak < 2 * 1024 * 1024
+
+
+async def test_portable_checksum_cleanup_does_not_follow_replaced_parent(tmp_path, monkeypatch, caplog):
+    parent = tmp_path / "destination"
+    parent.mkdir()
+    displaced = tmp_path / "displaced"
+    destination = parent / "result.bin"
+    replacement_content = b"replacement-owned"
+
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+
+    async def chunks():
+        yield b"wrong"
+        parent.rename(displaced)
+        parent.mkdir()
+        temporary = next(displaced.glob(".*.part"))
+        (parent / temporary.name).write_bytes(replacement_content)
+
+    with caplog.at_level(logging.WARNING), pytest.raises(TransferChecksumError):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(expected_sha256=hashlib.sha256(b"expected").hexdigest()),
+            context=RequestContext(),
+        )
+
+    replacement_temporary = next(parent.glob(".*.part"))
+    assert replacement_temporary.read_bytes() == replacement_content
+    assert "Skipped unsafe transfer temporary cleanup" in caplog.text
+
+
+async def test_portable_timeout_cleanup_does_not_follow_replaced_parent(tmp_path, monkeypatch, caplog):
+    parent = tmp_path / "destination"
+    parent.mkdir()
+    displaced = tmp_path / "displaced"
+    destination = parent / "result.bin"
+    replacement_content = b"replacement-owned"
+
+    monkeypatch.setattr(transfer_module, "_USE_POSIX_DIR_FDS", False)
+
+    async def chunks():
+        yield b"partial"
+        parent.rename(displaced)
+        parent.mkdir()
+        temporary = next(displaced.glob(".*.part"))
+        (parent / temporary.name).write_bytes(replacement_content)
+        await asyncio.Event().wait()
+
+    with caplog.at_level(logging.WARNING), pytest.raises(TransferTimeoutError):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(timeout_seconds=0.05),
+            context=RequestContext(),
+        )
+
+    replacement_temporary = next(parent.glob(".*.part"))
+    assert replacement_temporary.read_bytes() == replacement_content
+    assert "Skipped unsafe transfer temporary cleanup" in caplog.text
 
 
 @pytest.mark.parametrize(

@@ -209,8 +209,7 @@ def safe_transfer_resource(value: str | os.PathLike[str] | None) -> str | None:
     """Return a credential-free resource identifier suitable for logs and events."""
     if value is None:
         return None
-    text = os.fspath(value)
-    return sanitize_uri_for_display(text) if "://" in text else text
+    return safe_artifact_reference(os.fspath(value))
 
 
 def safe_artifact_reference(value: str) -> str:
@@ -448,10 +447,23 @@ async def stream_chunks_to_file(
         try:
             if parent_fd is not None:
                 os.unlink(temporary_name, dir_fd=parent_fd)
-            elif portable_parent is not None:
-                (portable_parent / temporary_name).unlink(missing_ok=True)
+            elif portable_parent is not None and portable_parent_identity is not None:
+                current_parent = destination_path.parent.resolve(strict=True)
+                current_stat = current_parent.stat()
+                if (
+                    current_parent != portable_parent
+                    or (current_stat.st_dev, current_stat.st_ino) != portable_parent_identity
+                ):
+                    LOGGER.warning(
+                        "Skipped unsafe transfer temporary cleanup after destination parent replacement: %s",
+                        temporary_name,
+                    )
+                    return
+                (current_parent / temporary_name).unlink(missing_ok=True)
         except FileNotFoundError:
             return
+        except OSError:
+            LOGGER.warning("Could not safely remove transfer temporary file %s.", temporary_name, exc_info=True)
 
     try:
         if _USE_POSIX_DIR_FDS:
