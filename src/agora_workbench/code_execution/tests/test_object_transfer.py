@@ -261,6 +261,61 @@ async def test_streaming_receiver_rejects_malformed_base64_and_cleans_partial(tm
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "mutate"),
+    [
+        ("missing-closing-quote", lambda body: body.replace(b'","metadata"', b',"metadata"', 1)),
+        ("missing-closing-brace", lambda body: body[:-1]),
+        ("trailing-garbage", lambda body: body + b"unexpected"),
+        ("extra-json-field", lambda body: body[:-1] + b',"unexpected":true}'),
+    ],
+)
+async def test_streaming_receiver_rejects_invalid_final_framing_without_commit(tmp_path, case, mutate):
+    data = b"content"
+    destination = tmp_path / f"{case}.pkl"
+
+    with pytest.raises(ValueError):
+        await receive_streaming_transfer(
+            _body_chunks(mutate(_streaming_envelope(data)), 3),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_accepts_split_terminator_and_json_trailing_whitespace(tmp_path):
+    data = b"content"
+    body = _streaming_envelope(data) + b" \t\r\n"
+    destination = tmp_path / "received.pkl"
+
+    async def split_terminator():
+        yield body[:-5]
+        yield body[-5:-4]
+        yield body[-4:-2]
+        yield body[-2:]
+
+    result = await receive_streaming_transfer(
+        split_terminator(),
+        destination,
+        expected_size=len(data),
+        expected_sha256=hashlib.sha256(data).hexdigest(),
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert result.bytes_transferred == len(data)
+    assert destination.read_bytes() == data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_streaming_receiver_accepts_uppercase_declared_checksum(tmp_path):
     destination = tmp_path / "received.pkl"
     data = b"content"

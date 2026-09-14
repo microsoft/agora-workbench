@@ -121,6 +121,34 @@ def parse_transfer_correlation_metadata(metadata: Any) -> tuple[str | None, str 
     return identifiers[0], identifiers[1]
 
 
+def _validate_streaming_envelope_suffix(suffix: bytes) -> None:
+    """Validate the bounded JSON tail following the streamed base64 string."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Invalid streaming object transfer envelope.")
+            result[key] = value
+        return result
+
+    try:
+        envelope = json.loads(b'{"data":""' + suffix, object_pairs_hook=reject_duplicate_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid streaming object transfer envelope.") from exc
+    if not isinstance(envelope, dict):
+        raise ValueError("Invalid streaming object transfer envelope.")
+    expected_keys = {"data", "metadata"}
+    if "session_id" in envelope:
+        expected_keys.add("session_id")
+    if (
+        set(envelope) != expected_keys
+        or not isinstance(envelope["metadata"], dict)
+        or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
+    ):
+        raise ValueError("Invalid streaming object transfer envelope.")
+
+
 async def receive_streaming_transfer(
     chunks: AsyncIterable[bytes],
     destination: Path,
@@ -140,6 +168,7 @@ async def receive_streaming_transfer(
     async def decoded_chunks():
         prefix = bytearray()
         remainder = b""
+        suffix = bytearray()
         reading_data = False
         data_complete = False
         total_encoded = 0
@@ -155,6 +184,9 @@ async def receive_streaming_transfer(
                     operation="receive",
                 )
             if data_complete:
+                suffix.extend(chunk)
+                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid streaming object transfer envelope.")
                 continue
             data = chunk
             if not reading_data:
@@ -172,6 +204,9 @@ async def receive_streaming_transfer(
             encoded = data if closing_quote < 0 else data[:closing_quote]
             if closing_quote >= 0:
                 data_complete = True
+                suffix.extend(data[closing_quote + 1 :])
+                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid streaming object transfer envelope.")
             encoded = remainder + encoded
             complete_length = len(encoded) if data_complete else len(encoded) - (len(encoded) % 4)
             if complete_length:
@@ -188,6 +223,7 @@ async def receive_streaming_transfer(
 
         if not reading_data or not data_complete or remainder:
             raise ValueError("Invalid streaming object transfer envelope.")
+        _validate_streaming_envelope_suffix(bytes(suffix))
         if total_decoded != expected_size:
             raise ValueError("Decoded payload size did not match the declared size.")
 
