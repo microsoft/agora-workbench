@@ -180,6 +180,7 @@ class TestAssetResolutionMiddleware:
         "secret_uri",
         [
             "https://user:password@example.com/data?sig=secret#fragment",
+            "*" * 6 + "example.com/data?sig=secret#fragment",
             "s3://bucket/object?token=secret#fragment",
         ],
     )

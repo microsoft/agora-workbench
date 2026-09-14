@@ -20,8 +20,8 @@ from .publishers import (
     LocalFilePublisher,
     ServerPublisher,
     parse_destination_tag,
-    publish_compat,
 )
+from .publishers import publish_compat as publish_compat
 from .resolution import (
     AssetResolutionMiddleware,
     looks_like_qualified_name,

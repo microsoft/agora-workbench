@@ -18,12 +18,11 @@ if TYPE_CHECKING:
     from ..server import CodeExecutionServer
 
 LOGGER = logging.getLogger(__name__)
-_URI_IN_ERROR_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
 
 
 def _safe_error_detail(error: BaseException) -> str:
     """Redact credentials from URI-like values embedded in exception text."""
-    return _URI_IN_ERROR_RE.sub(lambda match: safe_artifact_reference(match.group(0)), str(error))
+    return safe_artifact_reference(str(error))
 
 
 # ContextVar for passing asset resolution metadata from middleware to tool callback.
