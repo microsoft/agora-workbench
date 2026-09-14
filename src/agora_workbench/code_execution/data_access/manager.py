@@ -109,12 +109,12 @@ def _open_cached_file_no_follow(path: Path) -> BinaryIO:
 
 def _remove_legacy_staging_if_owned(path: Path, expected_identity: tuple[int, int] | None) -> None:
     """Remove a regular legacy staging entry only while its observed identity is unchanged."""
+    if expected_identity is None:
+        return
     try:
         entry_stat = path.stat(follow_symlinks=False)
         entry_identity = (entry_stat.st_dev, entry_stat.st_ino)
-        if not stat.S_ISREG(entry_stat.st_mode) or (
-            expected_identity is not None and entry_identity != expected_identity
-        ):
+        if not stat.S_ISREG(entry_stat.st_mode) or entry_identity != expected_identity:
             LOGGER.warning("Skipped cleanup of replaced legacy transfer staging entry: %s", path.name)
             return
         with _open_cached_file_no_follow(path) as staged_file:
@@ -468,6 +468,16 @@ class DataLakeDataManager:
                 started = time.monotonic()
                 staged_identity: tuple[int, int] | None = None
                 try:
+                    staging_fd = os.open(
+                        temporary_path,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                        0o600,
+                    )
+                    try:
+                        staging_stat = os.fstat(staging_fd)
+                        staged_identity = (staging_stat.st_dev, staging_stat.st_ino)
+                    finally:
+                        os.close(staging_fd)
                     await await_transfer(
                         fetcher.fetch_to_file(qualified_name, temporary_path),
                         options,

@@ -2859,6 +2859,7 @@ else:
                         if (entry_stat.st_dev, entry_stat.st_ino) == stage_file_identity:
                             os.unlink("payload.pkl", dir_fd=stage_directory_fd)
                     except FileNotFoundError:
+                        # The owned staging entry was already removed.
                         pass
                     except OSError:
                         LOGGER.warning("Could not safely remove object transfer staging file.", exc_info=True)
@@ -2874,6 +2875,7 @@ else:
                         if (directory_stat.st_dev, directory_stat.st_ino) == stage_directory_identity:
                             stage_directory.rmdir()
                     except FileNotFoundError:
+                        # The private staging directory was already removed.
                         pass
                     except OSError:
                         LOGGER.warning("Could not safely remove object transfer staging directory.", exc_info=True)
@@ -3060,6 +3062,9 @@ else:
                                 attributes={"session_id": session.session_id},
                             ),
                             _destination_parent_fd=stage_directory_fd,
+                            expected_variable_name=variable_name,
+                            expected_session_id=session_id,
+                            expected_metadata=transfer_metadata,
                         )
                         pinned_stat = pin_transfer_stage()
                     except TransferLimitError:

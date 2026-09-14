@@ -385,6 +385,7 @@ async def test_streaming_receiver_rejects_malformed_base64_and_cleans_partial(tm
 @pytest.mark.parametrize(
     ("case", "mutate"),
     [
+        ("garbage-prefix", lambda body: b"garbage" + body[body.index(b',"data"') :]),
         ("missing-closing-quote", lambda body: body.replace(b'","metadata"', b',"metadata"', 1)),
         ("missing-closing-brace", lambda body: body[:-1]),
         ("trailing-garbage", lambda body: body + b"unexpected"),
@@ -437,6 +438,29 @@ async def test_receivers_preserve_existing_destination_on_invalid_trailing_envel
             )
 
     assert destination.read_bytes() == b"existing"
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_body_fields_that_disagree_with_header_metadata(tmp_path):
+    data = b"content"
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(ValueError, match="authenticated metadata"):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 3),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(),
+            context=RequestContext(),
+            expected_variable_name="different",
+            expected_session_id="session-1",
+            expected_metadata={},
+        )
+
+    assert not destination.exists()
     assert list(tmp_path.glob(".*.part")) == []
 
 
@@ -617,7 +641,14 @@ def test_streaming_receive_endpoint_uses_versioned_incremental_path(tmp_path, mo
     with TestClient(app) as client:
         response = client.post(
             "/object-transfer/receive",
-            content=_streaming_envelope(data).replace(b'"value"', b'"received"', 1),
+            content=(
+                _streaming_envelope(data)
+                .replace(b'"value"', b'"received"', 1)
+                .replace(
+                    b'"metadata":{}',
+                    b'"metadata":{"source_server":"source","transfer_id":"transfer-1"},"session_id":"session-1"',
+                )
+            ),
             headers={
                 STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
                 STREAMING_TRANSFER_INFO_HEADER: info,
@@ -673,7 +704,11 @@ def test_receive_endpoint_rejects_unsafe_correlation_metadata_without_disclosure
                 ),
             }
         )
-        content = _streaming_envelope(data).replace(b'"value"', b'"received"', 1)
+        content = (
+            _streaming_envelope(data)
+            .replace(b'"value"', b'"received"', 1)
+            .replace(b'"metadata":{}', b'"metadata":' + json.dumps(metadata, separators=(",", ":")).encode())
+        )
     else:
         content = json.dumps(
             {
@@ -846,7 +881,14 @@ def test_receive_endpoint_rejects_staging_replacement_before_kernel_read(
                 ),
             }
         )
-        content = _streaming_envelope(data).replace(b'"value"', b'"received"', 1)
+        content = (
+            _streaming_envelope(data)
+            .replace(b'"value"', b'"received"', 1)
+            .replace(
+                b'"metadata":{}',
+                b'"metadata":' + json.dumps(metadata, separators=(",", ":")).encode() + b',"session_id":"session-1"',
+            )
+        )
     else:
         content = json.dumps(
             {

@@ -123,20 +123,36 @@ def parse_transfer_correlation_metadata(metadata: Any) -> tuple[str | None, str 
     return identifiers[0], identifiers[1]
 
 
-def _validate_streaming_envelope_suffix(suffix: bytes) -> None:
+def _reject_duplicate_streaming_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Invalid streaming object transfer envelope.")
+        result[key] = value
+    return result
+
+
+def _validate_streaming_envelope_prefix(prefix: bytes) -> str:
+    """Validate the bounded JSON prefix preceding the streamed base64 string."""
+    try:
+        envelope = json.loads(prefix + b',"data":""}', object_pairs_hook=_reject_duplicate_streaming_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Invalid streaming object transfer envelope.") from exc
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"variable_name", "data"}
+        or not isinstance(envelope["variable_name"], str)
+    ):
+        raise ValueError("Invalid streaming object transfer envelope.")
+    return envelope["variable_name"]
+
+
+def _validate_streaming_envelope_suffix(suffix: bytes) -> dict[str, Any]:
     """Validate the bounded JSON tail following the streamed base64 string."""
 
-    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Invalid streaming object transfer envelope.")
-            result[key] = value
-        return result
-
     try:
-        envelope = json.loads(b'{"data":""' + suffix, object_pairs_hook=reject_duplicate_keys)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        envelope = json.loads(b'{"data":""' + suffix, object_pairs_hook=_reject_duplicate_streaming_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError("Invalid streaming object transfer envelope.") from exc
     if not isinstance(envelope, dict):
         raise ValueError("Invalid streaming object transfer envelope.")
@@ -149,6 +165,7 @@ def _validate_streaming_envelope_suffix(suffix: bytes) -> None:
         or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
     ):
         raise ValueError("Invalid streaming object transfer envelope.")
+    return envelope
 
 
 @dataclass(frozen=True)
@@ -283,6 +300,9 @@ async def receive_streaming_transfer(
     options: TransferOptions,
     context: RequestContext,
     _destination_parent_fd: int | None = None,
+    expected_variable_name: str | None = None,
+    expected_session_id: str | None = None,
+    expected_metadata: dict[str, Any] | None = None,
 ) -> TransferResult:
     """Incrementally decode a versioned JSON/base64 request into a bounded file."""
     transfer_options = replace(options, expected_sha256=expected_sha256)
@@ -323,7 +343,7 @@ async def receive_streaming_transfer(
                         raise ValueError("Invalid streaming object transfer envelope.")
                     continue
                 data = bytes(prefix[marker_index + len(_STREAMING_DATA_MARKER) :])
-                prefix.clear()
+                del prefix[marker_index:]
                 reading_data = True
 
             closing_quote = data.find(b'"')
@@ -349,7 +369,14 @@ async def receive_streaming_transfer(
 
         if not reading_data or not data_complete or remainder:
             raise ValueError("Invalid streaming object transfer envelope.")
-        _validate_streaming_envelope_suffix(bytes(suffix))
+        variable_name = _validate_streaming_envelope_prefix(bytes(prefix))
+        envelope = _validate_streaming_envelope_suffix(bytes(suffix))
+        if expected_variable_name is not None and variable_name != expected_variable_name:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
+        if expected_session_id is not None and envelope.get("session_id", "") != expected_session_id:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
+        if expected_metadata is not None and envelope["metadata"] != expected_metadata:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
         if total_decoded != expected_size:
             raise ValueError("Decoded payload size did not match the declared size.")
 

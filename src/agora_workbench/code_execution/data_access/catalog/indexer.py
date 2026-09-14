@@ -21,6 +21,7 @@ from agora_workbench.data_lake.manifest import (
     CatalogManifest,
     ManifestArtifact,
 )
+from agora_workbench.data_lake.identity import validate_azure_object_path
 
 from .identity import (
     azure_uri_from_blob_name,
@@ -761,21 +762,22 @@ class CatalogIndexer:
         container_client = client.get_container_client(container)
         prefix_boundary = prefix if prefix.endswith("/") else f"{prefix}/"
         async for blob in container_client.list_blobs(name_starts_with=prefix):
-            if prefix and blob.name != prefix and not blob.name.startswith(prefix_boundary):
+            blob_name = validate_azure_object_path(blob.name, allow_reserved=True)
+            if prefix and blob_name != prefix and not blob_name.startswith(prefix_boundary):
                 continue
-            if blob.name.endswith("/"):
+            if blob_name.endswith("/"):
                 continue
-            filename = blob.name.split("/")[-1]
+            filename = blob_name.split("/")[-1]
             if filename.startswith("."):
                 continue
 
-            storage_uri = azure_uri_from_blob_name(account, container, blob.name)
+            storage_uri = azure_uri_from_blob_name(account, container, blob_name)
             relative_name = (
                 filename
-                if prefix and blob.name == prefix
-                else blob.name[len(prefix) :].lstrip("/")
+                if prefix and blob_name == prefix
+                else blob_name[len(prefix) :].lstrip("/")
                 if prefix
-                else blob.name
+                else blob_name
             )
             if is_scan_excluded_path(relative_name):
                 continue

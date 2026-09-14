@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agora_workbench.data_lake.errors import InvalidRequestError
 from agora_workbench.data_lake.identity import azure_uri_from_blob_name, canonicalize_azure_uri
 
 from ....data_access.catalog import indexer as indexer_module
@@ -1110,6 +1111,28 @@ class TestBlobMigrationAdoption:
         try:
             artifacts = await indexer._enumerate_blob_source(source, MagicMock(), clients)
             assert [artifact["name"] for artifact in artifacts] == ["visible.csv"]
+        finally:
+            db.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("blob_name", ["a//b.csv", "a/./b.csv", "a/../b.csv", r"a\b.csv"])
+    async def test_blob_scan_rejects_ambiguous_decoded_object_names(self, blob_name):
+        db = CatalogDB(":memory:", vec_dimensions=4)
+        db.open()
+        source = SourceConfig(source_id="blob-source", path="az://account123/container")
+        indexer = CatalogIndexer(CatalogConfig(sources=[source]), db)
+        blob = SimpleNamespace(
+            name=blob_name,
+            etag='"etag"',
+            size=10,
+            last_modified=None,
+            content_settings=SimpleNamespace(content_type="text/csv"),
+        )
+        clients = {"https://account123.blob.core.windows.net": _FakeBlobServiceClient([blob])}
+
+        try:
+            with pytest.raises(InvalidRequestError, match="ambiguous separator|empty or dot segments"):
+                await indexer._enumerate_blob_source(source, MagicMock(), clients)
         finally:
             db.close()
 

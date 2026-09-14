@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
+import io
 import inspect
 import json
 import logging
@@ -118,6 +119,55 @@ def _sanitize_peer_payload(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_sanitize_peer_payload(item) for item in value)
     return value
+
+
+class _TrackedUploadStream(io.BufferedReader):
+    """Track which immutable snapshot byte ranges a provider actually reads."""
+
+    def __init__(self, source: Any) -> None:
+        super().__init__(source)
+        self._ranges: list[tuple[int, int]] = []
+
+    def _record(self, start: int, length: int) -> None:
+        if length > 0:
+            self._ranges.append((start, start + length))
+
+    def read(self, size: int = -1) -> bytes:
+        start = self.tell()
+        data = super().read(size)
+        self._record(start, len(data))
+        return data
+
+    def readinto(self, buffer: Any) -> int | None:
+        start = self.tell()
+        count = super().readinto(buffer)
+        if count is not None:
+            self._record(start, count)
+        return count
+
+    def read1(self, size: int = -1) -> bytes:
+        start = self.tell()
+        data = super().read1(size)
+        self._record(start, len(data))
+        return data
+
+    def readinto1(self, buffer: Any) -> int:
+        start = self.tell()
+        count = super().readinto1(buffer)
+        self._record(start, count)
+        return count
+
+    def fully_consumed(self, size: int) -> bool:
+        if size == 0:
+            return True
+        cursor = 0
+        for start, end in sorted(self._ranges):
+            if start > cursor:
+                return False
+            cursor = max(cursor, end)
+            if cursor >= size:
+                return True
+        return False
 
 
 def _validate_artifact_name(name: str, *, allow_reserved: bool = False) -> None:
@@ -744,28 +794,28 @@ class BlobPublisher(AssetPublisher):
                 os.lseek(snapshot_fd, 0, os.SEEK_SET)
                 check_transfer_cancelled(options, operation="upload", resource=display_uri)
                 metadata = dict(options.object_metadata)
-                with os.fdopen(os.dup(snapshot_fd), "rb", closefd=True) as source:
+                with _TrackedUploadStream(os.fdopen(os.dup(snapshot_fd), "rb", buffering=0)) as tracked_source:
                     if options.create_exclusive and metadata:
                         upload = blob_client.upload_blob(
-                            source,
+                            tracked_source,
                             overwrite=False,
                             if_none_match="*",
                             metadata=metadata,
                         )
                     elif options.create_exclusive:
                         upload = blob_client.upload_blob(
-                            source,
+                            tracked_source,
                             overwrite=False,
                             if_none_match="*",
                         )
                     elif metadata:
                         upload = blob_client.upload_blob(
-                            source,
+                            tracked_source,
                             overwrite=True,
                             metadata=metadata,
                         )
                     else:
-                        upload = blob_client.upload_blob(source, overwrite=True)
+                        upload = blob_client.upload_blob(tracked_source, overwrite=True)
                     await await_transfer(
                         upload,
                         TransferOptions(
@@ -778,6 +828,8 @@ class BlobPublisher(AssetPublisher):
                         operation="upload",
                         resource=display_uri,
                     )
+                    if not tracked_source.fully_consumed(snapshot.bytes_transferred):
+                        raise OSError("Blob provider did not consume the complete immutable upload snapshot.")
                 return snapshot
 
             try:
@@ -955,6 +1007,8 @@ class LocalFilePublisher(AssetPublisher):
         super().__init__(credential=None)
         self._base_dir = Path(os.path.abspath(os.fspath(base_dir)))
         self._anchor_fd: int | None = None
+        self._anchor_path: Path | None = None
+        self._anchor_identity: tuple[int, int] | None = None
         self._root_parts: tuple[str, ...] = ()
         self._root_identity: tuple[int, int] | None = None
         self._portable_anchor_path: Path | None = None
@@ -1023,6 +1077,9 @@ class LocalFilePublisher(AssetPublisher):
         if candidate.is_symlink() or not candidate.is_dir():
             raise UnsafePathError("Local publisher root ancestor must be a real directory.", operation="upload")
         self._anchor_fd = _open_posix_path_no_follow(candidate, directory=True)
+        anchor_stat = os.fstat(self._anchor_fd)
+        self._anchor_path = candidate
+        self._anchor_identity = (anchor_stat.st_dev, anchor_stat.st_ino)
         relative_existing = self._base_dir.relative_to(candidate).parts
         self._root_parts = tuple(relative_existing) if relative_existing else ()
         if not self._root_parts:
@@ -1042,8 +1099,22 @@ class LocalFilePublisher(AssetPublisher):
 
     def _open_verified_root(self) -> int:
         """Open/create the configured root beneath the retained trusted ancestor."""
-        if self._anchor_fd is None:
+        if self._anchor_fd is None or self._anchor_path is None or self._anchor_identity is None:
             raise UnsafePathError("Local publisher root is unavailable.", operation="upload")
+        try:
+            anchor_entry = self._anchor_path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise UnsafePathError(
+                "Local publisher root ancestor was replaced after configuration.",
+                operation="upload",
+            ) from exc
+        retained_anchor = os.fstat(self._anchor_fd)
+        if (
+            not stat.S_ISDIR(anchor_entry.st_mode)
+            or (anchor_entry.st_dev, anchor_entry.st_ino) != self._anchor_identity
+            or (retained_anchor.st_dev, retained_anchor.st_ino) != self._anchor_identity
+        ):
+            raise UnsafePathError("Local publisher root ancestor was replaced after configuration.", operation="upload")
         current = os.dup(self._anchor_fd)
         try:
             for part in self._root_parts:

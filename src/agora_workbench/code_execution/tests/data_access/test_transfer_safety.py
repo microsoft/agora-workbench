@@ -57,6 +57,10 @@ def _part_files(parent: Path) -> list[Path]:
     return list(parent.glob(".*.part"))
 
 
+async def _consume_blob_upload(stream, **_kwargs):
+    stream.read()
+
+
 @pytest.mark.parametrize("chunk_size", [True, 1.5])
 def test_transfer_options_reject_non_integer_chunk_sizes(chunk_size):
     with pytest.raises(ValueError, match="chunk_size"):
@@ -932,6 +936,25 @@ async def test_local_publisher_rejects_absent_root_component_swapped_before_open
     await publisher.close()
 
 
+async def test_local_publisher_rejects_configured_anchor_path_replacement(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    configured_parent = tmp_path / "configured"
+    output_root = configured_parent / "outputs"
+    output_root.mkdir(parents=True)
+    publisher = LocalFilePublisher(output_root)
+    displaced_parent = tmp_path / "configured-original"
+    configured_parent.rename(displaced_parent)
+    (configured_parent / "outputs").mkdir(parents=True)
+
+    with pytest.raises(UnsafePathError, match="ancestor was replaced"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert not (configured_parent / "outputs" / "session" / "result.bin").exists()
+    assert not (displaced_parent / "outputs" / "session" / "result.bin").exists()
+    await publisher.close()
+
+
 @pytest.mark.parametrize("publisher_kind", ["local", "blob"])
 async def test_publishers_reject_source_paths_with_symlinked_parent(tmp_path, publisher_kind):
     actual = tmp_path / "actual"
@@ -950,7 +973,7 @@ async def test_publishers_reject_source_paths_with_symlinked_parent(tmp_path, pu
         await publisher.close()
     else:
         blob_client = MagicMock()
-        blob_client.upload_blob = AsyncMock()
+        blob_client.upload_blob = AsyncMock(side_effect=_consume_blob_upload)
         service_client = MagicMock()
         service_client.get_blob_client.return_value = blob_client
         service_client.close = AsyncMock()
@@ -1525,8 +1548,12 @@ async def test_blob_publisher_streams_file_and_returns_auditable_result(tmp_path
 async def test_blob_publisher_returns_encoded_https_locator(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
+
+    async def upload(stream, **_kwargs):
+        assert stream.read() == b"payload"
+
     blob_client = MagicMock()
-    blob_client.upload_blob = AsyncMock()
+    blob_client.upload_blob = upload
     service_client = MagicMock()
     service_client.get_blob_client.return_value = blob_client
     publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
@@ -1565,6 +1592,24 @@ async def test_blob_publisher_uploads_immutable_snapshot_and_reports_uploaded_ch
     assert result.bytes_transferred == len(uploaded)
     assert result.checksum_sha256 == hashlib.sha256(uploaded).hexdigest()
     assert list(tmp_path.glob(".*.upload")) == []
+
+
+async def test_blob_publisher_rejects_successful_short_snapshot_read(tmp_path):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"payload")
+
+    async def upload(stream, **_kwargs):
+        assert stream.read(3) == b"pay"
+
+    blob_client = MagicMock()
+    blob_client.upload_blob = upload
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
+    publisher._client = service_client
+
+    with pytest.raises(OSError, match="complete immutable upload snapshot"):
+        await publisher.publish_with_result(source, "result.bin", "session")
 
 
 async def test_blob_publisher_stages_outside_read_only_source_directory(tmp_path):
@@ -1611,7 +1656,7 @@ async def test_blob_snapshot_cleanup_failure_preserves_primary_outcome_and_close
     source.write_bytes(b"payload")
     staging = tmp_path / "staging"
     blob_client = MagicMock()
-    blob_client.upload_blob = AsyncMock()
+    blob_client.upload_blob = AsyncMock(side_effect=_consume_blob_upload)
     service_client = MagicMock()
     service_client.get_blob_client.return_value = blob_client
     service_client.close = AsyncMock()
@@ -1750,7 +1795,7 @@ async def test_blob_conditional_create_seam_uses_create_only_precondition(tmp_pa
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
     blob_client = MagicMock()
-    blob_client.upload_blob = AsyncMock()
+    blob_client.upload_blob = AsyncMock(side_effect=_consume_blob_upload)
     service_client = MagicMock()
     service_client.get_blob_client.return_value = blob_client
     publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
@@ -1782,7 +1827,7 @@ async def test_reserved_blob_write_requires_explicit_trusted_option(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
     blob_client = MagicMock()
-    blob_client.upload_blob = AsyncMock()
+    blob_client.upload_blob = AsyncMock(side_effect=_consume_blob_upload)
     service_client = MagicMock()
     service_client.get_blob_client.return_value = blob_client
     publisher = BlobPublisher(
@@ -2145,6 +2190,32 @@ async def test_manager_legacy_fetcher_failure_preserves_existing_destination(tmp
         assert list(tmp_path.glob(".*.legacy-part")) == []
     finally:
         await manager.aclose()
+
+
+async def test_manager_legacy_staging_collision_preserves_unowned_file(tmp_path, monkeypatch):
+    class LegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b""
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            raise AssertionError("colliding staging path must not be handed to the provider")
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    destination = tmp_path / "cached.bin"
+    colliding_stage = tmp_path / ".cached.bin.collision.legacy-part"
+    colliding_stage.write_bytes(b"other process")
+    monkeypatch.setattr(manager_module.secrets, "token_hex", lambda _size: "collision")
+    manager = DataLakeDataManager(extra_fetchers=[LegacyFetcher()])
+    try:
+        with pytest.raises(FileExistsError):
+            await manager._fetch_asset_to_file("legacy://object", destination)
+    finally:
+        await manager.aclose()
+
+    assert colliding_stage.read_bytes() == b"other process"
+    assert not destination.exists()
 
 
 async def test_manager_legacy_fetcher_enforces_transfer_options_before_commit(tmp_path):

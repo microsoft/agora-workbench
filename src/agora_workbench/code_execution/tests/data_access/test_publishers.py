@@ -225,7 +225,11 @@ class TestBlobPublisherPublish:
         src.write_bytes(b"a,b\n1,2\n")
 
         mock_blob_client = AsyncMock()
-        mock_blob_client.upload_blob = AsyncMock()
+
+        async def upload(stream, **_kwargs):
+            stream.read()
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
 
         mock_service_client = MagicMock()
         mock_service_client.get_blob_client = MagicMock(return_value=mock_blob_client)
@@ -246,7 +250,11 @@ class TestBlobPublisherPublish:
         src.write_bytes(b"%PDF")
 
         mock_blob_client = AsyncMock()
-        mock_blob_client.upload_blob = AsyncMock()
+
+        async def upload(stream, **_kwargs):
+            stream.read()
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
 
         mock_service_client = MagicMock()
         mock_service_client.get_blob_client = MagicMock(return_value=mock_blob_client)
