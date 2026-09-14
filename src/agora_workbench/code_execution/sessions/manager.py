@@ -740,7 +740,11 @@ class SessionManager:
                 else None
             )
         if stale_shutdown is not None:
-            _ = await stale_shutdown
+            try:
+                _ = await asyncio.shield(stale_shutdown)
+            except asyncio.CancelledError:
+                _ = await asyncio.shield(stale_shutdown)
+                raise
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")

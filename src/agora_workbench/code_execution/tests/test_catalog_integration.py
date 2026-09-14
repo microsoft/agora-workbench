@@ -704,6 +704,48 @@ async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     assert current.close_calls == 1
 
 
+async def test_failed_context_refresh_closes_uncommitted_credential_provider():
+    class CredentialProvider:
+        def __init__(self, token):
+            self.token = token
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    providers = []
+
+    def provider_factory(token):
+        provider = CredentialProvider(token)
+        providers.append(provider)
+        return provider
+
+    credential = SessionCredential(provider_factory("old-token"), provider_factory=provider_factory)
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    binding.add_context_refresher(credential.prepare_context_refresh)
+
+    def fail_refresh(context):
+        del context
+        raise ValueError("later refresh failed")
+
+    binding.add_context_refresher(fail_refresh)
+
+    with pytest.raises(ValueError, match="later refresh failed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await integration._cleanup_tracker.drain()
+
+    assert credential._provider is providers[0]
+    assert providers[0].close_calls == 0
+    assert providers[1].close_calls == 1
+
+    await credential.close()
+    await binding.aclose()
+
+
 async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     class CustomResolver:
         unavailable_reason = None

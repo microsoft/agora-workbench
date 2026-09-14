@@ -165,6 +165,15 @@ async def _close_resources(resources: tuple[object, ...]) -> None:
         raise ExceptionGroup("Resource cleanup failed.", errors)
 
 
+@dataclass(frozen=True)
+class _PreparedContextRefresh:
+    commit: Callable[[], None]
+    rollback_resource: object | None = None
+
+    def __call__(self) -> None:
+        self.commit()
+
+
 class SessionCredential:
     """Adapt a workbench credential provider to the async Azure credential shape."""
 
@@ -180,10 +189,10 @@ class SessionCredential:
             raise ValueError("At least one scope is required.")
         return await self._provider.get_token(scopes[0])
 
-    def prepare_context_refresh(self, context: SessionContext) -> Callable[[], None]:
+    def prepare_context_refresh(self, context: SessionContext) -> _PreparedContextRefresh:
         """Build a replacement provider and return a non-failing commit callback."""
         if self._provider_factory is None:
-            return lambda: None
+            return _PreparedContextRefresh(lambda: None)
         provider = self._provider_factory(context.user_token)
 
         def commit() -> None:
@@ -191,7 +200,7 @@ class SessionCredential:
             self._provider = provider
             self._provider_closed = False
 
-        return commit
+        return _PreparedContextRefresh(commit, rollback_resource=provider)
 
     async def close(self) -> None:
         errors: list[Exception] = []
@@ -378,7 +387,7 @@ class CatalogSessionBinding:
     cleanup_tracker: _AsyncCleanupTracker | None = None
     authorizer_factory: AuthorizerFactory | None = None
     owned_authorizer: CatalogAuthorizer | None = None
-    context_refreshers: list[Callable[[SessionContext], Callable[[], None]]] | None = None
+    context_refreshers: list[Callable[[SessionContext], Callable[[], None] | _PreparedContextRefresh]] | None = None
     provider: CatalogProvider | None = None
     policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
@@ -432,16 +441,21 @@ class CatalogSessionBinding:
                 mode=self.policy_mode,
                 per_artifact_enforcer=self.per_artifact_enforcer,
             )
+        prepared_refreshes: list[Callable[[], None] | _PreparedContextRefresh] = []
         try:
-            commits = [refresher(context) for refresher in self.context_refreshers or ()]
+            for refresher in self.context_refreshers or ():
+                prepared_refreshes.append(refresher(context))
         except BaseException:
+            for prepared in prepared_refreshes:
+                if isinstance(prepared, _PreparedContextRefresh) and prepared.rollback_resource is not None:
+                    self._schedule_resource_cleanup(prepared.rollback_resource)
             if authorizer is not None and authorizer is not self.owned_authorizer:
                 self._schedule_resource_cleanup(authorizer)
             raise
 
         previous_authorizer = self.owned_authorizer
-        for commit in commits:
-            commit()
+        for prepared in prepared_refreshes:
+            prepared()
         self.catalog = catalog
         self.resolver._catalog = catalog
         self.owned_authorizer = authorizer
@@ -453,7 +467,10 @@ class CatalogSessionBinding:
             else:
                 self._schedule_resource_cleanup(previous_authorizer)
 
-    def add_context_refresher(self, refresher: Callable[[SessionContext], Callable[[], None]]) -> None:
+    def add_context_refresher(
+        self,
+        refresher: Callable[[SessionContext], Callable[[], None] | _PreparedContextRefresh],
+    ) -> None:
         """Register a side-effect-free preparation step for token rebinding."""
         if self.context_refreshers is None:
             self.context_refreshers = []

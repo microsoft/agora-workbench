@@ -816,6 +816,47 @@ class TestKernelRebuildWaits:
         assert created_while_old_alive == [True], "replacement was built before the old kernel finished shutting down"
         assert "s1" in manager._kernels
 
+    async def test_cancelled_kernel_start_drains_stale_generation_teardown(self, manager, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        gate = asyncio.Event()
+        manager.create_session(
+            data={},
+            user_identity="old",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
+        old_kernel, _ = register_kernel(manager, "s1", name="OLD", gate=gate)
+        manager.storage.delete("s1")
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id="s1",
+        )
+
+        class UnexpectedKernelManager:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("replacement kernel started after request cancellation")
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", UnexpectedKernelManager)
+
+        create = asyncio.create_task(manager._get_or_create_kernel("s1"))
+        await let_teardown_start()
+        assert old_kernel.shutdown_started
+        create.cancel()
+        await asyncio.sleep(0)
+        assert not create.done()
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            _ = await create
+
+        assert old_kernel.shutdown_finished
+        assert "s1" not in manager._kernels
+
     async def test_idle_cleanup_registers_teardown_for_kernel_rebuild_waiters(self, manager):
         gate = asyncio.Event()
         session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
