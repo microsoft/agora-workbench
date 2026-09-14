@@ -476,6 +476,33 @@ def test_receive_endpoint_rejects_unsafe_correlation_metadata_without_disclosure
     server.session_manager.get_session.assert_not_called()
 
 
+@pytest.mark.unit
+def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legacy_parse(tmp_path):
+    from starlette.testclient import TestClient
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/object-transfer/receive",
+            content=b"not a legacy JSON body",
+            headers={STREAMING_TRANSFER_VERSION_HEADER: "3"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Unsupported object transfer version."}
+
+
 # ---------------------------------------------------------------------------
 # ServerPublisher tests
 # ---------------------------------------------------------------------------

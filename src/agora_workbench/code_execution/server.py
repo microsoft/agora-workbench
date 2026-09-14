@@ -2789,7 +2789,13 @@ else:
                 receive_streaming_transfer,
             )
 
-            streaming_transfer = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER) == STREAMING_TRANSFER_VERSION
+            transfer_version = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER)
+            if transfer_version and transfer_version != STREAMING_TRANSFER_VERSION:
+                return JSONResponse(
+                    {"success": False, "error": "Unsupported object transfer version."},
+                    status_code=400,
+                )
+            streaming_transfer = transfer_version == STREAMING_TRANSFER_VERSION
             serialized_data: bytes | None = None
             expected_size: int | None = None
             expected_sha256: str | None = None
