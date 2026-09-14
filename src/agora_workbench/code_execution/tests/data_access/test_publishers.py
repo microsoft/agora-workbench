@@ -708,7 +708,7 @@ class TestSendTool:
         assert all(record.exc_info is None for record in caplog.records)
 
     @pytest.mark.asyncio
-    async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch):
+    async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch, caplog):
         """The send result exposes actionable fields returned by a peer."""
         from ... import sessions as sessions_pkg
         from ...sessions import (
@@ -724,6 +724,7 @@ class TestSendTool:
         publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
         server = _make_server_with_publishers([publisher])
         server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
 
         session_id = session_manager.create_session(
             data={},
@@ -743,14 +744,21 @@ class TestSendTool:
         session_manager.execute_code_for_session = AsyncMock(
             return_value=("", "NameError: name 'result' is not defined", False, [], [])
         )
+        secret = "DO_NOT_DISCLOSE"
+        unsafe_uri = "https" + f"://user:{secret}@example.com/object?sig={secret}"
         publisher.publish = AsyncMock(
             side_effect=ObjectTransferError(
                 server_name="gis",
                 status_code=404,
                 response_body={
                     "success": False,
-                    "error": "No active session found to receive the object",
+                    "error": f"No active session found for {unsafe_uri}",
                     "hint": "Initialize the destination server, then retry.",
+                    "details": {
+                        "resource": unsafe_uri,
+                        "references": [f"retry {unsafe_uri}", {"message": unsafe_uri}],
+                    },
+                    "error_code": "SESSION_NOT_FOUND",
                 },
             )
         )
@@ -760,18 +768,33 @@ class TestSendTool:
 
         try:
             mcp_tool = await server.mcp.get_tool("test_send")
-            result_json = await mcp_tool.fn(ctx=mock_ctx, data_ref="result", to="gis")
+            with caplog.at_level("ERROR"):
+                result_json = await mcp_tool.fn(ctx=mock_ctx, data_ref="result", to="gis")
         finally:
             set_current_user_identity(None)
             set_current_request_token(None)
             set_current_token_claims(None)
 
-        assert json.loads(result_json) == {
+        result = json.loads(result_json)
+        assert result == {
             "success": False,
-            "error": "Object transfer to 'gis' failed: No active session found to receive the object",
+            "error": "Object transfer to 'gis' failed: No active session found for https://example.com/object",
             "hint": "Initialize the destination server, then retry.",
+            "details": {
+                "resource": "https://example.com/object",
+                "references": [
+                    "retry https://example.com/object",
+                    {"message": "https://example.com/object"},
+                ],
+            },
+            "error_code": "SESSION_NOT_FOUND",
             "status_code": 404,
         }
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        serialized = json.dumps({"result": result, "event": event, "logs": caplog.text})
+        assert secret not in serialized
+        assert "sig=" not in serialized
+        assert all(record.exc_info is None for record in caplog.records)
 
     @pytest.mark.asyncio
     async def test_send_destination_names_in_description(self, tmp_path):

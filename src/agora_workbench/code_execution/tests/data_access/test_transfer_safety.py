@@ -1848,6 +1848,38 @@ async def test_blob_publisher_rejects_size_and_checksum_before_remote_side_effec
     blob_client.upload_blob.assert_not_awaited()
 
 
+async def test_server_publisher_enforces_limits_cancellation_and_checksum_before_peer_request(tmp_path, monkeypatch):
+    source = tmp_path / "object.pkl"
+    source.write_bytes(b"serialized")
+    publisher = ServerPublisher("peer", target_url="https://peer.example")
+    publisher._user_token = "token"
+    client_factory = MagicMock()
+    monkeypatch.setattr("httpx.AsyncClient", client_factory)
+
+    with pytest.raises(TransferLimitError):
+        await publisher.publish(source, "value", "", options=TransferOptions(max_bytes=3))
+
+    cancellation = asyncio.Event()
+    cancellation.set()
+    with pytest.raises(TransferCancelledError):
+        await publisher.publish(
+            source,
+            "value",
+            "",
+            options=TransferOptions(cancellation_event=cancellation),
+        )
+
+    with pytest.raises(TransferChecksumError):
+        await publisher.publish(
+            source,
+            "value",
+            "",
+            options=TransferOptions(expected_sha256="0" * 64),
+        )
+
+    client_factory.assert_not_called()
+
+
 async def test_unsupported_streaming_capability_is_explicit(tmp_path):
     publisher = ServerPublisher("peer", target_url="https://peer.example")
     with pytest.raises(UnsupportedOperationError, match="bounded file publishing"):

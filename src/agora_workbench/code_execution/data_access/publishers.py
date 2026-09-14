@@ -21,14 +21,17 @@ import asyncio
 import functools
 import hashlib
 import inspect
+import json
 import logging
 import os
 import re
 import secrets
 import stat
+import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -84,11 +87,27 @@ class ObjectTransferError(RuntimeError):
 
     def to_payload(self) -> dict[str, Any]:
         """Return the peer response as an agent-facing send-tool error."""
-        payload = dict(self.response_body)
+        payload = _sanitize_peer_payload(self.response_body)
         payload["success"] = False
-        payload["error"] = str(self)
+        payload["error"] = safe_transfer_resource(str(self))
         payload["status_code"] = self.status_code
         return payload
+
+
+def _sanitize_peer_payload(value: Any) -> Any:
+    """Recursively sanitize untrusted peer response data for presentation."""
+    if isinstance(value, str):
+        return safe_transfer_resource(value)
+    if isinstance(value, dict):
+        return {
+            safe_transfer_resource(key) if isinstance(key, str) else key: _sanitize_peer_payload(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_peer_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_peer_payload(item) for item in value)
+    return value
 
 
 def _validate_artifact_name(name: str, *, allow_reserved: bool = False) -> None:
@@ -1356,14 +1375,13 @@ class ServerPublisher(AssetPublisher):
 
         import httpx
 
-        from ..object_transfer import _validate_target_url
+        from ..object_transfer import MAX_TRANSFER_SIZE_BYTES, _validate_target_url
 
-        del options, context
+        options = options or TransferOptions()
+        context = context or RequestContext()
 
         if not local_path.is_file():
             raise FileNotFoundError(f"Transfer file not found at {local_path}")
-
-        serialized = local_path.read_bytes()
 
         # user_token is injected by the send tool before calling publish
         user_token = getattr(self, "_user_token", "")
@@ -1377,40 +1395,143 @@ class ServerPublisher(AssetPublisher):
         base = _re.sub(r"/mcp/?$", "", self._target_url.rstrip("/"))
         receive_url = f"{base}/object-transfer/receive"
 
-        payload: dict = {
-            "variable_name": name,
-            "data": base64.b64encode(serialized).decode("ascii"),
-            "metadata": {
-                "source_server": getattr(self, "_source_server", "unknown"),
-                "transfer_id": getattr(self, "_transfer_id", ""),
-            },
-        }
-        if session_id:
-            payload["session_id"] = session_id
-
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
-        ) as client:
-            response = await client.post(
-                receive_url,
-                json=payload,
-                headers={"Authorization": f"Bearer {user_token}"},
+        configured_max = options.max_bytes
+        bounded_options = replace(
+            options,
+            max_bytes=MAX_TRANSFER_SIZE_BYTES
+            if configured_max is None
+            else min(configured_max, MAX_TRANSFER_SIZE_BYTES),
+        )
+        display_resource = safe_transfer_resource(receive_url)
+        started = time.monotonic()
+        await emit_transfer_diagnostic(
+            bounded_options,
+            TransferDiagnostic("upload", "started", context, display_resource),
+        )
+        snapshot = tempfile.TemporaryFile(mode="w+b")
+        try:
+            snapshot_result = await _copy_local_descriptors(local_path, snapshot.fileno(), bounded_options, context)
+            await _run_blocking_io(
+                lambda: snapshot.seek(0),
+                options=bounded_options,
+                operation="upload",
+                resource=display_resource,
             )
-            try:
-                result = response.json()
-            except ValueError:
-                response.raise_for_status()
-                raise
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic("upload", "failed", context, display_resource, error_type=type(exc).__name__),
+            )
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+            raise
 
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                if isinstance(result, dict):
-                    raise ObjectTransferError(
-                        server_name=self._server_name,
-                        status_code=response.status_code,
-                        response_body=result,
-                    ) from exc
-                raise
+        metadata = {
+            "source_server": getattr(self, "_source_server", "unknown"),
+            "transfer_id": getattr(self, "_transfer_id", ""),
+        }
+        prefix = ('{"variable_name":' + json.dumps(name) + ',"data":"').encode()
+        suffix = (
+            '","metadata":'
+            + json.dumps(metadata, separators=(",", ":"))
+            + (',"session_id":' + json.dumps(session_id) if session_id else "")
+            + "}"
+        ).encode()
+
+        async def payload_chunks():
+            yield prefix
+            remainder = b""
+            while True:
+                check_transfer_cancelled(bounded_options, operation="upload", resource=display_resource)
+                chunk = await _run_blocking_io(
+                    lambda: snapshot.read(bounded_options.chunk_size),
+                    options=bounded_options,
+                    operation="upload",
+                    resource=display_resource,
+                )
+                if not chunk:
+                    break
+                data = remainder + chunk
+                encoded_length = len(data) - (len(data) % 3)
+                if encoded_length:
+                    yield base64.b64encode(data[:encoded_length])
+                remainder = data[encoded_length:]
+            if remainder:
+                yield base64.b64encode(remainder)
+            yield suffix
+
+        elapsed = time.monotonic() - started
+        remaining_timeout = None if options.timeout_seconds is None else options.timeout_seconds - elapsed
+        if remaining_timeout is not None and remaining_timeout <= 0:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic(
+                    "upload",
+                    "failed",
+                    context,
+                    display_resource,
+                    error_type=TransferTimeoutError.__name__,
+                ),
+            )
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+            raise TransferTimeoutError(
+                f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+                resource_id=display_resource,
+                operation="upload",
+            )
+        request_options = replace(bounded_options, timeout_seconds=remaining_timeout, expected_sha256=None)
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
+            ) as client:
+                response = await await_transfer(
+                    client.post(
+                        receive_url,
+                        content=payload_chunks(),
+                        headers={
+                            "Authorization": f"Bearer {user_token}",
+                            "Content-Type": "application/json",
+                        },
+                    ),
+                    request_options,
+                    operation="upload",
+                    resource=display_resource,
+                )
+                try:
+                    result = response.json()
+                except ValueError:
+                    response.raise_for_status()
+                    raise
+
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if isinstance(result, dict):
+                        raise ObjectTransferError(
+                            server_name=self._server_name,
+                            status_code=response.status_code,
+                            response_body=result,
+                        ) from exc
+                    raise
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic("upload", "failed", context, display_resource, error_type=type(exc).__name__),
+            )
+            raise
+        finally:
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+
+        await emit_transfer_diagnostic(
+            bounded_options,
+            TransferDiagnostic(
+                "upload",
+                "completed",
+                context,
+                display_resource,
+                snapshot_result.bytes_transferred,
+                snapshot_result.checksum_sha256,
+            ),
+        )
 
         return f"Injected '{name}' into {self._server_name} kernel (response: {result})"

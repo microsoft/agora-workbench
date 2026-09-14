@@ -129,12 +129,15 @@ reconcile a catalog manifest.
 Managed commit/recovery is a separate lifecycle and must not assume that the
 catalog layer owns cleanup of a failed conditional create.
 
-The legacy peer `ServerPublisher` serializes an object into an HTTP request and
-is not a bounded file-streaming provider. Calling `publish_with_result()` on it
-raises `UnsupportedOperationError` rather than silently claiming the
-capability. Custom fetchers that implement only `fetch_to_file()` remain usable
-by the legacy manager, but must implement `fetch_to_file_result()` to advertise
-the bounded streaming contract.
+The peer `ServerPublisher.publish()` copies the serialized object into an
+immutable bounded snapshot, validates size/quota/checksum/cancellation, and
+streams its base64 JSON body with backpressure under the remaining timeout.
+The peer protocol does not expose a durable storage locator or conditional
+creation result, so `publish_with_result()` still raises
+`UnsupportedOperationError` rather than claiming that detailed capability.
+Custom fetchers that implement only `fetch_to_file()` remain usable by the
+legacy manager, but must implement `fetch_to_file_result()` to advertise the
+bounded streaming contract.
 
 ### Storage boundaries
 

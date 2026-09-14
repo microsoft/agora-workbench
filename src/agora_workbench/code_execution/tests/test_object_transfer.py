@@ -1,6 +1,7 @@
 """Tests for server-to-server object transfer functionality."""
 
 import dill
+import json
 import pytest
 
 from ..object_transfer import (
@@ -170,7 +171,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -186,7 +194,7 @@ class TestServerPublisher:
             call_args = mock_client.post.call_args
             assert call_args[0][0] == "http://localhost:8001/object-transfer/receive"
 
-            payload = call_args[1]["json"]
+            payload = captured_payload
             assert payload["variable_name"] == "target_var"
             assert payload["data"] == expected_b64
             assert payload["metadata"]["source_server"] == "chemistry"
@@ -265,7 +273,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -296,7 +311,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -378,14 +400,21 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
             await publisher.publish(local_path=pkl_file, name="var", session_id="session-123")
 
-            payload = mock_client.post.call_args[1]["json"]
+            payload = captured_payload
             assert payload["session_id"] == "session-123"
 
     @pytest.mark.unit

@@ -1927,7 +1927,7 @@ class CodeExecutionServer(BaseMCPServer):
 
             except _ObjectTransferError as exc:
                 error_payload = exc.to_payload()
-                LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                LOGGER.error("send tool failed: %s", error_payload["error"])
                 server.activity_publisher.publish_nowait(
                     {
                         **error_payload,
