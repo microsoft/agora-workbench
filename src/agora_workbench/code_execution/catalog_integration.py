@@ -737,7 +737,7 @@ class CatalogIntegration:
                     raise TypeError("Owned catalog providers must define aclose(), close(), or cleanup().")
                 result = close()
                 if inspect.isawaitable(result):
-                    await result
+                    _ = await result
                 self._provider_closed = True
 
             task = asyncio.create_task(close_once())

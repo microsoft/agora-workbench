@@ -274,7 +274,7 @@ async def test_server_shutdown_cancellation_still_closes_sessions_and_catalog(tm
     assert not shutdown.done()
     sidecar_gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await shutdown
+        _ = await shutdown
 
     assert sidecar_stopped.is_set()
     session_cleanup.assert_awaited_once()

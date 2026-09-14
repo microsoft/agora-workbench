@@ -359,6 +359,7 @@ class Session(Generic[T]):
             try:
                 shutil.rmtree(session_dir)
             except OSError:
+                # The file is already gone; removing an empty parent is best-effort.
                 pass
 
     def claim_session_file_cleanup(self) -> None:

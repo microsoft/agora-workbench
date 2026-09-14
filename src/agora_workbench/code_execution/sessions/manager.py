@@ -615,13 +615,15 @@ class SessionManager:
             try:
                 if cleanup_task is not None:
                     await cleanup_task
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                cleanup_error = exc
+            except Exception as exc:
                 cleanup_error = exc
             finally:
                 if session is not None:
                     self._track_session_cleanup_tasks(session)
             if shutdown_task is not None:
-                await shutdown_task
+                _ = await shutdown_task
             else:
                 await self.await_kernel_shutdown(session_id)
             if cleanup_error is not None:
@@ -738,7 +740,7 @@ class SessionManager:
                 else None
             )
         if stale_shutdown is not None:
-            await stale_shutdown
+            _ = await stale_shutdown
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
@@ -1973,7 +1975,7 @@ class SessionManager:
                     caller="cleanup_idle_kernels()",
                 )
             if shutdown_task is not None:
-                await shutdown_task
+                _ = await shutdown_task
 
     # ========================================================================
     # Session Listing and Cleanup

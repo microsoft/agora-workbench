@@ -119,7 +119,7 @@ class AzureOpenAIEmbeddingProvider(EmbeddingProvider):
                 if callable(close):
                     result = close()
                     if inspect.isawaitable(result):
-                        await result
+                        _ = await result
                 self._credential_owned = False
 
 

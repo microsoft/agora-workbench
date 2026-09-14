@@ -2792,7 +2792,7 @@ else:
         if callable(close):
             result = close()
             if inspect.isawaitable(result):
-                await result
+                _ = await result
         self._closed_tool_search_backends.add(resource_id)
 
     async def _close_publisher(self, publisher: "AssetPublisher") -> None:
@@ -2918,6 +2918,7 @@ else:
             try:
                 await asyncio.shield(task)
             except asyncio.CancelledError:
+                # Preserve the caller's original cancellation after the cleanup task drains.
                 pass
             except Exception:
                 LOGGER.warning("%s raised; continuing", label, exc_info=True)
