@@ -15,7 +15,9 @@ from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServ
 from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     SessionCredential,
+    _AsyncCleanupTracker,
     _artifact_payload,
+    _close_resources,
     _decode_reference,
     _encode_reference,
     _error_payload,
@@ -32,6 +34,7 @@ from agora_workbench.code_execution.sessions import (
     SessionConfig,
     SessionContext,
     SessionManager,
+    SessionResources,
     set_current_request_token,
     set_current_token_claims,
     set_current_user_identity,
@@ -40,6 +43,7 @@ from agora_workbench.data_lake import (
     ArtifactNotFoundError,
     ArtifactPresentation,
     ArtifactReference,
+    BackendUnavailableError,
     CatalogArtifact,
     CatalogOperation,
     CatalogPolicyMode,
@@ -554,6 +558,41 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     await manager.aclose()
 
 
+async def test_repeated_cache_invalidation_has_bounded_fetch_retries():
+    fetch_calls = 0
+    manager = None
+
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            nonlocal fetch_calls
+            fetch_calls += 1
+            dest_path.write_text(f"fetch-{fetch_calls}")
+            assert manager is not None
+            manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+
+    with pytest.raises(BackendUnavailableError, match="changed repeatedly"):
+        await manager.get_cache_path("<blob>catalog-v1:opaque</blob>")
+
+    assert fetch_calls == 2
+    assert manager._cache_index == {}
+    await manager.aclose()
+
+
 async def test_catalog_cache_reauthorization_retries_after_concurrent_refresh():
     reauthorization_started = asyncio.Event()
     reauthorization_gate = asyncio.Event()
@@ -704,6 +743,35 @@ async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     assert current.close_calls == 1
 
 
+async def test_cleanup_tracker_retries_only_pending_resources():
+    class Resource:
+        def __init__(self, *, cancel_once=False):
+            self.cancel_once = cancel_once
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+            if self.cancel_once:
+                self.cancel_once = False
+                raise asyncio.CancelledError
+
+    completed = Resource()
+    cancelled = Resource(cancel_once=True)
+    pending: list[object] = [completed, cancelled]
+    tracker = _AsyncCleanupTracker()
+
+    def cleanup():
+        return _close_resources(pending)
+
+    tracker.schedule(cleanup(), retry=cleanup)
+    with pytest.raises(asyncio.CancelledError):
+        await tracker.drain()
+
+    assert completed.close_calls == 1
+    assert cancelled.close_calls == 2
+    assert pending == []
+
+
 async def test_failed_context_refresh_closes_uncommitted_credential_provider():
     class CredentialProvider:
         def __init__(self, token):
@@ -778,6 +846,70 @@ async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     assert not session.extensions["catalog"].execution_references
     await session_manager.aclose_all_sessions()
     await integration.shutdown()
+
+
+async def test_catalog_extension_collision_rolls_back_custom_session_resources(tmp_path):
+    class Extension:
+        def __init__(self):
+            self.cleanup_calls = 0
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+
+    extension = Extension()
+    manager = DataLakeDataManager()
+    cache_dir = manager._cache_dir
+    session_manager = SessionManager(
+        SessionConfig(
+            data_manager_factory=lambda context: SessionResources(
+                manager,
+                {"catalog": extension},
+            )
+        )
+    )
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    with pytest.raises(ValueError, match="reserved 'catalog' key"):
+        session_manager.create_session({}, "user", "token", {})
+    await session_manager.await_resource_cleanup()
+    await integration.shutdown()
+
+    assert extension.cleanup_calls == 1
+    assert not cache_dir.exists()
+
+
+async def test_invalid_factory_manager_rolls_back_extensions():
+    class Extension:
+        def __init__(self):
+            self.cleanup_calls = 0
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+
+    extension = Extension()
+    session_manager = SessionManager(
+        SessionConfig(
+            data_manager_factory=lambda context: SessionResources(
+                cast(Any, object()),
+                {"extension": extension},
+            )
+        )
+    )
+
+    with pytest.raises(TypeError, match="cleanup\\(\\) method"):
+        session_manager.create_session({}, "user", "token", {})
+    await session_manager.await_resource_cleanup()
+
+    assert extension.cleanup_calls == 1
 
 
 class _LifecycleProvider:

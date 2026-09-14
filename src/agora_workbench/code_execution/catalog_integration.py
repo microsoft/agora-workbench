@@ -140,14 +140,15 @@ class _AsyncCleanupTracker:
         return errors
 
 
-async def _close_resources(resources: tuple[object, ...]) -> None:
+async def _close_resources(resources: list[object]) -> None:
     errors: list[Exception] = []
     cancelled: asyncio.CancelledError | None = None
-    for resource in resources:
+    for resource in tuple(resources):
         close = (
             getattr(resource, "aclose", None) or getattr(resource, "close", None) or getattr(resource, "cleanup", None)
         )
         if not callable(close):
+            resources.remove(resource)
             continue
         try:
             result = close()
@@ -157,6 +158,8 @@ async def _close_resources(resources: tuple[object, ...]) -> None:
             cancelled = cancelled or exc
         except Exception as exc:
             errors.append(exc)
+        else:
+            resources.remove(resource)
     if cancelled is not None:
         if errors:
             cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
@@ -479,9 +482,10 @@ class CatalogSessionBinding:
     def _schedule_resource_cleanup(self, resource: object) -> None:
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
+        pending_resources = [resource]
 
         def cleanup() -> Any:
-            return _close_resources((resource,))
+            return _close_resources(pending_resources)
 
         self.cleanup_tracker.schedule(cleanup(), retry=cleanup)
 
@@ -807,9 +811,10 @@ class CatalogIntegration:
         except BaseException as bind_error:
             resources = (*extensions, authorizer) if self._authorizer_factory is not None else extensions
             if resources:
+                pending_resources = list(resources)
 
                 def cleanup() -> Any:
-                    return _close_resources(resources)
+                    return _close_resources(pending_resources)
 
                 try:
                     self._cleanup_tracker.schedule(cleanup(), retry=cleanup)

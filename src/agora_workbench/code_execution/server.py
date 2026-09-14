@@ -362,6 +362,17 @@ class CodeExecutionServer(BaseMCPServer):
                             "SessionConfig.data_manager_factory must return a data manager instance "
                             "with a cleanup() method."
                         )
+                    if "catalog" in custom_extensions:
+                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(
+                            manager,
+                            custom_extensions,
+                        )
+                        collision = ValueError(
+                            "SessionConfig.data_manager_factory extensions cannot use the reserved 'catalog' key."
+                        )
+                        if cleanup_error is not None:
+                            collision.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                        raise collision
             except BaseException as exc:
                 try:
                     binding.cleanup()

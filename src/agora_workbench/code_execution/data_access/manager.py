@@ -23,7 +23,12 @@ from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
 
 from agora_workbench.data_lake import ResourceOwnership
-from agora_workbench.data_lake.errors import TransferTimeoutError, UnsupportedOperationError, UnsafePathError
+from agora_workbench.data_lake.errors import (
+    BackendUnavailableError,
+    TransferTimeoutError,
+    UnsupportedOperationError,
+    UnsafePathError,
+)
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
@@ -454,47 +459,54 @@ class DataLakeDataManager:
             cache_generation = self._cache_generation
             full_cache_generation = self._full_cache_generation
 
-        # Route to appropriate resolver based on artifact type
-        if artifact_type == "blob":
-            resource_url = await self._get_blob_url_from_artifact_id(artifact_id)
-        elif artifact_type == "local":
-            # Local artifacts: the artifact_id is the file path itself
-            resource_url = artifact_id
-        else:
-            raise ValueError(f"Unsupported artifact type: {artifact_type}. {self._asset_tag_guidance()}")
+        for fetch_attempt in range(2):
+            # Route to appropriate resolver based on artifact type
+            if artifact_type == "blob":
+                resource_url = await self._get_blob_url_from_artifact_id(artifact_id)
+            elif artifact_type == "local":
+                # Local artifacts: the artifact_id is the file path itself
+                resource_url = artifact_id
+            else:
+                raise ValueError(f"Unsupported artifact type: {artifact_type}. {self._asset_tag_guidance()}")
 
-        # Fetch and cache the asset
-        LOGGER.debug(f"Fetching and caching {artifact_type} asset")
-        cache_path = self._get_cache_file_path(
-            resource_url,
-            cache_salt=(
-                f"{full_cache_generation}:{cache_generation if generation_scoped else ''}"
-                if full_cache_generation or generation_scoped
-                else None
-            ),
-        )
+            # Fetch and cache the asset
+            LOGGER.debug(f"Fetching and caching {artifact_type} asset")
+            cache_path = self._get_cache_file_path(
+                resource_url,
+                cache_salt=(
+                    f"{full_cache_generation}:{cache_generation if generation_scoped else ''}"
+                    if full_cache_generation or generation_scoped
+                    else None
+                ),
+            )
 
-        # Stream asset directly to file to avoid loading into memory
-        bytes_written = await self._fetch_asset_to_file(
-            resource_url,
-            cache_path,
-            context=context,
-            transfer_options=transfer_options,
-        )
-
-        if cache_was_invalidated():
-            cache_path.unlink(missing_ok=True)
-            return await self.get_cache_path(
-                qualified_name,
+            # Stream asset directly to file to avoid loading into memory
+            bytes_written = await self._fetch_asset_to_file(
+                resource_url,
+                cache_path,
                 context=context,
                 transfer_options=transfer_options,
             )
 
-        # Update index (use artifact_id as key)
-        self._cache_index[artifact_id] = cache_path
+            if cache_was_invalidated():
+                cache_path.unlink(missing_ok=True)
+                if fetch_attempt == 1:
+                    raise BackendUnavailableError(
+                        "Catalog authorization changed repeatedly during download.",
+                        resource_id=safe_artifact_reference(artifact_id),
+                        operation="download",
+                    )
+                cache_generation = self._cache_generation
+                full_cache_generation = self._full_cache_generation
+                continue
 
-        LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
-        return cache_path
+            # Update index (use artifact_id as key)
+            self._cache_index[artifact_id] = cache_path
+
+            LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
+            return cache_path
+
+        raise AssertionError("bounded cache fetch loop exited unexpectedly")
 
     async def _fetch_asset_to_file(
         self,

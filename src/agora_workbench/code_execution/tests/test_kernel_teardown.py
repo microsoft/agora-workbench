@@ -691,6 +691,26 @@ class TestAwaitableClose:
         assert attempts == 2
         assert manager.storage.retrieve(session_id) is None
 
+    async def test_sync_close_retains_retry_after_synchronous_cancellation(self, manager):
+        attempts = 0
+
+        class CancelsOnce:
+            def cleanup(self):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise asyncio.CancelledError
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, CancelsOnce())
+
+        manager.close_session(session_id)
+        await manager.await_resource_cleanup()
+
+        assert attempts == 2
+        assert manager.storage.retrieve(session_id) is None
+
     async def test_cancelled_resource_drain_remains_tracked_for_next_drain(self, manager):
         started = asyncio.Event()
         gate = asyncio.Event()

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from threading import Condition, RLock
-from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING, cast
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -330,6 +330,7 @@ class SessionManager:
             # the Session never constructs (and immediately discards) a default
             # one — DataLakeDataManager allocates a temp cache dir eagerly.
             data_manager = None
+            extensions: dict[str, Any] = {}
             if self.config.data_manager_factory is not None:
                 factory_result = self.config.data_manager_factory(
                     SessionContext(
@@ -341,7 +342,6 @@ class SessionManager:
                         metadata=metadata or {},
                     )
                 )
-                extensions: dict[str, Any] = {}
                 if isinstance(factory_result, SessionResources):
                     data_manager = factory_result.data_manager
                     extensions = dict(factory_result.extensions)
@@ -353,28 +353,47 @@ class SessionManager:
                 # surface later as unexplained default behaviour instead of an
                 # error at the point of the bug.
                 if data_manager is None or not callable(getattr(data_manager, "cleanup", None)):
-                    raise TypeError(
+                    error = TypeError(
                         "SessionConfig.data_manager_factory must return a data manager instance with a "
                         f"cleanup() method, but it returned {type(data_manager).__name__}. Returning None "
                         "would silently fall back to a default DataLakeDataManager and discard the "
                         "customization the factory exists to provide."
                     )
+                    cleanup_error = self._cleanup_unclaimed_session_resources(None, extensions)
+                    if cleanup_error is not None:
+                        error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                    raise error
 
             # Create session
-            session = Session(
-                session_id=session_id,
-                data=data,
-                session_type="default",
-                user_identity=user_identity,
-                user_token=user_token,
-                token_claims=token_claims,
-                metadata=metadata,
-                data_manager=data_manager,
-                extensions=extensions if self.config.data_manager_factory is not None else None,
-            )
+            session = None
+            try:
+                session = Session(
+                    session_id=session_id,
+                    data=data,
+                    session_type="default",
+                    user_identity=user_identity,
+                    user_token=user_token,
+                    token_claims=token_claims,
+                    metadata=metadata,
+                    data_manager=data_manager,
+                    extensions=extensions if self.config.data_manager_factory is not None else None,
+                )
 
-            # Store
-            self.storage.store(session_id, session)
+                # Store
+                self.storage.store(session_id, session)
+            except BaseException as creation_error:
+                if session is None:
+                    cleanup_error = self._cleanup_unclaimed_session_resources(data_manager, extensions)
+                else:
+                    try:
+                        self._start_session_cleanup(session)
+                    except BaseException as exc:
+                        cleanup_error = exc
+                    else:
+                        cleanup_error = None
+                if cleanup_error is not None:
+                    creation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                raise
             self._session_generation_seq += 1
             self._session_generations[session_id] = self._session_generation_seq
 
@@ -477,6 +496,12 @@ class SessionManager:
             cleanup_failed = False
             try:
                 self._start_session_cleanup(session)
+            except asyncio.CancelledError:
+                cleanup_failed = True
+                LOGGER.warning(
+                    "Cleanup of session %s was cancelled; retained cleanup tasks will be drained later.",
+                    session_id,
+                )
             except Exception as e:
                 cleanup_failed = True
                 LOGGER.error(
@@ -489,6 +514,40 @@ class SessionManager:
                 LOGGER.info(f"Closed session {session_id} (remaining={self.storage.count()})")
 
         return shutdown_task
+
+    def _cleanup_unclaimed_session_resources(
+        self,
+        data_manager: object | None,
+        extensions: dict[str, Any],
+    ) -> BaseException | None:
+        """Transfer factory-created resources into normal tracked cleanup."""
+
+        class _NoopDataManager:
+            def cleanup(self) -> None:
+                return None
+
+        cleanup_session = Session(
+            session_id=f"unclaimed-{uuid.uuid4()}",
+            data={},
+            session_type="cleanup",
+            user_identity="",
+            user_token="",
+            token_claims={},
+            data_manager=cast(
+                Any,
+                (
+                    data_manager
+                    if data_manager is not None and callable(getattr(data_manager, "cleanup", None))
+                    else _NoopDataManager()
+                ),
+            ),
+            extensions=extensions,
+        )
+        try:
+            self._start_session_cleanup(cleanup_session)
+        except BaseException as exc:
+            return exc
+        return None
 
     def _start_session_cleanup(self, session: Session) -> None:
         """Start all sync-path cleanup and retain any asynchronous work."""
