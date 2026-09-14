@@ -1003,6 +1003,7 @@ def test_receive_endpoint_cleans_private_stage_when_initialization_fails(tmp_pat
                 if Path(os.readlink(f"/proc/self/fd/{descriptor}")) == created[0]:
                     raise OSError("injected stage fstat failure")
             except FileNotFoundError:
+                # An unrelated descriptor may close while the injected hook runs.
                 pass
         return original_fstat(descriptor)
 
