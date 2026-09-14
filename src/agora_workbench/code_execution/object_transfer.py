@@ -55,6 +55,15 @@ _CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
+def parse_object_transfer_version(value: str | None) -> bool:
+    """Return whether the exact supported streaming version was requested."""
+    if value is None:
+        return False
+    if value == STREAMING_TRANSFER_VERSION:
+        return True
+    raise ValueError("Unsupported object transfer version.")
+
+
 def encode_streaming_transfer_info(
     *,
     variable_name: str,

@@ -2781,21 +2781,22 @@ else:
             from .object_transfer import (
                 MAX_TRANSFER_SIZE_BYTES,
                 STREAMING_TRANSFER_INFO_HEADER,
-                STREAMING_TRANSFER_VERSION,
                 STREAMING_TRANSFER_VERSION_HEADER,
                 ObjectSerializer,
                 decode_streaming_transfer_info,
+                parse_object_transfer_version,
                 parse_transfer_correlation_metadata,
                 receive_streaming_transfer,
             )
 
             transfer_version = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER)
-            if transfer_version and transfer_version != STREAMING_TRANSFER_VERSION:
+            try:
+                streaming_transfer = parse_object_transfer_version(transfer_version)
+            except ValueError as exc:
                 return JSONResponse(
-                    {"success": False, "error": "Unsupported object transfer version."},
+                    {"success": False, "error": str(exc)},
                     status_code=400,
                 )
-            streaming_transfer = transfer_version == STREAMING_TRANSFER_VERSION
             serialized_data: bytes | None = None
             expected_size: int | None = None
             expected_sha256: str | None = None

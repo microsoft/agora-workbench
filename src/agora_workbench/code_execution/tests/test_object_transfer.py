@@ -23,6 +23,7 @@ from ..object_transfer import (
     STREAMING_TRANSFER_VERSION_HEADER,
     decode_streaming_transfer_info,
     encode_streaming_transfer_info,
+    parse_object_transfer_version,
     parse_transfer_correlation_metadata,
     receive_streaming_transfer,
 )
@@ -69,6 +70,19 @@ def test_transfer_correlation_metadata_rejects_unsafe_identifiers(field, value):
 )
 def test_transfer_correlation_metadata_preserves_valid_compatibility(metadata, expected):
     assert parse_transfer_correlation_metadata(metadata) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["", "3", "20", "v2", "2 ", " 2", "2.0", "2,3"])
+def test_object_transfer_version_rejects_every_present_non_v2_token(version):
+    with pytest.raises(ValueError, match=r"\AUnsupported object transfer version\.\Z"):
+        parse_object_transfer_version(version)
+
+
+@pytest.mark.unit
+def test_object_transfer_version_preserves_absent_v1_and_exact_v2():
+    assert parse_object_transfer_version(None) is False
+    assert parse_object_transfer_version(STREAMING_TRANSFER_VERSION) is True
 
 
 # ---------------------------------------------------------------------------
@@ -477,13 +491,23 @@ def test_receive_endpoint_rejects_unsafe_correlation_metadata_without_disclosure
 
 
 @pytest.mark.unit
-def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legacy_parse(tmp_path):
+@pytest.mark.parametrize("version", ["3", "future", "2 "])
+def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legacy_parse(tmp_path, monkeypatch, version):
     from starlette.testclient import TestClient
+    from starlette.requests import Request
 
     from ..auth import create_noop_auth_config
     from ..code_execution_models import ServerConfig
     from ..server import CodeExecutionServer
 
+    json_called = False
+
+    async def fail_if_json_called(_request):
+        nonlocal json_called
+        json_called = True
+        raise AssertionError("unknown versions must not materialize the request body")
+
+    monkeypatch.setattr(Request, "json", fail_if_json_called)
     server = CodeExecutionServer(
         server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
         auth_config=create_noop_auth_config(),
@@ -496,11 +520,45 @@ def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legac
         response = client.post(
             "/object-transfer/receive",
             content=b"not a legacy JSON body",
-            headers={STREAMING_TRANSFER_VERSION_HEADER: "3"},
+            headers={STREAMING_TRANSFER_VERSION_HEADER: version},
         )
 
     assert response.status_code == 400
     assert response.json() == {"success": False, "error": "Unsupported object transfer version."}
+    assert not json_called
+
+
+@pytest.mark.unit
+def test_receive_endpoint_without_version_header_preserves_legacy_json_path(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from starlette.requests import Request
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+
+    json_called = False
+
+    async def track_legacy_json(_request):
+        nonlocal json_called
+        json_called = True
+        raise ValueError("injected invalid legacy body")
+
+    monkeypatch.setattr(Request, "json", track_legacy_json)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=b"legacy body")
+
+    assert json_called
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Invalid JSON body"}
 
 
 # ---------------------------------------------------------------------------
