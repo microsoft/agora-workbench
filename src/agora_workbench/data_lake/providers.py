@@ -9,6 +9,7 @@ from math import isfinite
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from agora_workbench.code_execution.data_access.catalog.config import CatalogConfig, DiscoveryMode
@@ -137,11 +138,22 @@ def _artifact(record: ArtifactRecord, *, requested_reference: ArtifactReference 
 class SQLiteCatalogProvider:
     """CatalogProvider adapter over an opened, caller-owned CatalogDB."""
 
-    def __init__(self, db: CatalogDB, source_ids: tuple[str, ...]):
+    def __init__(
+        self,
+        db: CatalogDB,
+        source_ids: tuple[str, ...],
+        *,
+        query_embedder: Callable[[str], Awaitable[list[float]]] | None = None,
+        hybrid_alpha: float = 0.5,
+    ):
         self._db = db
         self._source_ids = tuple(dict.fromkeys(source_ids))
+        self._query_embedder = query_embedder
+        self._hybrid_alpha = hybrid_alpha
         if not self._source_ids or any(not source_id for source_id in self._source_ids):
             raise ValueError("SQLiteCatalogProvider requires at least one non-empty source_id")
+        if not 0.0 <= hybrid_alpha <= 1.0:
+            raise ValueError("hybrid_alpha must be between 0 and 1")
 
     async def capabilities(self) -> tuple[SourceCapabilities, ...]:
         return tuple(SourceCapabilities(source_id, READ_OPERATIONS) for source_id in self._source_ids)
@@ -171,13 +183,20 @@ class SQLiteCatalogProvider:
             "filters": dict(request.filters),
         }
         offset = _cursor_offset(request.page.cursor, cursor_request)
+        query_embedding = (
+            await self._query_embedder(request.query)
+            if request.query.strip() and self._query_embedder is not None
+            else None
+        )
         records = self._db.search(
             request.query,
+            query_embedding=query_embedding,
             domain=domain,
             source_type=source_type,
             source_ids=source_ids,
             top=request.page.limit + 1,
             offset=offset,
+            hybrid_alpha=self._hybrid_alpha,
         )
         page_records = records[: request.page.limit]
         has_more = len(records) > request.page.limit

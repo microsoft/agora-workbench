@@ -16,6 +16,8 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     SessionCredential,
     _AsyncCleanupTracker,
+    _ConfiguredCatalogProvider,
+    _PreparedContextRefresh,
     _artifact_payload,
     _close_resources,
     _decode_reference,
@@ -57,7 +59,7 @@ from agora_workbench.data_lake import (
     StorageLocator,
     stable_source_id,
 )
-from agora_workbench.data_lake.catalog import CatalogConfig, DiscoveryMode, SourceConfig
+from agora_workbench.data_lake.catalog import CatalogConfig, DiscoveryMode, SearchConfig, SourceConfig
 from agora_workbench.code_execution.data_access.catalog import CatalogDB
 
 
@@ -213,6 +215,59 @@ async def test_configured_catalog_startup_rejects_unready_source(tmp_path):
         await integration.startup()
 
     assert cast(Any, integration.provider)._closed
+
+
+async def test_configured_catalog_preserves_valid_manifest_generation_after_refresh_failure(tmp_path):
+    root = tmp_path / "manifest-source"
+    source = _write_manifest(root, "source", "data.txt", "artifact")
+    database = tmp_path / "catalog.db"
+    provider = _ConfiguredCatalogProvider(CatalogConfig(sources=[source]), db_path=database)
+    assert await provider.load() == 1
+    await provider.aclose()
+
+    (root / "manifest.json").write_text("{")
+    replacement = _ConfiguredCatalogProvider(CatalogConfig(sources=[source]), db_path=database)
+    try:
+        assert await replacement.load() == 0
+        artifact = await replacement.get(ArtifactReference("artifact", "source"), RequestContext())
+        assert artifact.reference.artifact_id == "artifact"
+    finally:
+        await replacement.aclose()
+
+
+async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "data.txt").write_text("payload")
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root))],
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    provider = _ConfiguredCatalogProvider(config)
+
+    class Embeddings:
+        dimensions = 2
+
+        async def embed(self, texts):
+            return [[0.1, 0.2] for _ in texts]
+
+    provider._indexer._embedding_provider = Embeddings()
+    captured = {}
+    original_search = CatalogDB.search
+
+    def search(db, query, **kwargs):
+        captured.update(kwargs)
+        return original_search(db, query, **kwargs)
+
+    monkeypatch.setattr(CatalogDB, "search", search)
+    try:
+        await provider.load()
+        await provider.search(SearchRequest("semantic query"), RequestContext())
+    finally:
+        await provider.aclose()
+
+    assert captured["query_embedding"] == [0.1, 0.2]
+    assert captured["hybrid_alpha"] == 0.25
 
 
 def test_from_config_rejects_invalid_authorizer_before_opening_database(tmp_path):
@@ -811,6 +866,41 @@ async def test_failed_context_refresh_closes_uncommitted_credential_provider():
     assert providers[1].close_calls == 1
 
     await credential.close()
+    await binding.aclose()
+
+
+async def test_context_refresh_rolls_back_already_committed_refreshers():
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    state = {"value": "old"}
+
+    def prepare_first(context):
+        previous = state["value"]
+        return _PreparedContextRefresh(
+            lambda: state.__setitem__("value", context.user_token),
+            rollback=lambda: state.__setitem__("value", previous),
+        )
+
+    def prepare_second(context):
+        del context
+
+        def fail():
+            raise ValueError("commit failed")
+
+        return _PreparedContextRefresh(fail)
+
+    binding.add_context_refresher(prepare_first)
+    binding.add_context_refresher(prepare_second)
+    previous_context = binding.context
+
+    with pytest.raises(ValueError, match="commit failed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+
+    assert state["value"] == "old"
+    assert binding.context is previous_context
     await binding.aclose()
 
 

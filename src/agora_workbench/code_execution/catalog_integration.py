@@ -13,6 +13,7 @@ import shutil
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Annotated, cast
@@ -40,10 +41,11 @@ from agora_workbench.data_lake import (
     sanitize_uri_for_display,
     stable_source_id,
 )
-from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, SourceConfig
+from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, DiscoveryMode, SourceConfig
 from agora_workbench.data_lake.policy import AuthorizedCatalogProvider
 from agora_workbench.data_lake.providers import SQLiteCatalogProvider
 
+from .data_access.catalog.indexer import ManifestRefreshError
 from .sessions.session import SessionContext
 
 LOGGER = logging.getLogger(__name__)
@@ -172,6 +174,7 @@ async def _close_resources(resources: list[object]) -> None:
 class _PreparedContextRefresh:
     commit: Callable[[], None]
     rollback_resource: object | None = None
+    rollback: Callable[[], None] | None = None
 
     def __call__(self) -> None:
         self.commit()
@@ -197,13 +200,22 @@ class SessionCredential:
         if self._provider_factory is None:
             return _PreparedContextRefresh(lambda: None)
         provider = self._provider_factory(context.user_token)
+        previous_provider = self._provider
 
         def commit() -> None:
             self._retired_providers.append(self._provider)
             self._provider = provider
             self._provider_closed = False
 
-        return _PreparedContextRefresh(commit, rollback_resource=provider)
+        def rollback() -> None:
+            if self._provider is provider:
+                self._provider = previous_provider
+                for index in range(len(self._retired_providers) - 1, -1, -1):
+                    if self._retired_providers[index] is previous_provider:
+                        self._retired_providers.pop(index)
+                        break
+
+        return _PreparedContextRefresh(commit, rollback_resource=provider, rollback=rollback)
 
     async def close(self) -> None:
         errors: list[Exception] = []
@@ -254,6 +266,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
     """Lifecycle wrapper for scan, manifest, or mixed configured catalogs."""
 
     def __init__(self, config: CatalogConfig, *, db_path: str | Path = ":memory:", credential_provider: Any = None):
+        self._config = config
         self._db_owned = CatalogDB(db_path, vec_dimensions=config.search.embedding_dimensions)
         self._closed = False
         self._embedding_closed = False
@@ -262,7 +275,21 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
             self._configured_source_ids = tuple(_effective_source_id(source) for source in config.sources)
-            super().__init__(self._db_owned, self._configured_source_ids)
+            self._source_stale_limits = {
+                _effective_source_id(source): (
+                    source.max_stale_seconds if source.max_stale_seconds is not None else 300.0
+                )
+                for source in config.sources
+            }
+            self._manifest_source_ids = {
+                _effective_source_id(source) for source in config.sources if source.discovery is DiscoveryMode.MANIFEST
+            }
+            super().__init__(
+                self._db_owned,
+                self._configured_source_ids,
+                query_embedder=self._embed_query,
+                hybrid_alpha=config.search.hybrid_alpha,
+            )
         except BaseException:
             self._db_owned.close()
             self._closed = True
@@ -271,15 +298,51 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
     async def load(self) -> int:
         if self._closed:
             raise RuntimeError("Catalog provider is closed.")
-        indexed = await self._indexer.index()
-        unavailable = []
-        for source_id in self._configured_source_ids:
-            state = self._db_owned.get_source_refresh_state(source_id)
-            if state is None or state.successful_generation < 1:
-                unavailable.append(source_id)
+        try:
+            indexed = await self._indexer.index()
+        except ManifestRefreshError as exc:
+            states = {state.source_id: state for state in self._db_owned.list_source_refresh_states()}
+            unavailable = self._unavailable_sources(states, failed_source_ids=set(exc.errors))
+            if unavailable:
+                raise RuntimeError(f"Catalog sources are not ready: {', '.join(sorted(unavailable))}") from exc
+            return sum(state.artifact_count or 0 for state in states.values())
+        states = {state.source_id: state for state in self._db_owned.list_source_refresh_states()}
+        failed_source_ids = {
+            source_id
+            for source_id, state in states.items()
+            if source_id in self._manifest_source_ids and state.status != "success"
+        }
+        unavailable = self._unavailable_sources(states, failed_source_ids=failed_source_ids)
         if unavailable:
             raise RuntimeError(f"Catalog sources are not ready: {', '.join(sorted(unavailable))}")
         return indexed
+
+    def _unavailable_sources(self, states: Mapping[str, Any], *, failed_source_ids: set[str]) -> list[str]:
+        now = datetime.now(timezone.utc)
+        unavailable = []
+        for source_id in self._configured_source_ids:
+            state = states.get(source_id)
+            if state is None or state.successful_generation < 1:
+                unavailable.append(source_id)
+                continue
+            if source_id not in failed_source_ids:
+                continue
+            if state.last_success_at is None:
+                unavailable.append(source_id)
+                continue
+            success_at = datetime.fromisoformat(state.last_success_at.replace("Z", "+00:00"))
+            if success_at.tzinfo is None:
+                success_at = success_at.replace(tzinfo=timezone.utc)
+            if (now - success_at.astimezone(timezone.utc)).total_seconds() > self._source_stale_limits[source_id]:
+                unavailable.append(source_id)
+        return unavailable
+
+    async def _embed_query(self, query: str) -> list[float]:
+        provider = self._indexer.embedding_provider
+        if provider is None:
+            raise RuntimeError("Catalog query embedding is unavailable.")
+        embeddings = await provider.embed([query])
+        return embeddings[0]
 
     async def aclose(self) -> None:
         if self._closed:
@@ -457,8 +520,37 @@ class CatalogSessionBinding:
             raise
 
         previous_authorizer = self.owned_authorizer
-        for prepared in prepared_refreshes:
-            prepared()
+        committed_refreshes: list[_PreparedContextRefresh] = []
+        try:
+            for prepared in prepared_refreshes:
+                prepared()
+                if isinstance(prepared, _PreparedContextRefresh):
+                    committed_refreshes.append(prepared)
+        except BaseException as commit_error:
+            rollback_errors: list[Exception] = []
+            for prepared in reversed(committed_refreshes):
+                if prepared.rollback is not None:
+                    try:
+                        prepared.rollback()
+                    except Exception as exc:
+                        rollback_errors.append(exc)
+            rollback_resources: list[object] = []
+            seen_resources: set[int] = set()
+            for prepared in prepared_refreshes:
+                if (
+                    isinstance(prepared, _PreparedContextRefresh)
+                    and prepared.rollback_resource is not None
+                    and id(prepared.rollback_resource) not in seen_resources
+                ):
+                    seen_resources.add(id(prepared.rollback_resource))
+                    rollback_resources.append(prepared.rollback_resource)
+            for resource in rollback_resources:
+                self._schedule_resource_cleanup(resource)
+            if authorizer is not None and authorizer is not self.owned_authorizer:
+                self._schedule_resource_cleanup(authorizer)
+            if rollback_errors:
+                commit_error.add_note(str(ExceptionGroup("Context refresh rollback failed.", rollback_errors)))
+            raise
         self.catalog = catalog
         self.resolver._catalog = catalog
         self.owned_authorizer = authorizer
