@@ -152,7 +152,7 @@ async def _close_resources(resources: tuple[object, ...]) -> None:
         try:
             result = close()
             if inspect.isawaitable(result):
-                await result
+                _ = await result
         except asyncio.CancelledError as exc:
             cancelled = cancelled or exc
         except Exception as exc:
@@ -205,7 +205,7 @@ class SessionCredential:
                 if callable(close):
                     result = close()
                     if inspect.isawaitable(result):
-                        await result
+                        _ = await result
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
             except Exception as exc:
@@ -281,7 +281,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
                 if callable(close):
                     result = close()
                     if inspect.isawaitable(result):
-                        await result
+                        _ = await result
                 self._embedding_closed = True
             except asyncio.CancelledError as exc:
                 cancelled = exc
@@ -506,7 +506,7 @@ class CatalogSessionBinding:
                 try:
                     result = close()
                     if inspect.isawaitable(result):
-                        await result
+                        _ = await result
                 except asyncio.CancelledError as exc:
                     cancelled = cancelled or exc
                 except Exception as exc:
@@ -652,7 +652,7 @@ class CatalogIntegration:
                     raise TypeError("Catalog load_on_startup requires a provider with load().")
                 result = load()
                 if inspect.isawaitable(result):
-                    await result
+                    _ = await result
             await self.provider.capabilities()
             self._started = True
         except BaseException as startup_error:

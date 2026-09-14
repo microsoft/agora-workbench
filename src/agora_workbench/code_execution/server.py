@@ -2770,7 +2770,7 @@ else:
             if callable(initialize):
                 result = initialize()
                 if inspect.isawaitable(result):
-                    await result
+                    _ = await result
 
     async def _close_tool_search_backends(self) -> None:
         """Close registered tool search backends."""

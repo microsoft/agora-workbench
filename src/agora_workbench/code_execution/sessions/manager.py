@@ -614,7 +614,7 @@ class SessionManager:
             cleanup_error: BaseException | None = None
             try:
                 if cleanup_task is not None:
-                    await cleanup_task
+                    _ = await cleanup_task
             except asyncio.CancelledError as exc:
                 cleanup_error = exc
             except Exception as exc:

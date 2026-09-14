@@ -116,7 +116,7 @@ class TestAtomicClaim:
         assert manager.get_kernel_generation("s1") is None
 
         gate.set()
-        await task
+        _ = await task
 
     async def test_second_teardown_claims_nothing(self, manager):
         gate = asyncio.Event()
@@ -129,7 +129,7 @@ class TestAtomicClaim:
         await manager._shutdown_kernel("s1")
 
         gate.set()
-        await first
+        _ = await first
         assert km_first.shutdown_finished
 
     async def test_replacement_closed_while_old_kernel_stops_cannot_start_orphan(self, manager):
@@ -176,7 +176,7 @@ class TestAtomicClaim:
         new_generation = manager.get_kernel_generation("s1")
 
         gate.set()
-        await stale
+        _ = await stale
 
         assert manager._kernels.get("s1") == (new_km, new_kc), "live kernel was evicted"
         assert manager.get_kernel_generation("s1") == new_generation
@@ -252,7 +252,7 @@ class TestAtomicClaim:
         marker.write_text("replacement")
 
         gate.set()
-        await shutdown
+        _ = await shutdown
 
         assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
         assert session_file.read_text() == "replacement", "stale cleanup deleted a live session file"
@@ -304,7 +304,7 @@ class TestAtomicClaim:
         register_kernel(manager, session_id, name="NEW")
 
         gate.set()
-        await stale
+        _ = await stale
 
         assert (outputs / "result.csv").exists()
 
@@ -397,8 +397,9 @@ class TestCoalescing:
 
         storage.pause_retrieve = False
         storage.resume_retrieve.set()
-        await close_task
-        await replacement_task
+        _ = await close_task
+        replacement_id = await replacement_task
+        assert replacement_id == session_id
 
         assert manager.storage.retrieve(session_id).user_identity == "new"
 
@@ -421,7 +422,9 @@ class TestCoalescing:
             timeout=1,
         )
         resume_cleanup.set()
-        await close_task
+        close_result = await close_task
+        if close_result is not None:
+            _ = await close_result
 
         assert manager.storage.retrieve(replacement) is not None
 
@@ -438,7 +441,7 @@ class TestCoalescing:
         gate.set()
         for task in (first, second):
             if task is not None:
-                await task
+                _ = await task
         assert first is not None
         assert second is first, "the second close should join the in-flight teardown"
         assert first.exception() is None
@@ -452,7 +455,7 @@ class TestCoalescing:
         assert first is second
 
         gate.set()
-        await first
+        _ = await first
 
     async def test_task_is_referenced_while_running_and_released_after(self, manager):
         gate = asyncio.Event()
@@ -463,7 +466,7 @@ class TestCoalescing:
         assert manager._kernel_shutdown_tasks.get("s1") is task, "an unreferenced task can be GC-ed mid-flight"
 
         gate.set()
-        await task
+        _ = await task
         await asyncio.sleep(0)
         assert "s1" not in manager._kernel_shutdown_tasks
 
@@ -493,7 +496,7 @@ class TestCoalescing:
             task = manager._schedule_kernel_shutdown("s1")
             assert task is not None
             with pytest.raises(RuntimeError):
-                await task
+                _ = await task
 
         assert any("Kernel shutdown for session s1 failed" in r.getMessage() for r in caplog.records)
 
@@ -516,7 +519,7 @@ class TestAwaitableClose:
 
         gate.set()
         assert task is not None
-        await task
+        _ = await task
         assert km.shutdown_finished is True
 
     async def test_aclose_session_waits_for_the_kernel(self, manager):
@@ -552,7 +555,7 @@ class TestAwaitableClose:
         assert manager.storage.retrieve(session_id) is None
 
         cleanup_gate.set()
-        await close_task
+        _ = await close_task
         assert manager.storage.retrieve(session_id) is None
 
     async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):
@@ -577,7 +580,7 @@ class TestAwaitableClose:
 
         for gate in gates:
             gate.set()
-        await close_task
+        _ = await close_task
         assert manager.storage.count() == 0
 
     async def test_aclose_all_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
@@ -705,7 +708,7 @@ class TestAwaitableClose:
 
         first_drain.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await first_drain
+            _ = await first_drain
         assert task in manager._resource_cleanup_tasks
         assert not task.cancelled()
 
@@ -713,7 +716,7 @@ class TestAwaitableClose:
         await asyncio.sleep(0)
         assert not second_drain.done()
         gate.set()
-        await second_drain
+        _ = await second_drain
 
         assert finished.is_set()
         assert not manager._resource_cleanup_tasks
@@ -732,10 +735,10 @@ class TestAwaitableClose:
         await let_teardown_start()
         waiter.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await waiter
+            _ = await waiter
 
         gate.set()
-        await task
+        _ = await task
         assert km.shutdown_finished is True
 
 
@@ -807,8 +810,8 @@ class TestKernelRebuildWaits:
         assert not create.done(), "kernel rebuild should wait for the teardown"
 
         gate.set()
-        await teardown
-        await create
+        _ = await teardown
+        _ = await create
 
         assert created_while_old_alive == [True], "replacement was built before the old kernel finished shutting down"
         assert "s1" in manager._kernels
@@ -824,7 +827,7 @@ class TestKernelRebuildWaits:
         assert session_id in manager._kernel_shutdown_tasks
 
         gate.set()
-        await cleanup
+        _ = await cleanup
 
     async def test_generation_mismatch_teardown_preserves_replacement_outputs(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg

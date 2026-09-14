@@ -278,7 +278,7 @@ class Session(Generic[T]):
 
                 async def await_cleanup() -> None:
                     try:
-                        await result
+                        _ = await result
                     except asyncio.CancelledError as cancelled:
                         try:
                             await self._retry_resource_cleanup(resource, label)
@@ -309,7 +309,7 @@ class Session(Generic[T]):
         try:
             result = close()
             if inspect.isawaitable(result):
-                await result
+                _ = await result
         except asyncio.CancelledError as exc:
             cancellations.append(exc)
             retry = asyncio.create_task(self._retry_resource_cleanup(resource, label))
@@ -335,7 +335,7 @@ class Session(Generic[T]):
         try:
             result = close()
             if inspect.isawaitable(result):
-                await result
+                _ = await result
         except asyncio.CancelledError:
             raise
         except Exception as exc:
