@@ -33,6 +33,7 @@ from agora_workbench.data_lake.transfer import (
     check_transfer_size,
     hash_file,
     safe_artifact_reference,
+    stream_chunks_to_file,
 )
 
 from .. import agent_guidance
@@ -57,7 +58,19 @@ def _open_cached_file_no_follow(path: Path) -> BinaryIO:
             parent_fd = os.open(os.path.sep, flags)
             try:
                 for part in absolute_path.parts[1:-1]:
+                    entry_stat = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
+                    if not stat.S_ISDIR(entry_stat.st_mode):
+                        raise UnsafePathError("Cached asset path component is not a directory.", operation="download")
                     next_fd = os.open(part, flags, dir_fd=parent_fd)
+                    try:
+                        opened_stat = os.fstat(next_fd)
+                        if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                            raise UnsafePathError(
+                                "Cached asset path identity changed during open.", operation="download"
+                            )
+                    except BaseException:
+                        os.close(next_fd)
+                        raise
                     os.close(parent_fd)
                     parent_fd = next_fd
 
@@ -92,6 +105,34 @@ def _open_cached_file_no_follow(path: Path) -> BinaryIO:
         raise
     except OSError as exc:
         raise UnsafePathError("Cached asset path could not be opened safely.", operation="download") from exc
+
+
+def _remove_legacy_staging_if_owned(path: Path, expected_identity: tuple[int, int] | None) -> None:
+    """Remove a regular legacy staging entry only while its observed identity is unchanged."""
+    try:
+        entry_stat = path.stat(follow_symlinks=False)
+        entry_identity = (entry_stat.st_dev, entry_stat.st_ino)
+        if not stat.S_ISREG(entry_stat.st_mode) or (
+            expected_identity is not None and entry_identity != expected_identity
+        ):
+            LOGGER.warning("Skipped cleanup of replaced legacy transfer staging entry: %s", path.name)
+            return
+        with _open_cached_file_no_follow(path) as staged_file:
+            opened_stat = os.fstat(staged_file.fileno())
+            if (opened_stat.st_dev, opened_stat.st_ino) != entry_identity:
+                LOGGER.warning("Skipped cleanup of changed legacy transfer staging entry: %s", path.name)
+                return
+        final_stat = path.stat(follow_symlinks=False)
+        if (final_stat.st_dev, final_stat.st_ino) != entry_identity or not stat.S_ISREG(final_stat.st_mode):
+            LOGGER.warning("Skipped cleanup of changed legacy transfer staging entry: %s", path.name)
+            return
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except UnsafePathError:
+        LOGGER.warning("Skipped unsafe legacy transfer staging cleanup for %s.", path.name, exc_info=True)
+    except OSError:
+        LOGGER.warning("Could not safely remove legacy transfer staging entry %s.", path.name, exc_info=True)
 
 
 def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
@@ -425,6 +466,7 @@ class DataLakeDataManager:
                 temporary_path = dest_path.with_name(f".{dest_path.name}.{secrets.token_hex(8)}.legacy-part")
                 options = transfer_options or self._transfer_options
                 started = time.monotonic()
+                staged_identity: tuple[int, int] | None = None
                 try:
                     await await_transfer(
                         fetcher.fetch_to_file(qualified_name, temporary_path),
@@ -442,32 +484,48 @@ class DataLakeDataManager:
                         )
                     validation_options = replace(options, timeout_seconds=remaining_timeout)
                     check_transfer_cancelled(validation_options, operation="download", resource=qualified_name)
-                    file_stat = temporary_path.stat(follow_symlinks=False)
-                    if not stat.S_ISREG(file_stat.st_mode):
-                        raise UnsafePathError("Legacy fetcher output must be a regular file.", operation="download")
-                    check_transfer_size(
-                        file_stat.st_size,
-                        validation_options,
-                        operation="download",
-                        resource=qualified_name,
-                    )
-                    if validation_options.expected_sha256 is not None:
-                        with temporary_path.open("rb", buffering=0) as source:
-                            await hash_file(
-                                source,
-                                options=validation_options,
-                                context=context or RequestContext(),
+                    with _open_cached_file_no_follow(temporary_path) as source:
+                        file_stat = os.fstat(source.fileno())
+                        staged_identity = (file_stat.st_dev, file_stat.st_ino)
+                        check_transfer_size(
+                            file_stat.st_size,
+                            validation_options,
+                            operation="download",
+                            resource=qualified_name,
+                        )
+                        current_stat = temporary_path.stat(follow_symlinks=False)
+                        if (
+                            not stat.S_ISREG(current_stat.st_mode)
+                            or (current_stat.st_dev, current_stat.st_ino) != staged_identity
+                        ):
+                            raise UnsafePathError(
+                                "Legacy fetcher output identity changed before commit.",
                                 operation="download",
-                                resource=qualified_name,
                             )
-                    check_transfer_cancelled(validation_options, operation="download", resource=qualified_name)
-                    if validation_options.create_exclusive:
-                        os.link(temporary_path, dest_path)
-                    else:
-                        os.replace(temporary_path, dest_path)
-                    return file_stat.st_size
+
+                        async def staged_chunks():
+                            while True:
+                                chunk = await _run_blocking_io(
+                                    lambda: source.read(validation_options.chunk_size),
+                                    options=validation_options,
+                                    operation="download",
+                                    resource=qualified_name,
+                                )
+                                if not chunk:
+                                    break
+                                yield chunk
+
+                        result = await stream_chunks_to_file(
+                            staged_chunks(),
+                            dest_path,
+                            options=validation_options,
+                            context=context or RequestContext(),
+                            operation="download",
+                            resource=qualified_name,
+                        )
+                        return result.bytes_transferred
                 finally:
-                    temporary_path.unlink(missing_ok=True)
+                    _remove_legacy_staging_if_owned(temporary_path, staged_identity)
 
         raise UnsupportedOperationError(
             "No configured fetcher supports this storage locator. "

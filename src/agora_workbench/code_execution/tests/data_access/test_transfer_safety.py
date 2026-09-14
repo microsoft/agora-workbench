@@ -2120,6 +2120,55 @@ async def test_manager_legacy_fetcher_enforces_transfer_options_before_commit(tm
         await manager.aclose()
 
 
+async def test_manager_legacy_fetcher_rejects_staging_symlink_swap_before_commit(tmp_path, monkeypatch):
+    staged_path: Path | None = None
+
+    class LegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b"content"
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            nonlocal staged_path
+            staged_path = Path(dest_path)
+            staged_path.write_bytes(b"content")
+            return len(b"content")
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    outside = tmp_path / "outside.bin"
+    outside.write_bytes(b"external")
+    displaced_stage = tmp_path / "displaced-stage.bin"
+    destination = tmp_path / "cached.bin"
+    original_check_transfer_size = manager_module.check_transfer_size
+    swapped = False
+
+    def swap_after_validation(size, options, **kwargs):
+        nonlocal swapped
+        original_check_transfer_size(size, options, **kwargs)
+        if not swapped:
+            assert staged_path is not None
+            staged_path.rename(displaced_stage)
+            staged_path.symlink_to(outside)
+            swapped = True
+
+    monkeypatch.setattr(manager_module, "check_transfer_size", swap_after_validation)
+    manager = DataLakeDataManager(extra_fetchers=[LegacyFetcher()])
+    try:
+        with pytest.raises(UnsafePathError, match="identity changed before commit"):
+            await manager._fetch_asset_to_file("legacy://swapped", destination)
+    finally:
+        await manager.aclose()
+
+    assert swapped
+    assert not destination.exists()
+    assert outside.read_bytes() == b"external"
+    assert displaced_stage.read_bytes() == b"content"
+    assert staged_path is not None
+    assert staged_path.is_symlink()
+    assert staged_path.resolve() == outside
+
+
 async def test_manager_legacy_fetcher_timeout_drains_before_temp_cleanup(tmp_path):
     provider_started = asyncio.Event()
     provider_drained = asyncio.Event()
