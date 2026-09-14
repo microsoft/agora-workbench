@@ -2196,7 +2196,7 @@ async def test_manager_legacy_fetcher_cancellation_drains_before_temp_cleanup(tm
         await provider_started.wait()
         cancellation.set()
         with pytest.raises(TransferCancelledError):
-            await transfer
+            await asyncio.wait_for(transfer, timeout=1)
         assert provider_drained.is_set()
         assert temp_existed_while_draining
         assert not destination.exists()
