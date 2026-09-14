@@ -2230,19 +2230,61 @@ async def test_manager_legacy_staging_collision_preserves_unowned_file(tmp_path,
         def can_handle(self, qualified_name: str) -> bool:
             return qualified_name.startswith("legacy://")
 
-    destination = tmp_path / "cached.bin"
-    colliding_stage = tmp_path / ".cached.bin.collision.legacy-part"
-    colliding_stage.write_bytes(b"other process")
     monkeypatch.setattr(manager_module.secrets, "token_hex", lambda _size: "collision")
     manager = DataLakeDataManager(extra_fetchers=[LegacyFetcher()])
+    destination = tmp_path / "cached.bin"
+    colliding_stage: Path | None = None
+    original_mkdtemp = manager_module.tempfile.mkdtemp
+
+    def create_colliding_stage(*args, **kwargs):
+        nonlocal colliding_stage
+        directory = Path(original_mkdtemp(*args, **kwargs))
+        colliding_stage = directory / "collision.legacy-part"
+        colliding_stage.write_bytes(b"other process")
+        return str(directory)
+
+    monkeypatch.setattr(manager_module.tempfile, "mkdtemp", create_colliding_stage)
     try:
         with pytest.raises(FileExistsError):
             await manager._fetch_asset_to_file("legacy://object", destination)
+        assert colliding_stage is not None
+        assert colliding_stage.read_bytes() == b"other process"
+        assert not destination.exists()
+        colliding_stage.unlink()
+        colliding_stage.parent.rmdir()
     finally:
         await manager.aclose()
 
-    assert colliding_stage.read_bytes() == b"other process"
-    assert not destination.exists()
+
+async def test_manager_legacy_fetcher_stages_outside_symlinked_destination_parent(tmp_path):
+    staged_path: Path | None = None
+
+    class LegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b"content"
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            nonlocal staged_path
+            staged_path = Path(dest_path)
+            staged_path.write_bytes(b"content")
+            return len(b"content")
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    redirected_parent = tmp_path / "redirected"
+    redirected_parent.symlink_to(outside, target_is_directory=True)
+    manager = DataLakeDataManager(extra_fetchers=[LegacyFetcher()])
+    try:
+        with pytest.raises(UnsafePathError):
+            await manager._fetch_asset_to_file("legacy://object", redirected_parent / "cached.bin")
+        assert staged_path is not None
+        assert staged_path.is_relative_to(manager._cache_dir)
+        assert list(outside.iterdir()) == []
+    finally:
+        await manager.aclose()
 
 
 async def test_manager_legacy_fetcher_enforces_transfer_options_before_commit(tmp_path):
@@ -2336,16 +2378,17 @@ async def test_manager_legacy_fetcher_rejects_staging_symlink_swap_before_commit
     try:
         with pytest.raises(UnsafePathError, match="identity changed before commit"):
             await manager._fetch_asset_to_file("legacy://swapped", destination)
+        assert swapped
+        assert not destination.exists()
+        assert outside.read_bytes() == b"external"
+        assert displaced_stage.read_bytes() == b"content"
+        assert staged_path is not None
+        assert staged_path.is_symlink()
+        assert staged_path.resolve() == outside
+        staged_path.unlink()
+        staged_path.parent.rmdir()
     finally:
         await manager.aclose()
-
-    assert swapped
-    assert not destination.exists()
-    assert outside.read_bytes() == b"external"
-    assert displaced_stage.read_bytes() == b"content"
-    assert staged_path is not None
-    assert staged_path.is_symlink()
-    assert staged_path.resolve() == outside
 
 
 async def test_manager_legacy_fetcher_timeout_drains_before_temp_cleanup(tmp_path):

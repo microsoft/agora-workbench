@@ -21,7 +21,7 @@ import logging
 import math
 import os
 import re
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -55,6 +55,54 @@ _CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 
 # Loopback hostnames that are always permitted for local development / testing.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+class _IncrementalBase64Decoder:
+    """Decode arbitrarily large input chunks using bounded aligned blocks."""
+
+    def __init__(self, decoded_chunk_size: int) -> None:
+        self._pending = b""
+        self._block_size = max(4, (decoded_chunk_size // 3) * 4)
+
+    @property
+    def has_pending(self) -> bool:
+        return bool(self._pending)
+
+    def decode(self, encoded: bytes | memoryview, *, final: bool) -> Iterator[bytes]:
+        view = memoryview(encoded)
+        offset = 0
+        if self._pending:
+            needed = 4 - len(self._pending)
+            take = min(needed, len(view))
+            block = self._pending + bytes(view[:take])
+            offset += take
+            if len(block) < 4:
+                self._pending = block
+                if final:
+                    raise ValueError("Invalid base64 data.")
+                return
+            self._pending = b""
+            try:
+                yield base64.b64decode(block, validate=True)
+            except binascii.Error as exc:
+                raise ValueError("Invalid base64 data.") from exc
+
+        available = len(view) - offset
+        complete_length = available if final else available - (available % 4)
+        if complete_length % 4:
+            raise ValueError("Invalid base64 data.")
+        end = offset + complete_length
+        while offset < end:
+            block_end = min(end, offset + self._block_size)
+            block_end -= (block_end - offset) % 4
+            try:
+                yield base64.b64decode(view[offset:block_end], validate=True)
+            except binascii.Error as exc:
+                raise ValueError("Invalid base64 data.") from exc
+            offset = block_end
+        self._pending = bytes(view[offset:])
+        if final and self._pending:
+            raise ValueError("Invalid base64 data.")
 
 
 def parse_object_transfer_version(value: str | None) -> bool:
@@ -189,7 +237,7 @@ async def receive_legacy_streaming_transfer(
     """Incrementally decode a legacy v1 JSON/base64 envelope with bounded memory."""
     prefix = bytearray()
     suffix = bytearray()
-    remainder = b""
+    decoder = _IncrementalBase64Decoder(options.chunk_size)
     reading_data = False
     data_complete = False
     total_body_bytes = 0
@@ -225,7 +273,7 @@ async def receive_legacy_streaming_transfer(
         return envelope
 
     async def decoded_chunks():
-        nonlocal remainder, reading_data, data_complete, total_body_bytes, validated_envelope
+        nonlocal reading_data, data_complete, total_body_bytes, validated_envelope
         async for chunk in chunks:
             total_body_bytes += len(chunk)
             if total_body_bytes > MAX_TRANSFER_BODY_BYTES:
@@ -235,41 +283,45 @@ async def receive_legacy_streaming_transfer(
                     operation="receive",
                 )
             if data_complete:
-                suffix.extend(chunk)
-                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                if len(suffix) + len(chunk) > _MAX_STREAMING_ENVELOPE_BYTES:
                     raise ValueError("Invalid legacy object transfer envelope.")
+                suffix.extend(chunk)
                 continue
-            data = chunk
+            payload_start = 0
             if not reading_data:
-                prefix.extend(data)
-                marker = _LEGACY_DATA_MARKER_RE.search(prefix)
-                if marker is None:
-                    if len(prefix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                scan_offset = 0
+                marker = None
+                while scan_offset < len(chunk):
+                    remaining_capacity = _MAX_STREAMING_ENVELOPE_BYTES - len(prefix)
+                    if remaining_capacity <= 0:
                         raise ValueError("Invalid legacy object transfer envelope.")
+                    block_end = min(len(chunk), scan_offset + min(4096, remaining_capacity))
+                    previous_prefix_length = len(prefix)
+                    prefix.extend(memoryview(chunk)[scan_offset:block_end])
+                    marker = _LEGACY_DATA_MARKER_RE.search(prefix)
+                    if marker is not None:
+                        payload_start = scan_offset + max(0, marker.end() - previous_prefix_length)
+                        del prefix[marker.start() :]
+                        reading_data = True
+                        break
+                    scan_offset = block_end
+                if marker is None:
                     continue
-                data = bytes(prefix[marker.end() :])
-                del prefix[marker.start() :]
-                reading_data = True
 
-            closing_quote = data.find(b'"')
-            encoded = data if closing_quote < 0 else data[:closing_quote]
+            closing_quote = chunk.find(b'"', payload_start)
+            encoded_end = len(chunk) if closing_quote < 0 else closing_quote
+            encoded = memoryview(chunk)[payload_start:encoded_end]
             if closing_quote >= 0:
                 data_complete = True
-                suffix.extend(data[closing_quote + 1 :])
-                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                trailing = memoryview(chunk)[closing_quote + 1 :]
+                if len(suffix) + len(trailing) > _MAX_STREAMING_ENVELOPE_BYTES:
                     raise ValueError("Invalid legacy object transfer envelope.")
-            encoded = remainder + encoded
-            complete_length = len(encoded) if data_complete else len(encoded) - (len(encoded) % 4)
-            if complete_length:
-                try:
-                    decoded = base64.b64decode(encoded[:complete_length], validate=True)
-                except binascii.Error as exc:
-                    raise ValueError("Invalid base64 data.") from exc
+                suffix.extend(trailing)
+            for decoded in decoder.decode(encoded, final=data_complete):
                 if decoded:
                     yield decoded
-            remainder = encoded[complete_length:]
 
-        if not reading_data or not data_complete or remainder:
+        if not reading_data or not data_complete or decoder.has_pending:
             raise ValueError("Invalid legacy object transfer envelope.")
         validated_envelope = validate_envelope()
 
@@ -313,7 +365,7 @@ async def receive_streaming_transfer(
 
     async def decoded_chunks():
         prefix = bytearray()
-        remainder = b""
+        decoder = _IncrementalBase64Decoder(options.chunk_size)
         suffix = bytearray()
         reading_data = False
         data_complete = False
@@ -330,44 +382,49 @@ async def receive_streaming_transfer(
                     operation="receive",
                 )
             if data_complete:
-                suffix.extend(chunk)
-                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                if len(suffix) + len(chunk) > _MAX_STREAMING_ENVELOPE_BYTES:
                     raise ValueError("Invalid streaming object transfer envelope.")
+                suffix.extend(chunk)
                 continue
-            data = chunk
+            payload_start = 0
             if not reading_data:
-                prefix.extend(data)
-                marker_index = prefix.find(_STREAMING_DATA_MARKER)
-                if marker_index < 0:
-                    if len(prefix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                scan_offset = 0
+                marker_index = -1
+                while scan_offset < len(chunk):
+                    remaining_capacity = _MAX_STREAMING_ENVELOPE_BYTES - len(prefix)
+                    if remaining_capacity <= 0:
                         raise ValueError("Invalid streaming object transfer envelope.")
+                    block_end = min(len(chunk), scan_offset + min(4096, remaining_capacity))
+                    previous_prefix_length = len(prefix)
+                    prefix.extend(memoryview(chunk)[scan_offset:block_end])
+                    marker_index = prefix.find(_STREAMING_DATA_MARKER)
+                    if marker_index >= 0:
+                        marker_end = marker_index + len(_STREAMING_DATA_MARKER)
+                        payload_start = scan_offset + max(0, marker_end - previous_prefix_length)
+                        del prefix[marker_index:]
+                        reading_data = True
+                        break
+                    scan_offset = block_end
+                if marker_index < 0:
                     continue
-                data = bytes(prefix[marker_index + len(_STREAMING_DATA_MARKER) :])
-                del prefix[marker_index:]
-                reading_data = True
 
-            closing_quote = data.find(b'"')
-            encoded = data if closing_quote < 0 else data[:closing_quote]
+            closing_quote = chunk.find(b'"', payload_start)
+            encoded_end = len(chunk) if closing_quote < 0 else closing_quote
+            encoded = memoryview(chunk)[payload_start:encoded_end]
             if closing_quote >= 0:
                 data_complete = True
-                suffix.extend(data[closing_quote + 1 :])
-                if len(suffix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                trailing = memoryview(chunk)[closing_quote + 1 :]
+                if len(suffix) + len(trailing) > _MAX_STREAMING_ENVELOPE_BYTES:
                     raise ValueError("Invalid streaming object transfer envelope.")
-            encoded = remainder + encoded
-            complete_length = len(encoded) if data_complete else len(encoded) - (len(encoded) % 4)
-            if complete_length:
-                try:
-                    decoded = base64.b64decode(encoded[:complete_length], validate=True)
-                except binascii.Error as exc:
-                    raise ValueError("Invalid base64 data.") from exc
+                suffix.extend(trailing)
+            for decoded in decoder.decode(encoded, final=data_complete):
                 if decoded:
                     total_decoded += len(decoded)
                     if total_decoded > expected_size:
                         raise ValueError("Decoded payload exceeded the declared size.")
                     yield decoded
-            remainder = encoded[complete_length:]
 
-        if not reading_data or not data_complete or remainder:
+        if not reading_data or not data_complete or decoder.has_pending:
             raise ValueError("Invalid streaming object transfer envelope.")
         variable_name = _validate_streaming_envelope_prefix(bytes(prefix))
         envelope = _validate_streaming_envelope_suffix(bytes(suffix))

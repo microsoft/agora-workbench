@@ -463,7 +463,8 @@ class DataLakeDataManager:
                     )
                     return result.bytes_transferred
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
-                temporary_path = dest_path.with_name(f".{dest_path.name}.{secrets.token_hex(8)}.legacy-part")
+                staging_directory = Path(tempfile.mkdtemp(prefix="legacy_fetch_", dir=self._cache_dir))
+                temporary_path = staging_directory / f"{secrets.token_hex(8)}.legacy-part"
                 options = transfer_options or self._transfer_options
                 started = time.monotonic()
                 staged_identity: tuple[int, int] | None = None
@@ -536,6 +537,17 @@ class DataLakeDataManager:
                         return result.bytes_transferred
                 finally:
                     _remove_legacy_staging_if_owned(temporary_path, staged_identity)
+                    try:
+                        staging_directory.rmdir()
+                    except FileNotFoundError:
+                        # The private staging directory was already removed.
+                        pass
+                    except OSError:
+                        LOGGER.warning(
+                            "Could not remove legacy transfer staging directory %s.",
+                            staging_directory.name,
+                            exc_info=True,
+                        )
 
         raise UnsupportedOperationError(
             "No configured fetcher supports this storage locator. "

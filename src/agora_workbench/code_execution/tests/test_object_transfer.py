@@ -226,7 +226,7 @@ async def test_streaming_receiver_peak_memory_is_independent_of_payload_size(tmp
     tracemalloc.start()
     try:
         result = await receive_streaming_transfer(
-            _body_chunks(body),
+            _body_chunks(body, len(body)),
             destination,
             expected_size=len(data),
             expected_sha256=hashlib.sha256(data).hexdigest(),
@@ -256,7 +256,7 @@ async def test_legacy_receiver_peak_memory_is_independent_of_payload_size(tmp_pa
     tracemalloc.start()
     try:
         envelope = await receive_legacy_streaming_transfer(
-            _body_chunks(body),
+            _body_chunks(body, len(body)),
             destination,
             options=TransferOptions(max_bytes=len(data), chunk_size=64 * 1024),
             context=RequestContext(),
