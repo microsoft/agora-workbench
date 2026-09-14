@@ -98,6 +98,32 @@ class TestValidateArtifactName:
             _validate_artifact_name("subdir\\..\\..\\escape.txt")
 
 
+def test_object_transfer_error_preserves_colliding_sanitized_keys_without_disclosure():
+    safe_key = "https://example.com/object"
+    first_unsafe_key = "https" + "://user:first@example.com/object?sig=one"
+    second_unsafe_key = "https" + "://user:second@example.com/object?sig=two"
+    error = ObjectTransferError(
+        server_name="peer",
+        status_code=400,
+        response_body={
+            first_unsafe_key: "first",
+            safe_key: "safe",
+            second_unsafe_key: "second",
+            "error": "failed",
+        },
+    )
+
+    payload = error.to_payload()
+
+    assert payload[safe_key] == "safe"
+    assert payload[f"{safe_key} [2]"] == "first"
+    assert payload[f"{safe_key} [3]"] == "second"
+    serialized = json.dumps(payload)
+    assert "user:first" not in serialized
+    assert "user:second" not in serialized
+    assert "sig=" not in serialized
+
+
 # ---------------------------------------------------------------------------
 # destination_name property
 # ---------------------------------------------------------------------------

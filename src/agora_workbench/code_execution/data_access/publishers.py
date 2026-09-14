@@ -99,10 +99,20 @@ def _sanitize_peer_payload(value: Any) -> Any:
     if isinstance(value, str):
         return safe_transfer_resource(value)
     if isinstance(value, dict):
-        return {
-            safe_transfer_resource(key) if isinstance(key, str) else key: _sanitize_peer_payload(item)
-            for key, item in value.items()
-        }
+        reserved_keys = {key for key in value if not isinstance(key, str) or safe_transfer_resource(key) == key}
+        sanitized: dict[Any, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key in reserved_keys:
+                safe_key = key
+            else:
+                base_key = safe_transfer_resource(key) or "redacted-key"
+                safe_key = base_key
+                suffix = 2
+                while safe_key in reserved_keys or safe_key in sanitized:
+                    safe_key = f"{base_key} [{suffix}]"
+                    suffix += 1
+            sanitized[safe_key] = _sanitize_peer_payload(item)
+        return sanitized
     if isinstance(value, list):
         return [_sanitize_peer_payload(item) for item in value]
     if isinstance(value, tuple):

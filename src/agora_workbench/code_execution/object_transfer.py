@@ -21,18 +21,17 @@ import logging
 import math
 import os
 from collections.abc import AsyncIterable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import dill
 
-from agora_workbench.data_lake import RequestContext
+from agora_workbench.data_lake import RequestContext, TransferLimitError
 from agora_workbench.data_lake.transfer import (
     TransferOptions,
     TransferResult,
-    _run_blocking_io,
-    check_transfer_size,
     stream_chunks_to_file,
 )
 
@@ -99,6 +98,11 @@ async def receive_streaming_transfer(
     context: RequestContext,
 ) -> TransferResult:
     """Incrementally decode a versioned JSON/base64 request into a bounded file."""
+    if options.expected_sha256 not in (None, expected_sha256):
+        raise ValueError("Transfer options checksum does not match the declared checksum.")
+    transfer_options = (
+        options if options.expected_sha256 == expected_sha256 else replace(options, expected_sha256=expected_sha256)
+    )
     effective_max_bytes = options.effective_max_bytes
     max_encoded_bytes = math.ceil(effective_max_bytes * 4 / 3) + 4 if effective_max_bytes is not None else None
 
@@ -108,15 +112,16 @@ async def receive_streaming_transfer(
         reading_data = False
         data_complete = False
         total_encoded = 0
+        total_decoded = 0
 
         async for chunk in chunks:
             total_encoded += len(chunk)
-            if max_encoded_bytes is not None:
-                check_transfer_size(
-                    max(0, total_encoded - _MAX_STREAMING_ENVELOPE_BYTES),
-                    TransferOptions(max_bytes=max_encoded_bytes),
+            encoded_payload_bytes = max(0, total_encoded - _MAX_STREAMING_ENVELOPE_BYTES)
+            if max_encoded_bytes is not None and encoded_payload_bytes > max_encoded_bytes:
+                raise TransferLimitError(
+                    f"Transfer exceeds the configured {max_encoded_bytes}-byte encoded limit.",
+                    resource_id="peer object transfer",
                     operation="receive",
-                    resource="peer object transfer",
                 )
             if data_complete:
                 continue
@@ -144,35 +149,25 @@ async def receive_streaming_transfer(
                 except binascii.Error as exc:
                     raise ValueError("Invalid base64 data.") from exc
                 if decoded:
+                    total_decoded += len(decoded)
+                    if total_decoded > expected_size:
+                        raise ValueError("Decoded payload exceeded the declared size.")
                     yield decoded
             remainder = encoded[complete_length:]
 
         if not reading_data or not data_complete or remainder:
             raise ValueError("Invalid streaming object transfer envelope.")
+        if total_decoded != expected_size:
+            raise ValueError("Decoded payload size did not match the declared size.")
 
-    result = await stream_chunks_to_file(
+    return await stream_chunks_to_file(
         decoded_chunks(),
         destination,
-        options=options,
+        options=transfer_options,
         context=context,
         operation="receive",
         resource="peer object transfer",
     )
-    if result.bytes_transferred != expected_size:
-        await _run_blocking_io(
-            lambda: destination.unlink(missing_ok=True),
-            operation="receive",
-            resource="peer object transfer",
-        )
-        raise ValueError("Decoded payload size did not match the declared size.")
-    if result.checksum_sha256 != expected_sha256:
-        await _run_blocking_io(
-            lambda: destination.unlink(missing_ok=True),
-            operation="receive",
-            resource="peer object transfer",
-        )
-        raise ValueError("Decoded payload checksum did not match the declared checksum.")
-    return result
 
 
 def _validate_target_url(url: str, trust_http: bool = False) -> None:
