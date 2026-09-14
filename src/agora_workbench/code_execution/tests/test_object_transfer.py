@@ -1,13 +1,40 @@
 """Tests for server-to-server object transfer functionality."""
 
+import asyncio
+import base64
 import dill
+import hashlib
 import json
 import pytest
+import tracemalloc
 
+from agora_workbench.data_lake import (
+    RequestContext,
+    TransferCancelledError,
+    TransferChecksumError,
+    TransferLimitError,
+    TransferOptions,
+    TransferTimeoutError,
+)
 from ..object_transfer import (
     ObjectSerializer,
+    STREAMING_TRANSFER_INFO_HEADER,
+    STREAMING_TRANSFER_VERSION,
+    STREAMING_TRANSFER_VERSION_HEADER,
+    decode_streaming_transfer_info,
+    encode_streaming_transfer_info,
+    receive_streaming_transfer,
 )
 from ..sessions.objects import ObjectStore
+
+
+def _streaming_envelope(data: bytes) -> bytes:
+    return b'{"variable_name":"value","data":"' + base64.b64encode(data) + b'","metadata":{}}'
+
+
+async def _body_chunks(body: bytes, chunk_size: int = 64 * 1024):
+    for offset in range(0, len(body), chunk_size):
+        yield body[offset : offset + chunk_size]
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +161,183 @@ class TestObjectStoreGetMetadata:
         assert meta == {}
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_peak_memory_is_independent_of_payload_size(tmp_path):
+    data = b"x" * (16 * 1024 * 1024)
+    body = _streaming_envelope(data)
+    destination = tmp_path / "received.pkl"
+
+    tracemalloc.start()
+    try:
+        result = await receive_streaming_transfer(
+            _body_chunks(body),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(
+                max_bytes=len(data),
+                chunk_size=64 * 1024,
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+            ),
+            context=RequestContext(),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result.bytes_transferred == len(data)
+    assert destination.stat().st_size == len(data)
+    assert peak < 2 * 1024 * 1024
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_malformed_base64_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    body = b'{"variable_name":"value","data":"AAAA!!!!","metadata":{}}'
+
+    with pytest.raises(ValueError, match="base64"):
+        await receive_streaming_transfer(
+            _body_chunks(body, 3),
+            destination,
+            expected_size=6,
+            expected_sha256="0" * 64,
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_enforces_quota_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"oversized"
+
+    with pytest.raises(TransferLimitError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 5),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(max_bytes=None, quota_bytes=3),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_checksum_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"content"
+
+    with pytest.raises(TransferChecksumError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 4),
+            destination,
+            expected_size=len(data),
+            expected_sha256="0" * 64,
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_cancellation_and_timeout_clean_partials(tmp_path):
+    cancellation = asyncio.Event()
+    cancellation.set()
+    cancelled_destination = tmp_path / "cancelled.pkl"
+
+    with pytest.raises(TransferCancelledError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(b"content")),
+            cancelled_destination,
+            expected_size=7,
+            expected_sha256=hashlib.sha256(b"content").hexdigest(),
+            options=TransferOptions(cancellation_event=cancellation),
+            context=RequestContext(),
+        )
+
+    async def stalled_body():
+        yield b'{"variable_name":"value","data":"'
+        await asyncio.Event().wait()
+
+    timeout_destination = tmp_path / "timeout.pkl"
+    with pytest.raises(TransferTimeoutError):
+        await receive_streaming_transfer(
+            stalled_body(),
+            timeout_destination,
+            expected_size=7,
+            expected_sha256=hashlib.sha256(b"content").hexdigest(),
+            options=TransferOptions(timeout_seconds=0.05),
+            context=RequestContext(),
+        )
+
+    assert not cancelled_destination.exists()
+    assert not timeout_destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+def test_streaming_receive_endpoint_uses_versioned_incremental_path(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.session_manager.execute_code_for_session = AsyncMock(return_value=("", "", True, [], []))
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+
+    data = dill.dumps({"value": 1})
+    checksum = hashlib.sha256(data).hexdigest()
+    info = encode_streaming_transfer_info(
+        variable_name="received",
+        session_id="session-1",
+        metadata={"source_server": "source", "transfer_id": "transfer-1"},
+        size_bytes=len(data),
+        checksum_sha256=checksum,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/object-transfer/receive",
+            content=_streaming_envelope(data).replace(b'"value"', b'"received"', 1),
+            headers={
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: info,
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["size_bytes"] == len(data)
+    server.session_manager.execute_code_for_session.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # ServerPublisher tests
 # ---------------------------------------------------------------------------
@@ -201,6 +405,11 @@ class TestServerPublisher:
             assert payload["metadata"]["transfer_id"] == "abc123"
 
             headers = call_args[1]["headers"]
+            assert headers[STREAMING_TRANSFER_VERSION_HEADER] == STREAMING_TRANSFER_VERSION
+            transfer_info = decode_streaming_transfer_info(headers[STREAMING_TRANSFER_INFO_HEADER])
+            assert transfer_info["variable_name"] == "target_var"
+            assert transfer_info["size_bytes"] == len(serialized)
+            assert transfer_info["checksum_sha256"] == hashlib.sha256(serialized).hexdigest()
             assert headers["Authorization"] == "Bearer test-token"
 
             assert "Injected 'target_var' into gis kernel" in result

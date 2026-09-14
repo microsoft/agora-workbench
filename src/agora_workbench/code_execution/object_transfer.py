@@ -14,12 +14,27 @@ Typical flow (agent-triggered):
 """
 
 import base64
+import binascii
+
+import json
 import logging
+import math
 import os
+from collections.abc import AsyncIterable
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import dill
+
+from agora_workbench.data_lake import RequestContext
+from agora_workbench.data_lake.transfer import (
+    TransferOptions,
+    TransferResult,
+    _run_blocking_io,
+    check_transfer_size,
+    stream_chunks_to_file,
+)
 
 from . import agent_guidance
 
@@ -28,9 +43,136 @@ LOGGER = logging.getLogger(__name__)
 # Maximum serialized object size (256 MB).  Objects exceeding this limit
 # are rejected to prevent accidental memory exhaustion.
 MAX_TRANSFER_SIZE_BYTES = 256 * 1024 * 1024
+STREAMING_TRANSFER_VERSION = "2"
+STREAMING_TRANSFER_VERSION_HEADER = "X-Agora-Object-Transfer-Version"
+STREAMING_TRANSFER_INFO_HEADER = "X-Agora-Object-Transfer-Info"
+_STREAMING_DATA_MARKER = b',"data":"'
+_MAX_STREAMING_ENVELOPE_BYTES = 64 * 1024
 
 # Loopback hostnames that are always permitted for local development / testing.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def encode_streaming_transfer_info(
+    *,
+    variable_name: str,
+    session_id: str,
+    metadata: dict[str, Any],
+    size_bytes: int,
+    checksum_sha256: str,
+) -> str:
+    """Encode bounded metadata for the versioned streaming receive path."""
+    payload = json.dumps(
+        {
+            "variable_name": variable_name,
+            "session_id": session_id,
+            "metadata": metadata,
+            "size_bytes": size_bytes,
+            "checksum_sha256": checksum_sha256,
+        },
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode()
+
+
+def decode_streaming_transfer_info(value: str) -> dict[str, Any]:
+    """Decode and validate the versioned streaming transfer header."""
+    if not value or len(value) > _MAX_STREAMING_ENVELOPE_BYTES:
+        raise ValueError("Invalid streaming transfer metadata.")
+    try:
+        decoded = base64.b64decode(value, altchars=b"-_", validate=True)
+        payload = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid streaming transfer metadata.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid streaming transfer metadata.")
+    return payload
+
+
+async def receive_streaming_transfer(
+    chunks: AsyncIterable[bytes],
+    destination: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    options: TransferOptions,
+    context: RequestContext,
+) -> TransferResult:
+    """Incrementally decode a versioned JSON/base64 request into a bounded file."""
+    effective_max_bytes = options.effective_max_bytes
+    max_encoded_bytes = math.ceil(effective_max_bytes * 4 / 3) + 4 if effective_max_bytes is not None else None
+
+    async def decoded_chunks():
+        prefix = bytearray()
+        remainder = b""
+        reading_data = False
+        data_complete = False
+        total_encoded = 0
+
+        async for chunk in chunks:
+            total_encoded += len(chunk)
+            if max_encoded_bytes is not None:
+                check_transfer_size(
+                    max(0, total_encoded - _MAX_STREAMING_ENVELOPE_BYTES),
+                    TransferOptions(max_bytes=max_encoded_bytes),
+                    operation="receive",
+                    resource="peer object transfer",
+                )
+            if data_complete:
+                continue
+            data = chunk
+            if not reading_data:
+                prefix.extend(data)
+                marker_index = prefix.find(_STREAMING_DATA_MARKER)
+                if marker_index < 0:
+                    if len(prefix) > _MAX_STREAMING_ENVELOPE_BYTES:
+                        raise ValueError("Invalid streaming object transfer envelope.")
+                    continue
+                data = bytes(prefix[marker_index + len(_STREAMING_DATA_MARKER) :])
+                prefix.clear()
+                reading_data = True
+
+            closing_quote = data.find(b'"')
+            encoded = data if closing_quote < 0 else data[:closing_quote]
+            if closing_quote >= 0:
+                data_complete = True
+            encoded = remainder + encoded
+            complete_length = len(encoded) if data_complete else len(encoded) - (len(encoded) % 4)
+            if complete_length:
+                try:
+                    decoded = base64.b64decode(encoded[:complete_length], validate=True)
+                except binascii.Error as exc:
+                    raise ValueError("Invalid base64 data.") from exc
+                if decoded:
+                    yield decoded
+            remainder = encoded[complete_length:]
+
+        if not reading_data or not data_complete or remainder:
+            raise ValueError("Invalid streaming object transfer envelope.")
+
+    result = await stream_chunks_to_file(
+        decoded_chunks(),
+        destination,
+        options=options,
+        context=context,
+        operation="receive",
+        resource="peer object transfer",
+    )
+    if result.bytes_transferred != expected_size:
+        await _run_blocking_io(
+            lambda: destination.unlink(missing_ok=True),
+            operation="receive",
+            resource="peer object transfer",
+        )
+        raise ValueError("Decoded payload size did not match the declared size.")
+    if result.checksum_sha256 != expected_sha256:
+        await _run_blocking_io(
+            lambda: destination.unlink(missing_ok=True),
+            operation="receive",
+            resource="peer object transfer",
+        )
+        raise ValueError("Decoded payload checksum did not match the declared checksum.")
+    return result
 
 
 def _validate_target_url(url: str, trust_http: bool = False) -> None:

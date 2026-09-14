@@ -132,6 +132,9 @@ catalog layer owns cleanup of a failed conditional create.
 The peer `ServerPublisher.publish()` copies the serialized object into an
 immutable bounded snapshot, validates size/quota/checksum/cancellation, and
 streams its base64 JSON body with backpressure under the remaining timeout.
+It marks that backward-compatible JSON body as protocol version 2 so updated
+receivers incrementally decode it directly to a bounded temporary file; older
+receivers can continue parsing the same JSON envelope through the legacy path.
 The peer protocol does not expose a durable storage locator or conditional
 creation result, so `publish_with_result()` still raises
 `UnsupportedOperationError` rather than claiming that detailed capability.

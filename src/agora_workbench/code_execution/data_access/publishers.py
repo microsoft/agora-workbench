@@ -1375,7 +1375,14 @@ class ServerPublisher(AssetPublisher):
 
         import httpx
 
-        from ..object_transfer import MAX_TRANSFER_SIZE_BYTES, _validate_target_url
+        from ..object_transfer import (
+            MAX_TRANSFER_SIZE_BYTES,
+            STREAMING_TRANSFER_INFO_HEADER,
+            STREAMING_TRANSFER_VERSION,
+            STREAMING_TRANSFER_VERSION_HEADER,
+            _validate_target_url,
+            encode_streaming_transfer_info,
+        )
 
         options = options or TransferOptions()
         context = context or RequestContext()
@@ -1429,6 +1436,13 @@ class ServerPublisher(AssetPublisher):
             "source_server": getattr(self, "_source_server", "unknown"),
             "transfer_id": getattr(self, "_transfer_id", ""),
         }
+        transfer_info = encode_streaming_transfer_info(
+            variable_name=name,
+            session_id=session_id,
+            metadata=metadata,
+            size_bytes=snapshot_result.bytes_transferred,
+            checksum_sha256=snapshot_result.checksum_sha256,
+        )
         prefix = ('{"variable_name":' + json.dumps(name) + ',"data":"').encode()
         suffix = (
             '","metadata":'
@@ -1491,6 +1505,8 @@ class ServerPublisher(AssetPublisher):
                         headers={
                             "Authorization": f"Bearer {user_token}",
                             "Content-Type": "application/json",
+                            STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                            STREAMING_TRANSFER_INFO_HEADER: transfer_info,
                         },
                     ),
                     request_options,

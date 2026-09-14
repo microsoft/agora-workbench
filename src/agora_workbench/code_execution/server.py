@@ -2767,58 +2767,116 @@ else:
             import os
             import tempfile
 
-            from .object_transfer import ObjectSerializer, MAX_TRANSFER_SIZE_BYTES
+            from starlette.requests import ClientDisconnect
 
-            try:
-                body = await request.json()
-            except Exception:
-                return JSONResponse({"success": False, "error": "Invalid JSON body"}, status_code=400)
+            from agora_workbench.data_lake import (
+                RequestContext,
+                TransferCancelledError,
+                TransferChecksumError,
+                TransferLimitError,
+                TransferTimeoutError,
+            )
+            from agora_workbench.data_lake.transfer import TransferOptions
 
-            variable_name = body.get("variable_name")
-            data_b64 = body.get("data")
-            session_id = body.get("session_id")
-            transfer_metadata = body.get("metadata") or {}
+            from .object_transfer import (
+                MAX_TRANSFER_SIZE_BYTES,
+                STREAMING_TRANSFER_INFO_HEADER,
+                STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_VERSION_HEADER,
+                ObjectSerializer,
+                decode_streaming_transfer_info,
+                receive_streaming_transfer,
+            )
 
-            if not isinstance(variable_name, str) or not isinstance(data_b64, str):
-                return JSONResponse(
-                    {"success": False, "error": "'variable_name' and 'data' must be strings"},
-                    status_code=400,
-                )
+            streaming_transfer = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER) == STREAMING_TRANSFER_VERSION
+            serialized_data: bytes | None = None
+            expected_size: int | None = None
+            expected_sha256: str | None = None
 
-            if not variable_name or not data_b64:
-                return JSONResponse(
-                    {"success": False, "error": "Missing required fields: 'variable_name' and 'data'"},
-                    status_code=400,
-                )
+            if streaming_transfer:
+                try:
+                    transfer_info = decode_streaming_transfer_info(
+                        request.headers.get(STREAMING_TRANSFER_INFO_HEADER, "")
+                    )
+                except ValueError as exc:
+                    return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
+                variable_name = transfer_info.get("variable_name")
+                session_id = transfer_info.get("session_id")
+                transfer_metadata = transfer_info.get("metadata") or {}
+                expected_size = transfer_info.get("size_bytes")
+                expected_sha256 = transfer_info.get("checksum_sha256")
+                if (
+                    not isinstance(variable_name, str)
+                    or not isinstance(session_id, str)
+                    or not isinstance(transfer_metadata, dict)
+                    or isinstance(expected_size, bool)
+                    or not isinstance(expected_size, int)
+                    or expected_size < 0
+                    or expected_size > MAX_TRANSFER_SIZE_BYTES
+                    or not isinstance(expected_sha256, str)
+                ):
+                    return JSONResponse(
+                        {"success": False, "error": "Invalid streaming transfer metadata."},
+                        status_code=400,
+                    )
+                try:
+                    TransferOptions(expected_sha256=expected_sha256)
+                except ValueError:
+                    return JSONResponse(
+                        {"success": False, "error": "Invalid streaming transfer metadata."},
+                        status_code=400,
+                    )
+            else:
+                try:
+                    body = await request.json()
+                except Exception:
+                    return JSONResponse({"success": False, "error": "Invalid JSON body"}, status_code=400)
+
+                variable_name = body.get("variable_name")
+                data_b64 = body.get("data")
+                session_id = body.get("session_id")
+                transfer_metadata = body.get("metadata") or {}
+
+                if not isinstance(variable_name, str) or not isinstance(data_b64, str):
+                    return JSONResponse(
+                        {"success": False, "error": "'variable_name' and 'data' must be strings"},
+                        status_code=400,
+                    )
+
+                if not variable_name or not data_b64:
+                    return JSONResponse(
+                        {"success": False, "error": "Missing required fields: 'variable_name' and 'data'"},
+                        status_code=400,
+                    )
+
+                # Enforce size limit on the base64 payload before decoding.
+                # Base64 encodes 3 bytes as 4 chars, so ceil(n * 4/3) + padding.
+                max_b64_len = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4
+                if len(data_b64) > max_b64_len:
+                    return JSONResponse(
+                        {"success": False, "error": "Payload exceeds maximum transfer size"},
+                        status_code=413,
+                    )
+
+                try:
+                    serialized_data = ObjectSerializer.from_base64(data_b64)
+                except Exception as e:
+                    return JSONResponse(
+                        {"success": False, "error": f"Invalid base64 data: {e}"},
+                        status_code=400,
+                    )
+
+                if len(serialized_data) > MAX_TRANSFER_SIZE_BYTES:
+                    return JSONResponse(
+                        {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
+                        status_code=413,
+                    )
 
             # Validate variable_name is a safe Python identifier
             if not variable_name.isidentifier() or keyword.iskeyword(variable_name):
                 return JSONResponse(
                     {"success": False, "error": f"Invalid Python variable name: '{variable_name}'"},
                     status_code=400,
-                )
-
-            # Enforce size limit on the base64 payload before decoding.
-            # Base64 encodes 3 bytes as 4 chars, so ceil(n * 4/3) + padding.
-            max_b64_len = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4
-            if len(data_b64) > max_b64_len:
-                return JSONResponse(
-                    {"success": False, "error": "Payload exceeds maximum transfer size"},
-                    status_code=413,
-                )
-
-            try:
-                serialized_data = ObjectSerializer.from_base64(data_b64)
-            except Exception as e:
-                return JSONResponse(
-                    {"success": False, "error": f"Invalid base64 data: {e}"},
-                    status_code=400,
-                )
-
-            if len(serialized_data) > MAX_TRANSFER_SIZE_BYTES:
-                return JSONResponse(
-                    {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
-                    status_code=413,
                 )
 
             # Get the authenticated user identity from context (set by AuthMiddleware)
@@ -2876,9 +2934,64 @@ else:
             fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
             os.close(fd)
             try:
-                # Write serialized bytes to temp file
-                with open(temp_path, "wb") as f:
-                    f.write(serialized_data)
+                if streaming_transfer:
+                    assert expected_size is not None
+                    assert expected_sha256 is not None
+                    try:
+                        transfer_result = await receive_streaming_transfer(
+                            request.stream(),
+                            Path(temp_path),
+                            expected_size=expected_size,
+                            expected_sha256=expected_sha256,
+                            options=TransferOptions(
+                                max_bytes=MAX_TRANSFER_SIZE_BYTES,
+                                quota_bytes=MAX_TRANSFER_SIZE_BYTES,
+                                expected_sha256=expected_sha256,
+                            ),
+                            context=RequestContext(
+                                request_id=transfer_metadata.get("transfer_id"),
+                                caller_id=caller_identity,
+                                attributes={"session_id": session.session_id},
+                            ),
+                        )
+                    except TransferLimitError:
+                        return JSONResponse(
+                            {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
+                            status_code=413,
+                        )
+                    except TransferChecksumError:
+                        return JSONResponse(
+                            {"success": False, "error": "Decoded payload checksum did not match"},
+                            status_code=400,
+                        )
+                    except TransferTimeoutError:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer receive timed out"},
+                            status_code=408,
+                        )
+                    except TransferCancelledError:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer receive was cancelled"},
+                            status_code=499,
+                        )
+                    except ClientDisconnect:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer client disconnected"},
+                            status_code=499,
+                        )
+                    except ValueError as exc:
+                        return JSONResponse(
+                            {"success": False, "error": str(exc)},
+                            status_code=400,
+                        )
+                    received_size = transfer_result.bytes_transferred
+                else:
+                    # Legacy v1 compatibility path. Version 2 senders use the
+                    # bounded streaming branch above.
+                    assert serialized_data is not None
+                    with open(temp_path, "wb") as f:
+                        f.write(serialized_data)
+                    received_size = len(serialized_data)
 
                 # Deserialize and assign in the kernel
                 deserialize_code = (
@@ -2957,7 +3070,7 @@ else:
                         "success": True,
                         "variable_name": variable_name,
                         "session_id": session.session_id,
-                        "size_bytes": len(serialized_data),
+                        "size_bytes": received_size,
                     }
                 )
             except Exception as e:
