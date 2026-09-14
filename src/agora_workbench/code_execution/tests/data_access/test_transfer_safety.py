@@ -410,6 +410,23 @@ async def test_local_publisher_timeout_drains_slow_fsync_and_cleans_partial(tmp_
     assert _part_files(output_root / "session") == []
 
 
+async def test_local_publisher_temp_collision_preserves_unowned_file(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"new content")
+    output_root = tmp_path / "outputs"
+    session_dir = output_root / "session"
+    session_dir.mkdir(parents=True)
+    temporary = session_dir / ".result.bin.collision.part"
+    temporary.write_bytes(b"other process")
+    monkeypatch.setattr(publishers_module.secrets, "token_hex", lambda _size: "collision")
+
+    with pytest.raises(FileExistsError):
+        await LocalFilePublisher(output_root).publish(source, "result.bin", "session")
+
+    assert temporary.read_bytes() == b"other process"
+    assert not (session_dir / "result.bin").exists()
+
+
 async def test_non_posix_unrestricted_local_transfer_fallbacks_remain_functional(tmp_path, monkeypatch):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
@@ -1228,6 +1245,27 @@ async def test_conditional_stream_succeeds_when_post_link_cleanup_fails(tmp_path
     assert result.created is True
     assert destination.read_bytes() == b"content"
     assert "Could not remove committed transfer temporary file" in caplog.text
+
+
+async def test_stream_temp_collision_preserves_unowned_file(tmp_path, monkeypatch):
+    destination = tmp_path / "destination.bin"
+    temporary = tmp_path / ".destination.bin.collision.part"
+    temporary.write_bytes(b"other process")
+    monkeypatch.setattr(transfer_module.secrets, "token_hex", lambda _size: "collision")
+
+    async def chunks():
+        yield b"new content"
+
+    with pytest.raises(FileExistsError):
+        await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert temporary.read_bytes() == b"other process"
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize(
@@ -2077,6 +2115,91 @@ async def test_manager_legacy_fetcher_enforces_transfer_options_before_commit(tm
                 transfer_options=TransferOptions(cancellation_event=cancellation),
             )
         assert not (tmp_path / "cancelled.bin").exists()
+        assert list(tmp_path.glob(".*.legacy-part")) == []
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_legacy_fetcher_timeout_drains_before_temp_cleanup(tmp_path):
+    provider_started = asyncio.Event()
+    provider_drained = asyncio.Event()
+    temp_existed_while_draining = False
+
+    class BlockingLegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b""
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            nonlocal temp_existed_while_draining
+            Path(dest_path).write_bytes(b"partial")
+            provider_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                temp_existed_while_draining = Path(dest_path).exists()
+                provider_drained.set()
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    manager = DataLakeDataManager(extra_fetchers=[BlockingLegacyFetcher()])
+    destination = tmp_path / "destination.bin"
+    try:
+        with pytest.raises(TransferTimeoutError):
+            await manager._fetch_asset_to_file(
+                "legacy://blocked",
+                destination,
+                transfer_options=TransferOptions(timeout_seconds=0.01),
+            )
+        assert provider_started.is_set()
+        assert provider_drained.is_set()
+        assert temp_existed_while_draining
+        assert not destination.exists()
+        assert list(tmp_path.glob(".*.legacy-part")) == []
+    finally:
+        await manager.aclose()
+
+
+async def test_manager_legacy_fetcher_cancellation_drains_before_temp_cleanup(tmp_path):
+    provider_started = asyncio.Event()
+    provider_drained = asyncio.Event()
+    temp_existed_while_draining = False
+    cancellation = asyncio.Event()
+
+    class BlockingLegacyFetcher(AssetFetcher):
+        async def fetch(self, qualified_name: str):
+            return b""
+
+        async def fetch_to_file(self, qualified_name: str, dest_path, **kwargs):
+            nonlocal temp_existed_while_draining
+            Path(dest_path).write_bytes(b"partial")
+            provider_started.set()
+            try:
+                await asyncio.Future()
+            finally:
+                temp_existed_while_draining = Path(dest_path).exists()
+                provider_drained.set()
+
+        def can_handle(self, qualified_name: str) -> bool:
+            return qualified_name.startswith("legacy://")
+
+    manager = DataLakeDataManager(extra_fetchers=[BlockingLegacyFetcher()])
+    destination = tmp_path / "destination.bin"
+    transfer = asyncio.create_task(
+        manager._fetch_asset_to_file(
+            "legacy://blocked",
+            destination,
+            transfer_options=TransferOptions(cancellation_event=cancellation),
+        )
+    )
+    try:
+        await provider_started.wait()
+        cancellation.set()
+        with pytest.raises(TransferCancelledError):
+            await transfer
+        assert provider_drained.is_set()
+        assert temp_existed_while_draining
+        assert not destination.exists()
         assert list(tmp_path.glob(".*.legacy-part")) == []
     finally:
         await manager.aclose()

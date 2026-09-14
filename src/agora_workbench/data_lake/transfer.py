@@ -369,6 +369,7 @@ async def stream_chunks_to_file(
     portable_parent: Path | None = None
     portable_destination: Path | None = None
     portable_parent_identity: tuple[int, int] | None = None
+    temporary_created = False
     committed = False
     display_resource = safe_transfer_resource(resource)
     started = time.monotonic()
@@ -380,7 +381,7 @@ async def stream_chunks_to_file(
     )
 
     async def copy() -> None:
-        nonlocal bytes_transferred
+        nonlocal bytes_transferred, temporary_created
         if parent_fd is not None:
             secured_parent_fd = parent_fd
 
@@ -397,6 +398,7 @@ async def stream_chunks_to_file(
             output_file = (portable_parent / temporary_name).open("xb", buffering=0)
         else:
             raise RuntimeError("Transfer destination parent was not initialized.")
+        temporary_created = True
         with output_file:
             iterator = chunks.__aiter__()
             try:
@@ -446,6 +448,8 @@ async def stream_chunks_to_file(
             )
 
     def cleanup_temporary() -> None:
+        if not temporary_created:
+            return
         try:
             if parent_fd is not None:
                 os.unlink(temporary_name, dir_fd=parent_fd)

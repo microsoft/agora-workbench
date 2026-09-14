@@ -15,12 +15,14 @@ import secrets
 import shutil
 import stat
 import tempfile
+import time
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from agora_workbench.data_lake.errors import UnsupportedOperationError, UnsafePathError
+from agora_workbench.data_lake.errors import TransferTimeoutError, UnsupportedOperationError, UnsafePathError
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
@@ -421,30 +423,45 @@ class DataLakeDataManager:
                     return result.bytes_transferred
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
                 temporary_path = dest_path.with_name(f".{dest_path.name}.{secrets.token_hex(8)}.legacy-part")
+                options = transfer_options or self._transfer_options
+                started = time.monotonic()
                 try:
-                    await fetcher.fetch_to_file(qualified_name, temporary_path)
-                    options = transfer_options or self._transfer_options
-                    check_transfer_cancelled(options, operation="download", resource=qualified_name)
+                    await await_transfer(
+                        fetcher.fetch_to_file(qualified_name, temporary_path),
+                        options,
+                        operation="download",
+                        resource=qualified_name,
+                    )
+                    elapsed = time.monotonic() - started
+                    remaining_timeout = None if options.timeout_seconds is None else options.timeout_seconds - elapsed
+                    if remaining_timeout is not None and remaining_timeout <= 0:
+                        raise TransferTimeoutError(
+                            f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+                            resource_id=safe_artifact_reference(qualified_name),
+                            operation="download",
+                        )
+                    validation_options = replace(options, timeout_seconds=remaining_timeout)
+                    check_transfer_cancelled(validation_options, operation="download", resource=qualified_name)
                     file_stat = temporary_path.stat(follow_symlinks=False)
                     if not stat.S_ISREG(file_stat.st_mode):
                         raise UnsafePathError("Legacy fetcher output must be a regular file.", operation="download")
                     check_transfer_size(
                         file_stat.st_size,
-                        options,
+                        validation_options,
                         operation="download",
                         resource=qualified_name,
                     )
-                    if options.expected_sha256 is not None:
+                    if validation_options.expected_sha256 is not None:
                         with temporary_path.open("rb", buffering=0) as source:
                             await hash_file(
                                 source,
-                                options=options,
+                                options=validation_options,
                                 context=context or RequestContext(),
                                 operation="download",
                                 resource=qualified_name,
                             )
-                    check_transfer_cancelled(options, operation="download", resource=qualified_name)
-                    if options.create_exclusive:
+                    check_transfer_cancelled(validation_options, operation="download", resource=qualified_name)
+                    if validation_options.create_exclusive:
                         os.link(temporary_path, dest_path)
                     else:
                         os.replace(temporary_path, dest_path)

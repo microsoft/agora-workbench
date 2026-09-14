@@ -98,11 +98,9 @@ async def receive_streaming_transfer(
     context: RequestContext,
 ) -> TransferResult:
     """Incrementally decode a versioned JSON/base64 request into a bounded file."""
-    if options.expected_sha256 not in (None, expected_sha256):
+    transfer_options = replace(options, expected_sha256=expected_sha256)
+    if options.expected_sha256 not in (None, transfer_options.expected_sha256):
         raise ValueError("Transfer options checksum does not match the declared checksum.")
-    transfer_options = (
-        options if options.expected_sha256 == expected_sha256 else replace(options, expected_sha256=expected_sha256)
-    )
     effective_max_bytes = options.effective_max_bytes
     max_encoded_bytes = math.ceil(effective_max_bytes * 4 / 3) + 4 if effective_max_bytes is not None else None
 

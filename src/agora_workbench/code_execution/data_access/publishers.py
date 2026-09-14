@@ -1177,6 +1177,7 @@ class LocalFilePublisher(AssetPublisher):
         parent_fd = root_fd
         temporary_name = f".{relative.name}.{secrets.token_hex(8)}.part"
         output_fd: int | None = None
+        temporary_created = False
         committed = False
         try:
             for part in relative.parts[:-1]:
@@ -1211,6 +1212,7 @@ class LocalFilePublisher(AssetPublisher):
                 0o640,
                 dir_fd=parent_fd,
             )
+            temporary_created = True
             result = await _copy_local_descriptors(local_path, output_fd, options, context)
             os.close(output_fd)
             output_fd = None
@@ -1252,7 +1254,7 @@ class LocalFilePublisher(AssetPublisher):
         finally:
             if output_fd is not None:
                 os.close(output_fd)
-            if not committed:
+            if temporary_created and not committed:
                 try:
                     os.unlink(temporary_name, dir_fd=parent_fd)
                 except FileNotFoundError:

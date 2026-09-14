@@ -213,6 +213,43 @@ async def test_streaming_receiver_rejects_malformed_base64_and_cleans_partial(tm
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_streaming_receiver_accepts_uppercase_declared_checksum(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"content"
+    checksum = hashlib.sha256(data).hexdigest()
+
+    result = await receive_streaming_transfer(
+        _body_chunks(_streaming_envelope(data), 3),
+        destination,
+        expected_size=len(data),
+        expected_sha256=checksum.upper(),
+        options=TransferOptions(expected_sha256=checksum),
+        context=RequestContext(),
+    )
+
+    assert result.checksum_sha256 == checksum
+    assert destination.read_bytes() == data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_mismatched_normalized_checksum(tmp_path):
+    data = b"content"
+    checksum = hashlib.sha256(data).hexdigest()
+
+    with pytest.raises(ValueError, match="does not match"):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data)),
+            tmp_path / "received.pkl",
+            expected_size=len(data),
+            expected_sha256=checksum.upper(),
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_streaming_receiver_enforces_quota_and_cleans_partial(tmp_path):
     destination = tmp_path / "received.pkl"
     data = b"oversized"
