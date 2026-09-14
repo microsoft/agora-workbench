@@ -154,9 +154,9 @@ class TestAtomicClaim:
         assert replacement_close is old_shutdown
 
         gate.set()
-        await old_shutdown
+        _ = await old_shutdown
         with pytest.raises(ValueError, match="closed before its kernel could start"):
-            await replacement_start
+            _ = await replacement_start
 
         assert session_id not in manager._kernels
         assert manager.storage.retrieve(session_id) is None

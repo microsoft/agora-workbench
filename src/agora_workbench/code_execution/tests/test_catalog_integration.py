@@ -344,7 +344,7 @@ async def test_server_shutdown_drains_each_cancelled_resource_once(tmp_path, can
     gate.set()
 
     with pytest.raises(asyncio.CancelledError):
-        await shutdown
+        _ = await shutdown
 
     assert all(resource.closed for resource in (*tool_backends, *publishers))
     assert activity.stopped
@@ -995,7 +995,7 @@ async def test_closing_binding_rejects_new_request_snapshots():
         binding.refresh_context(SessionContext("session", "user", "new-token"))
 
     snapshot.close()
-    await closing
+    _ = await closing
 
 
 @pytest.mark.parametrize("failure", [RuntimeError("load failed"), asyncio.CancelledError()])
@@ -1039,7 +1039,7 @@ async def test_cancelled_catalog_startup_awaits_owned_provider_close():
 
     close_gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await startup
+        _ = await startup
     assert provider.close_calls == 1
 
 
@@ -1464,7 +1464,7 @@ async def test_sync_session_close_tracks_async_only_extension_until_shutdown(tmp
     assert not drain.done()
 
     gate.set()
-    await drain
+    _ = await drain
 
 
 async def test_factory_rollback_async_extension_is_awaited_by_integration_shutdown(tmp_path):
@@ -1501,7 +1501,7 @@ async def test_factory_rollback_async_extension_is_awaited_by_integration_shutdo
     assert not shutdown.done()
 
     gate.set()
-    await shutdown
+    _ = await shutdown
 
 
 async def test_binding_factory_failure_closes_factory_authorizer():
@@ -1550,7 +1550,7 @@ async def test_cancelled_catalog_shutdown_waits_for_cleanup_before_provider():
     assert provider.close_calls == 0
     gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await first_shutdown
+        _ = await first_shutdown
     assert finished.is_set()
     assert provider.close_calls == 1
 
@@ -1579,13 +1579,13 @@ async def test_cancelled_catalog_drain_remains_tracked_for_next_drain():
     await asyncio.sleep(0)
     first_drain.cancel()
     with pytest.raises(asyncio.CancelledError):
-        await first_drain
+        _ = await first_drain
 
     second_drain = asyncio.create_task(integration._cleanup_tracker.drain())
     await asyncio.sleep(0)
     assert not second_drain.done()
     gate.set()
-    await second_drain
+    _ = await second_drain
 
 
 async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes():
