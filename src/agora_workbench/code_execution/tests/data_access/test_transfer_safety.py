@@ -1690,7 +1690,17 @@ async def test_blob_publisher_rejects_replaced_staging_root(tmp_path):
     await publisher.close()
 
 
-async def test_blob_publisher_rejects_metadata_keys_unsupported_by_azure(tmp_path):
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"agora-operation-id": "operation-1"},
+        {
+            "agora-operation-id": "operation-1",
+            "agora_operation_id": "different-operation",
+        },
+    ],
+)
+async def test_blob_publisher_rejects_metadata_keys_unsupported_by_azure(tmp_path, metadata):
     source = tmp_path / "source.bin"
     source.write_bytes(b"payload")
     publisher = BlobPublisher("https://account123.blob.core.windows.net", "container")
@@ -1701,7 +1711,7 @@ async def test_blob_publisher_rejects_metadata_keys_unsupported_by_azure(tmp_pat
             source,
             "result.bin",
             "session",
-            options=TransferOptions(object_metadata={"agora-operation-id": "operation-1"}),
+            options=TransferOptions(object_metadata=metadata),
         )
 
     publisher._client.get_blob_client.assert_not_called()
