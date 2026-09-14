@@ -167,6 +167,7 @@ async def receive_legacy_streaming_transfer(
     *,
     options: TransferOptions,
     context: RequestContext,
+    _destination_parent_fd: int | None = None,
 ) -> LegacyTransferEnvelope:
     """Incrementally decode a legacy v1 JSON/base64 envelope with bounded memory."""
     prefix = bytearray()
@@ -262,6 +263,7 @@ async def receive_legacy_streaming_transfer(
         context=context,
         operation="receive",
         resource="peer object transfer",
+        _destination_parent_fd=_destination_parent_fd,
     )
     assert validated_envelope is not None
     return LegacyTransferEnvelope(
@@ -280,6 +282,7 @@ async def receive_streaming_transfer(
     expected_sha256: str,
     options: TransferOptions,
     context: RequestContext,
+    _destination_parent_fd: int | None = None,
 ) -> TransferResult:
     """Incrementally decode a versioned JSON/base64 request into a bounded file."""
     transfer_options = replace(options, expected_sha256=expected_sha256)
@@ -357,6 +360,7 @@ async def receive_streaming_transfer(
         context=context,
         operation="receive",
         resource="peer object transfer",
+        _destination_parent_fd=_destination_parent_fd,
     )
 
 

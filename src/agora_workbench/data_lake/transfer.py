@@ -24,6 +24,7 @@ from .errors import (
     TransferChecksumError,
     TransferLimitError,
     TransferTimeoutError,
+    UnsupportedOperationError,
     UnsafePathError,
 )
 from .identity import sanitize_uri_for_display
@@ -356,6 +357,7 @@ async def stream_chunks_to_file(
     resource: str | None = None,
     _portable_root: Path | None = None,
     _portable_root_identity: tuple[int, int] | None = None,
+    _destination_parent_fd: int | None = None,
 ) -> TransferResult:
     """Stream chunks into an atomically published file and remove partials on failure.
 
@@ -472,7 +474,15 @@ async def stream_chunks_to_file(
             LOGGER.warning("Could not safely remove transfer temporary file %s.", temporary_name, exc_info=True)
 
     try:
-        if _USE_POSIX_DIR_FDS:
+        if _destination_parent_fd is not None:
+            if not _USE_POSIX_DIR_FDS:
+                raise UnsupportedOperationError(
+                    "Descriptor-anchored transfer staging is unavailable on this platform.",
+                    resource_id=display_resource,
+                    operation=operation,
+                )
+            parent_fd = os.dup(_destination_parent_fd)
+        elif _USE_POSIX_DIR_FDS:
             parent_fd = os.open(
                 os.path.sep,
                 os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),

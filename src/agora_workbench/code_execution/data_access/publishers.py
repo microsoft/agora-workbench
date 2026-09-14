@@ -179,6 +179,33 @@ def _open_posix_path_no_follow(path: Path, *, directory: bool = False) -> int:
         raise
 
 
+def _open_or_create_verified_directory(parent_fd: int, name: str, *, mode: int, operation: str) -> int:
+    """Open one directory entry only when its observed and opened identities match."""
+    try:
+        os.mkdir(name, mode=mode, dir_fd=parent_fd)
+    except FileExistsError:
+        LOGGER.debug("Secure directory component already exists: %s", name)
+    entry_stat = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISDIR(entry_stat.st_mode):
+        raise UnsafePathError("Directory path component is not a real directory.", operation=operation)
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        dir_fd=parent_fd,
+    )
+    try:
+        opened_stat = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened_stat.st_mode) or (opened_stat.st_dev, opened_stat.st_ino) != (
+            entry_stat.st_dev,
+            entry_stat.st_ino,
+        ):
+            raise UnsafePathError("Directory identity changed during traversal.", operation=operation)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
 def _open_or_create_posix_directory(path: Path) -> int:
     """Create and open a directory through no-follow descriptor traversal."""
     absolute_path = Path(os.path.abspath(os.fspath(path)))
@@ -188,15 +215,7 @@ def _open_or_create_posix_directory(path: Path) -> int:
     )
     try:
         for part in absolute_path.parts[1:]:
-            try:
-                os.mkdir(part, mode=0o700, dir_fd=current)
-            except FileExistsError:
-                LOGGER.debug("Secure directory component already exists: %s", part)
-            next_fd = os.open(
-                part,
-                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=current,
-            )
+            next_fd = _open_or_create_verified_directory(current, part, mode=0o700, operation="upload")
             os.close(current)
             current = next_fd
         return current
@@ -1028,15 +1047,7 @@ class LocalFilePublisher(AssetPublisher):
         current = os.dup(self._anchor_fd)
         try:
             for part in self._root_parts:
-                try:
-                    os.mkdir(part, mode=0o750, dir_fd=current)
-                except FileExistsError:
-                    LOGGER.debug("Local publisher root component already exists: %s", part)
-                next_fd = os.open(
-                    part,
-                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                    dir_fd=current,
-                )
+                next_fd = _open_or_create_verified_directory(current, part, mode=0o750, operation="upload")
                 os.close(current)
                 current = next_fd
             stat_result = os.fstat(current)
@@ -1192,28 +1203,7 @@ class LocalFilePublisher(AssetPublisher):
         committed = False
         try:
             for part in relative.parts[:-1]:
-                try:
-                    os.mkdir(part, mode=0o750, dir_fd=parent_fd)
-                except FileExistsError:
-                    LOGGER.debug("Local publisher destination directory already exists: %s", part)
-                entry_stat = os.stat(part, dir_fd=parent_fd, follow_symlinks=False)
-                if not stat.S_ISDIR(entry_stat.st_mode):
-                    raise UnsafePathError("Local publish path component is not a directory.", operation="upload")
-                next_fd = os.open(
-                    part,
-                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
-                    dir_fd=parent_fd,
-                )
-                try:
-                    opened_stat = os.fstat(next_fd)
-                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
-                        raise UnsafePathError(
-                            "Local publish directory identity changed during traversal.",
-                            operation="upload",
-                        )
-                except BaseException:
-                    os.close(next_fd)
-                    raise
+                next_fd = _open_or_create_verified_directory(parent_fd, part, mode=0o750, operation="upload")
                 if parent_fd != root_fd:
                     os.close(parent_fd)
                 parent_fd = next_fd

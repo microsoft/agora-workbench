@@ -903,6 +903,35 @@ async def test_local_publisher_rejects_existing_root_replaced_before_first_publi
     await publisher.close()
 
 
+async def test_local_publisher_rejects_absent_root_component_swapped_before_open(tmp_path, monkeypatch):
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"content")
+    output_root = tmp_path / "missing" / "outputs"
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    publisher = LocalFilePublisher(output_root)
+    original_open = publishers_module.os.open
+    swapped = False
+
+    def swap_created_component_before_open(path, flags, *args, **kwargs):
+        nonlocal swapped
+        if path == "missing" and kwargs.get("dir_fd") is not None and not swapped:
+            swapped = True
+            (tmp_path / "missing").rename(tmp_path / "created-root-component")
+            replacement.rename(tmp_path / "missing")
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(publishers_module.os, "open", swap_created_component_before_open)
+
+    with pytest.raises(UnsafePathError, match="identity changed"):
+        await publisher.publish(source, "result.bin", "session")
+
+    assert swapped
+    assert publisher._root_identity is None
+    assert not (tmp_path / "missing" / "outputs" / "session" / "result.bin").exists()
+    await publisher.close()
+
+
 @pytest.mark.parametrize("publisher_kind", ["local", "blob"])
 async def test_publishers_reject_source_paths_with_symlinked_parent(tmp_path, publisher_kind):
     actual = tmp_path / "actual"

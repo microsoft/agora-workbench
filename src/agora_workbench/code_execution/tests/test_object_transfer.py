@@ -1,10 +1,13 @@
 """Tests for server-to-server object transfer functionality."""
 
+import ast
 import asyncio
 import base64
 import dill
 import hashlib
 import json
+from pathlib import Path
+
 import pytest
 import tracemalloc
 
@@ -408,6 +411,37 @@ async def test_streaming_receiver_rejects_invalid_final_framing_without_commit(t
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_receivers_preserve_existing_destination_on_invalid_trailing_envelope(tmp_path, legacy):
+    data = b"content"
+    destination = tmp_path / "received.pkl"
+    destination.write_bytes(b"existing")
+    body = _streaming_envelope(data) + b"unexpected"
+
+    with pytest.raises(ValueError):
+        if legacy:
+            await receive_legacy_streaming_transfer(
+                _body_chunks(body, 3),
+                destination,
+                options=TransferOptions(),
+                context=RequestContext(),
+            )
+        else:
+            await receive_streaming_transfer(
+                _body_chunks(body, 3),
+                destination,
+                expected_size=len(data),
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+                options=TransferOptions(),
+                context=RequestContext(),
+            )
+
+    assert destination.read_bytes() == b"existing"
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_streaming_receiver_accepts_split_terminator_and_json_trailing_whitespace(tmp_path):
     data = b"content"
     body = _streaming_envelope(data) + b" \t\r\n"
@@ -746,6 +780,109 @@ def test_receive_endpoint_without_version_header_streams_legacy_without_request_
     assert response.status_code == 200
     assert response.json()["size_bytes"] == len(data)
     server.session_manager.execute_code_for_session.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming_transfer", [False, True])
+@pytest.mark.parametrize("replacement_kind", ["regular", "symlink"])
+def test_receive_endpoint_rejects_staging_replacement_before_kernel_read(
+    tmp_path, monkeypatch, streaming_transfer, replacement_kind
+):
+    from starlette.testclient import TestClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+    captured: dict[str, object] = {}
+
+    async def replace_before_kernel_read(*, code, **_kwargs):
+        path_expression = code.split("__os__.open(", 1)[1].split(", __os__.O_RDONLY", 1)[0]
+        staged_path = Path(ast.literal_eval(path_expression))
+        original_path = staged_path.with_name("owned-original.pkl")
+        staged_path.rename(original_path)
+        attacker_payload = dill.dumps({"attacker": True})
+        if replacement_kind == "symlink":
+            attacker_path = tmp_path / f"attacker-{streaming_transfer}.pkl"
+            attacker_path.write_bytes(attacker_payload)
+            staged_path.symlink_to(attacker_path)
+            captured["attacker_path"] = attacker_path
+        else:
+            staged_path.write_bytes(attacker_payload)
+        namespace: dict[str, object] = {}
+        try:
+            exec(code, namespace)
+        except Exception as exc:
+            captured.update(staged_path=staged_path, original_path=original_path, namespace=namespace)
+            return "", str(exc), False, [], []
+        raise AssertionError("replacement staging file must not be loaded")
+
+    server.session_manager.execute_code_for_session = AsyncMock(side_effect=replace_before_kernel_read)
+    data = dill.dumps({"trusted": True})
+    metadata = {"source_server": "source", "transfer_id": "transfer-1"}
+    headers = {"Content-Type": "application/json"}
+    if streaming_transfer:
+        headers.update(
+            {
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: encode_streaming_transfer_info(
+                    variable_name="received",
+                    session_id="session-1",
+                    metadata=metadata,
+                    size_bytes=len(data),
+                    checksum_sha256=hashlib.sha256(data).hexdigest(),
+                ),
+            }
+        )
+        content = _streaming_envelope(data).replace(b'"value"', b'"received"', 1)
+    else:
+        content = json.dumps(
+            {
+                "variable_name": "received",
+                "session_id": "session-1",
+                "metadata": metadata,
+                "data": base64.b64encode(data).decode(),
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    with TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=content, headers=headers)
+
+    assert response.status_code == 500
+    executed_namespace = captured["namespace"]
+    assert isinstance(executed_namespace, dict)
+    assert "received" not in executed_namespace
+    staged_path = captured["staged_path"]
+    original_path = captured["original_path"]
+    assert isinstance(staged_path, Path)
+    assert isinstance(original_path, Path)
+    assert staged_path.exists() or staged_path.is_symlink()
+    assert original_path.read_bytes() == data
+    if replacement_kind == "regular":
+        assert staged_path.read_bytes() == dill.dumps({"attacker": True})
+    else:
+        attacker_path = captured["attacker_path"]
+        assert isinstance(attacker_path, Path)
+        assert attacker_path.read_bytes() == dill.dumps({"attacker": True})
+
+    staged_path.unlink()
+    original_path.unlink()
+    staged_path.parent.rmdir()
 
 
 @pytest.mark.unit
