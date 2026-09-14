@@ -55,3 +55,13 @@ def logical_artifact_id(source_id: str, logical_path: str) -> str:
 def split_alias(value: str, default_namespace: str = "artifact-id") -> tuple[str, str]:
     """Split a namespaced alias while retaining compatibility with opaque IDs."""
     return _internal_call(_identity.split_alias, value, default_namespace)
+
+
+def is_reserved_provider_path(path: str) -> bool:
+    """Return whether a path belongs to provider-managed state."""
+    return _identity.is_reserved_provider_path(path)
+
+
+def is_scan_excluded_path(path: str) -> bool:
+    """Return whether scan discovery must prune a hidden or managed path."""
+    return _identity.is_scan_excluded_path(path)

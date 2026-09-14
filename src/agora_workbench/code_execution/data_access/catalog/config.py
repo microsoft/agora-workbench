@@ -16,6 +16,7 @@ from .identity import (
     ArtifactIdentityError,
     azure_uri_from_blob_name,
     canonicalize_azure_uri,
+    is_reserved_provider_path,
     parse_azure_uri,
     sanitize_uri_for_display,
     split_alias,
@@ -117,6 +118,8 @@ class SourceConfig(BaseModel):
             except ArtifactIdentityError:
                 raise
             account, container, prefix = parse_azure_uri(canonical)
+            if is_reserved_provider_path(prefix):
+                raise ValueError("Blob source prefix is reserved for provider metadata")
             data["path"] = azure_uri_from_blob_name(account, container, prefix)
         manifest = data.get("manifest")
         if isinstance(manifest, str) and "://" in manifest:

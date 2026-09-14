@@ -98,6 +98,32 @@ class TestValidateArtifactName:
             _validate_artifact_name("subdir\\..\\..\\escape.txt")
 
 
+def test_object_transfer_error_preserves_colliding_sanitized_keys_without_disclosure():
+    safe_key = "https://example.com/object"
+    first_unsafe_key = "https" + "://user:first@example.com/object?sig=one"
+    second_unsafe_key = "https" + "://user:second@example.com/object?sig=two"
+    error = ObjectTransferError(
+        server_name="peer",
+        status_code=400,
+        response_body={
+            first_unsafe_key: "first",
+            safe_key: "safe",
+            second_unsafe_key: "second",
+            "error": "failed",
+        },
+    )
+
+    payload = error.to_payload()
+
+    assert payload[safe_key] == "safe"
+    assert payload[f"{safe_key} [2]"] == "first"
+    assert payload[f"{safe_key} [3]"] == "second"
+    serialized = json.dumps(payload)
+    assert "user:first" not in serialized
+    assert "user:second" not in serialized
+    assert "sig=" not in serialized
+
+
 # ---------------------------------------------------------------------------
 # destination_name property
 # ---------------------------------------------------------------------------
@@ -107,7 +133,7 @@ class TestDestinationName:
     """Tests for the ``destination_name`` property on publishers."""
 
     def test_blob_publisher_destination_name(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.destination_name == "blob"
 
     def test_local_publisher_destination_name(self, tmp_path):
@@ -149,23 +175,23 @@ class TestBlobPublisherCanHandle:
     """Tests for BlobPublisher.can_handle()."""
 
     def test_handles_blob_closed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv</blob>") is True
 
     def test_handles_blob_unclosed_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<blob>results.csv") is True
 
     def test_rejects_local_tag(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("<local>output</local>") is False
 
     def test_rejects_plain_string(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("results.csv") is False
 
     def test_rejects_url(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub.can_handle("https://acct.blob.core.windows.net/c/f") is False
 
 
@@ -182,11 +208,11 @@ class TestBlobPublisherInit:
 
     def test_credential_stored(self, create_mock_credential):
         cred = create_mock_credential()
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c", credential=cred)
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container", credential=cred)
         assert pub.credential is cred
 
     def test_client_lazily_created(self):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         assert pub._client is None
 
 
@@ -199,7 +225,11 @@ class TestBlobPublisherPublish:
         src.write_bytes(b"a,b\n1,2\n")
 
         mock_blob_client = AsyncMock()
-        mock_blob_client.upload_blob = AsyncMock()
+
+        async def upload(stream, **_kwargs):
+            stream.read()
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
 
         mock_service_client = MagicMock()
         mock_service_client.get_blob_client = MagicMock(return_value=mock_blob_client)
@@ -220,7 +250,11 @@ class TestBlobPublisherPublish:
         src.write_bytes(b"%PDF")
 
         mock_blob_client = AsyncMock()
-        mock_blob_client.upload_blob = AsyncMock()
+
+        async def upload(stream, **_kwargs):
+            stream.read()
+
+        mock_blob_client.upload_blob = AsyncMock(side_effect=upload)
 
         mock_service_client = MagicMock()
         mock_service_client.get_blob_client = MagicMock(return_value=mock_blob_client)
@@ -235,7 +269,7 @@ class TestBlobPublisherPublish:
 
     @pytest.mark.asyncio
     async def test_publish_raises_if_file_missing(self, tmp_path):
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(FileNotFoundError):
@@ -246,7 +280,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="parent traversal"):
@@ -257,7 +291,7 @@ class TestBlobPublisherPublish:
         src = tmp_path / "data.csv"
         src.write_bytes(b"a,b\n")
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = MagicMock()
 
         with pytest.raises(ValueError, match="absolute path"):
@@ -268,7 +302,7 @@ class TestBlobPublisherPublish:
         mock_service_client = AsyncMock()
         mock_service_client.close = AsyncMock()
 
-        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="c")
+        pub = BlobPublisher(account_url="https://acct.blob.core.windows.net", container="container")
         pub._client = mock_service_client
 
         await pub.close()
@@ -599,7 +633,116 @@ class TestSendTool:
         set_current_token_claims(None)
 
     @pytest.mark.asyncio
-    async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch):
+    async def test_send_sanitizes_custom_publisher_locator_in_response_and_activity(self, tmp_path, monkeypatch):
+        from ... import sessions as sessions_pkg
+        from ...sessions import (
+            SessionConfig,
+            SessionManager,
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        session_manager = SessionManager(SessionConfig())
+        publisher = LocalFilePublisher(base_dir=tmp_path / "published")
+        secret_locator = "https://account.blob.core.windows.net/container/result.csv?sig=DO_NOT_DISCLOSE"
+        publisher.publish = AsyncMock(return_value=secret_locator)
+        server = _make_server_with_publishers([publisher])
+        server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
+
+        session_id = session_manager.create_session(
+            data={},
+            user_identity="u@t",
+            user_token="tok",
+            token_claims={"oid": "u", "tid": "t"},
+        )
+        outputs = session_manager._get_outputs_dir(session_id)
+        artifact = outputs / "result.csv"
+        artifact.write_text("value")
+        session_manager._register_artifacts_from_diff(session_id, {}, session_manager._snapshot_outputs_dir(session_id))
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
+        server._restore_auth_context_for_mcp_session = MagicMock()
+        mock_ctx = MagicMock(session_id=session_id)
+
+        try:
+            mcp_tool = await server.mcp.get_tool("test_send")
+            result = json.loads(await mcp_tool.fn(ctx=mock_ctx, data_ref="result.csv", to="local"))
+        finally:
+            set_current_user_identity(None)
+            set_current_request_token(None)
+            set_current_token_claims(None)
+
+        assert result["remote_uri"] == "https://account.blob.core.windows.net/container/result.csv"
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        assert event["remote_uri"] == result["remote_uri"]
+        assert "DO_NOT_DISCLOSE" not in json.dumps(event)
+
+    @pytest.mark.asyncio
+    async def test_send_sanitizes_custom_publisher_failure_in_logs_response_and_activity(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        from ... import sessions as sessions_pkg
+        from ...sessions import (
+            SessionConfig,
+            SessionManager,
+            set_current_request_token,
+            set_current_token_claims,
+            set_current_user_identity,
+        )
+
+        monkeypatch.setattr(sessions_pkg.manager, "_OUTPUTS_BASE_DIR", tmp_path)
+        session_manager = SessionManager(SessionConfig())
+        publisher = LocalFilePublisher(base_dir=tmp_path / "published")
+        secret = "DO_NOT_DISCLOSE"
+        unsafe_uri = "https" + f"://user:{secret}@example.com/result.csv?sig={secret}"
+        publisher.publish = AsyncMock(side_effect=RuntimeError(f"upload failed for <blob>{unsafe_uri}</blob>"))
+        server = _make_server_with_publishers([publisher])
+        server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
+
+        session_id = session_manager.create_session(
+            data={},
+            user_identity="u@t",
+            user_token="tok",
+            token_claims={"oid": "u", "tid": "t"},
+        )
+        outputs = session_manager._get_outputs_dir(session_id)
+        artifact = outputs / "result.csv"
+        artifact.write_text("value")
+        session_manager._register_artifacts_from_diff(session_id, {}, session_manager._snapshot_outputs_dir(session_id))
+        set_current_user_identity("u@t")
+        set_current_request_token("tok")
+        set_current_token_claims({"oid": "u", "tid": "t"})
+        server._restore_auth_context_for_mcp_session = MagicMock()
+        mock_ctx = MagicMock(session_id=session_id)
+
+        try:
+            with caplog.at_level("ERROR"):
+                result = json.loads(
+                    await (await server.mcp.get_tool("test_send")).fn(
+                        ctx=mock_ctx,
+                        data_ref="result.csv",
+                        to="local",
+                    )
+                )
+        finally:
+            set_current_user_identity(None)
+            set_current_request_token(None)
+            set_current_token_claims(None)
+
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        serialized = json.dumps({"result": result, "event": event, "logs": caplog.text})
+        assert secret not in serialized
+        assert "sig=" not in serialized
+        assert "https://example.com/result.csv" in serialized
+        assert all(record.exc_info is None for record in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_send_preserves_structured_object_transfer_error(self, tmp_path, monkeypatch, caplog):
         """The send result exposes actionable fields returned by a peer."""
         from ... import sessions as sessions_pkg
         from ...sessions import (
@@ -615,6 +758,7 @@ class TestSendTool:
         publisher = ServerPublisher(server_name="gis", target_url="http://localhost:8001")
         server = _make_server_with_publishers([publisher])
         server.session_manager = session_manager
+        server.activity_publisher = MagicMock()
 
         session_id = session_manager.create_session(
             data={},
@@ -634,14 +778,21 @@ class TestSendTool:
         session_manager.execute_code_for_session = AsyncMock(
             return_value=("", "NameError: name 'result' is not defined", False, [], [])
         )
+        secret = "DO_NOT_DISCLOSE"
+        unsafe_uri = "https" + f"://user:{secret}@example.com/object?sig={secret}"
         publisher.publish = AsyncMock(
             side_effect=ObjectTransferError(
                 server_name="gis",
                 status_code=404,
                 response_body={
                     "success": False,
-                    "error": "No active session found to receive the object",
+                    "error": f"No active session found for {unsafe_uri}",
                     "hint": "Initialize the destination server, then retry.",
+                    "details": {
+                        "resource": unsafe_uri,
+                        "references": [f"retry {unsafe_uri}", {"message": unsafe_uri}],
+                    },
+                    "error_code": "SESSION_NOT_FOUND",
                 },
             )
         )
@@ -651,18 +802,33 @@ class TestSendTool:
 
         try:
             mcp_tool = await server.mcp.get_tool("test_send")
-            result_json = await mcp_tool.fn(ctx=mock_ctx, data_ref="result", to="gis")
+            with caplog.at_level("ERROR"):
+                result_json = await mcp_tool.fn(ctx=mock_ctx, data_ref="result", to="gis")
         finally:
             set_current_user_identity(None)
             set_current_request_token(None)
             set_current_token_claims(None)
 
-        assert json.loads(result_json) == {
+        result = json.loads(result_json)
+        assert result == {
             "success": False,
-            "error": "Object transfer to 'gis' failed: No active session found to receive the object",
+            "error": "Object transfer to 'gis' failed: No active session found for https://example.com/object",
             "hint": "Initialize the destination server, then retry.",
+            "details": {
+                "resource": "https://example.com/object",
+                "references": [
+                    "retry https://example.com/object",
+                    {"message": "https://example.com/object"},
+                ],
+            },
+            "error_code": "SESSION_NOT_FOUND",
             "status_code": 404,
         }
+        event = server.activity_publisher.publish_nowait.call_args.args[0]
+        serialized = json.dumps({"result": result, "event": event, "logs": caplog.text})
+        assert secret not in serialized
+        assert "sig=" not in serialized
+        assert all(record.exc_info is None for record in caplog.records)
 
     @pytest.mark.asyncio
     async def test_send_destination_names_in_description(self, tmp_path):

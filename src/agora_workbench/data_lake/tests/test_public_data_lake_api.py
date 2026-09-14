@@ -267,6 +267,25 @@ def test_existing_resolver_protocol_is_the_public_protocol():
     assert isinstance(MemoryResolver(), ArtifactResolver)
 
 
+def test_legacy_data_access_package_exports_publisher_compatibility_adapter():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from agora_workbench.code_execution.data_access import publish_compat; "
+                "from agora_workbench.code_execution.data_access.publishers import publish_compat as canonical; "
+                "assert publish_compat is canonical"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_existing_catalog_classes_are_reexported_without_duplication():
     from agora_workbench.code_execution.data_access.catalog import CatalogDB as LegacyCatalogDB
 

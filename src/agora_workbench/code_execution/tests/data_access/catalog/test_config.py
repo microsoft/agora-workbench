@@ -82,6 +82,17 @@ class TestSourceConfig:
     @pytest.mark.parametrize(
         "path",
         [
+            "az://account123/container/.agora",
+            "az://account123/container/.agora/operations",
+        ],
+    )
+    def test_provider_reserved_blob_prefixes_are_rejected(self, path):
+        with pytest.raises(ValueError, match="reserved"):
+            SourceConfig(path=path)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
             "https://blob.core.windows.net/container/path",
             "https://dfs.core.windows.net/container/path",
             "az://ab/container/path",

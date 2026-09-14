@@ -1,12 +1,95 @@
 """Tests for server-to-server object transfer functionality."""
 
+import ast
+import asyncio
+import base64
 import dill
-import pytest
+import hashlib
+import json
+import os
+from pathlib import Path
+import tempfile
 
+import pytest
+import tracemalloc
+
+from agora_workbench.data_lake import (
+    RequestContext,
+    TransferCancelledError,
+    TransferChecksumError,
+    TransferLimitError,
+    TransferOptions,
+    TransferTimeoutError,
+)
 from ..object_transfer import (
+    MAX_TRANSFER_BODY_BYTES,
     ObjectSerializer,
+    STREAMING_TRANSFER_INFO_HEADER,
+    STREAMING_TRANSFER_VERSION,
+    STREAMING_TRANSFER_VERSION_HEADER,
+    decode_streaming_transfer_info,
+    encode_streaming_transfer_info,
+    parse_object_transfer_version,
+    parse_transfer_correlation_metadata,
+    receive_legacy_streaming_transfer,
+    receive_streaming_transfer,
 )
 from ..sessions.objects import ObjectStore
+
+
+def _streaming_envelope(data: bytes) -> bytes:
+    return b'{"variable_name":"value","data":"' + base64.b64encode(data) + b'","metadata":{}}'
+
+
+async def _body_chunks(body: bytes, chunk_size: int = 64 * 1024):
+    for offset in range(0, len(body), chunk_size):
+        yield body[offset : offset + chunk_size]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_server", "https://user:password@example.com/source"),
+        ("transfer_id", "https://example.com/object?sig=secret"),
+        ("source_server", "source\nforged-log-entry"),
+        ("transfer_id", "transfer\rforged-header"),
+        ("source_server", "x" * 129),
+        ("transfer_id", "x" * 129),
+    ],
+)
+def test_transfer_correlation_metadata_rejects_unsafe_identifiers(field, value):
+    metadata = {"source_server": "source-1", "transfer_id": "transfer_1:retry.2"}
+    metadata[field] = value
+
+    with pytest.raises(ValueError, match=r"\AInvalid object transfer correlation metadata\.\Z"):
+        parse_transfer_correlation_metadata(metadata)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({}, (None, None)),
+        ({"source_server": "", "transfer_id": ""}, (None, None)),
+        ({"source_server": "source-1", "transfer_id": "transfer_1:retry.2"}, ("source-1", "transfer_1:retry.2")),
+    ],
+)
+def test_transfer_correlation_metadata_preserves_valid_compatibility(metadata, expected):
+    assert parse_transfer_correlation_metadata(metadata) == expected
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["", "3", "20", "v2", "2 ", " 2", "2.0", "2,3"])
+def test_object_transfer_version_rejects_every_present_non_v2_token(version):
+    with pytest.raises(ValueError, match=r"\AUnsupported object transfer version\.\Z"):
+        parse_object_transfer_version(version)
+
+
+@pytest.mark.unit
+def test_object_transfer_version_preserves_absent_v1_and_exact_v2():
+    assert parse_object_transfer_version(None) is False
+    assert parse_object_transfer_version(STREAMING_TRANSFER_VERSION) is True
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +216,840 @@ class TestObjectStoreGetMetadata:
         assert meta == {}
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_peak_memory_is_independent_of_payload_size(tmp_path):
+    data = b"x" * (16 * 1024 * 1024)
+    body = _streaming_envelope(data)
+    destination = tmp_path / "received.pkl"
+
+    tracemalloc.start()
+    try:
+        result = await receive_streaming_transfer(
+            _body_chunks(body, len(body)),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(
+                max_bytes=len(data),
+                chunk_size=64 * 1024,
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+            ),
+            context=RequestContext(),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result.bytes_transferred == len(data)
+    assert destination.stat().st_size == len(data)
+    assert peak < 2 * 1024 * 1024
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_peak_memory_is_independent_of_payload_size(tmp_path):
+    data = b"x" * (16 * 1024 * 1024)
+    body = _streaming_envelope(data)
+    destination = tmp_path / "received.pkl"
+
+    tracemalloc.start()
+    try:
+        envelope = await receive_legacy_streaming_transfer(
+            _body_chunks(body, len(body)),
+            destination,
+            options=TransferOptions(max_bytes=len(data), chunk_size=64 * 1024),
+            context=RequestContext(),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert envelope.variable_name == "value"
+    assert envelope.result.bytes_transferred == len(data)
+    assert destination.stat().st_size == len(data)
+    assert peak < 2 * 1024 * 1024
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"variable_name":"value","data":"!!!!","metadata":{}}',
+        b'{"variable_name":"value","data":"',
+        b'garbage,"data":"YQ==","metadata":{}}',
+        b'{"variable_name":"value","data":"YQ==","metadata":{},"extra":true}',
+        b'{"variable_name":"value","data":"YQ==","metadata":{},"metadata":{}}',
+    ],
+)
+async def test_legacy_receiver_rejects_malformed_envelopes_and_cleans_partial(tmp_path, body):
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(ValueError):
+        await receive_legacy_streaming_transfer(
+            _body_chunks(body, 2),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_rejects_chunked_encoded_overflow_and_cleans_partial(tmp_path, monkeypatch):
+    from .. import object_transfer as object_transfer_module
+
+    monkeypatch.setattr(object_transfer_module, "MAX_TRANSFER_BODY_BYTES", 32)
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(TransferLimitError):
+        await receive_legacy_streaming_transfer(
+            _body_chunks(_streaming_envelope(b"x" * 64), 5),
+            destination,
+            options=TransferOptions(max_bytes=64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_accepts_exact_encoded_body_boundary(tmp_path, monkeypatch):
+    from .. import object_transfer as object_transfer_module
+
+    body = _streaming_envelope(b"content")
+    monkeypatch.setattr(object_transfer_module, "MAX_TRANSFER_BODY_BYTES", len(body))
+    destination = tmp_path / "received.pkl"
+
+    envelope = await receive_legacy_streaming_transfer(
+        _body_chunks(body, 3),
+        destination,
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert envelope.result.bytes_transferred == len(b"content")
+    assert destination.read_bytes() == b"content"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_accepts_json_whitespace_compatibility(tmp_path):
+    data = b"content"
+    body = json.dumps(
+        {
+            "variable_name": "value",
+            "data": base64.b64encode(data).decode(),
+            "metadata": {},
+        }
+    ).encode()
+    destination = tmp_path / "received.pkl"
+
+    envelope = await receive_legacy_streaming_transfer(
+        _body_chunks(body, 3),
+        destination,
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert envelope.variable_name == "value"
+    assert destination.read_bytes() == data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_malformed_base64_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    body = b'{"variable_name":"value","data":"AAAA!!!!","metadata":{}}'
+
+    with pytest.raises(ValueError, match="base64"):
+        await receive_streaming_transfer(
+            _body_chunks(body, 3),
+            destination,
+            expected_size=6,
+            expected_sha256="0" * 64,
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("case", "mutate"),
+    [
+        ("garbage-prefix", lambda body: b"garbage" + body[body.index(b',"data"') :]),
+        ("missing-closing-quote", lambda body: body.replace(b'","metadata"', b',"metadata"', 1)),
+        ("missing-closing-brace", lambda body: body[:-1]),
+        ("trailing-garbage", lambda body: body + b"unexpected"),
+        ("extra-json-field", lambda body: body[:-1] + b',"unexpected":true}'),
+    ],
+)
+async def test_streaming_receiver_rejects_invalid_final_framing_without_commit(tmp_path, case, mutate):
+    data = b"content"
+    destination = tmp_path / f"{case}.pkl"
+
+    with pytest.raises(ValueError):
+        await receive_streaming_transfer(
+            _body_chunks(mutate(_streaming_envelope(data)), 3),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+async def test_receivers_preserve_existing_destination_on_invalid_trailing_envelope(tmp_path, legacy):
+    data = b"content"
+    destination = tmp_path / "received.pkl"
+    destination.write_bytes(b"existing")
+    body = _streaming_envelope(data) + b"unexpected"
+
+    with pytest.raises(ValueError):
+        if legacy:
+            await receive_legacy_streaming_transfer(
+                _body_chunks(body, 3),
+                destination,
+                options=TransferOptions(),
+                context=RequestContext(),
+            )
+        else:
+            await receive_streaming_transfer(
+                _body_chunks(body, 3),
+                destination,
+                expected_size=len(data),
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+                options=TransferOptions(),
+                context=RequestContext(),
+            )
+
+    assert destination.read_bytes() == b"existing"
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_body_fields_that_disagree_with_header_metadata(tmp_path):
+    data = b"content"
+    destination = tmp_path / "received.pkl"
+
+    with pytest.raises(ValueError, match="authenticated metadata"):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 3),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(),
+            context=RequestContext(),
+            expected_variable_name="different",
+            expected_session_id="session-1",
+            expected_metadata={},
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_accepts_split_terminator_and_json_trailing_whitespace(tmp_path):
+    data = b"content"
+    body = _streaming_envelope(data) + b" \t\r\n"
+    destination = tmp_path / "received.pkl"
+
+    async def split_terminator():
+        yield body[:-5]
+        yield body[-5:-4]
+        yield body[-4:-2]
+        yield body[-2:]
+
+    result = await receive_streaming_transfer(
+        split_terminator(),
+        destination,
+        expected_size=len(data),
+        expected_sha256=hashlib.sha256(data).hexdigest(),
+        options=TransferOptions(),
+        context=RequestContext(),
+    )
+
+    assert result.bytes_transferred == len(data)
+    assert destination.read_bytes() == data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_accepts_uppercase_declared_checksum(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"content"
+    checksum = hashlib.sha256(data).hexdigest()
+
+    result = await receive_streaming_transfer(
+        _body_chunks(_streaming_envelope(data), 3),
+        destination,
+        expected_size=len(data),
+        expected_sha256=checksum.upper(),
+        options=TransferOptions(expected_sha256=checksum),
+        context=RequestContext(),
+    )
+
+    assert result.checksum_sha256 == checksum
+    assert destination.read_bytes() == data
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_mismatched_normalized_checksum(tmp_path):
+    data = b"content"
+    checksum = hashlib.sha256(data).hexdigest()
+
+    with pytest.raises(ValueError, match="does not match"):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data)),
+            tmp_path / "received.pkl",
+            expected_size=len(data),
+            expected_sha256=checksum.upper(),
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_enforces_quota_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"oversized"
+
+    with pytest.raises(TransferLimitError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 5),
+            destination,
+            expected_size=len(data),
+            expected_sha256=hashlib.sha256(data).hexdigest(),
+            options=TransferOptions(max_bytes=None, quota_bytes=3),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_rejects_checksum_and_cleans_partial(tmp_path):
+    destination = tmp_path / "received.pkl"
+    data = b"content"
+
+    with pytest.raises(TransferChecksumError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(data), 4),
+            destination,
+            expected_size=len(data),
+            expected_sha256="0" * 64,
+            options=TransferOptions(expected_sha256="0" * 64),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_streaming_receiver_cancellation_and_timeout_clean_partials(tmp_path):
+    cancellation = asyncio.Event()
+    cancellation.set()
+    cancelled_destination = tmp_path / "cancelled.pkl"
+
+    with pytest.raises(TransferCancelledError):
+        await receive_streaming_transfer(
+            _body_chunks(_streaming_envelope(b"content")),
+            cancelled_destination,
+            expected_size=7,
+            expected_sha256=hashlib.sha256(b"content").hexdigest(),
+            options=TransferOptions(cancellation_event=cancellation),
+            context=RequestContext(),
+        )
+
+    async def stalled_body():
+        yield b'{"variable_name":"value","data":"'
+        await asyncio.Event().wait()
+
+    timeout_destination = tmp_path / "timeout.pkl"
+    with pytest.raises(TransferTimeoutError):
+        await receive_streaming_transfer(
+            stalled_body(),
+            timeout_destination,
+            expected_size=7,
+            expected_sha256=hashlib.sha256(b"content").hexdigest(),
+            options=TransferOptions(timeout_seconds=0.05),
+            context=RequestContext(),
+        )
+
+    assert not cancelled_destination.exists()
+    assert not timeout_destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
+@pytest.mark.unit
+def test_streaming_receive_endpoint_uses_versioned_incremental_path(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.session_manager.execute_code_for_session = AsyncMock(return_value=("", "", True, [], []))
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+
+    data = dill.dumps({"value": 1})
+    checksum = hashlib.sha256(data).hexdigest()
+    info = encode_streaming_transfer_info(
+        variable_name="received",
+        session_id="session-1",
+        metadata={"source_server": "source", "transfer_id": "transfer-1"},
+        size_bytes=len(data),
+        checksum_sha256=checksum,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/object-transfer/receive",
+            content=(
+                _streaming_envelope(data)
+                .replace(b'"value"', b'"received"', 1)
+                .replace(
+                    b'"metadata":{}',
+                    b'"metadata":{"source_server":"source","transfer_id":"transfer-1"},"session_id":"session-1"',
+                )
+            ),
+            headers={
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: info,
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["size_bytes"] == len(data)
+    server.session_manager.execute_code_for_session.assert_awaited_once()
+    activity = server.activity_publisher.publish_nowait.call_args.args[0]
+    assert activity["source_server"] == "source"
+    assert activity["transfer_id"] == "transfer-1"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming_transfer", [True, False])
+def test_receive_endpoint_rejects_unsafe_correlation_metadata_without_disclosure(
+    tmp_path, monkeypatch, caplog, streaming_transfer
+):
+    from starlette.testclient import TestClient
+    from unittest.mock import MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    server.session_manager = MagicMock()
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+
+    data = dill.dumps({"value": 1})
+    query_secret = "top-" + "secret"
+    unsafe_source = f"https://user:password@example.com/source?sig={query_secret}"
+    metadata = {"source_server": unsafe_source, "transfer_id": "transfer-1"}
+    headers = {"Content-Type": "application/json"}
+    if streaming_transfer:
+        headers.update(
+            {
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: encode_streaming_transfer_info(
+                    variable_name="received",
+                    session_id="session-1",
+                    metadata=metadata,
+                    size_bytes=len(data),
+                    checksum_sha256=hashlib.sha256(data).hexdigest(),
+                ),
+            }
+        )
+        content = (
+            _streaming_envelope(data)
+            .replace(b'"value"', b'"received"', 1)
+            .replace(b'"metadata":{}', b'"metadata":' + json.dumps(metadata, separators=(",", ":")).encode())
+        )
+    else:
+        content = json.dumps(
+            {
+                "variable_name": "received",
+                "session_id": "session-1",
+                "metadata": metadata,
+                "data": base64.b64encode(data).decode(),
+            }
+        ).encode()
+
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    with caplog.at_level("DEBUG"), TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=content, headers=headers)
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Invalid object transfer correlation metadata."}
+    assert query_secret not in response.text
+    assert query_secret not in caplog.text
+    server.activity_publisher.publish_nowait.assert_not_called()
+    server.session_manager.get_session.assert_not_called()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("version", ["3", "future", "2 "])
+def test_receive_endpoint_rejects_unknown_explicit_protocol_version_before_legacy_parse(tmp_path, monkeypatch, version):
+    from starlette.testclient import TestClient
+    from starlette.requests import Request
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+
+    json_called = False
+
+    async def fail_if_json_called(_request):
+        nonlocal json_called
+        json_called = True
+        raise AssertionError("unknown versions must not materialize the request body")
+
+    monkeypatch.setattr(Request, "json", fail_if_json_called)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/object-transfer/receive",
+            content=b"not a legacy JSON body",
+            headers={STREAMING_TRANSFER_VERSION_HEADER: version},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"success": False, "error": "Unsupported object transfer version."}
+    assert not json_called
+
+
+@pytest.mark.unit
+def test_receive_endpoint_without_version_header_streams_legacy_without_request_json(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from starlette.requests import Request
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    async def fail_if_json_called(_request):
+        raise AssertionError("legacy v1 must not materialize request.json")
+
+    monkeypatch.setattr(Request, "json", fail_if_json_called)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.session_manager.execute_code_for_session = AsyncMock(return_value=("", "", True, [], []))
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    data = dill.dumps({"value": 1})
+    body = json.dumps(
+        {
+            "variable_name": "received",
+            "data": base64.b64encode(data).decode(),
+            "metadata": {"source_server": "source", "transfer_id": "transfer-1"},
+            "session_id": "session-1",
+        },
+        separators=(",", ":"),
+    ).encode()
+
+    with TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=body)
+
+    assert response.status_code == 200
+    assert response.json()["size_bytes"] == len(data)
+    server.session_manager.execute_code_for_session.assert_awaited_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming_transfer", [False, True])
+@pytest.mark.parametrize("replacement_kind", ["regular", "symlink"])
+def test_receive_endpoint_rejects_staging_replacement_before_kernel_read(
+    tmp_path, monkeypatch, streaming_transfer, replacement_kind
+):
+    from starlette.testclient import TestClient
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    session = MagicMock(session_id="session-1", user_identity="user@example.com")
+    server.session_manager = MagicMock()
+    server.session_manager.get_session.return_value = session
+    server.activity_publisher = MagicMock()
+    monkeypatch.setattr(server_module, "get_current_user_identity", lambda: "user@example.com")
+    captured: dict[str, object] = {}
+
+    async def replace_before_kernel_read(*, code, **_kwargs):
+        path_expression = code.split("__os__.open(", 1)[1].split(", __os__.O_RDONLY", 1)[0]
+        staged_path = Path(ast.literal_eval(path_expression))
+        original_path = staged_path.with_name("owned-original.pkl")
+        staged_path.rename(original_path)
+        attacker_payload = dill.dumps({"attacker": True})
+        if replacement_kind == "symlink":
+            attacker_path = tmp_path / f"attacker-{streaming_transfer}.pkl"
+            attacker_path.write_bytes(attacker_payload)
+            staged_path.symlink_to(attacker_path)
+            captured["attacker_path"] = attacker_path
+        else:
+            staged_path.write_bytes(attacker_payload)
+        namespace: dict[str, object] = {}
+        try:
+            exec(code, namespace)
+        except Exception as exc:
+            captured.update(staged_path=staged_path, original_path=original_path, namespace=namespace)
+            return "", str(exc), False, [], []
+        raise AssertionError("replacement staging file must not be loaded")
+
+    server.session_manager.execute_code_for_session = AsyncMock(side_effect=replace_before_kernel_read)
+    data = dill.dumps({"trusted": True})
+    metadata = {"source_server": "source", "transfer_id": "transfer-1"}
+    headers = {"Content-Type": "application/json"}
+    if streaming_transfer:
+        headers.update(
+            {
+                STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                STREAMING_TRANSFER_INFO_HEADER: encode_streaming_transfer_info(
+                    variable_name="received",
+                    session_id="session-1",
+                    metadata=metadata,
+                    size_bytes=len(data),
+                    checksum_sha256=hashlib.sha256(data).hexdigest(),
+                ),
+            }
+        )
+        content = (
+            _streaming_envelope(data)
+            .replace(b'"value"', b'"received"', 1)
+            .replace(
+                b'"metadata":{}',
+                b'"metadata":' + json.dumps(metadata, separators=(",", ":")).encode() + b',"session_id":"session-1"',
+            )
+        )
+    else:
+        content = json.dumps(
+            {
+                "variable_name": "received",
+                "session_id": "session-1",
+                "metadata": metadata,
+                "data": base64.b64encode(data).decode(),
+            },
+            separators=(",", ":"),
+        ).encode()
+
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+    with TestClient(app) as client:
+        response = client.post("/object-transfer/receive", content=content, headers=headers)
+
+    assert response.status_code == 500
+    executed_namespace = captured["namespace"]
+    assert isinstance(executed_namespace, dict)
+    assert "received" not in executed_namespace
+    staged_path = captured["staged_path"]
+    original_path = captured["original_path"]
+    assert isinstance(staged_path, Path)
+    assert isinstance(original_path, Path)
+    assert staged_path.exists() or staged_path.is_symlink()
+    assert original_path.read_bytes() == data
+    if replacement_kind == "regular":
+        assert staged_path.read_bytes() == dill.dumps({"attacker": True})
+    else:
+        attacker_path = captured["attacker_path"]
+        assert isinstance(attacker_path, Path)
+        assert attacker_path.read_bytes() == dill.dumps({"attacker": True})
+
+    staged_path.unlink()
+    original_path.unlink()
+    staged_path.parent.rmdir()
+
+
+@pytest.mark.unit
+def test_legacy_endpoint_rejects_declared_oversized_body_before_streaming(tmp_path, monkeypatch):
+    from starlette.testclient import TestClient
+    from starlette.requests import Request
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+
+    stream_called = False
+
+    async def fail_if_streamed(_request):
+        nonlocal stream_called
+        stream_called = True
+        raise AssertionError("declared oversized body must not be consumed")
+        yield b""
+
+    monkeypatch.setattr(Request, "stream", fail_if_streamed)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/object-transfer/receive",
+            content=b"x",
+            headers={"Content-Length": str(MAX_TRANSFER_BODY_BYTES + 1)},
+        )
+
+    assert response.status_code == 413
+    assert not stream_called
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_point", ["lstat", "open", "fstat"])
+def test_receive_endpoint_cleans_private_stage_when_initialization_fails(tmp_path, monkeypatch, failure_point):
+    from starlette.testclient import TestClient
+
+    from ..auth import create_noop_auth_config
+    from ..code_execution_models import ServerConfig
+    from ..server import CodeExecutionServer
+    from .. import server as server_module
+
+    created: list[Path] = []
+    original_mkdtemp = tempfile.mkdtemp
+    original_lstat = Path.lstat
+    original_open = server_module.os.open
+    original_fstat = server_module.os.fstat
+
+    def tracked_mkdtemp(*args, **kwargs):
+        path = Path(original_mkdtemp(dir=tmp_path, *args, **kwargs))
+        created.append(path)
+        return str(path)
+
+    def fail_lstat(path):
+        if failure_point == "lstat" and created and Path(path) == created[0]:
+            raise OSError("injected stage lstat failure")
+        return original_lstat(path)
+
+    def fail_open(path, flags, *args, **kwargs):
+        if failure_point == "open" and created and Path(path) == created[0]:
+            raise OSError("injected stage open failure")
+        return original_open(path, flags, *args, **kwargs)
+
+    def fail_fstat(descriptor):
+        if failure_point == "fstat" and created:
+            try:
+                if Path(os.readlink(f"/proc/self/fd/{descriptor}")) == created[0]:
+                    raise OSError("injected stage fstat failure")
+            except FileNotFoundError:
+                # An unrelated descriptor may close while the injected hook runs.
+                pass
+        return original_fstat(descriptor)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", tracked_mkdtemp)
+    monkeypatch.setattr(Path, "lstat", fail_lstat)
+    monkeypatch.setattr(server_module.os, "open", fail_open)
+    monkeypatch.setattr(server_module.os, "fstat", fail_fstat)
+    server = CodeExecutionServer(
+        server_config=ServerConfig(name="test", type="uv", description="Test", dependency_file="# Test"),
+        auth_config=create_noop_auth_config(),
+        working_dir=tmp_path,
+    )
+    app = server.mcp.http_app(transport="streamable-http")
+    server._add_custom_endpoints(app)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post("/object-transfer/receive", content=b'{"variable_name":"value","data":""}')
+
+    assert response.status_code == 500
+    assert len(created) == 1
+    assert not created[0].exists()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_legacy_receiver_disconnect_cleans_partial(tmp_path):
+    from starlette.requests import ClientDisconnect
+
+    destination = tmp_path / "received.pkl"
+
+    async def disconnected_body():
+        yield b'{"variable_name":"value","data":"YQ'
+        raise ClientDisconnect()
+
+    with pytest.raises(ClientDisconnect):
+        await receive_legacy_streaming_transfer(
+            disconnected_body(),
+            destination,
+            options=TransferOptions(),
+            context=RequestContext(),
+        )
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".*.part")) == []
+
+
 # ---------------------------------------------------------------------------
 # ServerPublisher tests
 # ---------------------------------------------------------------------------
@@ -170,7 +1087,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -186,13 +1110,18 @@ class TestServerPublisher:
             call_args = mock_client.post.call_args
             assert call_args[0][0] == "http://localhost:8001/object-transfer/receive"
 
-            payload = call_args[1]["json"]
+            payload = captured_payload
             assert payload["variable_name"] == "target_var"
             assert payload["data"] == expected_b64
             assert payload["metadata"]["source_server"] == "chemistry"
             assert payload["metadata"]["transfer_id"] == "abc123"
 
             headers = call_args[1]["headers"]
+            assert headers[STREAMING_TRANSFER_VERSION_HEADER] == STREAMING_TRANSFER_VERSION
+            transfer_info = decode_streaming_transfer_info(headers[STREAMING_TRANSFER_INFO_HEADER])
+            assert transfer_info["variable_name"] == "target_var"
+            assert transfer_info["size_bytes"] == len(serialized)
+            assert transfer_info["checksum_sha256"] == hashlib.sha256(serialized).hexdigest()
             assert headers["Authorization"] == "Bearer test-token"
 
             assert "Injected 'target_var' into gis kernel" in result
@@ -265,7 +1194,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -296,7 +1232,14 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
@@ -378,14 +1321,21 @@ class TestServerPublisher:
 
         with patch("httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
+            captured_payload = {}
+
+            async def post(*args, **kwargs):
+                body = b"".join([chunk async for chunk in kwargs["content"]])
+                captured_payload.update(json.loads(body))
+                return mock_response
+
+            mock_client.post = AsyncMock(side_effect=post)
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
             mock_client_cls.return_value = mock_client
 
             await publisher.publish(local_path=pkl_file, name="var", session_id="session-123")
 
-            payload = mock_client.post.call_args[1]["json"]
+            payload = captured_payload
             assert payload["session_id"] == "session-123"
 
     @pytest.mark.unit
@@ -402,6 +1352,34 @@ class TestServerPublisher:
 
         with pytest.raises(RuntimeError, match="_user_token"):
             await publisher.publish(local_path=pkl_file, name="var", session_id="")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "target_url",
+        [
+            "https://user:password@allowed.example",
+            "https://user%40tenant:password@allowed.example",
+            "https://@allowed.example",
+        ],
+    )
+    async def test_publish_rejects_userinfo_before_client_or_token_forwarding(self, tmp_path, monkeypatch, target_url):
+        from unittest.mock import patch
+
+        from ..data_access.publishers import ServerPublisher
+
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "allowed.example")
+        publisher = ServerPublisher(server_name="gis", target_url=target_url)
+        publisher._user_token = "must-not-be-forwarded"
+        publisher._source_server = "src"
+        publisher._transfer_id = "transfer-1"
+        pkl_file = tmp_path / "data.pkl"
+        pkl_file.write_bytes(b"data")
+
+        with patch("httpx.AsyncClient") as mock_client_cls, pytest.raises(ValueError, match="user information"):
+            await publisher.publish(local_path=pkl_file, name="var", session_id="")
+
+        mock_client_cls.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +1398,8 @@ class TestValidateTargetUrl:
         # Should not raise
         _validate_target_url("https://example.azurecontainerapps.io")
         _validate_target_url("https://example.azure.com/path")
+        _validate_target_url("https://example.azure.com:8443/mcp")
+        _validate_target_url("https://[2001:db8::1]:8443/mcp")
 
     @pytest.mark.unit
     def test_http_loopback_accepted(self):
@@ -497,6 +1477,48 @@ class TestValidateTargetUrl:
 
         with pytest.raises(ValueError, match="hostname"):
             _validate_target_url("https:///path")
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://user@allowed.example",
+            "https://user:password@allowed.example",
+            "https://@allowed.example",
+            "https://:password@allowed.example",
+            "https://user:@allowed.example",
+            "https://user%40tenant@allowed.example",
+            "https://user%3Apassword@allowed.example",
+            "https://user@[::1]:8000",
+        ],
+    )
+    def test_userinfo_authorities_are_rejected(self, monkeypatch, url):
+        from ..object_transfer import _validate_target_url
+
+        monkeypatch.setenv("OBJECT_TRANSFER_ALLOWED_HOSTS", "allowed.example ::1")
+        with pytest.raises(ValueError, match="user information"):
+            _validate_target_url(url)
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        ("url", "message"),
+        [
+            ("https://allowed.example%40evil.example", "percent-encoding"),
+            ("https://allowed.example%5cevil.example", "percent-encoding"),
+            ("https://allowed.example\\@evil.example", "ambiguous"),
+            ("https://allowed.example\\evil/path", "ambiguous"),
+            ("https://allowed.example/path\nforged", "ambiguous"),
+            ("https://allowed.example/path?sig=secret", "query string or fragment"),
+            ("https://allowed.example/path#secret", "query string or fragment"),
+            ("https://allowed.example:99999/path", "invalid authority"),
+            ("https://allowed.example:not-a-port/path", "invalid authority"),
+        ],
+    )
+    def test_ambiguous_or_credential_bearing_target_components_are_rejected(self, url, message):
+        from ..object_transfer import _validate_target_url
+
+        with pytest.raises(ValueError, match=message):
+            _validate_target_url(url)
 
     @pytest.mark.unit
     def test_non_http_scheme_rejected(self):

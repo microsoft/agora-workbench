@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .errors import InvalidRequestError
-from .identity import normalize_logical_path, split_alias
+from .identity import is_reserved_provider_path, normalize_logical_path, split_alias
 
 MANIFEST_VERSION = 1
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
@@ -35,6 +35,8 @@ class ManifestArtifact:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", normalize_logical_path(self.path))
+        if is_reserved_provider_path(self.path):
+            raise _invalid("Manifest artifact logical path is reserved for provider metadata.")
         object.__setattr__(self, "aliases", tuple(self.aliases))
         if self.artifact_id is not None:
             if not self.artifact_id.strip() or self.artifact_id != self.artifact_id.strip():

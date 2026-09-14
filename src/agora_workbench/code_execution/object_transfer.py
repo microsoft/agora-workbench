@@ -14,12 +14,27 @@ Typical flow (agent-triggered):
 """
 
 import base64
+import binascii
+
+import json
 import logging
+import math
 import os
+import re
+from collections.abc import AsyncIterable, Iterator
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import dill
+
+from agora_workbench.data_lake import RequestContext, TransferLimitError
+from agora_workbench.data_lake.transfer import (
+    TransferOptions,
+    TransferResult,
+    stream_chunks_to_file,
+)
 
 from . import agent_guidance
 
@@ -28,9 +43,409 @@ LOGGER = logging.getLogger(__name__)
 # Maximum serialized object size (256 MB).  Objects exceeding this limit
 # are rejected to prevent accidental memory exhaustion.
 MAX_TRANSFER_SIZE_BYTES = 256 * 1024 * 1024
+STREAMING_TRANSFER_VERSION = "2"
+STREAMING_TRANSFER_VERSION_HEADER = "X-Agora-Object-Transfer-Version"
+STREAMING_TRANSFER_INFO_HEADER = "X-Agora-Object-Transfer-Info"
+_STREAMING_DATA_MARKER = b',"data":"'
+_LEGACY_DATA_MARKER_RE = re.compile(rb',\s*"data"\s*:\s*"')
+_MAX_STREAMING_ENVELOPE_BYTES = 64 * 1024
+MAX_TRANSFER_BODY_BYTES = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4 + (2 * _MAX_STREAMING_ENVELOPE_BYTES)
+_MAX_CORRELATION_ID_LENGTH = 128
+_CORRELATION_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 
 # Loopback hostnames that are always permitted for local development / testing.
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+class _IncrementalBase64Decoder:
+    """Decode arbitrarily large input chunks using bounded aligned blocks."""
+
+    def __init__(self, decoded_chunk_size: int) -> None:
+        self._pending = b""
+        self._block_size = max(4, (decoded_chunk_size // 3) * 4)
+
+    @property
+    def has_pending(self) -> bool:
+        return bool(self._pending)
+
+    def decode(self, encoded: bytes | memoryview, *, final: bool) -> Iterator[bytes]:
+        view = memoryview(encoded)
+        offset = 0
+        if self._pending:
+            needed = 4 - len(self._pending)
+            take = min(needed, len(view))
+            block = self._pending + bytes(view[:take])
+            offset += take
+            if len(block) < 4:
+                self._pending = block
+                if final:
+                    raise ValueError("Invalid base64 data.")
+                return
+            self._pending = b""
+            try:
+                yield base64.b64decode(block, validate=True)
+            except binascii.Error as exc:
+                raise ValueError("Invalid base64 data.") from exc
+
+        available = len(view) - offset
+        complete_length = available if final else available - (available % 4)
+        if complete_length % 4:
+            raise ValueError("Invalid base64 data.")
+        end = offset + complete_length
+        while offset < end:
+            block_end = min(end, offset + self._block_size)
+            block_end -= (block_end - offset) % 4
+            try:
+                yield base64.b64decode(view[offset:block_end], validate=True)
+            except binascii.Error as exc:
+                raise ValueError("Invalid base64 data.") from exc
+            offset = block_end
+        self._pending = bytes(view[offset:])
+        if final and self._pending:
+            raise ValueError("Invalid base64 data.")
+
+
+def parse_object_transfer_version(value: str | None) -> bool:
+    """Return whether the exact supported streaming version was requested."""
+    if value is None:
+        return False
+    if value == STREAMING_TRANSFER_VERSION:
+        return True
+    raise ValueError("Unsupported object transfer version.")
+
+
+def encode_streaming_transfer_info(
+    *,
+    variable_name: str,
+    session_id: str,
+    metadata: dict[str, Any],
+    size_bytes: int,
+    checksum_sha256: str,
+) -> str:
+    """Encode bounded metadata for the versioned streaming receive path."""
+    payload = json.dumps(
+        {
+            "variable_name": variable_name,
+            "session_id": session_id,
+            "metadata": metadata,
+            "size_bytes": size_bytes,
+            "checksum_sha256": checksum_sha256,
+        },
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode()
+
+
+def decode_streaming_transfer_info(value: str) -> dict[str, Any]:
+    """Decode and validate the versioned streaming transfer header."""
+    if not value or len(value) > _MAX_STREAMING_ENVELOPE_BYTES:
+        raise ValueError("Invalid streaming transfer metadata.")
+    try:
+        decoded = base64.b64decode(value, altchars=b"-_", validate=True)
+        payload = json.loads(decoded)
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid streaming transfer metadata.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid streaming transfer metadata.")
+    return payload
+
+
+def parse_transfer_correlation_metadata(metadata: Any) -> tuple[str | None, str | None]:
+    """Validate optional opaque identifiers used in peer transfer diagnostics."""
+    if not isinstance(metadata, dict):
+        raise ValueError("Invalid object transfer correlation metadata.")
+
+    identifiers: list[str | None] = []
+    for field in ("source_server", "transfer_id"):
+        value = metadata.get(field)
+        if value in (None, ""):
+            identifiers.append(None)
+            continue
+        if (
+            not isinstance(value, str)
+            or len(value) > _MAX_CORRELATION_ID_LENGTH
+            or _CORRELATION_ID_RE.fullmatch(value) is None
+        ):
+            raise ValueError("Invalid object transfer correlation metadata.")
+        identifiers.append(value)
+    return identifiers[0], identifiers[1]
+
+
+def _reject_duplicate_streaming_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Invalid streaming object transfer envelope.")
+        result[key] = value
+    return result
+
+
+def _validate_streaming_envelope_prefix(prefix: bytes) -> str:
+    """Validate the bounded JSON prefix preceding the streamed base64 string."""
+    try:
+        envelope = json.loads(prefix + b',"data":""}', object_pairs_hook=_reject_duplicate_streaming_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Invalid streaming object transfer envelope.") from exc
+    if (
+        not isinstance(envelope, dict)
+        or set(envelope) != {"variable_name", "data"}
+        or not isinstance(envelope["variable_name"], str)
+    ):
+        raise ValueError("Invalid streaming object transfer envelope.")
+    return envelope["variable_name"]
+
+
+def _validate_streaming_envelope_suffix(suffix: bytes) -> dict[str, Any]:
+    """Validate the bounded JSON tail following the streamed base64 string."""
+
+    try:
+        envelope = json.loads(b'{"data":""' + suffix, object_pairs_hook=_reject_duplicate_streaming_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Invalid streaming object transfer envelope.") from exc
+    if not isinstance(envelope, dict):
+        raise ValueError("Invalid streaming object transfer envelope.")
+    expected_keys = {"data", "metadata"}
+    if "session_id" in envelope:
+        expected_keys.add("session_id")
+    if (
+        set(envelope) != expected_keys
+        or not isinstance(envelope["metadata"], dict)
+        or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
+    ):
+        raise ValueError("Invalid streaming object transfer envelope.")
+    return envelope
+
+
+@dataclass(frozen=True)
+class LegacyTransferEnvelope:
+    """Validated legacy v1 metadata accompanying a streamed payload."""
+
+    variable_name: str
+    session_id: str
+    metadata: dict[str, Any]
+    result: TransferResult
+
+
+async def receive_legacy_streaming_transfer(
+    chunks: AsyncIterable[bytes],
+    destination: Path,
+    *,
+    options: TransferOptions,
+    context: RequestContext,
+    _destination_parent_fd: int | None = None,
+) -> LegacyTransferEnvelope:
+    """Incrementally decode a legacy v1 JSON/base64 envelope with bounded memory."""
+    prefix = bytearray()
+    suffix = bytearray()
+    decoder = _IncrementalBase64Decoder(options.chunk_size)
+    reading_data = False
+    data_complete = False
+    total_body_bytes = 0
+    validated_envelope: dict[str, Any] | None = None
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise ValueError("Invalid legacy object transfer envelope.")
+            parsed[key] = value
+        return parsed
+
+    def validate_envelope() -> dict[str, Any]:
+        try:
+            envelope = json.loads(
+                bytes(prefix) + b',"data":""' + bytes(suffix),
+                object_pairs_hook=reject_duplicate_keys,
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("Invalid legacy object transfer envelope.") from exc
+        expected_keys = {"variable_name", "data", "metadata"}
+        if isinstance(envelope, dict) and "session_id" in envelope:
+            expected_keys.add("session_id")
+        if (
+            not isinstance(envelope, dict)
+            or set(envelope) != expected_keys
+            or not isinstance(envelope.get("variable_name"), str)
+            or not isinstance(envelope.get("metadata"), dict)
+            or ("session_id" in envelope and not isinstance(envelope["session_id"], str))
+        ):
+            raise ValueError("Invalid legacy object transfer envelope.")
+        return envelope
+
+    async def decoded_chunks():
+        nonlocal reading_data, data_complete, total_body_bytes, validated_envelope
+        async for chunk in chunks:
+            total_body_bytes += len(chunk)
+            if total_body_bytes > MAX_TRANSFER_BODY_BYTES:
+                raise TransferLimitError(
+                    "Object transfer request body exceeds the maximum encoded size.",
+                    resource_id="peer object transfer",
+                    operation="receive",
+                )
+            if data_complete:
+                if len(suffix) + len(chunk) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid legacy object transfer envelope.")
+                suffix.extend(chunk)
+                continue
+            payload_start = 0
+            if not reading_data:
+                scan_offset = 0
+                marker = None
+                while scan_offset < len(chunk):
+                    remaining_capacity = _MAX_STREAMING_ENVELOPE_BYTES - len(prefix)
+                    if remaining_capacity <= 0:
+                        raise ValueError("Invalid legacy object transfer envelope.")
+                    block_end = min(len(chunk), scan_offset + min(4096, remaining_capacity))
+                    previous_prefix_length = len(prefix)
+                    prefix.extend(memoryview(chunk)[scan_offset:block_end])
+                    marker = _LEGACY_DATA_MARKER_RE.search(prefix)
+                    if marker is not None:
+                        payload_start = scan_offset + max(0, marker.end() - previous_prefix_length)
+                        del prefix[marker.start() :]
+                        reading_data = True
+                        break
+                    scan_offset = block_end
+                if marker is None:
+                    continue
+
+            closing_quote = chunk.find(b'"', payload_start)
+            encoded_end = len(chunk) if closing_quote < 0 else closing_quote
+            encoded = memoryview(chunk)[payload_start:encoded_end]
+            if closing_quote >= 0:
+                data_complete = True
+                trailing = memoryview(chunk)[closing_quote + 1 :]
+                if len(suffix) + len(trailing) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid legacy object transfer envelope.")
+                suffix.extend(trailing)
+            for decoded in decoder.decode(encoded, final=data_complete):
+                if decoded:
+                    yield decoded
+
+        if not reading_data or not data_complete or decoder.has_pending:
+            raise ValueError("Invalid legacy object transfer envelope.")
+        validated_envelope = validate_envelope()
+
+    result = await stream_chunks_to_file(
+        decoded_chunks(),
+        destination,
+        options=options,
+        context=context,
+        operation="receive",
+        resource="peer object transfer",
+        _destination_parent_fd=_destination_parent_fd,
+    )
+    assert validated_envelope is not None
+    return LegacyTransferEnvelope(
+        variable_name=validated_envelope["variable_name"],
+        session_id=validated_envelope.get("session_id", ""),
+        metadata=validated_envelope["metadata"],
+        result=result,
+    )
+
+
+async def receive_streaming_transfer(
+    chunks: AsyncIterable[bytes],
+    destination: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    options: TransferOptions,
+    context: RequestContext,
+    _destination_parent_fd: int | None = None,
+    expected_variable_name: str | None = None,
+    expected_session_id: str | None = None,
+    expected_metadata: dict[str, Any] | None = None,
+) -> TransferResult:
+    """Incrementally decode a versioned JSON/base64 request into a bounded file."""
+    transfer_options = replace(options, expected_sha256=expected_sha256)
+    if options.expected_sha256 not in (None, transfer_options.expected_sha256):
+        raise ValueError("Transfer options checksum does not match the declared checksum.")
+    effective_max_bytes = options.effective_max_bytes
+    max_encoded_bytes = math.ceil(effective_max_bytes * 4 / 3) + 4 if effective_max_bytes is not None else None
+
+    async def decoded_chunks():
+        prefix = bytearray()
+        decoder = _IncrementalBase64Decoder(options.chunk_size)
+        suffix = bytearray()
+        reading_data = False
+        data_complete = False
+        total_encoded = 0
+        total_decoded = 0
+
+        async for chunk in chunks:
+            total_encoded += len(chunk)
+            encoded_payload_bytes = max(0, total_encoded - _MAX_STREAMING_ENVELOPE_BYTES)
+            if max_encoded_bytes is not None and encoded_payload_bytes > max_encoded_bytes:
+                raise TransferLimitError(
+                    f"Transfer exceeds the configured {max_encoded_bytes}-byte encoded limit.",
+                    resource_id="peer object transfer",
+                    operation="receive",
+                )
+            if data_complete:
+                if len(suffix) + len(chunk) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid streaming object transfer envelope.")
+                suffix.extend(chunk)
+                continue
+            payload_start = 0
+            if not reading_data:
+                scan_offset = 0
+                marker_index = -1
+                while scan_offset < len(chunk):
+                    remaining_capacity = _MAX_STREAMING_ENVELOPE_BYTES - len(prefix)
+                    if remaining_capacity <= 0:
+                        raise ValueError("Invalid streaming object transfer envelope.")
+                    block_end = min(len(chunk), scan_offset + min(4096, remaining_capacity))
+                    previous_prefix_length = len(prefix)
+                    prefix.extend(memoryview(chunk)[scan_offset:block_end])
+                    marker_index = prefix.find(_STREAMING_DATA_MARKER)
+                    if marker_index >= 0:
+                        marker_end = marker_index + len(_STREAMING_DATA_MARKER)
+                        payload_start = scan_offset + max(0, marker_end - previous_prefix_length)
+                        del prefix[marker_index:]
+                        reading_data = True
+                        break
+                    scan_offset = block_end
+                if marker_index < 0:
+                    continue
+
+            closing_quote = chunk.find(b'"', payload_start)
+            encoded_end = len(chunk) if closing_quote < 0 else closing_quote
+            encoded = memoryview(chunk)[payload_start:encoded_end]
+            if closing_quote >= 0:
+                data_complete = True
+                trailing = memoryview(chunk)[closing_quote + 1 :]
+                if len(suffix) + len(trailing) > _MAX_STREAMING_ENVELOPE_BYTES:
+                    raise ValueError("Invalid streaming object transfer envelope.")
+                suffix.extend(trailing)
+            for decoded in decoder.decode(encoded, final=data_complete):
+                if decoded:
+                    total_decoded += len(decoded)
+                    if total_decoded > expected_size:
+                        raise ValueError("Decoded payload exceeded the declared size.")
+                    yield decoded
+
+        if not reading_data or not data_complete or decoder.has_pending:
+            raise ValueError("Invalid streaming object transfer envelope.")
+        variable_name = _validate_streaming_envelope_prefix(bytes(prefix))
+        envelope = _validate_streaming_envelope_suffix(bytes(suffix))
+        if expected_variable_name is not None and variable_name != expected_variable_name:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
+        if expected_session_id is not None and envelope.get("session_id", "") != expected_session_id:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
+        if expected_metadata is not None and envelope["metadata"] != expected_metadata:
+            raise ValueError("Streaming object transfer envelope does not match authenticated metadata.")
+        if total_decoded != expected_size:
+            raise ValueError("Decoded payload size did not match the declared size.")
+
+    return await stream_chunks_to_file(
+        decoded_chunks(),
+        destination,
+        options=transfer_options,
+        context=context,
+        operation="receive",
+        resource="peer object transfer",
+        _destination_parent_fd=_destination_parent_fd,
+    )
 
 
 def _validate_target_url(url: str, trust_http: bool = False) -> None:
@@ -72,11 +487,27 @@ def _validate_target_url(url: str, trust_http: bool = False) -> None:
     Raises:
         ValueError: If the URL fails any validation rule.
     """
+    if "\\" in url or any(ord(char) <= 32 or ord(char) == 127 for char in url):
+        raise ValueError("Object transfer target URL contains an invalid or ambiguous character.")
     parsed = urlparse(url)
-    host = parsed.hostname or ""
+    try:
+        username = parsed.username
+        password = parsed.password
+        port = parsed.port
+        host = (parsed.hostname or "").lower().rstrip(".")
+    except ValueError as exc:
+        raise ValueError("Object transfer target URL has an invalid authority.") from exc
 
     if not host:
         raise ValueError("Object transfer target URL must include a hostname.")
+    if username is not None or password is not None or "@" in parsed.netloc:
+        raise ValueError("Object transfer target URL must not include user information.")
+    if "%" in host:
+        raise ValueError("Object transfer target URL hostname must not contain percent-encoding.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Object transfer target URL must not include a query string or fragment.")
+    if port is not None and not 1 <= port <= 65535:
+        raise ValueError("Object transfer target URL has an invalid port.")
 
     is_loopback = host in _LOOPBACK_HOSTS
 

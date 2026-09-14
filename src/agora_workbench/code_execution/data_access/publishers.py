@@ -17,19 +17,60 @@ Authentication:
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import hashlib
+import io
+import inspect
+import json
 import logging
 import os
 import re
-import shutil
+import secrets
+import stat
+import tempfile
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
+
+from agora_workbench.data_lake.errors import (
+    TransferChecksumError,
+    TransferTimeoutError,
+    UnsupportedOperationError,
+    UnsafePathError,
+)
+from agora_workbench.data_lake.identity import (
+    AzureBlobScope,
+    RESERVED_PROVIDER_PREFIX,
+    azure_uri_from_blob_name,
+    normalize_logical_path,
+    parse_azure_uri,
+    validate_managed_revision_path,
+    validate_azure_object_path,
+)
+from agora_workbench.data_lake.models import RequestContext
+from agora_workbench.data_lake.transfer import (
+    TransferDiagnostic,
+    TransferOptions,
+    TransferResult,
+    _run_blocking_io,
+    await_transfer,
+    check_transfer_cancelled,
+    check_transfer_size,
+    emit_transfer_diagnostic,
+    safe_transfer_resource,
+    stream_chunks_to_file,
+)
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
 
 LOGGER = logging.getLogger(__name__)
+_USE_POSIX_DIR_FDS = os.name == "posix"
 
 
 class ObjectTransferError(RuntimeError):
@@ -47,14 +88,89 @@ class ObjectTransferError(RuntimeError):
 
     def to_payload(self) -> dict[str, Any]:
         """Return the peer response as an agent-facing send-tool error."""
-        payload = dict(self.response_body)
+        payload = _sanitize_peer_payload(self.response_body)
         payload["success"] = False
-        payload["error"] = str(self)
+        payload["error"] = safe_transfer_resource(str(self))
         payload["status_code"] = self.status_code
         return payload
 
 
-def _validate_artifact_name(name: str) -> None:
+def _sanitize_peer_payload(value: Any) -> Any:
+    """Recursively sanitize untrusted peer response data for presentation."""
+    if isinstance(value, str):
+        return safe_transfer_resource(value)
+    if isinstance(value, dict):
+        reserved_keys = {key for key in value if not isinstance(key, str) or safe_transfer_resource(key) == key}
+        sanitized: dict[Any, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str) or key in reserved_keys:
+                safe_key = key
+            else:
+                base_key = safe_transfer_resource(key) or "redacted-key"
+                safe_key = base_key
+                suffix = 2
+                while safe_key in reserved_keys or safe_key in sanitized:
+                    safe_key = f"{base_key} [{suffix}]"
+                    suffix += 1
+            sanitized[safe_key] = _sanitize_peer_payload(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_sanitize_peer_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_peer_payload(item) for item in value)
+    return value
+
+
+class _TrackedUploadStream(io.BufferedReader):
+    """Track which immutable snapshot byte ranges a provider actually reads."""
+
+    def __init__(self, source: Any) -> None:
+        super().__init__(source)
+        self._ranges: list[tuple[int, int]] = []
+
+    def _record(self, start: int, length: int) -> None:
+        if length > 0:
+            self._ranges.append((start, start + length))
+
+    def read(self, size: int = -1) -> bytes:
+        start = self.tell()
+        data = super().read(size)
+        self._record(start, len(data))
+        return data
+
+    def readinto(self, buffer: Any) -> int | None:
+        start = self.tell()
+        count = super().readinto(buffer)
+        if count is not None:
+            self._record(start, count)
+        return count
+
+    def read1(self, size: int = -1) -> bytes:
+        start = self.tell()
+        data = super().read1(size)
+        self._record(start, len(data))
+        return data
+
+    def readinto1(self, buffer: Any) -> int:
+        start = self.tell()
+        count = super().readinto1(buffer)
+        self._record(start, count)
+        return count
+
+    def fully_consumed(self, size: int) -> bool:
+        if size == 0:
+            return True
+        cursor = 0
+        for start, end in sorted(self._ranges):
+            if start > cursor:
+                return False
+            cursor = max(cursor, end)
+            if cursor >= size:
+                return True
+        return False
+
+
+def _validate_artifact_name(name: str, *, allow_reserved: bool = False) -> None:
     """Validate that an artifact name is safe for path construction.
 
     Rejects absolute paths, parent-directory traversal (``..``), and empty
@@ -74,6 +190,95 @@ def _validate_artifact_name(name: str) -> None:
     normalized = name.replace("\\", "/")
     if ".." in Path(normalized).parts:
         raise ValueError(f"Artifact name must not contain parent traversal (..): {name!r}")
+    normalized = normalize_logical_path(normalized)
+    if not allow_reserved and (
+        normalized == RESERVED_PROVIDER_PREFIX.rstrip("/") or normalized.startswith(RESERVED_PROVIDER_PREFIX)
+    ):
+        raise ValueError("Artifact name is reserved for provider metadata.")
+
+
+def _validate_blob_metadata(metadata: dict[str, str]) -> None:
+    """Validate Azure Blob metadata keys before any upload side effects."""
+    for key in metadata:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) is None:
+            raise ValueError(
+                "Azure Blob metadata keys must start with an ASCII letter or underscore "
+                "and contain only ASCII letters, digits, and underscores."
+            )
+
+
+def _open_posix_path_no_follow(path: Path, *, directory: bool = False) -> int:
+    """Open an absolute or relative path without following any symlink component."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    current = os.open(
+        os.path.sep,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        for index, part in enumerate(absolute_path.parts[1:]):
+            is_final = index == len(absolute_path.parts) - 2
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            if not is_final or directory:
+                flags |= getattr(os, "O_DIRECTORY", 0)
+            next_fd = os.open(part, flags, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _open_or_create_verified_directory(parent_fd: int, name: str, *, mode: int, operation: str) -> int:
+    """Open one directory entry only when its observed and opened identities match."""
+    try:
+        os.mkdir(name, mode=mode, dir_fd=parent_fd)
+    except FileExistsError:
+        LOGGER.debug("Secure directory component already exists: %s", name)
+    entry_stat = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISDIR(entry_stat.st_mode):
+        raise UnsafePathError("Directory path component is not a real directory.", operation=operation)
+    descriptor = os.open(
+        name,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+        dir_fd=parent_fd,
+    )
+    try:
+        opened_stat = os.fstat(descriptor)
+        if not stat.S_ISDIR(opened_stat.st_mode) or (opened_stat.st_dev, opened_stat.st_ino) != (
+            entry_stat.st_dev,
+            entry_stat.st_ino,
+        ):
+            raise UnsafePathError("Directory identity changed during traversal.", operation=operation)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _open_or_create_posix_directory(path: Path) -> int:
+    """Create and open a directory through no-follow descriptor traversal."""
+    absolute_path = Path(os.path.abspath(os.fspath(path)))
+    current = os.open(
+        os.path.sep,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    try:
+        for part in absolute_path.parts[1:]:
+            next_fd = _open_or_create_verified_directory(current, part, mode=0o700, operation="upload")
+            os.close(current)
+            current = next_fd
+        return current
+    except BaseException:
+        os.close(current)
+        raise
+
+
+def _validate_publish_path(path: str, *, allow_reserved: bool) -> str:
+    """Validate an ordinary path or the narrow trusted managed-revision seam."""
+    if allow_reserved:
+        return validate_managed_revision_path(path)
+    return validate_azure_object_path(path)
 
 
 # Regex for parsing tag-based destination strings.
@@ -99,6 +304,188 @@ def parse_destination_tag(destination: str) -> tuple[str, str] | None:
     if m:
         return m.group(1), m.group(2)
     return None
+
+
+def _inspect_publish_capabilities(implementation: Any) -> tuple[bool, bool, bool]:
+    """Return keyword capabilities for one publisher implementation."""
+    try:
+        signature = inspect.signature(implementation)
+    except (TypeError, ValueError):
+        return False, False, False
+    supports_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+    )
+    return supports_kwargs, "options" in signature.parameters, "context" in signature.parameters
+
+
+@functools.lru_cache(maxsize=128)
+def _publish_capabilities(implementation: Any) -> tuple[bool, bool, bool]:
+    """Return cached keyword capabilities for a stable publisher implementation."""
+    return _inspect_publish_capabilities(implementation)
+
+
+async def publish_compat(
+    publisher: Any,
+    *,
+    local_path: Path,
+    name: str,
+    session_id: str,
+    options: TransferOptions | None = None,
+    context: RequestContext | None = None,
+) -> str:
+    """Call modern or legacy publishers without masking implementation errors."""
+    publish = publisher.publish
+    implementation = getattr(publish, "__func__", None)
+    if implementation is not None and implementation is getattr(type(publisher), "publish", None):
+        supports_kwargs, supports_options, supports_context = _publish_capabilities(implementation)
+    else:
+        supports_kwargs, supports_options, supports_context = _inspect_publish_capabilities(publish)
+    kwargs: dict[str, object] = {
+        "local_path": local_path,
+        "name": name,
+        "session_id": session_id,
+    }
+    if supports_kwargs or supports_options:
+        kwargs["options"] = options
+    if supports_kwargs or supports_context:
+        kwargs["context"] = context
+    return await publish(**kwargs)
+
+
+async def _copy_local_descriptors(
+    local_path: Path,
+    output_fd: int,
+    options: TransferOptions,
+    context: RequestContext,
+) -> TransferResult:
+    """Copy a regular source descriptor to an already-secured destination descriptor."""
+    source_fd = (
+        _open_posix_path_no_follow(local_path)
+        if _USE_POSIX_DIR_FDS
+        else os.open(local_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    )
+    started = time.monotonic()
+    total = 0
+    digest = hashlib.sha256()
+
+    async def copy() -> None:
+        nonlocal total
+        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+            raise UnsafePathError("Upload source must be a regular file.", operation="upload")
+        check_transfer_size(os.fstat(source_fd).st_size, options, operation="upload", resource=str(local_path))
+        while True:
+            check_transfer_cancelled(options, operation="upload", resource=str(local_path))
+            chunk = await _run_blocking_io(
+                lambda: os.read(source_fd, options.chunk_size),
+                options=options,
+                operation="upload",
+                resource=str(local_path),
+            )
+            if not chunk:
+                break
+            total += len(chunk)
+            check_transfer_size(total, options, operation="upload", resource=str(local_path))
+            digest.update(chunk)
+            remaining = memoryview(chunk)
+            while remaining:
+                written = await _run_blocking_io(
+                    lambda: os.write(output_fd, remaining),
+                    options=options,
+                    operation="upload",
+                    resource=str(local_path),
+                )
+                if written <= 0:
+                    raise OSError("Transfer output made no write progress.")
+                remaining = remaining[written:]
+        await _run_blocking_io(
+            lambda: os.fsync(output_fd),
+            options=options,
+            operation="upload",
+            resource=str(local_path),
+        )
+
+    try:
+        if options.timeout_seconds is None:
+            await copy()
+        else:
+            async with asyncio.timeout(options.timeout_seconds):
+                await copy()
+    except TimeoutError as exc:
+        message = (
+            "Provider transfer timed out."
+            if options.timeout_seconds is None
+            else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+        )
+        raise TransferTimeoutError(
+            message,
+            resource_id=str(local_path),
+            operation="upload",
+        ) from exc
+    finally:
+        os.close(source_fd)
+    checksum = digest.hexdigest()
+    if options.expected_sha256 is not None and not secrets.compare_digest(checksum, options.expected_sha256):
+        raise TransferChecksumError(
+            "Transfer checksum did not match the expected SHA-256 digest.",
+            resource_id=str(local_path),
+            operation="upload",
+        )
+    return TransferResult(total, checksum, context, str(local_path), time.monotonic() - started)
+
+
+async def _copy_local_path(
+    local_path: Path,
+    destination: Path,
+    options: TransferOptions,
+    context: RequestContext,
+    *,
+    portable_root: Path | None = None,
+    portable_root_identity: tuple[int, int] | None = None,
+) -> TransferResult:
+    """Best-effort fallback for unrestricted local publishing on non-POSIX platforms."""
+
+    def open_verified_source():
+        source_path = local_path.resolve(strict=True)
+        source_stat = source_path.stat()
+        source_file = source_path.open("rb", buffering=0)
+        opened_stat = os.fstat(source_file.fileno())
+        if (opened_stat.st_dev, opened_stat.st_ino) != (source_stat.st_dev, source_stat.st_ino):
+            source_file.close()
+            raise UnsafePathError("Upload source identity changed before open.", operation="upload")
+        return source_path, source_file
+
+    source_path, source_file = await _run_blocking_io(
+        open_verified_source,
+        options=options,
+        operation="upload",
+        resource=str(local_path),
+    )
+    try:
+
+        async def chunks():
+            while True:
+                chunk = await _run_blocking_io(
+                    lambda: source_file.read(options.chunk_size),
+                    options=options,
+                    operation="upload",
+                    resource=str(source_path),
+                )
+                if not chunk:
+                    break
+                yield chunk
+
+        return await stream_chunks_to_file(
+            chunks(),
+            destination,
+            options=options,
+            context=context,
+            operation="upload",
+            resource=str(source_path),
+            _portable_root=portable_root,
+            _portable_root_identity=portable_root_identity,
+        )
+    finally:
+        await _run_blocking_io(source_file.close)
 
 
 class AssetPublisher(ABC):
@@ -138,7 +525,15 @@ class AssetPublisher(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
         """Publish a local artifact to this publisher's configured destination.
 
         The publisher owns path placement logic — it combines its configured
@@ -157,6 +552,21 @@ class AssetPublisher(ABC):
             or ``"/mnt/shared/outputs/session/name"``).
         """
         raise NotImplementedError
+
+    async def publish_with_result(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> tuple[str, TransferResult]:
+        """Publish with detailed transfer data when supported by the provider."""
+        raise UnsupportedOperationError(
+            f"{type(self).__name__} does not implement bounded file publishing.",
+            operation="upload",
+        )
 
     @abstractmethod
     def can_handle(self, destination: str) -> bool:
@@ -203,6 +613,9 @@ class BlobPublisher(AssetPublisher):
         account_url: str,
         container: str,
         credential: "AsyncTokenCredential | None" = None,
+        *,
+        prefix: str = "",
+        staging_dir: Path | str | None = None,
     ):
         """
         Initialise the BlobPublisher.
@@ -217,8 +630,36 @@ class BlobPublisher(AssetPublisher):
                 token refreshes.
         """
         super().__init__(credential=credential)
-        self._account_url = account_url.rstrip("/")
-        self._container = container
+        parsed = urlsplit(account_url)
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.username is not None
+            or parsed.password is not None
+            or "@" in parsed.netloc
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("BlobPublisher account_url must be a credential-free Azure HTTPS account URL.")
+        account, _, _ = parse_azure_uri(f"{account_url.rstrip('/')}/container")
+        scope = AzureBlobScope(account, container, prefix)
+        self._account_url = f"https://{scope.account}.blob.core.windows.net"
+        self._container = scope.container
+        self._prefix = scope.prefix
+        configured_staging = staging_dir or (
+            Path(os.getenv("MCP_ASSET_CACHE_DIR", os.getcwd())) / ".agora-transfer-staging"
+        )
+        self._staging_dir = Path(os.path.abspath(os.fspath(configured_staging)))
+        if not _USE_POSIX_DIR_FDS:
+            raise UnsupportedOperationError(
+                "BlobPublisher requires POSIX descriptor-relative filesystem support for secure staging.",
+                operation="upload",
+            )
+        self._staging_fd: int | None = None
+        self._staging_identity: tuple[int, int] | None = None
+        self._staging_fd = _open_or_create_posix_directory(self._staging_dir)
+        stat_result = os.fstat(self._staging_fd)
+        self._staging_identity = (stat_result.st_dev, stat_result.st_ino)
         self._client = None  # lazily initialised
 
     def _get_client(self):
@@ -234,16 +675,44 @@ class BlobPublisher(AssetPublisher):
 
     async def close(self) -> None:
         """Close the underlying BlobServiceClient."""
-        if self._client is not None:
-            await self._client.close()
-            self._client = None
+        try:
+            if self._client is not None:
+                await self._client.close()
+                self._client = None
+        finally:
+            if self._staging_fd is not None:
+                os.close(self._staging_fd)
+                self._staging_fd = None
+
+    def _open_verified_staging_root(self) -> int:
+        """Return the retained staging root after verifying its configured identity."""
+        if self._staging_fd is None or self._staging_identity is None:
+            raise UnsafePathError("Blob publisher staging root is unavailable.", operation="upload")
+        current_fd = _open_posix_path_no_follow(self._staging_dir, directory=True)
+        try:
+            stat_result = os.fstat(current_fd)
+            if (stat_result.st_dev, stat_result.st_ino) != self._staging_identity:
+                raise UnsafePathError(
+                    "Blob publisher staging root was replaced after configuration.", operation="upload"
+                )
+        finally:
+            os.close(current_fd)
+        return os.dup(self._staging_fd)
 
     def can_handle(self, destination: str) -> bool:
         """Return ``True`` for ``<blob>…</blob>`` destinations."""
         parsed = parse_destination_tag(destination)
         return parsed is not None and parsed[0] == "blob"
 
-    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
         """Upload *local_path* to ``{container}/{session_id}/{name}``.
 
         Args:
@@ -259,12 +728,41 @@ class BlobPublisher(AssetPublisher):
             azure.core.exceptions.ClientAuthenticationError: If the credential
                 is not authorised to write to the container.
         """
+        remote_uri, _ = await self.publish_with_result(
+            local_path,
+            name,
+            session_id,
+            options=options,
+            context=context,
+        )
+        return remote_uri
+
+    async def publish_with_result(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> tuple[str, TransferResult]:
+        """Upload a regular file with bounded reads, timeout, cancellation, and checksum."""
+        options = options or TransferOptions()
+        context = context or RequestContext()
+        _validate_blob_metadata(dict(options.object_metadata))
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
-
-        _validate_artifact_name(name)
-
-        blob_path = f"{session_id}/{name}"
+        _validate_artifact_name(name, allow_reserved=options.allow_reserved)
+        if session_id:
+            _validate_artifact_name(session_id)
+        relative_path = "/".join(part for part in (self._prefix, session_id, name) if part)
+        blob_path = _validate_publish_path(relative_path, allow_reserved=options.allow_reserved)
+        remote_uri = azure_uri_from_blob_name(
+            parse_azure_uri(f"{self._account_url}/{self._container}")[0],
+            self._container,
+            blob_path,
+        )
+        display_uri = safe_transfer_resource(remote_uri)
         LOGGER.info(
             "BlobPublisher: uploading %s → %s/%s/%s",
             local_path,
@@ -275,13 +773,130 @@ class BlobPublisher(AssetPublisher):
 
         client = self._get_client()
         blob_client = client.get_blob_client(container=self._container, blob=blob_path)
+        started = time.monotonic()
+        await emit_transfer_diagnostic(options, TransferDiagnostic("upload", "started", context, display_uri))
+        snapshot_name = f"{secrets.token_hex(16)}.upload"
+        staging_fd: int | None = None
+        snapshot_fd: int | None = None
+        snapshot_created = False
+        try:
+            staging_fd = self._open_verified_staging_root()
+            snapshot_fd = os.open(
+                snapshot_name,
+                os.O_RDWR | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=staging_fd,
+            )
+            snapshot_created = True
 
-        with open(local_path, "rb") as fh:
-            await blob_client.upload_blob(fh, overwrite=True)
+            async def perform_upload() -> TransferResult:
+                snapshot = await _copy_local_descriptors(local_path, snapshot_fd, options, context)
+                os.lseek(snapshot_fd, 0, os.SEEK_SET)
+                check_transfer_cancelled(options, operation="upload", resource=display_uri)
+                metadata = dict(options.object_metadata)
+                with _TrackedUploadStream(os.fdopen(os.dup(snapshot_fd), "rb", buffering=0)) as tracked_source:
+                    if options.create_exclusive and metadata:
+                        upload = blob_client.upload_blob(
+                            tracked_source,
+                            overwrite=False,
+                            if_none_match="*",
+                            metadata=metadata,
+                        )
+                    elif options.create_exclusive:
+                        upload = blob_client.upload_blob(
+                            tracked_source,
+                            overwrite=False,
+                            if_none_match="*",
+                        )
+                    elif metadata:
+                        upload = blob_client.upload_blob(
+                            tracked_source,
+                            overwrite=True,
+                            metadata=metadata,
+                        )
+                    else:
+                        upload = blob_client.upload_blob(tracked_source, overwrite=True)
+                    await await_transfer(
+                        upload,
+                        TransferOptions(
+                            max_bytes=options.max_bytes,
+                            quota_bytes=options.quota_bytes,
+                            timeout_seconds=None,
+                            chunk_size=options.chunk_size,
+                            cancellation_event=options.cancellation_event,
+                        ),
+                        operation="upload",
+                        resource=display_uri,
+                    )
+                    if not tracked_source.fully_consumed(snapshot.bytes_transferred):
+                        raise OSError("Blob provider did not consume the complete immutable upload snapshot.")
+                return snapshot
 
-        remote_uri = f"{self._account_url}/{self._container}/{blob_path}"
-        LOGGER.info("BlobPublisher: uploaded %d bytes → %s", local_path.stat().st_size, remote_uri)
-        return remote_uri
+            try:
+                if options.timeout_seconds is None:
+                    uploaded = await perform_upload()
+                else:
+                    async with asyncio.timeout(options.timeout_seconds):
+                        uploaded = await perform_upload()
+            except TimeoutError as exc:
+                message = (
+                    "Provider transfer timed out."
+                    if options.timeout_seconds is None
+                    else f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout."
+                )
+                raise TransferTimeoutError(
+                    message,
+                    resource_id=display_uri,
+                    operation="upload",
+                ) from exc
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("upload", "failed", context, display_uri, error_type=type(exc).__name__),
+            )
+            raise
+        finally:
+            if snapshot_fd is not None:
+                try:
+                    os.close(snapshot_fd)
+                except OSError:
+                    LOGGER.warning("Could not close BlobPublisher snapshot descriptor.", exc_info=True)
+            try:
+                if snapshot_created and staging_fd is not None:
+                    try:
+                        os.unlink(snapshot_name, dir_fd=staging_fd)
+                    except FileNotFoundError:
+                        LOGGER.debug("BlobPublisher snapshot was already removed: %s", snapshot_name)
+                    except OSError:
+                        LOGGER.warning("Could not remove BlobPublisher snapshot %s.", snapshot_name, exc_info=True)
+            finally:
+                if staging_fd is not None:
+                    try:
+                        os.close(staging_fd)
+                    except OSError:
+                        LOGGER.warning("Could not close BlobPublisher staging descriptor.", exc_info=True)
+        result = TransferResult(
+            uploaded.bytes_transferred,
+            uploaded.checksum_sha256,
+            context,
+            display_uri,
+            time.monotonic() - started,
+            True if options.create_exclusive else None,
+            options.object_metadata,
+        )
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic(
+                "upload",
+                "completed",
+                context,
+                display_uri,
+                result.bytes_transferred,
+                result.checksum_sha256,
+            ),
+        )
+        LOGGER.info("BlobPublisher: uploaded %d bytes → %s", result.bytes_transferred, display_uri)
+        return f"{self._account_url}{urlsplit(remote_uri).path}", result
 
 
 class GuiPublisher(AssetPublisher):
@@ -320,7 +935,15 @@ class GuiPublisher(AssetPublisher):
         parsed = parse_destination_tag(destination)
         return parsed is not None and parsed[0] == "gui"
 
-    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
         """Return the download URL for the artifact.
 
         The artifact must already be registered in the session manager's
@@ -341,6 +964,7 @@ class GuiPublisher(AssetPublisher):
             FileNotFoundError: If *local_path* does not exist.
             RuntimeError: If no download token was provided.
         """
+        del options, context
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
 
@@ -354,7 +978,7 @@ class GuiPublisher(AssetPublisher):
 
         public_base = (os.getenv("SERVER_PUBLIC_URL") or self._public_url_fn()).rstrip("/")
         download_url = f"{public_base}/artifacts/{session_id}/{token}/{name}"
-        LOGGER.info("GuiPublisher: exposing %s → %s", local_path, download_url)
+        LOGGER.info("GuiPublisher: exposing %s for session %s as %s", local_path, session_id, name)
         return download_url
 
 
@@ -381,14 +1005,185 @@ class LocalFilePublisher(AssetPublisher):
                 one).
         """
         super().__init__(credential=None)
-        self._base_dir = Path(base_dir).resolve()
+        self._base_dir = Path(os.path.abspath(os.fspath(base_dir)))
+        self._anchor_fd: int | None = None
+        self._anchor_path: Path | None = None
+        self._anchor_identity: tuple[int, int] | None = None
+        self._root_parts: tuple[str, ...] = ()
+        self._root_identity: tuple[int, int] | None = None
+        self._portable_anchor_path: Path | None = None
+        self._portable_anchor_identity: tuple[int, int] | None = None
+        if _USE_POSIX_DIR_FDS:
+            self._initialize_root_anchor()
+        else:
+            self._initialize_portable_root()
+
+    def _initialize_portable_root(self) -> None:
+        """Capture the existing root or nearest ancestor for best-effort non-POSIX validation."""
+        candidate = self._base_dir
+        while not candidate.exists():
+            if candidate == candidate.parent:
+                raise FileNotFoundError(f"No existing ancestor for local publisher root: {self._base_dir}")
+            candidate = candidate.parent
+        if candidate.is_symlink() or not candidate.is_dir():
+            raise UnsafePathError("Local publisher root ancestor must be a real directory.", operation="upload")
+        resolved_anchor = candidate.resolve(strict=True)
+        anchor_stat = resolved_anchor.stat()
+        self._portable_anchor_path = resolved_anchor
+        self._portable_anchor_identity = (anchor_stat.st_dev, anchor_stat.st_ino)
+        if self._base_dir.exists():
+            resolved_root = self._base_dir.resolve(strict=True)
+            if resolved_root != self._base_dir:
+                raise UnsafePathError("Local publisher root must not be a symlink.", operation="upload")
+            root_stat = resolved_root.stat()
+            self._root_identity = (root_stat.st_dev, root_stat.st_ino)
+
+    def _verify_portable_root(self) -> Path:
+        """Resolve the non-POSIX root while checking identities captured at construction."""
+        if self._portable_anchor_path is None or self._portable_anchor_identity is None:
+            raise UnsafePathError("Local publisher root is unavailable.", operation="upload")
+        current_anchor = self._portable_anchor_path.resolve(strict=True)
+        anchor_stat = current_anchor.stat()
+        if (
+            current_anchor != self._portable_anchor_path
+            or (anchor_stat.st_dev, anchor_stat.st_ino) != self._portable_anchor_identity
+        ):
+            raise UnsafePathError("Local publisher root ancestor identity changed.", operation="upload")
+        self._base_dir.mkdir(parents=True, exist_ok=True)
+        resolved_root = self._base_dir.resolve(strict=True)
+        if resolved_root != self._base_dir:
+            raise UnsafePathError("Local publisher root must not be a symlink.", operation="upload")
+        if not resolved_root.is_relative_to(self._portable_anchor_path):
+            raise UnsafePathError("Local publisher root escapes its configured ancestor.", operation="upload")
+        root_stat = resolved_root.stat()
+        identity = (root_stat.st_dev, root_stat.st_ino)
+        if self._root_identity is None:
+            self._root_identity = identity
+        elif identity != self._root_identity:
+            raise UnsafePathError("Local publisher root was replaced after configuration.", operation="upload")
+        return resolved_root
+
+    def _initialize_root_anchor(self) -> None:
+        """Retain a trusted ancestor descriptor for no-follow root traversal."""
+        candidate = self._base_dir if self._base_dir == self._base_dir.parent else self._base_dir.parent
+        while True:
+            try:
+                candidate.lstat()
+                break
+            except FileNotFoundError:
+                if candidate == candidate.parent:
+                    raise
+                candidate = candidate.parent
+        if candidate.is_symlink() or not candidate.is_dir():
+            raise UnsafePathError("Local publisher root ancestor must be a real directory.", operation="upload")
+        self._anchor_fd = _open_posix_path_no_follow(candidate, directory=True)
+        anchor_stat = os.fstat(self._anchor_fd)
+        self._anchor_path = candidate
+        self._anchor_identity = (anchor_stat.st_dev, anchor_stat.st_ino)
+        relative_existing = self._base_dir.relative_to(candidate).parts
+        self._root_parts = tuple(relative_existing) if relative_existing else ()
+        if not self._root_parts:
+            stat_result = os.fstat(self._anchor_fd)
+            self._root_identity = (stat_result.st_dev, stat_result.st_ino)
+            return
+        try:
+            self._base_dir.lstat()
+        except FileNotFoundError:
+            return
+        root_fd = _open_posix_path_no_follow(self._base_dir, directory=True)
+        try:
+            stat_result = os.fstat(root_fd)
+            self._root_identity = (stat_result.st_dev, stat_result.st_ino)
+        finally:
+            os.close(root_fd)
+
+    def _open_verified_root(self) -> int:
+        """Open/create the configured root beneath the retained trusted ancestor."""
+        if self._anchor_fd is None or self._anchor_path is None or self._anchor_identity is None:
+            raise UnsafePathError("Local publisher root is unavailable.", operation="upload")
+        try:
+            anchor_entry = self._anchor_path.stat(follow_symlinks=False)
+        except OSError as exc:
+            raise UnsafePathError(
+                "Local publisher root ancestor was replaced after configuration.",
+                operation="upload",
+            ) from exc
+        retained_anchor = os.fstat(self._anchor_fd)
+        if (
+            not stat.S_ISDIR(anchor_entry.st_mode)
+            or (anchor_entry.st_dev, anchor_entry.st_ino) != self._anchor_identity
+            or (retained_anchor.st_dev, retained_anchor.st_ino) != self._anchor_identity
+        ):
+            raise UnsafePathError("Local publisher root ancestor was replaced after configuration.", operation="upload")
+        current = os.dup(self._anchor_fd)
+        try:
+            for part in self._root_parts:
+                next_fd = _open_or_create_verified_directory(current, part, mode=0o750, operation="upload")
+                os.close(current)
+                current = next_fd
+            stat_result = os.fstat(current)
+            identity = (stat_result.st_dev, stat_result.st_ino)
+            if self._root_identity is None:
+                self._root_identity = identity
+            elif identity != self._root_identity:
+                raise UnsafePathError("Local publisher root was replaced after configuration.", operation="upload")
+            return current
+        except BaseException:
+            os.close(current)
+            raise
+
+    def _verify_destination_parent_binding(self, relative_parent: Path, expected_fd: int) -> None:
+        """Verify the retained destination parent is still reachable through the configured root."""
+        current = self._open_verified_root()
+        try:
+            for part in relative_parent.parts:
+                entry_stat = os.stat(part, dir_fd=current, follow_symlinks=False)
+                if not stat.S_ISDIR(entry_stat.st_mode):
+                    raise UnsafePathError("Local publish path component is not a directory.", operation="upload")
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=current,
+                )
+                try:
+                    opened_stat = os.fstat(next_fd)
+                    if (opened_stat.st_dev, opened_stat.st_ino) != (entry_stat.st_dev, entry_stat.st_ino):
+                        raise UnsafePathError("Directory identity changed during traversal.", operation="upload")
+                except BaseException:
+                    os.close(next_fd)
+                    raise
+                os.close(current)
+                current = next_fd
+            current_stat = os.fstat(current)
+            expected_stat = os.fstat(expected_fd)
+            if (current_stat.st_dev, current_stat.st_ino) != (expected_stat.st_dev, expected_stat.st_ino):
+                raise UnsafePathError(
+                    "Local publish destination moved outside the configured root.",
+                    operation="upload",
+                )
+        finally:
+            os.close(current)
+
+    async def close(self) -> None:
+        """Close the retained trusted root descriptor."""
+        if self._anchor_fd is not None:
+            os.close(self._anchor_fd)
+            self._anchor_fd = None
 
     def can_handle(self, destination: str) -> bool:
         """Return ``True`` for ``<local>…</local>`` destinations."""
         parsed = parse_destination_tag(destination)
         return parsed is not None and parsed[0] == "local"
 
-    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
         """Copy *local_path* to ``{base_dir}/{session_id}/{name}``.
 
         Args:
@@ -402,23 +1197,181 @@ class LocalFilePublisher(AssetPublisher):
         Raises:
             FileNotFoundError: If *local_path* does not exist.
         """
+        destination, _ = await self.publish_with_result(
+            local_path,
+            name,
+            session_id,
+            options=options,
+            context=context,
+        )
+        return destination
+
+    async def publish_with_result(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> tuple[str, TransferResult]:
+        """Copy into the configured root without following destination symlinks."""
+        options = options or TransferOptions()
+        context = context or RequestContext()
         if not local_path.is_file():
             raise FileNotFoundError(f"Artifact not found at {local_path}")
+        _validate_artifact_name(name, allow_reserved=options.allow_reserved)
+        if session_id:
+            _validate_artifact_name(session_id)
+        if options.object_metadata:
+            raise UnsupportedOperationError(
+                "LocalFilePublisher does not support object metadata.",
+                operation="upload",
+            )
+        relative_text = normalize_logical_path("/".join(part for part in (session_id, name) if part))
+        _validate_publish_path(relative_text, allow_reserved=options.allow_reserved)
+        relative = Path(relative_text)
+        destination = self._base_dir / relative
+        started = time.monotonic()
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic("upload", "started", context, str(destination)),
+        )
+        try:
+            result = await self._copy_secure(local_path, relative, options, context)
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                options,
+                TransferDiagnostic("upload", "failed", context, str(destination), error_type=type(exc).__name__),
+            )
+            raise
+        result = TransferResult(
+            result.bytes_transferred,
+            result.checksum_sha256,
+            context,
+            str(destination),
+            time.monotonic() - started,
+            result.created,
+            result.object_metadata,
+        )
+        await emit_transfer_diagnostic(
+            options,
+            TransferDiagnostic(
+                "upload",
+                "completed",
+                context,
+                str(destination),
+                result.bytes_transferred,
+                result.checksum_sha256,
+            ),
+        )
+        LOGGER.info("LocalFilePublisher: copied %d bytes → %s", result.bytes_transferred, destination)
+        return str(destination), result
 
-        _validate_artifact_name(name)
+    async def _copy_secure(
+        self,
+        local_path: Path,
+        relative: Path,
+        options: TransferOptions,
+        context: RequestContext,
+    ) -> TransferResult:
+        if not _USE_POSIX_DIR_FDS:
+            resolved_base = self._verify_portable_root()
+            root_stat = resolved_base.stat()
+            root_identity = (root_stat.st_dev, root_stat.st_ino)
+            lexical_parent = resolved_base / relative.parent
+            if lexical_parent.resolve(strict=False) != lexical_parent:
+                raise UnsafePathError("Local publish parent must not contain symlinks.", operation="upload")
+            if not lexical_parent.is_relative_to(resolved_base):
+                raise UnsafePathError("Local publish path escapes the configured root.", operation="upload")
+            lexical_parent.mkdir(parents=True, exist_ok=True)
+            resolved_parent = lexical_parent.resolve(strict=True)
+            if resolved_parent != lexical_parent or not resolved_parent.is_relative_to(resolved_base):
+                raise UnsafePathError("Local publish parent changed during creation.", operation="upload")
+            destination = resolved_parent / relative.name
+            return await _copy_local_path(
+                local_path,
+                destination,
+                options,
+                context,
+                portable_root=resolved_base,
+                portable_root_identity=root_identity,
+            )
 
-        dest = (self._base_dir / session_id / name).resolve()
-        # Belt-and-suspenders: verify the resolved path is still within the
-        # expected session directory even after symlink resolution.
-        session_root = (self._base_dir / session_id).resolve()
-        if not dest.is_relative_to(session_root):
-            raise ValueError(f"Resolved artifact path {dest} escapes the session directory {session_root}.")
-        dest.parent.mkdir(parents=True, exist_ok=True)
-
-        LOGGER.info("LocalFilePublisher: copying %s → %s", local_path, dest)
-        shutil.copy2(local_path, dest)
-        LOGGER.info("LocalFilePublisher: copied %d bytes → %s", dest.stat().st_size, dest)
-        return str(dest)
+        root_fd = self._open_verified_root()
+        parent_fd = root_fd
+        temporary_name = f".{relative.name}.{secrets.token_hex(8)}.part"
+        output_fd: int | None = None
+        temporary_created = False
+        committed = False
+        try:
+            for part in relative.parts[:-1]:
+                next_fd = _open_or_create_verified_directory(parent_fd, part, mode=0o750, operation="upload")
+                if parent_fd != root_fd:
+                    os.close(parent_fd)
+                parent_fd = next_fd
+            output_fd = os.open(
+                temporary_name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+                0o640,
+                dir_fd=parent_fd,
+            )
+            temporary_created = True
+            result = await _copy_local_descriptors(local_path, output_fd, options, context)
+            os.close(output_fd)
+            output_fd = None
+            check_transfer_cancelled(options, operation="upload", resource=str(local_path))
+            self._verify_destination_parent_binding(relative.parent, parent_fd)
+            if options.create_exclusive:
+                os.link(
+                    temporary_name,
+                    relative.name,
+                    src_dir_fd=parent_fd,
+                    dst_dir_fd=parent_fd,
+                    follow_symlinks=False,
+                )
+                # Linking the validated bytes under the final name commits the
+                # publish; removal of the temporary name is best-effort.
+                committed = True
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    # The final link is committed and no temporary name remains.
+                    pass
+                except OSError:
+                    LOGGER.warning(
+                        "Could not remove committed local publish temporary file %s.",
+                        temporary_name,
+                        exc_info=True,
+                    )
+            else:
+                os.replace(temporary_name, relative.name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+                committed = True
+            return TransferResult(
+                result.bytes_transferred,
+                result.checksum_sha256,
+                result.context,
+                result.resource,
+                result.elapsed_seconds,
+                True if options.create_exclusive else None,
+                options.object_metadata,
+            )
+        finally:
+            if output_fd is not None:
+                os.close(output_fd)
+            if temporary_created and not committed:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    # A failed operation may already have removed its temporary file.
+                    pass
+                except OSError:
+                    LOGGER.warning(
+                        "Could not remove failed local publish temporary file %s.", temporary_name, exc_info=True
+                    )
+            if parent_fd != root_fd:
+                os.close(parent_fd)
+            os.close(root_fd)
 
 
 class ServerPublisher(AssetPublisher):
@@ -499,7 +1452,15 @@ class ServerPublisher(AssetPublisher):
         """
         return False
 
-    async def publish(self, local_path: Path, name: str, session_id: str) -> str:
+    async def publish(
+        self,
+        local_path: Path,
+        name: str,
+        session_id: str,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> str:
         """Serialize and push the file to the target server's kernel.
 
         The file at ``local_path`` is expected to be a dill-serialized pickle.
@@ -531,12 +1492,20 @@ class ServerPublisher(AssetPublisher):
 
         import httpx
 
-        from ..object_transfer import _validate_target_url
+        from ..object_transfer import (
+            MAX_TRANSFER_SIZE_BYTES,
+            STREAMING_TRANSFER_INFO_HEADER,
+            STREAMING_TRANSFER_VERSION,
+            STREAMING_TRANSFER_VERSION_HEADER,
+            _validate_target_url,
+            encode_streaming_transfer_info,
+        )
+
+        options = options or TransferOptions()
+        context = context or RequestContext()
 
         if not local_path.is_file():
             raise FileNotFoundError(f"Transfer file not found at {local_path}")
-
-        serialized = local_path.read_bytes()
 
         # user_token is injected by the send tool before calling publish
         user_token = getattr(self, "_user_token", "")
@@ -550,40 +1519,152 @@ class ServerPublisher(AssetPublisher):
         base = _re.sub(r"/mcp/?$", "", self._target_url.rstrip("/"))
         receive_url = f"{base}/object-transfer/receive"
 
-        payload: dict = {
-            "variable_name": name,
-            "data": base64.b64encode(serialized).decode("ascii"),
-            "metadata": {
-                "source_server": getattr(self, "_source_server", "unknown"),
-                "transfer_id": getattr(self, "_transfer_id", ""),
-            },
-        }
-        if session_id:
-            payload["session_id"] = session_id
-
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
-        ) as client:
-            response = await client.post(
-                receive_url,
-                json=payload,
-                headers={"Authorization": f"Bearer {user_token}"},
+        configured_max = options.max_bytes
+        bounded_options = replace(
+            options,
+            max_bytes=MAX_TRANSFER_SIZE_BYTES
+            if configured_max is None
+            else min(configured_max, MAX_TRANSFER_SIZE_BYTES),
+        )
+        display_resource = safe_transfer_resource(receive_url)
+        started = time.monotonic()
+        await emit_transfer_diagnostic(
+            bounded_options,
+            TransferDiagnostic("upload", "started", context, display_resource),
+        )
+        snapshot = tempfile.TemporaryFile(mode="w+b")
+        try:
+            snapshot_result = await _copy_local_descriptors(local_path, snapshot.fileno(), bounded_options, context)
+            await _run_blocking_io(
+                lambda: snapshot.seek(0),
+                options=bounded_options,
+                operation="upload",
+                resource=display_resource,
             )
-            try:
-                result = response.json()
-            except ValueError:
-                response.raise_for_status()
-                raise
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic("upload", "failed", context, display_resource, error_type=type(exc).__name__),
+            )
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+            raise
 
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError as exc:
-                if isinstance(result, dict):
-                    raise ObjectTransferError(
-                        server_name=self._server_name,
-                        status_code=response.status_code,
-                        response_body=result,
-                    ) from exc
-                raise
+        metadata = {
+            "source_server": getattr(self, "_source_server", "unknown"),
+            "transfer_id": getattr(self, "_transfer_id", ""),
+        }
+        transfer_info = encode_streaming_transfer_info(
+            variable_name=name,
+            session_id=session_id,
+            metadata=metadata,
+            size_bytes=snapshot_result.bytes_transferred,
+            checksum_sha256=snapshot_result.checksum_sha256,
+        )
+        prefix = ('{"variable_name":' + json.dumps(name) + ',"data":"').encode()
+        suffix = (
+            '","metadata":'
+            + json.dumps(metadata, separators=(",", ":"))
+            + (',"session_id":' + json.dumps(session_id) if session_id else "")
+            + "}"
+        ).encode()
+
+        async def payload_chunks():
+            yield prefix
+            remainder = b""
+            while True:
+                check_transfer_cancelled(bounded_options, operation="upload", resource=display_resource)
+                chunk = await _run_blocking_io(
+                    lambda: snapshot.read(bounded_options.chunk_size),
+                    options=bounded_options,
+                    operation="upload",
+                    resource=display_resource,
+                )
+                if not chunk:
+                    break
+                data = remainder + chunk
+                encoded_length = len(data) - (len(data) % 3)
+                if encoded_length:
+                    yield base64.b64encode(data[:encoded_length])
+                remainder = data[encoded_length:]
+            if remainder:
+                yield base64.b64encode(remainder)
+            yield suffix
+
+        elapsed = time.monotonic() - started
+        remaining_timeout = None if options.timeout_seconds is None else options.timeout_seconds - elapsed
+        if remaining_timeout is not None and remaining_timeout <= 0:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic(
+                    "upload",
+                    "failed",
+                    context,
+                    display_resource,
+                    error_type=TransferTimeoutError.__name__,
+                ),
+            )
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+            raise TransferTimeoutError(
+                f"Transfer exceeded the configured {options.timeout_seconds:g}-second timeout.",
+                resource_id=display_resource,
+                operation="upload",
+            )
+        request_options = replace(bounded_options, timeout_seconds=remaining_timeout, expected_sha256=None)
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=10.0, read=self._timeout, write=self._timeout, pool=10.0),
+            ) as client:
+                response = await await_transfer(
+                    client.post(
+                        receive_url,
+                        content=payload_chunks(),
+                        headers={
+                            "Authorization": f"Bearer {user_token}",
+                            "Content-Type": "application/json",
+                            STREAMING_TRANSFER_VERSION_HEADER: STREAMING_TRANSFER_VERSION,
+                            STREAMING_TRANSFER_INFO_HEADER: transfer_info,
+                        },
+                    ),
+                    request_options,
+                    operation="upload",
+                    resource=display_resource,
+                )
+                try:
+                    result = response.json()
+                except ValueError:
+                    response.raise_for_status()
+                    raise
+
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError as exc:
+                    if isinstance(result, dict):
+                        raise ObjectTransferError(
+                            server_name=self._server_name,
+                            status_code=response.status_code,
+                            response_body=result,
+                        ) from exc
+                    raise
+        except BaseException as exc:
+            await emit_transfer_diagnostic(
+                bounded_options,
+                TransferDiagnostic("upload", "failed", context, display_resource, error_type=type(exc).__name__),
+            )
+            raise
+        finally:
+            await _run_blocking_io(snapshot.close, options=None, operation="upload", resource=display_resource)
+
+        await emit_transfer_diagnostic(
+            bounded_options,
+            TransferDiagnostic(
+                "upload",
+                "completed",
+                context,
+                display_resource,
+                snapshot_result.bytes_transferred,
+                snapshot_result.checksum_sha256,
+            ),
+        )
 
         return f"Injected '{name}' into {self._server_name} kernel (response: {result})"

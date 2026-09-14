@@ -34,6 +34,14 @@ class TestArtifactIdGeneration:
     def test_different_uris_different_ids(self):
         assert artifact_id_from_uri("/a.csv") != artifact_id_from_uri("/b.csv")
 
+
+@pytest.mark.parametrize("separator", ["?", "#"])
+def test_malformed_azure_alias_does_not_persist_query_or_fragment_secret(separator):
+    alias = db_module._canonical_storage_alias(f"az://account123/container/file%{separator}sig=DO_NOT_STORE")
+
+    assert alias == "az://account123/container/file%"
+    assert "DO_NOT_STORE" not in alias
+
     def test_returns_16_char_hex(self):
         result = artifact_id_from_uri("/data/test.csv")
         assert len(result) == 16

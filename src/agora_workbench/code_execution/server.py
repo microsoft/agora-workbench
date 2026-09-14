@@ -1878,11 +1878,22 @@ class CodeExecutionServer(BaseMCPServer):
                     pub_instance._transfer_id = transfer_id
 
                 target_session = session_id if is_server_destination else session.session_id
-                remote_uri = await pub_instance.publish(
+                from agora_workbench.data_lake import RequestContext
+                from agora_workbench.data_lake.transfer import safe_artifact_reference
+                from .data_access.publishers import publish_compat
+
+                remote_uri = await publish_compat(
+                    pub_instance,
                     local_path=materialized_path,
                     name=logical_name,
                     session_id=target_session,
+                    context=RequestContext(
+                        request_id=transfer_id,
+                        caller_id=session.user_identity,
+                        attributes={"session_id": session.session_id},
+                    ),
                 )
+                display_remote_uri = safe_artifact_reference(remote_uri)
 
                 # --- Activity event ---
                 # Activity event types: server destinations → object_sent,
@@ -1898,7 +1909,7 @@ class CodeExecutionServer(BaseMCPServer):
                         "name": logical_name,
                         "session_id": session.session_id,
                         "success": True,
-                        "remote_uri": remote_uri,
+                        "remote_uri": display_remote_uri,
                     }
                 )
 
@@ -1908,7 +1919,7 @@ class CodeExecutionServer(BaseMCPServer):
                         "data_ref": data_ref,
                         "destination": to,
                         "name": logical_name,
-                        "remote_uri": remote_uri,
+                        "remote_uri": display_remote_uri,
                         "transfer_id": transfer_id,
                     },
                     indent=2,
@@ -1916,7 +1927,7 @@ class CodeExecutionServer(BaseMCPServer):
 
             except _ObjectTransferError as exc:
                 error_payload = exc.to_payload()
-                LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                LOGGER.error("send tool failed: %s", error_payload["error"])
                 server.activity_publisher.publish_nowait(
                     {
                         **error_payload,
@@ -1930,7 +1941,8 @@ class CodeExecutionServer(BaseMCPServer):
                 )
                 return _json.dumps(error_payload, indent=2)
             except Exception as exc:
-                LOGGER.error("send tool failed: %s", exc, exc_info=True)
+                safe_error = f"{type(exc).__name__}: {safe_artifact_reference(str(exc))}"
+                LOGGER.error("send tool failed: %s", safe_error)
                 event_type = "object_sent" if is_server_destination else "artifact_published"
                 server.activity_publisher.publish_nowait(
                     {
@@ -1941,11 +1953,11 @@ class CodeExecutionServer(BaseMCPServer):
                         "destination": to,
                         "session_id": session.session_id if session else mcp_session_id,
                         "success": False,
-                        "error": f"{type(exc).__name__}: {exc}",
+                        "error": safe_error,
                     }
                 )
                 return _json.dumps(
-                    {"success": False, "error": f"{type(exc).__name__}: {exc}"},
+                    {"success": False, "error": safe_error},
                     indent=2,
                 )
             finally:
@@ -2751,67 +2763,246 @@ else:
             it by variable name in subsequent code execution calls.
             """
             import keyword
-            import math
             import os
+            import stat
             import tempfile
 
-            from .object_transfer import ObjectSerializer, MAX_TRANSFER_SIZE_BYTES
+            from starlette.requests import ClientDisconnect
+
+            from agora_workbench.data_lake import (
+                RequestContext,
+                TransferCancelledError,
+                TransferChecksumError,
+                TransferLimitError,
+                TransferTimeoutError,
+            )
+            from agora_workbench.data_lake.transfer import TransferOptions
+
+            from .object_transfer import (
+                MAX_TRANSFER_SIZE_BYTES,
+                MAX_TRANSFER_BODY_BYTES,
+                STREAMING_TRANSFER_INFO_HEADER,
+                STREAMING_TRANSFER_VERSION_HEADER,
+                decode_streaming_transfer_info,
+                parse_object_transfer_version,
+                parse_transfer_correlation_metadata,
+                receive_legacy_streaming_transfer,
+                receive_streaming_transfer,
+            )
+
+            transfer_version = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER)
+            try:
+                streaming_transfer = parse_object_transfer_version(transfer_version)
+            except ValueError as exc:
+                return JSONResponse(
+                    {"success": False, "error": str(exc)},
+                    status_code=400,
+                )
+            stage_directory: Path | None = None
+            stage_directory_fd: int | None = None
+            stage_directory_identity: tuple[int, int] | None = None
+            stage_file_fd: int | None = None
+            stage_file_identity: tuple[int, int] | None = None
+            temp_path: str | None = None
+            expected_size: int | None = None
+            expected_sha256: str | None = None
+
+            def create_transfer_stage() -> Path:
+                nonlocal stage_directory, stage_directory_fd, stage_directory_identity, temp_path
+                stage_directory = Path(tempfile.mkdtemp(prefix="_mcp_transfer_receive_"))
+                descriptor: int | None = None
+                try:
+                    entry_stat = stage_directory.lstat()
+                    descriptor = os.open(
+                        stage_directory,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+                    )
+                    opened_stat = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISDIR(entry_stat.st_mode)
+                        or not stat.S_ISDIR(opened_stat.st_mode)
+                        or (entry_stat.st_dev, entry_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino)
+                    ):
+                        raise RuntimeError("Object transfer staging directory identity changed.")
+                    stage_directory_fd = descriptor
+                    descriptor = None
+                    stage_directory_identity = (opened_stat.st_dev, opened_stat.st_ino)
+                    temp_path = str(stage_directory / "payload.pkl")
+                    return Path(temp_path)
+                except BaseException:
+                    if descriptor is not None:
+                        os.close(descriptor)
+                    try:
+                        stage_directory.rmdir()
+                    except FileNotFoundError:
+                        # The failed initialization no longer owns a directory entry.
+                        pass
+                    except OSError:
+                        LOGGER.warning(
+                            "Could not remove failed object transfer staging directory.",
+                            exc_info=True,
+                        )
+                    stage_directory = None
+                    raise
+
+            def pin_transfer_stage() -> os.stat_result:
+                nonlocal stage_file_fd, stage_file_identity
+                if stage_directory_fd is None:
+                    raise RuntimeError("Object transfer staging directory is unavailable.")
+                entry_stat = os.stat("payload.pkl", dir_fd=stage_directory_fd, follow_symlinks=False)
+                if not stat.S_ISREG(entry_stat.st_mode):
+                    raise RuntimeError("Object transfer staging file is not a regular file.")
+                descriptor = os.open(
+                    "payload.pkl",
+                    os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=stage_directory_fd,
+                )
+                opened_stat = os.fstat(descriptor)
+                if not stat.S_ISREG(opened_stat.st_mode) or (entry_stat.st_dev, entry_stat.st_ino) != (
+                    opened_stat.st_dev,
+                    opened_stat.st_ino,
+                ):
+                    os.close(descriptor)
+                    raise RuntimeError("Object transfer staging file identity changed.")
+                stage_file_fd = descriptor
+                stage_file_identity = (opened_stat.st_dev, opened_stat.st_ino)
+                return opened_stat
+
+            def discard_transfer_stage() -> None:
+                nonlocal stage_directory_fd, stage_file_fd
+                if stage_directory_fd is not None and stage_file_identity is not None:
+                    try:
+                        entry_stat = os.stat("payload.pkl", dir_fd=stage_directory_fd, follow_symlinks=False)
+                        if (entry_stat.st_dev, entry_stat.st_ino) == stage_file_identity:
+                            os.unlink("payload.pkl", dir_fd=stage_directory_fd)
+                    except FileNotFoundError:
+                        # The owned staging entry was already removed.
+                        pass
+                    except OSError:
+                        LOGGER.warning("Could not safely remove object transfer staging file.", exc_info=True)
+                if stage_file_fd is not None:
+                    os.close(stage_file_fd)
+                    stage_file_fd = None
+                if stage_directory_fd is not None:
+                    os.close(stage_directory_fd)
+                    stage_directory_fd = None
+                if stage_directory is not None and stage_directory_identity is not None:
+                    try:
+                        directory_stat = stage_directory.lstat()
+                        if (directory_stat.st_dev, directory_stat.st_ino) == stage_directory_identity:
+                            stage_directory.rmdir()
+                    except FileNotFoundError:
+                        # The private staging directory was already removed.
+                        pass
+                    except OSError:
+                        LOGGER.warning("Could not safely remove object transfer staging directory.", exc_info=True)
+
+            if streaming_transfer:
+                try:
+                    transfer_info = decode_streaming_transfer_info(
+                        request.headers.get(STREAMING_TRANSFER_INFO_HEADER, "")
+                    )
+                except ValueError as exc:
+                    return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
+                variable_name = transfer_info.get("variable_name")
+                session_id = transfer_info.get("session_id")
+                transfer_metadata = transfer_info.get("metadata") or {}
+                expected_size = transfer_info.get("size_bytes")
+                expected_sha256 = transfer_info.get("checksum_sha256")
+                if (
+                    not isinstance(variable_name, str)
+                    or not isinstance(session_id, str)
+                    or not isinstance(transfer_metadata, dict)
+                    or isinstance(expected_size, bool)
+                    or not isinstance(expected_size, int)
+                    or expected_size < 0
+                    or expected_size > MAX_TRANSFER_SIZE_BYTES
+                    or not isinstance(expected_sha256, str)
+                ):
+                    return JSONResponse(
+                        {"success": False, "error": "Invalid streaming transfer metadata."},
+                        status_code=400,
+                    )
+                try:
+                    TransferOptions(expected_sha256=expected_sha256)
+                except ValueError:
+                    return JSONResponse(
+                        {"success": False, "error": "Invalid streaming transfer metadata."},
+                        status_code=400,
+                    )
+            else:
+                content_length = request.headers.get("content-length")
+                try:
+                    declared_length = int(content_length) if content_length is not None else None
+                except ValueError:
+                    return JSONResponse({"success": False, "error": "Invalid Content-Length header"}, status_code=400)
+                if declared_length is not None and (declared_length < 0 or declared_length > MAX_TRANSFER_BODY_BYTES):
+                    return JSONResponse(
+                        {"success": False, "error": "Payload exceeds maximum transfer size"},
+                        status_code=413,
+                    )
+                legacy_destination = create_transfer_stage()
+                try:
+                    legacy_envelope = await receive_legacy_streaming_transfer(
+                        request.stream(),
+                        legacy_destination,
+                        options=TransferOptions(
+                            max_bytes=MAX_TRANSFER_SIZE_BYTES,
+                            quota_bytes=MAX_TRANSFER_SIZE_BYTES,
+                        ),
+                        context=RequestContext(),
+                        _destination_parent_fd=stage_directory_fd,
+                    )
+                    pin_transfer_stage()
+                except TransferLimitError:
+                    discard_transfer_stage()
+                    return JSONResponse(
+                        {"success": False, "error": "Payload exceeds maximum transfer size"},
+                        status_code=413,
+                    )
+                except ClientDisconnect:
+                    discard_transfer_stage()
+                    return JSONResponse(
+                        {"success": False, "error": "Object transfer client disconnected"},
+                        status_code=499,
+                    )
+                except (TransferTimeoutError, TransferCancelledError):
+                    discard_transfer_stage()
+                    return JSONResponse(
+                        {"success": False, "error": "Object transfer receive was interrupted"},
+                        status_code=408,
+                    )
+                except (ValueError, RuntimeError, OSError) as exc:
+                    discard_transfer_stage()
+                    error_message = str(exc)
+                    if error_message == "Invalid legacy object transfer envelope.":
+                        error_message = "Invalid JSON body"
+                    return JSONResponse(
+                        {"success": False, "error": error_message},
+                        status_code=400,
+                    )
+                variable_name = legacy_envelope.variable_name
+                session_id = legacy_envelope.session_id
+                transfer_metadata = legacy_envelope.metadata
 
             try:
-                body = await request.json()
-            except Exception:
-                return JSONResponse({"success": False, "error": "Invalid JSON body"}, status_code=400)
-
-            variable_name = body.get("variable_name")
-            data_b64 = body.get("data")
-            session_id = body.get("session_id")
-            transfer_metadata = body.get("metadata") or {}
-
-            if not isinstance(variable_name, str) or not isinstance(data_b64, str):
-                return JSONResponse(
-                    {"success": False, "error": "'variable_name' and 'data' must be strings"},
-                    status_code=400,
-                )
-
-            if not variable_name or not data_b64:
-                return JSONResponse(
-                    {"success": False, "error": "Missing required fields: 'variable_name' and 'data'"},
-                    status_code=400,
-                )
+                source_server, transfer_id = parse_transfer_correlation_metadata(transfer_metadata)
+            except ValueError as exc:
+                discard_transfer_stage()
+                return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
 
             # Validate variable_name is a safe Python identifier
             if not variable_name.isidentifier() or keyword.iskeyword(variable_name):
+                discard_transfer_stage()
                 return JSONResponse(
                     {"success": False, "error": f"Invalid Python variable name: '{variable_name}'"},
                     status_code=400,
                 )
 
-            # Enforce size limit on the base64 payload before decoding.
-            # Base64 encodes 3 bytes as 4 chars, so ceil(n * 4/3) + padding.
-            max_b64_len = math.ceil(MAX_TRANSFER_SIZE_BYTES * 4 / 3) + 4
-            if len(data_b64) > max_b64_len:
-                return JSONResponse(
-                    {"success": False, "error": "Payload exceeds maximum transfer size"},
-                    status_code=413,
-                )
-
-            try:
-                serialized_data = ObjectSerializer.from_base64(data_b64)
-            except Exception as e:
-                return JSONResponse(
-                    {"success": False, "error": f"Invalid base64 data: {e}"},
-                    status_code=400,
-                )
-
-            if len(serialized_data) > MAX_TRANSFER_SIZE_BYTES:
-                return JSONResponse(
-                    {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
-                    status_code=413,
-                )
-
             # Get the authenticated user identity from context (set by AuthMiddleware)
             caller_identity = get_current_user_identity()
             if not caller_identity:
+                discard_transfer_stage()
                 return JSONResponse(
                     {"success": False, "error": "Authentication required"},
                     status_code=401,
@@ -2823,6 +3014,7 @@ else:
                 try:
                     session = self.session_manager.get_session(session_id)
                 except (ValueError, KeyError):
+                    discard_transfer_stage()
                     return JSONResponse(
                         {"success": False, "error": f"Session '{session_id}' not found"},
                         status_code=404,
@@ -2840,6 +3032,7 @@ else:
                         continue
 
             if not session:
+                discard_transfer_stage()
                 return JSONResponse(
                     {
                         "success": False,
@@ -2851,6 +3044,7 @@ else:
 
             # Verify session ownership: caller must own the target session
             if session.user_identity != caller_identity:
+                discard_transfer_stage()
                 LOGGER.warning(
                     f"Object transfer rejected: caller {caller_identity} does not own "
                     f"session {session.session_id} (owner: {session.user_identity})"
@@ -2861,19 +3055,88 @@ else:
                 )
 
             # Inject the object into the kernel namespace via temp file
-            fd, temp_path = tempfile.mkstemp(prefix="_mcp_transfer_", suffix=".pkl")
-            os.close(fd)
+            if temp_path is None:
+                create_transfer_stage()
+            assert temp_path is not None
             try:
-                # Write serialized bytes to temp file
-                with open(temp_path, "wb") as f:
-                    f.write(serialized_data)
+                if streaming_transfer:
+                    assert expected_size is not None
+                    assert expected_sha256 is not None
+                    try:
+                        await receive_streaming_transfer(
+                            request.stream(),
+                            Path(temp_path),
+                            expected_size=expected_size,
+                            expected_sha256=expected_sha256,
+                            options=TransferOptions(
+                                max_bytes=MAX_TRANSFER_SIZE_BYTES,
+                                quota_bytes=MAX_TRANSFER_SIZE_BYTES,
+                                expected_sha256=expected_sha256,
+                            ),
+                            context=RequestContext(
+                                request_id=transfer_id,
+                                caller_id=caller_identity,
+                                attributes={"session_id": session.session_id},
+                            ),
+                            _destination_parent_fd=stage_directory_fd,
+                            expected_variable_name=variable_name,
+                            expected_session_id=session_id,
+                            expected_metadata=transfer_metadata,
+                        )
+                        pinned_stat = pin_transfer_stage()
+                    except TransferLimitError:
+                        return JSONResponse(
+                            {"success": False, "error": "Decoded payload exceeds maximum transfer size"},
+                            status_code=413,
+                        )
+                    except TransferChecksumError:
+                        return JSONResponse(
+                            {"success": False, "error": "Decoded payload checksum did not match"},
+                            status_code=400,
+                        )
+                    except TransferTimeoutError:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer receive timed out"},
+                            status_code=408,
+                        )
+                    except TransferCancelledError:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer receive was cancelled"},
+                            status_code=499,
+                        )
+                    except ClientDisconnect:
+                        return JSONResponse(
+                            {"success": False, "error": "Object transfer client disconnected"},
+                            status_code=499,
+                        )
+                    except ValueError as exc:
+                        return JSONResponse(
+                            {"success": False, "error": str(exc)},
+                            status_code=400,
+                        )
+                    received_size = pinned_stat.st_size
+                else:
+                    if stage_file_fd is None:
+                        raise RuntimeError("Object transfer staging file is unavailable.")
+                    received_size = os.fstat(stage_file_fd).st_size
 
                 # Deserialize and assign in the kernel
+                if stage_file_identity is None:
+                    raise RuntimeError("Object transfer staging file identity is unavailable.")
+                expected_device, expected_inode = stage_file_identity
                 deserialize_code = (
-                    f"import dill as __pkl__\n"
-                    f"with open({temp_path!r}, 'rb') as __f__:\n"
-                    f"    {variable_name} = __pkl__.load(__f__)\n"
-                    f"del __pkl__, __f__\n"
+                    "import dill as __pkl__, os as __os__, stat as __stat__\n"
+                    f"__fd__ = __os__.open({temp_path!r}, __os__.O_RDONLY | getattr(__os__, 'O_NOFOLLOW', 0))\n"
+                    "try:\n"
+                    "    __st__ = __os__.fstat(__fd__)\n"
+                    f"    if not __stat__.S_ISREG(__st__.st_mode) or "
+                    f"(__st__.st_dev, __st__.st_ino) != ({expected_device}, {expected_inode}):\n"
+                    "        raise RuntimeError('Object transfer staging file identity changed.')\n"
+                    "    with __os__.fdopen(__fd__, 'rb', closefd=False) as __f__:\n"
+                    f"        {variable_name} = __pkl__.load(__f__)\n"
+                    "finally:\n"
+                    "    __os__.close(__fd__)\n"
+                    "del __pkl__, __os__, __stat__, __fd__, __st__, __f__\n"
                 )
                 working_dir_str = str(self.working_dir) if self.working_dir else None
                 stdout, stderr, success, _displays, _artifacts = await self.session_manager.execute_code_for_session(
@@ -2887,8 +3150,8 @@ else:
                         "session=%s variable=%s source=%s transfer_id=%s: %s",
                         session.session_id,
                         variable_name,
-                        transfer_metadata.get("source_server"),
-                        transfer_metadata.get("transfer_id"),
+                        source_server,
+                        transfer_id,
                         error_msg,
                     )
                     self.activity_publisher.publish_nowait(
@@ -2896,12 +3159,11 @@ else:
                             "type": "object_received",
                             "description": (
                                 f"Receive '{variable_name}' from "
-                                f"{transfer_metadata.get('source_server') or 'another server'} "
-                                f"failed: kernel injection error"
+                                f"{source_server or 'another server'} failed: kernel injection error"
                             ),
-                            "transfer_id": transfer_metadata.get("transfer_id"),
+                            "transfer_id": transfer_id,
                             "variable_name": variable_name,
-                            "source_server": transfer_metadata.get("source_server"),
+                            "source_server": source_server,
                             "session_id": session.session_id,
                             "success": False,
                             "error": error_msg,
@@ -2928,13 +3190,10 @@ else:
                 self.activity_publisher.publish_nowait(
                     {
                         "type": "object_received",
-                        "description": (
-                            f"Received '{variable_name}' from "
-                            f"{transfer_metadata.get('source_server') or 'another server'}"
-                        ),
-                        "transfer_id": transfer_metadata.get("transfer_id"),
+                        "description": (f"Received '{variable_name}' from {source_server or 'another server'}"),
+                        "transfer_id": transfer_id,
                         "variable_name": variable_name,
-                        "source_server": transfer_metadata.get("source_server"),
+                        "source_server": source_server,
                         "session_id": session.session_id,
                         "success": True,
                     }
@@ -2945,7 +3204,7 @@ else:
                         "success": True,
                         "variable_name": variable_name,
                         "session_id": session.session_id,
-                        "size_bytes": len(serialized_data),
+                        "size_bytes": received_size,
                     }
                 )
             except Exception as e:
@@ -2955,10 +3214,7 @@ else:
                     status_code=500,
                 )
             finally:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
+                discard_transfer_stage()
 
         app.routes.append(Route("/object-transfer/receive", object_transfer_receive, methods=["POST"]))
 
