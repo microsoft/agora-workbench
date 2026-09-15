@@ -195,6 +195,12 @@ class BlobFetcher(AssetFetcher):
             or parsed.fragment
         ):
             raise ValueError("Blob service endpoints cannot contain credentials, query strings, or fragments.")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Blob service endpoints must use a valid port.") from exc
+        if port == 0:
+            raise ValueError("Blob service endpoint ports must be between 1 and 65535.")
         if parsed.scheme == "http":
             hostname = parsed.hostname
             try:
@@ -205,7 +211,7 @@ class BlobFetcher(AssetFetcher):
                 raise ValueError("Plain HTTP Blob service endpoints are limited to loopback emulators.")
         elif parsed.scheme != "https":
             raise ValueError("Blob service endpoints must use HTTPS or loopback HTTP.")
-        if any(segment in {".", ".."} for segment in parsed.path.split("/")):
+        if any(segment in {".", ".."} for segment in unquote(parsed.path).split("/")):
             raise ValueError("Blob service endpoint paths cannot contain dot segments.")
         return endpoint.rstrip("/")
 

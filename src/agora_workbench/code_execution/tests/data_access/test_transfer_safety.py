@@ -118,6 +118,11 @@ def test_blob_fetcher_accepts_explicit_https_and_loopback_emulator_endpoints(end
         "https://storage.example.test?sig=secret",
         "https://storage.example.test/#fragment",
         "http://127.0.0.1:10000/../other",
+        "http://127.0.0.1:10000/%2e%2e/other",
+        "http://127.0.0.1:10000/%2E%2E%2Fother",
+        "https://storage.example.test:not-a-port",
+        "https://storage.example.test:0",
+        "https://storage.example.test:65536",
     ],
 )
 def test_blob_fetcher_rejects_unsafe_explicit_endpoints(endpoint):

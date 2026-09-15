@@ -7,6 +7,7 @@ import hashlib
 import os
 import time
 import uuid
+from contextlib import AsyncExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -53,11 +54,14 @@ def _server_config(tmp_path: Path) -> ServerConfig:
 @pytest.mark.integration
 async def test_azurite_blob_cas_transfer_interruption_and_reconciliation(tmp_path: Path):
     blob_module = pytest.importorskip("azure.storage.blob.aio")
-    service = blob_module.BlobServiceClient.from_connection_string(_azurite_connection_string())
-    container_name = f"agora-acceptance-{uuid.uuid4().hex}"
-    container = service.get_container_client(container_name)
-    await container.create_container()
-    try:
+    async with AsyncExitStack() as cleanup:
+        service = blob_module.BlobServiceClient.from_connection_string(_azurite_connection_string())
+        cleanup.push_async_callback(service.close)
+        container_name = f"agora-acceptance-{uuid.uuid4().hex}"
+        container = service.get_container_client(container_name)
+        await container.create_container()
+        cleanup.push_async_callback(container.delete_container)
+
         prefix = f"release/{uuid.uuid4().hex}"
         first_writer = ManagedCatalogWriter("azurite", BlobManagedStorage(container, prefix=prefix))
         second_writer = ManagedCatalogWriter("azurite", BlobManagedStorage(container, prefix=prefix))
@@ -119,9 +123,6 @@ async def test_azurite_blob_cas_transfer_interruption_and_reconciliation(tmp_pat
         report = await first_writer.reconcile(grace_seconds=0)
         assert report.removed_orphans == ("interrupted",)
         assert await first_writer.read_manifest(minimum_generation=5)
-    finally:
-        await container.delete_container()
-        await service.close()
 
 
 @pytest.mark.azurite
@@ -129,79 +130,86 @@ async def test_azurite_blob_cas_transfer_interruption_and_reconciliation(tmp_pat
 async def test_azurite_public_catalog_mcp_execution_roundtrip(tmp_path: Path, monkeypatch):
     blob_module = pytest.importorskip("azure.storage.blob.aio")
     credential_module = pytest.importorskip("azure.core.credentials")
-    service = blob_module.BlobServiceClient.from_connection_string(_azurite_connection_string())
-    container_name = f"agora-public-{uuid.uuid4().hex}"
-    container = service.get_container_client(container_name)
-    await container.create_container()
-    prefix = f"catalog/{uuid.uuid4().hex}"
-    blob_name = f"{prefix}/approved/observations.csv"
-    payload = b"station,value\nSEA,42\n"
-    await container.upload_blob(blob_name, payload)
+    async with AsyncExitStack() as cleanup:
+        service = blob_module.BlobServiceClient.from_connection_string(_azurite_connection_string())
+        cleanup.push_async_callback(service.close)
+        container_name = f"agora-public-{uuid.uuid4().hex}"
+        container = service.get_container_client(container_name)
+        await container.create_container()
+        cleanup.push_async_callback(container.delete_container)
 
-    sdk_policy = service.credential
-    credential = credential_module.AzureNamedKeyCredential(sdk_policy.account_name, sdk_policy.account_key)
-    endpoint = service.url.rstrip("/")
-    database = CatalogDB(tmp_path / "azurite-catalog.db")
-    database.open()
-    database.upsert_artifact(
-        artifact_id="azurite-observations",
-        source_id="azurite",
-        logical_path="approved/observations.csv",
-        name="azurite observations.csv",
-        storage_uri=f"az://devstoreaccount1/{container_name}/{blob_name}",
-        description="Actual emulator-backed observations",
-        domain="acceptance",
-        source_type="blob",
-    )
-    provider = SQLiteCatalogProvider(database, ("azurite",))
-    integration = CatalogIntegration(
-        ResourceLease(provider),
-        authorizer=DevelopmentAllowAllCatalogAuthorizer(),
-    )
+        prefix = f"catalog/{uuid.uuid4().hex}"
+        blob_name = f"{prefix}/approved/observations.csv"
+        payload = b"station,value\nSEA,42\n"
+        await container.upload_blob(blob_name, payload)
 
-    cache_index = 0
+        sdk_policy = service.credential
+        credential = credential_module.AzureNamedKeyCredential(sdk_policy.account_name, sdk_policy.account_key)
+        endpoint = service.url.rstrip("/")
+        database = CatalogDB(tmp_path / "azurite-catalog.db")
+        database.open()
+        cleanup.callback(database.close)
+        database.upsert_artifact(
+            artifact_id="azurite-observations",
+            source_id="azurite",
+            logical_path="approved/observations.csv",
+            name="azurite observations.csv",
+            storage_uri=f"az://devstoreaccount1/{container_name}/{blob_name}",
+            description="Actual emulator-backed observations",
+            domain="acceptance",
+            source_type="blob",
+        )
+        provider = SQLiteCatalogProvider(database, ("azurite",))
+        integration = CatalogIntegration(
+            ResourceLease(provider),
+            authorizer=DevelopmentAllowAllCatalogAuthorizer(),
+        )
+        cleanup.push_async_callback(integration.shutdown)
 
-    def isolated_cache(*, prefix: str) -> str:
-        nonlocal cache_index
-        cache_index += 1
-        path = tmp_path / f"{prefix}{cache_index}"
-        path.mkdir()
-        return str(path)
+        cache_index = 0
 
-    monkeypatch.setattr(manager_module.tempfile, "mkdtemp", isolated_cache)
+        def isolated_cache(*, prefix: str) -> str:
+            nonlocal cache_index
+            cache_index += 1
+            path = tmp_path / f"{prefix}{cache_index}"
+            path.mkdir()
+            return str(path)
 
-    class AzuriteCatalogManager(DataLakeDataManager):
-        def supports_catalog_references(self, resolver) -> bool:
-            self._artifact_resolver = resolver
-            return True
+        monkeypatch.setattr(manager_module.tempfile, "mkdtemp", isolated_cache)
 
-    def manager_factory(_context):
-        return AzuriteCatalogManager(
-            extra_fetchers=[
-                BlobFetcher(
-                    credential=cast(Any, credential),
-                    allowed_locations=[f"az://devstoreaccount1/{container_name}/{prefix}/"],
-                    account_endpoints={"devstoreaccount1": endpoint},
-                )
-            ],
-            credential=cast(Any, credential),
+        class AzuriteCatalogManager(DataLakeDataManager):
+            def supports_catalog_references(self, resolver) -> bool:
+                self._artifact_resolver = resolver
+                return True
+
+        def manager_factory(_context):
+            return AzuriteCatalogManager(
+                extra_fetchers=[
+                    BlobFetcher(
+                        credential=cast(Any, credential),
+                        allowed_locations=[f"az://devstoreaccount1/{container_name}/{prefix}/"],
+                        account_endpoints={"devstoreaccount1": endpoint},
+                    )
+                ],
+                credential=cast(Any, credential),
+            )
+
+        session_manager = SessionManager(SessionConfig(data_manager_factory=manager_factory))
+        cleanup.push_async_callback(session_manager.aclose_all_sessions)
+        server = CodeExecutionServer(
+            _server_config(tmp_path),
+            auth_config=create_noop_auth_config(),
+            session_manager=session_manager,
+            catalog=integration,
+        )
+        await integration.startup()
+        session_id = session_manager.create_session(
+            {},
+            "azurite-user@tenant",
+            "azurite-token",
+            {"oid": "azurite-user", "tid": "tenant", "exp": int(time.time()) + 3600},
         )
 
-    session_manager = SessionManager(SessionConfig(data_manager_factory=manager_factory))
-    server = CodeExecutionServer(
-        _server_config(tmp_path),
-        auth_config=create_noop_auth_config(),
-        session_manager=session_manager,
-        catalog=integration,
-    )
-    await integration.startup()
-    session_id = session_manager.create_session(
-        {},
-        "azurite-user@tenant",
-        "azurite-token",
-        {"oid": "azurite-user", "tid": "tenant", "exp": int(time.time()) + 3600},
-    )
-    try:
         search_tool = await server.mcp.get_tool("search_data")
         hits = await search_tool.fn(
             query="azurite observations",
@@ -216,9 +224,3 @@ async def test_azurite_public_catalog_mcp_execution_roundtrip(tmp_path: Path, mo
         assert not manager._catalog_managed_revision_access
         cached = await manager.get_cache_path(hits[0]["load_path"])
         assert cached.read_bytes() == payload
-    finally:
-        await session_manager.aclose_all_sessions()
-        await integration.shutdown()
-        database.close()
-        await container.delete_container()
-        await service.close()
