@@ -65,8 +65,9 @@ nav:
   - Other options:
       - Attaching to your agent: guide/attaching-to-your-agent.md
       - Working with data: guide/working-with-data.md
-      - Public data-lake API: guide/data-lake-api.md
+      - Data lake - start here: guide/data-lake.md
       - Data-lake CLI and quickstarts: guide/data-lake-operations.md
+      - Data-lake API reference: guide/data-lake-api.md
       - Data-lake 0.3 migration: guide/data-lake-migration.md
       - Data-lake 0.3 support and acceptance: guide/data-lake-support.md
       - Sidecars (shared helper processes): guide/sidecars.md

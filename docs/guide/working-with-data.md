@@ -1,5 +1,10 @@
 # Working with data
 
+If your goal is to let an agent search existing data and load a selected file,
+start with [Add a data catalog to your server](data-lake.md). This page compares
+that workflow with startup provisioning, session caching, and output
+publication.
+
 Agora Workbench separates four roles:
 
 1. **asset provisioning** copies fixed startup inputs into an environment;
@@ -382,19 +387,31 @@ for shutdown. Set `load_on_startup=False` when the application owns refreshes.
 Catalog refresh remains an administrative/application operation; no agent
 reindex or filesystem-watcher tool is registered.
 
-`capability_extension_factory` is a narrow session-scoped composition seam for
-applications that add separately authorized capabilities. It is intentionally
-writer-neutral today; a managed writer can use the seam after its write
-operations are added to the public `CatalogOperation` contract. The factory
-receives the `SessionContext`, authorized read catalog, and immutable
-`RequestContext`. Returned extension objects may provide
-`capabilities(request_context)`; those source capabilities are merged into
+`capability_extension_factory` adds separately authorized, session-scoped
+capabilities to the catalog integration. To expose a managed writer through the
+same session policy, use the public adapter:
+
+```python
+from agora_workbench.data_lake import managed_writer_extension_factory
+
+catalog = CatalogIntegration.from_config(
+    catalog_config,
+    authorizer=application_authorizer,
+    capability_extension_factory=managed_writer_extension_factory(backend_writer),
+)
+```
+
+The factory receives the session context, authorized read catalog, and
+immutable request context. The managed-writer adapter reuses that catalog's
+authorizer, so write capabilities are visible only when the caller is
+authorized. Returned extension capabilities are merged into
 `get_catalog_capabilities`, and the extension is closed with the session. The
-read provider remains independently owned and is not treated as a writer.
-Extensions may implement async-only `aclose()`. Synchronous session closure and
-timeout cleanup schedule and retain that work; server shutdown waits for it
-before closing the shared provider. Cleanup attempts the manager, every
-extension, session payload, and session files independently, reporting
+read provider and backend writer retain their separately declared ownership.
+
+Custom extensions may implement async-only `aclose()`. Synchronous session
+closure and timeout cleanup schedule and retain that work; server shutdown
+waits for it before closing the shared provider. Cleanup attempts the manager,
+every extension, session payload, and session files independently, reporting
 aggregated failures only after all steps have run.
 
 ### Source configuration

@@ -1,8 +1,11 @@
 # Data-lake v0.3.0 support and release acceptance
 
-This page records the supported v0.3.0 combinations and the gates used before
-release. It is intentionally narrower than the set of components an
-application could assemble from private implementation details.
+This page is for deployment owners and release maintainers. New users should
+start with [Add a data catalog to your server](data-lake.md).
+
+It records the supported v0.3.0 combinations and the gates used before release.
+It is intentionally narrower than the set of components an application could
+assemble from private implementation details.
 
 ## Support matrix
 

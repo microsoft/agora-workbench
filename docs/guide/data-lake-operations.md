@@ -1,10 +1,22 @@
 # Data-lake CLI and quickstarts
 
+**New to the data-lake API?** Read
+[Add a data catalog to your server](data-lake.md) first for the component model
+and the shortest path from local data to agent-visible search.
+
 The `agora-workbench-data-lake` command is the supported administrative
 surface for local catalog initialization, validation, refresh, search, external
 registration, and managed-write reconciliation. It calls the same public
 library APIs documented in [Data-lake API](data-lake-api.md); it does not
 provision storage, identities, search services, or application hosts.
+
+Use this page when you are operating a catalog:
+
+- **Local read-only:** follow the zero-cloud quickstart.
+- **Selective disclosure:** choose manifest discovery instead of scanning.
+- **Durable writes:** use the authorized managed-write example.
+- **Azure:** bring an existing storage account, container, identity, and
+  application host.
 
 ## Install
 

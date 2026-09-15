@@ -1,7 +1,15 @@
-# Data-lake API
+# Data-lake API reference
 
-Use the data-lake API to describe artifacts, search a catalog, resolve artifact
-IDs to storage locations, and connect those artifacts to code execution.
+This page is the detailed reference for transfer behavior, artifact contracts,
+custom providers and resolvers, identity, managed writes, and compatibility.
+
+**New to the data-lake API?** Start with
+[Add a data catalog to your server](data-lake.md). It takes you from a local
+CSV to searchable MCP tools before introducing these extension points.
+
+Most applications configure the built-in catalog and `CatalogIntegration`;
+they do not need to implement a provider or call the low-level transfer seam
+directly.
 
 Choose the import path that matches your task:
 
@@ -17,7 +25,7 @@ Choose the import path that matches your task:
 Importing `agora_workbench.data_lake` does not start a server, create an
 execution session, or load cloud SDK modules.
 
-For supported administrative commands, a runnable local example, Azure Storage
+For supported administrative commands, runnable examples, Azure Storage
 hosting guidance, and operational limits, see
 [Data-lake CLI and quickstarts](data-lake-operations.md). For import,
 configuration, reference, and rollback changes from 0.2.x, see
@@ -109,7 +117,7 @@ with `validate_managed_revision_path()`. This is intentionally narrow:
 authoritative manifest logical artifact paths can never use reserved names,
 while physical revision bytes may live only below `.agora/revisions/`.
 
-The stable #338 write seam is:
+The managed-storage transfer seam is:
 
 ```python
 uri, transfer = await blob_publisher.publish_with_result(
