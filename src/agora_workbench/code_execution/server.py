@@ -2950,16 +2950,22 @@ else:
                 await asyncio.shield(task)
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
-                if task.done():
-                    break
+                if not task.done():
+                    continue
             except Exception:
-                LOGGER.warning("%s raised; continuing", label, exc_info=True)
-                if retry_factory is None:
-                    break
-                task = asyncio.create_task(retry_factory())
-                retry_factory = None
+                pass
+            try:
+                task.result()
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+            except Exception as exc:
+                LOGGER.warning("%s failed with %s; continuing", label, type(exc).__name__)
             else:
                 break
+            if retry_factory is None:
+                break
+            task = asyncio.create_task(retry_factory())
+            retry_factory = None
         return cancelled
 
     def _add_custom_endpoints(self, app):

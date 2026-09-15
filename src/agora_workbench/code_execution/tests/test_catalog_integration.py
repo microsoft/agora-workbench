@@ -1092,6 +1092,32 @@ async def test_catalog_cleanup_retries_one_ordinary_failure():
     assert calls == 2
 
 
+async def test_catalog_cleanup_retries_completed_failure_after_waiter_cancellation():
+    calls = 0
+    failure_imminent = asyncio.Event()
+
+    async def cleanup():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            failure_imminent.set()
+            raise RuntimeError("transient close failure")
+
+    drain = asyncio.create_task(
+        CodeExecutionServer._await_catalog_cleanup(
+            cleanup(),
+            "test cleanup",
+            retry=cleanup,
+        )
+    )
+    await failure_imminent.wait()
+    drain.cancel()
+
+    cancelled = await drain
+    assert isinstance(cancelled, asyncio.CancelledError)
+    assert calls == 2
+
+
 @pytest.mark.parametrize("cancelled_stage", ["tool_search", "publisher", "activity"])
 async def test_server_shutdown_drains_each_cancelled_resource_once(tmp_path, cancelled_stage):
     started = asyncio.Event()
