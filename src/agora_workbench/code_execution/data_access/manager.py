@@ -449,9 +449,8 @@ class DataLakeDataManager:
                 finally:
                     await _run_blocking_io(cache_file.close)
 
-            validated_identity: tuple[int, int] | None = None
             try:
-                validated_identity = await await_transfer(
+                await await_transfer(
                     validate_cached_file(),
                     options,
                     operation="download",
@@ -464,7 +463,7 @@ class DataLakeDataManager:
                 if not cache_was_invalidated():
                     LOGGER.debug(f"Asset already cached: {cache_path}")
                     return cache_path
-            self._remove_validated_cache_entry(artifact_id, validated_cache_path, validated_identity)
+            self._remove_validated_cache_entry(artifact_id, validated_cache_path)
             cache_generation = self._cache_generation
             full_cache_generation = self._full_cache_generation
 
@@ -521,27 +520,10 @@ class DataLakeDataManager:
         self,
         artifact_id: str,
         path: Path,
-        expected_identity: tuple[int, int] | None,
     ) -> None:
-        """Remove an invalidated cache file only if it is still the validated entry."""
+        """Forget an invalidated cache entry without deleting a path in use."""
         if self._cache_index.get(artifact_id) == path:
             self._cache_index.pop(artifact_id, None)
-        if expected_identity is None:
-            return
-        try:
-            cache_root = self._cache_dir.resolve(strict=True)
-            if not path.parent.resolve(strict=True).is_relative_to(cache_root):
-                LOGGER.warning("Skipped cleanup of cache entry outside the owned cache directory: %s", path.name)
-                return
-            entry_stat = path.stat(follow_symlinks=False)
-            if not stat.S_ISREG(entry_stat.st_mode) or (entry_stat.st_dev, entry_stat.st_ino) != expected_identity:
-                LOGGER.warning("Skipped cleanup of replaced cache entry: %s", path.name)
-                return
-            path.unlink()
-        except FileNotFoundError:
-            return
-        except OSError:
-            LOGGER.debug("Failed to remove invalidated catalog cache entry %s", path, exc_info=True)
 
     async def _fetch_asset_to_file(
         self,
@@ -784,16 +766,22 @@ class DataLakeDataManager:
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
         self._cache_index.clear()
-        await self._aclose_async_resources()
-        self._remove_cache_dir()
+        try:
+            await self._aclose_async_resources()
+        finally:
+            self._remove_cache_dir()
 
     async def _aclose_async_resources(self) -> None:
         """Close fetchers, resolver, and owned credential (async-only resources)."""
+        cancelled = False
+
         # Close fetchers (releases pooled connections)
         for fetcher in self._fetchers:
             if hasattr(fetcher, "close"):
                 try:
                     await fetcher.close()
+                except asyncio.CancelledError:
+                    cancelled = True
                 except Exception as e:
                     LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
 
@@ -801,14 +789,21 @@ class DataLakeDataManager:
         if resolver_close is not None:
             try:
                 await resolver_close()
+            except asyncio.CancelledError:
+                cancelled = True
             except Exception as e:
                 LOGGER.debug(f"Error closing artifact resolver: {e}")
 
         if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
             try:
                 await self._credential.close()
+            except asyncio.CancelledError:
+                cancelled = True
             except Exception as e:
                 LOGGER.debug(f"Error closing credential: {e}")
+
+        if cancelled:
+            raise asyncio.CancelledError
 
     def _remove_cache_dir(self) -> None:
         if self._cache_dir and self._cache_dir.exists():

@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from agora_workbench.data_lake import ResourceOwnership
+
 from ...data_access.artifact_resolvers import SearchIndexArtifactResolver
 from ...data_access.fetchers import AssetFetcher, BlobFetcher
 from ...data_access.manager import DataLakeDataManager
@@ -225,7 +227,7 @@ class TestGetCachePath:
             assert cache_path1 == cache_path2
 
     @pytest.mark.asyncio
-    async def test_catalog_cache_invalidation_removes_superseded_validated_files(self, tmp_path):
+    async def test_catalog_cache_invalidation_retains_superseded_validated_files(self, tmp_path):
         source_path = tmp_path / "artifact.bin"
         source_path.write_bytes(b"payload")
         artifact_id = "catalog-v1:artifact"
@@ -255,7 +257,7 @@ class TestGetCachePath:
             refreshed = await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
             assert refreshed.read_bytes() == b"payload"
             assert unrelated.read_text() == "keep"
-            assert len(tuple(manager._cache_dir.iterdir())) == 2
+            assert len(tuple(manager._cache_dir.iterdir())) == _ + 3
 
         await manager.aclose()
 
@@ -565,6 +567,30 @@ class TestCleanup:
 
         assert not cache_dir.exists()
         assert manager._cache_index == {}
+        fetcher.close.side_effect = None
+
+    @pytest.mark.asyncio
+    async def test_aclose_continues_after_cancelled_resource_close(self):
+        """Async cleanup closes remaining resources before propagating cancellation."""
+        fetcher = MagicMock()
+        fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
+        resolver = _StubResolver()
+        credential = MagicMock()
+        credential.close = AsyncMock()
+        manager = DataLakeDataManager(
+            extra_fetchers=[fetcher],
+            artifact_resolver=resolver,
+            credential=credential,
+            credential_ownership=ResourceOwnership.OWNED,
+        )
+        cache_dir = manager._cache_dir
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.aclose()
+
+        assert resolver.aclose_calls == 1
+        credential.close.assert_awaited_once()
+        assert not cache_dir.exists()
         fetcher.close.side_effect = None
 
 
