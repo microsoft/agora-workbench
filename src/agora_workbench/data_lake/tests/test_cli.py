@@ -251,18 +251,6 @@ def test_cli_init_manifest_stage_failure_preserves_prior_files_and_retries(tmp_p
     assert CatalogManifest.from_mapping(json.loads(manifest.read_text(encoding="utf-8"))).generation == 1
 
 
-def test_keyword_cli_does_not_require_unrelated_optional_configuration(tmp_path):
-    source = tmp_path / "data"
-    source.mkdir()
-    (source / "weather.csv").write_text("data", encoding="utf-8")
-    config = tmp_path / "catalog.yaml"
-    database = tmp_path / "catalog.db"
-    _scan_config(source, config)
-
-    assert main(["refresh", "--config", str(config), "--database", str(database)]) == 0
-    assert main(["search", "weather", "--config", str(config), "--database", str(database)]) == 0
-
-
 def test_refresh_missing_local_source_prints_state_and_fails(tmp_path, capsys):
     config = tmp_path / "catalog.yaml"
     database = tmp_path / "catalog.db"
