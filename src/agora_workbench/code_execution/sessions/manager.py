@@ -1635,21 +1635,10 @@ class SessionManager:
             if not started:
                 release_task = asyncio.create_task(resource_operation.__aexit__(None, None, None))
                 self._background_lease_release_tasks.add(release_task)
-
-                def on_release_done(done_task: asyncio.Task[None]) -> None:
-                    self._background_lease_release_tasks.discard(done_task)
-                    if done_task.cancelled():
-                        return
-                    error = done_task.exception()
-                    if error is not None:
-                        LOGGER.error(
-                            "Failed to release background lease for job %s: %s",
-                            job.job_id,
-                            error,
-                            exc_info=error,
-                        )
-
-                release_task.add_done_callback(on_release_done)
+                self._session_owned_cleanup_tasks.setdefault(job.session_id, set()).add(release_task)
+                self._resource_cleanup_tasks.add(release_task)
+                release_task.add_done_callback(partial(self._on_session_owned_cleanup_done, job.session_id, None))
+                release_task.add_done_callback(self._background_lease_release_tasks.discard)
 
         task.add_done_callback(release_unstarted_collector)
         return task
@@ -2145,6 +2134,29 @@ class SessionManager:
             directory, including its name, size, MIME type, modification time,
             and download token.
         """
+        resource_operation = self.session_resource_operation(session_id)
+        try:
+            await resource_operation.__aenter__()
+        except ValueError:
+            return (
+                "",
+                (
+                    f"Session {session_id} is no longer available (expired or cleaned up). "
+                    "Please create a new session and retry."
+                ),
+                False,
+                [],
+                [],
+            )
+        try:
+            return await self._execute_code_for_admitted_session(session_id, code, timeout, working_dir)
+        finally:
+            await resource_operation.__aexit__(None, None, None)
+
+    async def _execute_code_for_admitted_session(
+        self, session_id: str, code: str, timeout: float, working_dir: Optional[str]
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
+        """Execute after admitting a session resource lease."""
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).
         try:

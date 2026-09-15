@@ -330,8 +330,11 @@ and continues to evaluate each immutable per-request context.
 If the supplied `SessionManager` already has a `data_manager_factory`, the
 server preserves that manager and its resolver. Discovery remains available,
 but catalog results omit `load_path` because the server cannot assume a custom
-resolver understands its opaque references. Applications that need both should
-compose the catalog resolver in their custom manager factory.
+resolver understands its opaque references. A custom manager that deliberately
+composes the session catalog resolver can opt in by implementing
+`supports_catalog_references(resolver) -> bool`; returning `True` enables
+opaque `load_path` values for that session without replacing the manager's
+resolver.
 
 To mount an application-managed provider, make ownership explicit:
 

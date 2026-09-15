@@ -195,6 +195,32 @@ async def test_binding_tracks_same_cleanup_task_through_cancelled_retry():
     await integration.shutdown()
 
 
+async def test_binding_requeues_failed_scheduled_cleanup_after_pending_initialized():
+    class Resource:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls < 3:
+                raise RuntimeError("retry cleanup")
+
+    resource = Resource()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding._pending_cleanup_resources = []
+    binding._schedule_resource_cleanup(resource)
+
+    await binding.aclose()
+
+    assert resource.close_calls == 3
+    assert binding._pending_cleanup_resources == []
+    await integration.shutdown()
+
+
 def _server_config(tmp_path: Path) -> ServerConfig:
     return ServerConfig(
         name="catalog-test",
@@ -2431,6 +2457,43 @@ async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     await integration.shutdown()
 
 
+async def test_custom_manager_can_opt_in_to_catalog_execution_references(tmp_path):
+    accepted_resolvers = []
+
+    class CustomResolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id: str) -> str:
+            return artifact_id
+
+    class ComposedManager(DataLakeDataManager):
+        def supports_catalog_references(self, resolver):
+            accepted_resolvers.append(resolver)
+            return True
+
+    custom_resolver = CustomResolver()
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[source]))
+    session_manager = SessionManager(
+        SessionConfig(data_manager_factory=lambda _context: ComposedManager(artifact_resolver=custom_resolver))
+    )
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    session_id = session_manager.create_session({}, "user", "token", {})
+    session = session_manager.get_session(session_id)
+
+    assert accepted_resolvers == [session.extensions["catalog"].resolver]
+    assert session.data_manager._artifact_resolver is custom_resolver
+    assert session.extensions["catalog"].execution_references
+    await session_manager.aclose_all_sessions()
+    await integration.shutdown()
+
+
 async def test_data_manager_construction_failure_closes_session_credential(tmp_path, monkeypatch):
     credentials = []
 
@@ -3654,7 +3717,8 @@ async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes
     with pytest.raises(asyncio.CancelledError):
         await integration.shutdown()
 
-    assert attempts == 2
+    # The scheduled cleanup and the integration shutdown retry are each bounded.
+    assert attempts == 4
     assert provider.close_calls == 1
 
 

@@ -1027,6 +1027,10 @@ class CatalogSessionBinding:
                     self.cleanup_tracker.discard(task)
                 if resource is not None and result is None:
                     _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+                elif resource is not None and self._pending_cleanup_resources is not None:
+                    _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+                    if not any(pending is resource for pending in self._pending_cleanup_resources):
+                        self._pending_cleanup_resources.append(resource)
         try:
             if not self._resolver_closed:
                 await self.resolver.aclose()

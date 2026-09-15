@@ -381,6 +381,11 @@ class CodeExecutionServer(BaseMCPServer):
                         if cleanup_error is not None:
                             collision.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                         raise collision
+                    supports_catalog_references = getattr(manager, "supports_catalog_references", None)
+                    if callable(supports_catalog_references):
+                        binding.execution_references = bool(supports_catalog_references(binding.resolver))
+                    elif getattr(manager, "_artifact_resolver", None) is binding.resolver:
+                        binding.execution_references = True
             except BaseException as exc:
                 if existing_factory is None:
                     if manager is not None:

@@ -918,6 +918,38 @@ class TestAwaitableClose:
 
         await manager.aclose_session(session_id)
 
+    async def test_direct_kernel_execution_holds_session_resources(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        execution_started = asyncio.Event()
+        release_execution = asyncio.Event()
+        manager_closed = asyncio.Event()
+
+        class DataManager:
+            async def aclose(self):
+                manager_closed.set()
+
+        async def blocked_execution(*_args):
+            execution_started.set()
+            await release_execution.wait()
+            return "", "", True, [], []
+
+        session.data_manager = DataManager()
+        monkeypatch.setattr(manager, "_execute_code_for_admitted_session", blocked_execution)
+
+        execution = asyncio.create_task(manager.execute_code_for_session(session_id, "pass", 30))
+        await execution_started.wait()
+        close = asyncio.create_task(manager.aclose_session(session_id))
+        await asyncio.sleep(0)
+
+        assert not close.done()
+        assert not manager_closed.is_set()
+
+        release_execution.set()
+        assert (await execution)[2]
+        await close
+        assert manager_closed.is_set()
+
     async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         session = manager.get_session(session_id)
@@ -2049,8 +2081,16 @@ class TestNoRunningLoop:
 
     async def test_cancelled_unstarted_background_collector_releases_resource_lease(self, manager, monkeypatch):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
-        resource_operation = manager.session_resource_operation(session_id)
-        await resource_operation.__aenter__()
+        release_started = asyncio.Event()
+        release_gate = asyncio.Event()
+
+        class ResourceOperation:
+            async def __aexit__(self, exc_type, exc, traceback):
+                del exc_type, exc, traceback
+                release_started.set()
+                await release_gate.wait()
+
+        resource_operation = ResourceOperation()
         job = _BackgroundJob("job", session_id, "message", 30, time.monotonic())
 
         async def collector(*_args):
@@ -2065,9 +2105,15 @@ class TestNoRunningLoop:
         )
         task.cancel()
         _ = await asyncio.gather(task, return_exceptions=True)
+        await release_started.wait()
+        close = asyncio.create_task(manager.aclose_session(session_id))
         await asyncio.sleep(0)
 
-        assert session_id not in manager._session_resource_users
+        assert not close.done()
+
+        release_gate.set()
+        await close
+        assert not manager._background_lease_release_tasks
 
     @pytest.mark.parametrize(
         ("method_name", "arguments"),
