@@ -940,6 +940,12 @@ class CatalogSessionBinding:
             if scheduled_resource is resource:
                 self._scheduled_cleanup_tasks.pop(task, None)
 
+    def _release_scheduled_resource_marker(self, resource: object) -> None:
+        _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+        for task, scheduled_resource in tuple(self._scheduled_cleanup_tasks.items()):
+            if scheduled_resource is resource:
+                self._scheduled_cleanup_tasks.pop(task, None)
+
     def _track_scheduled_resource(self, resource: object) -> bool:
         if any(existing is resource for existing in self._scheduled_cleanup_resources):
             return False
@@ -1119,7 +1125,7 @@ class CatalogSessionBinding:
         if self._pending_cleanup_resources:
             for resource in tuple(self._pending_cleanup_resources):
                 task: asyncio.Task[None] | None = None
-                failed = False
+                cleanup_completed = False
                 try:
                     if self.cleanup_tracker is not None and not self.cleanup_tracker.running_synchronously:
                         task = self._schedule_resource_cleanup(resource, retry=False)
@@ -1128,27 +1134,26 @@ class CatalogSessionBinding:
                     else:
                         self._track_scheduled_resource(resource)
                         await self._close_tracked_resource(resource, retry=False)
+                    cleanup_completed = True
                 except asyncio.CancelledError as exc:
                     cancelled = cancelled or exc
                 except Exception as exc:
-                    failed = True
                     errors.append(exc)
                 finally:
                     if task is not None and task.done():
                         self._scheduled_cleanup_tasks.pop(task, None)
                         if self.cleanup_tracker is not None:
                             self.cleanup_tracker.discard(task)
+                        if not cleanup_completed:
+                            self._release_scheduled_resource_marker(resource)
                     elif task is not None:
                         # The shielded cleanup is still running after caller
                         # cancellation; keep both registries owning it so a
                         # later shutdown drain observes completion.
                         pass
-                    if failed:
-                        # The fallback close failed, so keep owning the resource
-                        # here and drop its scheduled marker: a later close then
-                        # retries it instead of orphaning it.
-                        _remove_resource_identity(self._scheduled_cleanup_resources, resource)
-                    else:
+                    elif not cleanup_completed:
+                        self._release_scheduled_resource_marker(resource)
+                    if cleanup_completed or (task is not None and not task.done()):
                         _remove_resource_identity(self._pending_cleanup_resources, resource)
         if cancelled is not None:
             if errors:

@@ -3965,9 +3965,8 @@ async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes
     with pytest.raises(asyncio.CancelledError):
         await integration.shutdown()
 
-    # The scheduled cleanup is bounded and awaited instead of escaping into a
-    # later shutdown retry cycle.
-    assert attempts == 2
+    # The scheduled cleanup and the retained integration retry are each bounded.
+    assert attempts == 4
     assert provider.close_calls == 1
 
 
