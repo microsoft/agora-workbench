@@ -855,6 +855,26 @@ class TestAwaitableClose:
         _ = await close_task
         assert cleanup_started.is_set()
 
+    async def test_sync_close_keeps_session_file_until_resource_operation_finishes(self, manager, tmp_path):
+        session_file = tmp_path / "session.json"
+        session_file.write_text("active")
+        session_id = manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="u",
+            user_token="t",
+            token_claims={},
+        )
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+
+        manager.close_session(session_id)
+
+        assert session_file.read_text() == "active"
+
+        await operation.__aexit__(None, None, None)
+        await manager.await_resource_cleanup()
+        assert not session_file.exists()
+
     async def test_close_session_waits_for_active_kernel_execution(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         km, _ = register_kernel(manager, session_id)

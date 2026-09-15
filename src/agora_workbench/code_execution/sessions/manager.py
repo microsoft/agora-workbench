@@ -536,8 +536,6 @@ class SessionManager:
                     f"Session was removed, but resources may be leaked."
                 )
             finally:
-                if not session.session_file_cleanup_claimed():
-                    session.claim_session_file_cleanup()
                 self._finalize_closed_session(session_id)
             if cleanup_failed:
                 LOGGER.warning(f"Closed session {session_id} with failed cleanup (remaining={self.storage.count()})")
