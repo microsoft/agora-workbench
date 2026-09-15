@@ -162,6 +162,117 @@ async def test_execute_code_holds_session_resources_through_asset_resolution(tes
 
 
 @pytest.mark.asyncio
+async def test_execute_code_does_not_exit_unentered_session_resource_operation(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+
+    class FailingOperation:
+        def __init__(self):
+            self.exit_calls = 0
+
+        async def __aenter__(self):
+            raise RuntimeError("session admission failed")
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    operation = FailingOperation()
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with patch_server_method(
+            test_server.session_manager,
+            "session_resource_operation",
+            lambda _session_id: operation,
+        ):
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('never runs')",
+                execution_session_id=session_id,
+            )
+
+        assert "session admission failed" in json.loads(result)["error"]
+        assert operation.exit_calls == 0
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_does_not_exit_unentered_catalog_snapshot(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+
+    class ResourceOperation:
+        def __init__(self):
+            self.exit_calls = 0
+
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    class FailingSnapshot:
+        def __init__(self):
+            self.exit_calls = 0
+
+        def __enter__(self):
+            raise RuntimeError("catalog snapshot failed")
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    operation = ResourceOperation()
+    snapshot = FailingSnapshot()
+    session.extensions["catalog"] = SimpleNamespace(resolver=SimpleNamespace(bind_request_snapshot=lambda: snapshot))
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with patch_server_method(
+            test_server.session_manager,
+            "session_resource_operation",
+            lambda _session_id: operation,
+        ):
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('never runs')",
+                execution_session_id=session_id,
+            )
+
+        assert "catalog snapshot failed" in json.loads(result)["error"]
+        assert snapshot.exit_calls == 0
+        assert operation.exit_calls == 1
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
 async def test_numpy_import(test_server, simple_code_samples):
     """Test that environment dependencies are available."""
     result = await test_server.execute_code_isolated(simple_code_samples["import_test"], timeout=10)

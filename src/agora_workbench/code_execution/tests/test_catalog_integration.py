@@ -129,6 +129,72 @@ async def test_cleanup_tracker_retries_only_resources_left_after_cancellation():
     assert resources == []
 
 
+async def test_binding_failed_cleanup_is_retained_for_integration_retry():
+    class Extension:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("transient close failure")
+
+    extension = Extension()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: extension,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    with pytest.raises(ExceptionGroup, match="Catalog session binding cleanup failed"):
+        await binding.aclose()
+
+    await integration._cleanup_tracker.drain()
+    assert extension.close_calls == 2
+    await integration.shutdown()
+
+
+async def test_binding_tracks_same_cleanup_task_through_cancelled_retry():
+    retry_started = asyncio.Event()
+    release_retry = asyncio.Event()
+
+    class Resource:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise asyncio.CancelledError
+            if self.close_calls > 2:
+                raise RuntimeError("resource closed more than twice")
+            retry_started.set()
+            await release_retry.wait()
+
+    resource = Resource()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding._schedule_resource_cleanup(resource)
+    drain = asyncio.create_task(integration._cleanup_tracker.drain())
+    await retry_started.wait()
+
+    close_binding = asyncio.create_task(binding.aclose())
+    await asyncio.sleep(0)
+    assert resource.close_calls == 2
+
+    release_retry.set()
+    with pytest.raises(asyncio.CancelledError):
+        await drain
+    await close_binding
+
+    assert resource.close_calls == 2
+    await integration.shutdown()
+
+
 def _server_config(tmp_path: Path) -> ServerConfig:
     return ServerConfig(
         name="catalog-test",
