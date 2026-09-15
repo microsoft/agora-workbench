@@ -102,11 +102,25 @@ class _AsyncCleanupTracker:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = asyncio.new_event_loop()
+            cancelled: asyncio.CancelledError | None = None
+            current = awaitable
+            remaining_retries = cancellation_retries if retry is not None else 0
             try:
-                loop.run_until_complete(awaitable)
+                while True:
+                    try:
+                        loop.run_until_complete(current)
+                    except asyncio.CancelledError as exc:
+                        cancelled = cancelled or exc
+                        if retry is None or remaining_retries <= 0:
+                            raise cancelled
+                        remaining_retries -= 1
+                        current = retry()
+                    else:
+                        if cancelled is not None:
+                            raise cancelled
+                        return
             finally:
                 loop.close()
-            return
         task = loop.create_task(awaitable)
         self._tasks[task] = (retry, cancellation_retries if retry is not None else 0)
         task.add_done_callback(self._discard_successful)
@@ -416,7 +430,7 @@ def _decode_reference(value: str) -> ArtifactReference:
             raise ValueError
         if not isinstance(source_id, str) or not source_id:
             raise ValueError
-        if revision is not None and (not isinstance(revision, int) or isinstance(revision, bool)):
+        if revision is not None and (not isinstance(revision, int) or isinstance(revision, bool) or revision <= 0):
             raise ValueError
         return ArtifactReference(
             artifact_id=artifact_id,
@@ -803,7 +817,8 @@ class CatalogIntegration:
             except BaseException as exc:
                 close_error = exc
             finally:
-                self._cleanup_private_cache_directory()
+                if self._provider_closed:
+                    self._cleanup_private_cache_directory()
             if close_error is not None:
                 startup_error.add_note(f"Catalog startup rollback also failed: {close_error!r}")
             raise
@@ -843,7 +858,8 @@ class CatalogIntegration:
         except Exception as exc:
             errors.append(exc)
         finally:
-            self._cleanup_private_cache_directory()
+            if self._provider_closed:
+                self._cleanup_private_cache_directory()
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog shutdown failures.", errors)))

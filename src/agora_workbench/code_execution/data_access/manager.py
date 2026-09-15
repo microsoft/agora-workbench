@@ -402,7 +402,8 @@ class DataLakeDataManager:
                         continue
                     if not isinstance(exc, (ArtifactNotFoundError, PermissionDeniedError, PermissionError)):
                         raise
-                    self._cache_index.pop(artifact_id, None)
+                    if self._cache_index.get(artifact_id) == validated_cache_path:
+                        self._cache_index.pop(artifact_id, None)
                     try:
                         validated_cache_path.unlink(missing_ok=True)
                     except OSError:

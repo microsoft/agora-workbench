@@ -716,10 +716,15 @@ class SessionManager:
         completion = asyncio.gather(*tasks, return_exceptions=True)
         outer_cancellation: asyncio.CancelledError | None = None
         try:
-            results = await asyncio.shield(completion)
-        except asyncio.CancelledError as exc:
-            outer_cancellation = exc
-            results = await asyncio.shield(completion)
+            while True:
+                try:
+                    results = await asyncio.shield(completion)
+                    break
+                except asyncio.CancelledError as exc:
+                    outer_cancellation = outer_cancellation or exc
+                    if completion.done():
+                        results = completion.result()
+                        break
         finally:
             for (session_id, _), task in zip(sessions, tasks):
                 if task.done() and not task.cancelled() and task.exception() is not None:
@@ -733,12 +738,18 @@ class SessionManager:
             (result for result in results if isinstance(result, asyncio.CancelledError)),
             outer_cancellation,
         )
-        try:
-            await self.await_resource_cleanup()
-        except asyncio.CancelledError as exc:
-            cancelled = cancelled or exc
-        except Exception as exc:
-            errors.append(exc)
+        resource_cleanup = asyncio.create_task(self.await_resource_cleanup())
+        while True:
+            try:
+                await asyncio.shield(resource_cleanup)
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+                if resource_cleanup.done():
+                    break
+            except Exception as exc:
+                errors.append(exc)
+                break
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
@@ -2075,10 +2086,12 @@ class SessionManager:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
             async with self._get_kernel_execute_lock(session_id):
                 with self._session_lifecycle_lock:
+                    last_used = self._kernel_last_used.get(session_id)
                     if (
-                        self._kernel_session_generations.get(session_id) != session_generation
+                        last_used is None
+                        or time.time() - last_used <= max_idle_time
+                        or self._kernel_session_generations.get(session_id) != session_generation
                         or self._kernel_generations.get(session_id) != kernel_generation
-                        or now - self._kernel_last_used.get(session_id, now) <= max_idle_time
                     ):
                         continue
                     shutdown_task = self._schedule_kernel_shutdown(

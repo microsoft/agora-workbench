@@ -350,6 +350,38 @@ class TestAtomicClaim:
 
         assert lock_was_available
 
+    async def test_idle_cleanup_rechecks_last_used_after_active_execution(self, manager):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        kernel = register_kernel(manager, session_id, name="OLD")
+        manager._kernel_last_used[session_id] = 0.0
+        execute_lock = manager._get_kernel_execute_lock(session_id)
+        await execute_lock.acquire()
+
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=10))
+        await asyncio.sleep(0)
+        manager._kernel_last_used[session_id] = time.time()
+        execute_lock.release()
+        await cleanup
+
+        assert manager._kernels[session_id] == kernel
+
+    async def test_cancelled_idle_cleanup_does_not_cancel_kernel_teardown(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        kernel_manager, _ = register_kernel(manager, session_id, name="OLD", gate=gate)
+        manager._kernel_last_used[session_id] = 0.0
+
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=-1))
+        await let_teardown_start()
+        cleanup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cleanup
+
+        gate.set()
+        await manager.await_kernel_shutdown(session_id)
+        assert kernel_manager.shutdown_finished
+        assert session_id not in manager._kernels
+
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
         gate = asyncio.Event()
@@ -818,6 +850,31 @@ class TestAwaitableClose:
         _ = await second_drain
 
         assert finished.is_set()
+
+    async def test_aclose_all_sessions_drains_through_repeated_cancellation(self, manager):
+        gate = asyncio.Event()
+        started = asyncio.Event()
+
+        class Resource:
+            async def aclose(self):
+                started.set()
+                await gate.wait()
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.get_session(session_id).data_manager = cast(Any, Resource())
+
+        closing = asyncio.create_task(manager.aclose_all_sessions())
+        await started.wait()
+        closing.cancel()
+        await asyncio.sleep(0)
+        closing.cancel()
+        await asyncio.sleep(0)
+        assert not closing.done()
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert manager.storage.retrieve(session_id) is None
         assert not manager._resource_cleanup_tasks
 
     async def test_await_kernel_shutdown_is_a_noop_when_idle(self, manager):

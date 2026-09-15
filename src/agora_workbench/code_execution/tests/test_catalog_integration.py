@@ -148,6 +148,8 @@ def test_data_manager_preserves_positional_artifact_resolver():
         {"artifact_id": "artifact", "source_id": {"not": "a string"}},
         {"artifact_id": "artifact", "source_id": "source", "revision": 1.5},
         {"artifact_id": "artifact", "source_id": "source", "revision": True},
+        {"artifact_id": "artifact", "source_id": "source", "revision": 0},
+        {"artifact_id": "artifact", "source_id": "source", "revision": -1},
     ],
 )
 def test_catalog_reference_rejects_invalid_field_types(payload):
@@ -215,6 +217,33 @@ async def test_configured_catalog_startup_rejects_unready_source(tmp_path):
         await integration.startup()
 
     assert cast(Any, integration.provider)._closed
+
+
+async def test_failed_provider_close_retains_private_cache_for_shutdown_retry(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "data.txt").write_text("payload")
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))])
+    )
+    private_directory = integration._private_cache_directory
+    assert private_directory is not None
+    original_close = integration._close_provider
+
+    async def fail_close():
+        raise RuntimeError("provider close failed")
+
+    integration._close_provider = fail_close
+    with pytest.raises(ExceptionGroup, match="shutdown failed"):
+        await integration.shutdown()
+
+    assert private_directory.exists()
+    assert integration._private_cache_directory == private_directory
+
+    integration._close_provider = original_close
+    await integration.shutdown()
+    assert not private_directory.exists()
+    assert integration._private_cache_directory is None
 
 
 async def test_configured_catalog_preserves_valid_manifest_generation_after_refresh_failure(tmp_path):
@@ -747,6 +776,51 @@ async def test_catalog_cache_reauthorization_retries_after_concurrent_refresh():
     await manager.aclose()
 
 
+async def test_stale_cache_validation_does_not_remove_newer_cache_entry():
+    reauthorization_started = asyncio.Event()
+    reauthorization_gate = asyncio.Event()
+    resolve_calls = 0
+
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            if resolve_calls == 2:
+                reauthorization_started.set()
+                await reauthorization_gate.wait()
+                raise PermissionError("stale authorization")
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_text("initial")
+            return len("initial")
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    await manager.get_cache_path(reference)
+    stale = asyncio.create_task(manager.get_cache_path(reference))
+    await reauthorization_started.wait()
+
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+    newer_path = manager._cache_dir / "newer.csv"
+    newer_path.write_text("newer")
+    manager._cache_index["catalog-v1:opaque"] = newer_path
+    reauthorization_gate.set()
+
+    assert await stale == newer_path
+    assert manager._cache_index["catalog-v1:opaque"] == newer_path
+    await manager.aclose()
+
+
 async def test_full_cache_invalidation_rejects_in_flight_non_catalog_fetch(tmp_path):
     started = asyncio.Event()
     gate = asyncio.Event()
@@ -925,6 +999,22 @@ async def test_cleanup_tracker_discards_successful_background_cleanup():
     await asyncio.sleep(0)
 
     assert tracker._tasks == {}
+
+
+def test_cleanup_tracker_retries_synchronous_cancellation_without_event_loop():
+    tracker = _AsyncCleanupTracker()
+    attempts = 0
+
+    async def cleanup():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        tracker.schedule(cleanup(), retry=cleanup)
+
+    assert attempts == 2
 
 
 async def test_failed_context_refresh_closes_uncommitted_credential_provider():
