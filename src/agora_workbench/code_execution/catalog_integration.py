@@ -693,6 +693,7 @@ class CatalogSessionBinding:
     _pending_cleanup_resources: list[object] | None = None
     _scheduled_cleanup_resources: list[object] = field(default_factory=list)
     _scheduled_cleanup_tasks: dict[asyncio.Task[None], object] = field(default_factory=dict)
+    _retirement_started_resource_ids: set[int] = field(default_factory=set)
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -749,17 +750,27 @@ class CatalogSessionBinding:
                     extensions = tuple(created)
                 else:
                     extensions = (created,)
+            for resource in (*extensions, authorizer):
+                if resource is not None and id(resource) in self._retirement_started_resource_ids:
+                    raise RuntimeError("Catalog refresh cannot reactivate a resource whose cleanup has started.")
             for refresher in self.context_refreshers or ():
                 prepared_refreshes.append(refresher(context))
         except BaseException:
             current_extension_ids = {id(extension) for extension in self.capability_extensions}
             for extension in extensions:
-                if id(extension) not in current_extension_ids:
+                if (
+                    id(extension) not in current_extension_ids
+                    and id(extension) not in self._retirement_started_resource_ids
+                ):
                     self._schedule_resource_cleanup(extension)
             for prepared in prepared_refreshes:
                 if isinstance(prepared, _PreparedContextRefresh) and prepared.rollback_resource is not None:
                     self._schedule_resource_cleanup(prepared.rollback_resource)
-            if authorizer is not None and authorizer is not self.owned_authorizer:
+            if (
+                authorizer is not None
+                and authorizer is not self.owned_authorizer
+                and id(authorizer) not in self._retirement_started_resource_ids
+            ):
                 self._schedule_resource_cleanup(authorizer)
             raise
 
@@ -849,7 +860,11 @@ class CatalogSessionBinding:
         pending_resources = [resource]
 
         def cleanup() -> Any:
-            return _close_resources(pending_resources)
+            async def close() -> None:
+                self._retirement_started_resource_ids.add(id(resource))
+                await _close_resources(pending_resources)
+
+            return close()
 
         task = self.cleanup_tracker.schedule(cleanup(), retry=cleanup)
         if task is None:
@@ -890,7 +905,7 @@ class CatalogSessionBinding:
                 pass
             else:
                 if error is not None:
-                    LOGGER.error("Cancelled catalog resource cleanup failed: %s", error)
+                    LOGGER.error("Cancelled catalog resource cleanup failed: %s", _sanitize_error_message(str(error)))
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
@@ -1383,6 +1398,8 @@ def _sanitize_metadata_value(value: Any) -> Any:
         return [_sanitize_metadata_value(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_sanitize_metadata_value(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return type(value)(_sanitize_metadata_value(item) for item in value)
     return value
 
 

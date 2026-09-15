@@ -294,6 +294,18 @@ def test_catalog_payload_sanitizes_apostrophe_and_redacted_uri_metadata():
     assert "apostrophe-tail" not in str(payload)
 
 
+def test_catalog_payload_sanitizes_set_metadata():
+    artifact = CatalogArtifact(
+        ArtifactReference("artifact", "source"),
+        ArtifactPresentation("data.csv"),
+        metadata={"links": {"******example.test/data?sig=secret"}},
+    )
+
+    payload = _artifact_payload(artifact)
+
+    assert payload["links"] == {"example.test/data"}
+
+
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
     root = tmp_path / "implicit-source"
     root.mkdir()
@@ -2553,6 +2565,37 @@ async def test_refresh_reactivates_scheduled_authorizer_without_closing_it():
     assert binding.owned_authorizer is first
     assert first.close_calls == 0
     assert second.close_calls == 1
+    await binding.aclose()
+
+
+async def test_refresh_rejects_authorizer_whose_retirement_has_started():
+    class Authorizer:
+        def __init__(self, name):
+            self.name = name
+            self.close_calls = 0
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    first = Authorizer("first")
+    second = Authorizer("second")
+    by_token = {"first": first, "second": second, "first-again": first}
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: by_token[context.user_token],
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "first"), execution_references=True)
+
+    binding.refresh_context(SessionContext("session", "user", "second"))
+    await integration._cleanup_tracker.drain()
+
+    with pytest.raises(RuntimeError, match="cleanup has started"):
+        binding.refresh_context(SessionContext("session", "user", "first-again"))
+    assert binding.owned_authorizer is second
+    assert first.close_calls == 1
     await binding.aclose()
 
 
