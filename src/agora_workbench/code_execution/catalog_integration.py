@@ -260,6 +260,7 @@ class SessionCredential:
         self._provider_drained: dict[int, asyncio.Event] = {}
         self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
         self._provider_retirements: list[_RetiredCredentialProvider] = []
+        self._closed_retired_providers: dict[int, Any] = {}
         self._provider_closed = False
         self._closing = False
 
@@ -296,6 +297,11 @@ class SessionCredential:
         previous_provider = self._provider
         if provider is previous_provider:
             return _PreparedContextRefresh(lambda: None)
+        if self._closed_retired_providers.get(id(provider)) is provider:
+            raise RuntimeError(
+                f"Credential provider cleanup has completed for session {context.session_id}; "
+                "return a new provider instance."
+            )
         previous_retirement = next(
             (retirement for retirement in self._provider_retirements if retirement.provider is provider),
             None,
@@ -375,6 +381,7 @@ class SessionCredential:
                 result = close()
                 if inspect.isawaitable(result):
                     _ = await result
+                self._closed_retired_providers[provider_id] = provider
             for index, retired in enumerate(self._retired_providers):
                 if retired is provider:
                     self._retired_providers.pop(index)
