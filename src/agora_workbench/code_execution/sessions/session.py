@@ -277,7 +277,9 @@ class Session(Generic[T]):
                         cancellations.append(exc)
                         try:
                             loop.run_until_complete(self._retry_resource_cleanup(resource, label))
-                        except BaseException as retry_error:
+                        except asyncio.CancelledError as retry_error:
+                            exc.add_note(f"{label} cleanup retry was cancelled: {retry_error!r}")
+                        except Exception as retry_error:
                             exc.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
                 finally:
                     loop.close()
@@ -289,7 +291,9 @@ class Session(Generic[T]):
                     except asyncio.CancelledError as cancelled:
                         try:
                             await self._retry_resource_cleanup(resource, label)
-                        except BaseException as retry_error:
+                        except asyncio.CancelledError as retry_error:
+                            cancelled.add_note(f"{label} cleanup retry was cancelled: {retry_error!r}")
+                        except Exception as retry_error:
                             cancelled.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
                         raise cancelled
 

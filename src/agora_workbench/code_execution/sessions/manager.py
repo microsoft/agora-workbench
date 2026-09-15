@@ -872,12 +872,14 @@ class SessionManager:
             if kernel_start_attempted and not registered:
 
                 async def rollback_kernel_start() -> None:
-                    if kernel_client is not None:
-                        kernel_client.stop_channels()
                     try:
-                        await kernel_manager.shutdown_kernel(now=True)
+                        if kernel_client is not None:
+                            kernel_client.stop_channels()
                     finally:
-                        await kernel_manager.cleanup_resources()
+                        try:
+                            await kernel_manager.shutdown_kernel(now=True)
+                        finally:
+                            await kernel_manager.cleanup_resources()
 
                 cleanup = asyncio.create_task(rollback_kernel_start())
                 while True:
@@ -885,6 +887,8 @@ class SessionManager:
                         _ = await asyncio.shield(cleanup)
                         break
                     except asyncio.CancelledError:
+                        if cleanup.done():
+                            break
                         continue
                     except Exception:
                         LOGGER.error("Failed to clean up kernel startup for session %s", session_id, exc_info=True)

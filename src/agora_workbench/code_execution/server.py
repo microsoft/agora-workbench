@@ -2927,6 +2927,8 @@ else:
                 await asyncio.shield(task)
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
+                if task.done():
+                    break
             except Exception:
                 LOGGER.warning("%s raised; continuing", label, exc_info=True)
                 break

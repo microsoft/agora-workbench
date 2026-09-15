@@ -948,6 +948,7 @@ class TestKernelRebuildWaits:
 
             async def shutdown_kernel(self, now=False):
                 self.shut_down = True
+                raise asyncio.CancelledError
 
             async def cleanup_resources(self):
                 self.cleaned_up = True
@@ -963,6 +964,7 @@ class TestKernelRebuildWaits:
 
             def stop_channels(self):
                 self.channels_stopped = True
+                raise RuntimeError("channel cleanup failed")
 
         kernel_manager = FailingKernelManager()
         monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", lambda **kwargs: kernel_manager)
