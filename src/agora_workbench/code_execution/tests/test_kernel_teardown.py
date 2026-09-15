@@ -1886,6 +1886,18 @@ class TestNoRunningLoop:
         asyncio.run(manager.aclose_session(session_id))
         assert session_id not in manager._kernels, "the documented recovery path did not reclaim the kernel"
 
+    def test_aclose_all_reclaims_kernel_left_by_sync_close(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        _, kernel_client = register_kernel(manager, session_id)
+
+        manager.close_session(session_id)
+        assert session_id in manager._kernels
+
+        asyncio.run(manager.aclose_all_sessions())
+
+        assert session_id not in manager._kernels
+        assert kernel_client.channels_stopped
+
 
 # ---------------------------------------------------------------------------
 # Batch cleanup does not report success while kernels are still resident

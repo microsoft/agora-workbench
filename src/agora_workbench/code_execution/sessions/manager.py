@@ -727,7 +727,15 @@ class SessionManager:
         with self._session_lifecycle_lock:
             if expected_closing_session is not None:
                 if self._closing_sessions.get(session_id) is expected_closing_session:
-                    return self._kernel_shutdown_tasks.get(session_id), None
+                    shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+                    if shutdown_task is None or shutdown_task.done():
+                        shutdown_task = self._schedule_kernel_shutdown(
+                            session_id,
+                            caller=caller,
+                            cleanup_artifacts=False,
+                            wait_for_executions=True,
+                        )
+                    return shutdown_task, None
                 return None, None
             if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
                 return None, None

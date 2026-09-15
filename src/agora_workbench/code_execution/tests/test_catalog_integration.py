@@ -294,6 +294,22 @@ async def test_configured_catalog_startup_rejects_unready_source(tmp_path):
     assert cast(Any, integration.provider)._closed
 
 
+async def test_catalog_startup_preserves_failure_when_private_cache_cleanup_fails(tmp_path, monkeypatch):
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[SourceConfig(path=str(tmp_path / "missing"))])
+    )
+
+    def fail_cleanup():
+        raise PermissionError("busy")
+
+    monkeypatch.setattr(integration, "_cleanup_private_cache_directory", fail_cleanup)
+
+    with pytest.raises(RuntimeError, match="not ready") as error:
+        await integration.startup()
+
+    assert any("cache cleanup also failed: PermissionError" in note for note in error.value.__notes__)
+
+
 async def test_failed_provider_close_retains_private_cache_for_shutdown_retry(tmp_path):
     root = tmp_path / "source"
     root.mkdir()
