@@ -134,7 +134,7 @@ class AssetResolutionMiddleware(Middleware):
             try:
                 session_id = fastmcp_ctx.session_id
             except (RuntimeError, AttributeError):
-                pass
+                LOGGER.debug("FastMCP session ID is unavailable; using an unscoped execution session.")
 
         self.server._restore_auth_context_for_mcp_session(session_id)
         tool_name = context.message.name

@@ -376,6 +376,42 @@ async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(t
     assert captured["hybrid_alpha"] == 0.25
 
 
+async def test_configured_catalog_empty_query_embedding_falls_back_to_keyword_search(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root))],
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    provider = _ConfiguredCatalogProvider(config)
+
+    class EmptyEmbeddings:
+        dimensions = 2
+
+        async def embed(self, texts):
+            return []
+
+    captured = {}
+    original_search = CatalogDB.search
+
+    def search(db, query, **kwargs):
+        captured.update(kwargs)
+        return original_search(db, query, **kwargs)
+
+    monkeypatch.setattr(CatalogDB, "search", search)
+    try:
+        await provider.load()
+        provider._indexer._embedding_provider = EmptyEmbeddings()
+        page = await provider.search(SearchRequest("searchable"), RequestContext())
+    finally:
+        await provider.aclose()
+
+    assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+    assert captured["query_embedding"] is None
+    assert captured["hybrid_alpha"] == 1.0
+
+
 async def test_configured_keyword_only_catalog_searches_without_embeddings(tmp_path):
     root = tmp_path / "source"
     root.mkdir()

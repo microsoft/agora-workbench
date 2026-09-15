@@ -632,7 +632,7 @@ class SessionManager:
     def _on_session_owned_cleanup_done(
         self,
         session_id: str,
-        session: Session,
+        session: Session | None,
         task: asyncio.Task[None],
     ) -> None:
         session_tasks = self._session_owned_cleanup_tasks.get(session_id)
@@ -641,7 +641,8 @@ class SessionManager:
             if not session_tasks:
                 self._session_owned_cleanup_tasks.pop(session_id, None)
         self._on_resource_cleanup_done(task)
-        self._finalize_closed_session(session_id)
+        if session is not None:
+            self._finalize_closed_session(session_id)
 
     async def _await_session_owned_cleanup(self, session_id: str) -> None:
         """Wait for every asynchronous cleanup task owned by one session."""
@@ -649,7 +650,8 @@ class SessionManager:
         cancelled: asyncio.CancelledError | None = None
         while tasks := tuple(self._session_owned_cleanup_tasks.get(session_id, ())):
             results = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
-            for result in results:
+            for task, result in zip(tasks, results):
+                self._on_session_owned_cleanup_done(session_id, self._closing_sessions.get(session_id), task)
                 if isinstance(result, asyncio.CancelledError):
                     cancelled = cancelled or result
                 elif isinstance(result, Exception):

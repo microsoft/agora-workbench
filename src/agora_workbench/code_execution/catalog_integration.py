@@ -422,7 +422,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         if provider is None:
             return None
         embeddings = await provider.embed([query])
-        return embeddings[0]
+        return embeddings[0] if embeddings else None
 
     async def aclose(self) -> None:
         if self._closed:

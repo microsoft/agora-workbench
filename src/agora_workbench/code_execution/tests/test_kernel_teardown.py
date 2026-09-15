@@ -937,7 +937,7 @@ class TestAwaitableClose:
         assert not cleanup_started.is_set()
 
         await operation.__aexit__(None, None, None)
-        await close_task
+        _ = await close_task
         assert cleanup_started.is_set()
 
     async def test_aclose_session_joins_sync_scheduled_async_cleanup(self, manager):
@@ -959,7 +959,7 @@ class TestAwaitableClose:
         assert not close_task.done()
 
         cleanup_gate.set()
-        await close_task
+        _ = await close_task
 
     async def test_aclose_all_sessions_joins_pending_resource_cleanup(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
@@ -972,7 +972,7 @@ class TestAwaitableClose:
         assert not close_all.done()
 
         await operation.__aexit__(None, None, None)
-        await close_all
+        _ = await close_all
 
     async def test_thread_close_defers_resource_cleanup_until_operation_drains(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
