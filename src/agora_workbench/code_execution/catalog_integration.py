@@ -267,6 +267,8 @@ class SessionCredential:
         del kwargs
         if not scopes:
             raise ValueError("At least one scope is required.")
+        if self._closing or self._provider_closed:
+            raise RuntimeError("Credential cleanup has started; new token requests are not accepted.")
         provider = self._provider
         provider_id = id(provider)
         event = self._provider_drained.get(provider_id)

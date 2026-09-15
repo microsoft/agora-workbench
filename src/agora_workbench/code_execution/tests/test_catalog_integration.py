@@ -1937,6 +1937,36 @@ async def test_session_credential_close_rejects_concurrent_context_refresh():
     assert credential._provider is current
 
 
+async def test_session_credential_close_rejects_new_token_requests():
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+
+    class CredentialProvider:
+        def __init__(self):
+            self.get_token_calls = 0
+
+        async def get_token(self, _scope):
+            self.get_token_calls += 1
+            return object()
+
+        async def close(self):
+            close_started.set()
+            await release_close.wait()
+
+    provider = CredentialProvider()
+    credential = SessionCredential(provider)
+
+    close_task = asyncio.create_task(credential.close())
+    await close_started.wait()
+
+    with pytest.raises(RuntimeError, match="cleanup has started"):
+        await credential.get_token("scope")
+
+    assert provider.get_token_calls == 0
+    release_close.set()
+    await close_task
+
+
 async def test_session_credential_identity_refresh_does_not_retire_current_provider():
     class CredentialProvider:
         def __init__(self):
