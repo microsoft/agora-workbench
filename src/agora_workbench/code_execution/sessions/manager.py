@@ -282,6 +282,7 @@ class SessionManager:
         # garbage-collected mid-flight).
         self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
         self._resource_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._background_lease_release_tasks: set[asyncio.Task[None]] = set()
         self._resource_cleanup_errors: list[Exception] = []
         self._resource_cleanup_cancellations: list[asyncio.CancelledError] = []
         self._session_generation_seq = 0
@@ -1622,7 +1623,9 @@ class SessionManager:
 
         def release_unstarted_collector(_completed: asyncio.Task[None]) -> None:
             if not started:
-                asyncio.create_task(resource_operation.__aexit__(None, None, None))
+                release_task = asyncio.create_task(resource_operation.__aexit__(None, None, None))
+                self._background_lease_release_tasks.add(release_task)
+                release_task.add_done_callback(self._background_lease_release_tasks.discard)
 
         task.add_done_callback(release_unstarted_collector)
         return task

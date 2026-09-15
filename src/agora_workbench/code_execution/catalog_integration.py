@@ -877,8 +877,17 @@ class CatalogSessionBinding:
                 self._scheduled_cleanup_tasks.pop(task, None)
                 if self.cleanup_tracker is not None:
                     self.cleanup_tracker.discard(task)
+                task.add_done_callback(self._consume_cancelled_resource_cleanup)
                 task.cancel()
         _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+
+    @staticmethod
+    def _consume_cancelled_resource_cleanup(task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            try:
+                task.exception()
+            except asyncio.CancelledError:
+                pass
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
