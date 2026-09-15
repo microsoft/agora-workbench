@@ -280,6 +280,8 @@ class SessionCredential:
             return _PreparedContextRefresh(lambda: None)
         provider = self._provider_factory(context.user_token)
         previous_provider = self._provider
+        if provider is previous_provider:
+            return _PreparedContextRefresh(lambda: None)
 
         def commit() -> None:
             self._retired_providers.append(self._provider)

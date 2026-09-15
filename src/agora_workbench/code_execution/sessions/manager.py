@@ -2059,6 +2059,12 @@ class SessionManager:
         """Keep session-owned data resources alive for one admitted operation."""
         with self._session_lifecycle_lock:
             session_generation = self._session_generations.get(session_id)
+            if (
+                session_generation is None
+                and session_id not in self._closing_session_ids
+                and self.storage.retrieve(session_id) is not None
+            ):
+                session_generation = self._adopt_session_generation_locked(session_id)
 
         @asynccontextmanager
         async def operation() -> AsyncIterator[None]:

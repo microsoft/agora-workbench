@@ -908,6 +908,16 @@ class TestAwaitableClose:
         with pytest.raises(ValueError, match="not found or is closing"):
             await operation.__aenter__()
 
+    async def test_resource_operation_adopts_generation_for_restored_session(self, manager):
+        session_id = "restored-resource-operation"
+        manager.storage.store(session_id, Session(session_id, {}, "default", "user", "token", {}))
+        assert session_id not in manager._session_generations
+
+        async with manager.session_resource_operation(session_id):
+            assert manager._session_generations[session_id] > 0
+
+        await manager.aclose_session(session_id)
+
     async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         session = manager.get_session(session_id)

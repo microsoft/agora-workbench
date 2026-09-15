@@ -186,7 +186,7 @@ class SQLiteCatalogProvider:
         offset = _cursor_offset(request.page.cursor, cursor_request)
         query_embedding = (
             await self._query_embedder(request.query)
-            if request.query.strip() and self._query_embedder is not None
+            if self._hybrid_alpha < 1.0 and request.query.strip() and self._query_embedder is not None
             else None
         )
         records = self._db.search(

@@ -582,6 +582,37 @@ async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(t
     assert captured["hybrid_alpha"] == 0.25
 
 
+async def test_configured_catalog_keyword_search_does_not_call_query_embedder(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root))],
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=1.0),
+    )
+    provider = _ConfiguredCatalogProvider(config)
+    query_embedder = AsyncMock(side_effect=RuntimeError("keyword search must not embed"))
+    captured = {}
+    original_search = CatalogDB.search
+
+    def search(db, query, **kwargs):
+        captured.update(kwargs)
+        return original_search(db, query, **kwargs)
+
+    monkeypatch.setattr(CatalogDB, "search", search)
+    try:
+        await provider.load()
+        provider._query_embedder = query_embedder
+        page = await provider.search(SearchRequest("searchable"), RequestContext())
+    finally:
+        await provider.aclose()
+
+    query_embedder.assert_not_awaited()
+    assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+    assert captured["query_embedding"] is None
+    assert captured["hybrid_alpha"] == 1.0
+
+
 async def test_configured_catalog_empty_query_embedding_falls_back_to_keyword_search(tmp_path, monkeypatch):
     root = tmp_path / "source"
     root.mkdir()
@@ -1666,6 +1697,30 @@ async def test_session_credential_retries_cancelled_retired_provider_cleanup():
 
     assert retired.close_calls == 2
     assert current.close_calls == 1
+
+
+async def test_session_credential_identity_refresh_does_not_retire_current_provider():
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def get_token(self, scope):
+            return scope
+
+        async def close(self):
+            self.close_calls += 1
+
+    provider = CredentialProvider()
+    credential = SessionCredential(provider, provider_factory=lambda token: provider)
+    prepared = credential.prepare_context_refresh(SessionContext("session", "user", "new-token"))
+
+    prepared()
+    assert prepared.retire_resource is None
+    assert prepared.rollback_resource is None
+    assert await credential.get_token("scope") == "scope"
+
+    await credential.close()
+    assert provider.close_calls == 1
 
 
 async def test_session_credential_retires_provider_after_in_flight_token_request():
