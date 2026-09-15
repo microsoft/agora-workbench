@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from contextlib import contextmanager
@@ -94,6 +94,69 @@ async def test_execute_code_resumes_explicit_execution_session(test_server):
         set_current_request_token(None)
         set_current_token_claims(None)
         test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_holds_session_resources_through_asset_resolution(test_server, tmp_path):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    resolve_started = asyncio.Event()
+    release_resolve = asyncio.Event()
+    manager_closed = asyncio.Event()
+
+    class BlockingDataManager:
+        async def get_cache_path(self, reference):
+            del reference
+            resolve_started.set()
+            await release_resolve.wait()
+            return tmp_path / "asset.txt"
+
+        async def aclose(self):
+            manager_closed.set()
+
+    session.data_manager = BlockingDataManager()
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(
+                test_server,
+                "_execute_code_with_tracing",
+                AsyncMock(return_value=CodeExecutionResult(success=True, stdout="ok", execution_time=0.01)),
+            ),
+        ):
+            execution = asyncio.ensure_future(
+                execute_code_tool(
+                    ctx=SimpleNamespace(session_id=None),
+                    code="print('<blob>asset</blob>')",
+                    execution_session_id=session_id,
+                )
+            )
+            await resolve_started.wait()
+            close = asyncio.create_task(test_server.session_manager.aclose_session(session_id))
+            await asyncio.sleep(0)
+
+            assert not manager_closed.is_set()
+            assert not close.done()
+
+            release_resolve.set()
+            await execution
+            await close
+            assert manager_closed.is_set()
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
 
 
 @pytest.mark.asyncio

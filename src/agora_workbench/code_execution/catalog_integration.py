@@ -1049,7 +1049,12 @@ class CatalogIntegration:
                 close_error = exc
             finally:
                 if self._provider_closed:
-                    self._cleanup_private_cache_directory()
+                    try:
+                        self._cleanup_private_cache_directory()
+                    except Exception as cache_cleanup_error:
+                        startup_error.add_note(
+                            f"Catalog startup cache cleanup also failed: {type(cache_cleanup_error).__name__}"
+                        )
             if close_error is not None:
                 startup_error.add_note(f"Catalog startup rollback also failed: {close_error!r}")
             raise
