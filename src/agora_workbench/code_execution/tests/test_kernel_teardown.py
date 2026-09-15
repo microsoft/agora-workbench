@@ -947,7 +947,7 @@ class TestAwaitableClose:
 
         release_execution.set()
         assert (await execution)[2]
-        await close
+        assert await close is None
         assert manager_closed.is_set()
 
     async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
@@ -2112,7 +2112,7 @@ class TestNoRunningLoop:
         assert not close.done()
 
         release_gate.set()
-        await close
+        assert await close is None
         assert not manager._background_lease_release_tasks
 
     @pytest.mark.parametrize(
