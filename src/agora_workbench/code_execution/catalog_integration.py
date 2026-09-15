@@ -221,7 +221,7 @@ async def _close_resources(resources: list[object]) -> None:
         raise ExceptionGroup("Resource cleanup failed.", errors)
 
 
-def _remove_resource_identity(resources: list[object], resource: object) -> None:
+def _remove_resource_identity(resources: list[Any], resource: object) -> None:
     for index, candidate in enumerate(resources):
         if candidate is resource:
             resources.pop(index)
@@ -249,7 +249,7 @@ class SessionCredential:
         self._provider_users: dict[int, int] = {}
         self._provider_drained: dict[int, asyncio.Event] = {}
         self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
-        self._provider_retirements: dict[int, _RetiredCredentialProvider] = {}
+        self._provider_retirements: list[_RetiredCredentialProvider] = []
         self._provider_closed = False
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
@@ -283,24 +283,30 @@ class SessionCredential:
         previous_provider = self._provider
         if provider is previous_provider:
             return _PreparedContextRefresh(lambda: None)
-        previous_retirement = self._provider_retirements.get(id(provider))
-        if previous_retirement is not None and previous_retirement.provider is not provider:
-            previous_retirement = None
-        if previous_retirement is not None and previous_retirement.started:
-            raise RuntimeError(f"Credential provider cleanup has already started for session {context.session_id}.")
-        reactivated_index = next(
-            (index for index, retired in enumerate(self._retired_providers) if retired is provider),
+        previous_retirement = next(
+            (retirement for retirement in self._provider_retirements if retirement.provider is provider),
             None,
         )
+        if previous_retirement is not None and previous_retirement.started:
+            raise RuntimeError(
+                f"Credential provider cleanup has already started for session {context.session_id}; "
+                "return a new provider instance."
+            )
+        reactivated_index: int | None = None
         retirement = _RetiredCredentialProvider(self, previous_provider)
 
         def commit() -> None:
+            nonlocal reactivated_index
+            reactivated_index = next(
+                (index for index, retired in enumerate(self._retired_providers) if retired is provider),
+                None,
+            )
             if reactivated_index is not None:
                 self._retired_providers.pop(reactivated_index)
-                if self._provider_retirements.get(id(provider)) is previous_retirement:
-                    self._provider_retirements.pop(id(provider), None)
+                if previous_retirement is not None:
+                    _remove_resource_identity(self._provider_retirements, previous_retirement)
             self._retired_providers.append(self._provider)
-            self._provider_retirements[id(previous_provider)] = retirement
+            self._provider_retirements.append(retirement)
             self._provider = provider
             self._provider_closed = False
 
@@ -311,12 +317,11 @@ class SessionCredential:
                     if self._retired_providers[index] is previous_provider:
                         self._retired_providers.pop(index)
                         break
-                if self._provider_retirements.get(id(previous_provider)) is retirement:
-                    self._provider_retirements.pop(id(previous_provider), None)
+                _remove_resource_identity(self._provider_retirements, retirement)
                 if reactivated_index is not None:
                     self._retired_providers.insert(reactivated_index, provider)
                     if previous_retirement is not None:
-                        self._provider_retirements[id(provider)] = previous_retirement
+                        self._provider_retirements.append(previous_retirement)
 
         return _PreparedContextRefresh(
             commit,
@@ -326,9 +331,10 @@ class SessionCredential:
         )
 
     async def _close_retired_provider(self, retirement: _RetiredCredentialProvider) -> None:
+        """Close a provider only while its retirement ticket remains current."""
         provider = retirement.provider
         provider_id = id(provider)
-        if self._provider_retirements.get(provider_id) is not retirement:
+        if not any(candidate is retirement for candidate in self._provider_retirements):
             return
         if provider is self._provider:
             return
@@ -337,9 +343,9 @@ class SessionCredential:
         if existing is not None and existing is not current_task:
             await asyncio.shield(existing)
             return
+        retirement.started = True
         if existing is None and current_task is not None:
             self._retired_cleanup_tasks[provider_id] = current_task
-            retirement.started = True
         try:
             drained = self._provider_drained.get(provider_id)
             if drained is not None:
@@ -353,8 +359,7 @@ class SessionCredential:
                 if retired is provider:
                     self._retired_providers.pop(index)
                     break
-            if self._provider_retirements.get(provider_id) is retirement:
-                self._provider_retirements.pop(provider_id, None)
+            _remove_resource_identity(self._provider_retirements, retirement)
         finally:
             if self._retired_cleanup_tasks.get(provider_id) is current_task:
                 self._retired_cleanup_tasks.pop(provider_id, None)
@@ -377,8 +382,11 @@ class SessionCredential:
                         if inspect.isawaitable(result):
                             _ = await result
                 else:
-                    retirement = self._provider_retirements.get(id(provider))
-                    if retirement is not None and retirement.provider is provider:
+                    retirement = next(
+                        (candidate for candidate in self._provider_retirements if candidate.provider is provider),
+                        None,
+                    )
+                    if retirement is not None:
                         await self._close_retired_provider(retirement)
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
