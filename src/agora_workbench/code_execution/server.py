@@ -2922,19 +2922,16 @@ else:
         """Finish one catalog cleanup step even when server shutdown is cancelled."""
         task = asyncio.create_task(awaitable)
         cancelled: asyncio.CancelledError | None = None
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError as exc:
-            cancelled = exc
+        while True:
             try:
                 await asyncio.shield(task)
-            except asyncio.CancelledError:
-                # Preserve the caller's original cancellation after the cleanup task drains.
-                pass
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
             except Exception:
                 LOGGER.warning("%s raised; continuing", label, exc_info=True)
-        except Exception:
-            LOGGER.warning("%s raised; continuing", label, exc_info=True)
+                break
+            else:
+                break
         return cancelled
 
     def _add_custom_endpoints(self, app):

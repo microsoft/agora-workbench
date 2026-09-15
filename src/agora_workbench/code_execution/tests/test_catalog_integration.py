@@ -340,6 +340,31 @@ async def test_server_shutdown_cancellation_still_closes_sessions_and_catalog(tm
     assert provider.close_calls == 1
 
 
+async def test_catalog_cleanup_drains_through_repeated_cancellation():
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    finished = asyncio.Event()
+
+    async def cleanup():
+        started.set()
+        await gate.wait()
+        finished.set()
+
+    drain = asyncio.create_task(CodeExecutionServer._await_catalog_cleanup(cleanup(), "test cleanup"))
+    await started.wait()
+    drain.cancel()
+    await asyncio.sleep(0)
+    assert not drain.done()
+    drain.cancel()
+    await asyncio.sleep(0)
+    assert not drain.done()
+
+    gate.set()
+    cancelled = await drain
+    assert isinstance(cancelled, asyncio.CancelledError)
+    assert finished.is_set()
+
+
 @pytest.mark.parametrize("cancelled_stage", ["tool_search", "publisher", "activity"])
 async def test_server_shutdown_drains_each_cancelled_resource_once(tmp_path, cancelled_stage):
     started = asyncio.Event()

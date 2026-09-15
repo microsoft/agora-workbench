@@ -877,6 +877,58 @@ class TestKernelRebuildWaits:
         assert old_kernel.shutdown_finished
         assert "s1" not in manager._kernels
 
+    async def test_failed_kernel_start_rolls_back_unregistered_kernel(self, manager, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        session_id = manager.create_session(data={}, user_identity="user", user_token="token", token_claims={})
+
+        class FailingKernelManager:
+            started = False
+            shut_down = False
+            cleaned_up = False
+
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                self.started = True
+
+            def client(self):
+                return FailingKernelClient()
+
+            async def shutdown_kernel(self, now=False):
+                self.shut_down = True
+
+            async def cleanup_resources(self):
+                self.cleaned_up = True
+
+        class FailingKernelClient:
+            channels_stopped = False
+
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                raise RuntimeError("kernel did not become ready")
+
+            def stop_channels(self):
+                self.channels_stopped = True
+
+        kernel_manager = FailingKernelManager()
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", lambda **kwargs: kernel_manager)
+
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            await manager._get_or_create_kernel(session_id)
+
+        assert kernel_manager.started
+        assert kernel_manager.shut_down
+        assert kernel_manager.cleaned_up
+        assert session_id not in manager._kernels
+
     async def test_idle_cleanup_registers_teardown_for_kernel_rebuild_waiters(self, manager):
         gate = asyncio.Event()
         session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})

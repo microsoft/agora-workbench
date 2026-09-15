@@ -846,25 +846,50 @@ class SessionManager:
         else:
             env.pop("USER_IDENTITY", None)
 
-        await kernel_manager.start_kernel(env=env, cwd=working_dir)
-        kernel_client = kernel_manager.client()
-        kernel_client.start_channels()
-        await kernel_client.wait_for_ready()
+        kernel_client = None
+        kernel_start_attempted = False
+        registered = False
+        try:
+            kernel_start_attempted = True
+            await kernel_manager.start_kernel(env=env, cwd=working_dir)
+            kernel_client = kernel_manager.client()
+            kernel_client.start_channels()
+            await kernel_client.wait_for_ready()
 
-        # Store in registry
-        with self._session_lifecycle_lock:
-            session_is_current = self._session_generations.get(session_id) == session_generation
-            if session_is_current:
-                self._kernels[session_id] = (kernel_manager, kernel_client)
-                self._kernel_last_used[session_id] = time.time()
-                self._kernel_tokens[session_id] = user_token
-                self._assign_kernel_generation(session_id)
-                self._kernel_session_generations[session_id] = session_generation
-        if not session_is_current:
-            kernel_client.stop_channels()
-            await kernel_manager.shutdown_kernel(now=True)
-            await kernel_manager.cleanup_resources()
-            raise ValueError(f"Session {session_id} was closed while its kernel was starting.")
+            # Store in registry
+            with self._session_lifecycle_lock:
+                session_is_current = self._session_generations.get(session_id) == session_generation
+                if session_is_current:
+                    self._kernels[session_id] = (kernel_manager, kernel_client)
+                    self._kernel_last_used[session_id] = time.time()
+                    self._kernel_tokens[session_id] = user_token
+                    self._assign_kernel_generation(session_id)
+                    self._kernel_session_generations[session_id] = session_generation
+                    registered = True
+            if not session_is_current:
+                raise ValueError(f"Session {session_id} was closed while its kernel was starting.")
+        except BaseException:
+            if kernel_start_attempted and not registered:
+
+                async def rollback_kernel_start() -> None:
+                    if kernel_client is not None:
+                        kernel_client.stop_channels()
+                    try:
+                        await kernel_manager.shutdown_kernel(now=True)
+                    finally:
+                        await kernel_manager.cleanup_resources()
+
+                cleanup = asyncio.create_task(rollback_kernel_start())
+                while True:
+                    try:
+                        _ = await asyncio.shield(cleanup)
+                        break
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        LOGGER.error("Failed to clean up kernel startup for session %s", session_id, exc_info=True)
+                        break
+            raise
 
         LOGGER.info(f"Kernel started for session {session_id}")
         return kernel_manager, kernel_client
