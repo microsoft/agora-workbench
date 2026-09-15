@@ -1383,6 +1383,114 @@ async def test_blob_fetcher_rejects_prefix_and_reserved_paths_before_network(tmp
         )
 
 
+@pytest.mark.parametrize(
+    "reserved_path",
+    [
+        RESERVED_MANIFEST_PATH,
+        f"{RESERVED_OPERATIONS_PREFIX}operation.json",
+        f"{RESERVED_RECEIPTS_PREFIX}receipt.json",
+        ".agora/other/provider-state.json",
+    ],
+)
+async def test_trusted_catalog_blob_fetch_rejects_non_revision_provider_state(tmp_path, reserved_path):
+    fetcher = BlobFetcher(credential=MagicMock())
+    fetcher._get_client = MagicMock(side_effect=AssertionError("network must not be touched"))
+
+    with pytest.raises(InvalidRequestError, match="revisions prefix"):
+        await fetcher._fetch_catalog_to_file_result(
+            f"az://account123/container/{reserved_path}",
+            tmp_path / "denied.bin",
+        )
+
+
+async def test_trusted_catalog_blob_fetch_accepts_only_managed_revision_and_raw_stays_denied(tmp_path):
+    class Stream:
+        async def chunks(self):
+            yield b"managed revision"
+
+    blob_client = MagicMock()
+    blob_client.download_blob = AsyncMock(return_value=Stream())
+    service_client = MagicMock()
+    service_client.get_blob_client.return_value = blob_client
+    fetcher = BlobFetcher(
+        credential=MagicMock(),
+        allowed_locations=["az://account123/container/.agora/revisions/"],
+    )
+    fetcher._clients["https://account123.blob.core.windows.net"] = service_client
+    revision_uri = f"az://account123/container/{RESERVED_REVISIONS_PREFIX}artifact/operation.data"
+    destination = tmp_path / "revision.bin"
+
+    result = await fetcher._fetch_catalog_to_file_result(revision_uri, destination)
+
+    assert result.bytes_transferred == len(b"managed revision")
+    assert destination.read_bytes() == b"managed revision"
+    with pytest.raises(InvalidRequestError, match="reserved"):
+        await fetcher.fetch_to_file(revision_uri, tmp_path / "raw-denied.bin")
+
+
+@pytest.mark.parametrize(
+    "reserved_path",
+    [
+        RESERVED_MANIFEST_PATH,
+        f"{RESERVED_OPERATIONS_PREFIX}operation.json",
+        f"{RESERVED_RECEIPTS_PREFIX}receipt.json",
+        ".agora/other/provider-state.json",
+    ],
+)
+async def test_trusted_catalog_local_fetch_rejects_non_revision_provider_state(tmp_path, reserved_path):
+    root = tmp_path / "lake"
+    source = root / reserved_path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("provider state")
+    fetcher = LocalFileFetcher(allowed_roots=[str(root)])
+
+    with pytest.raises(InvalidRequestError, match="revisions prefix"):
+        await fetcher._fetch_catalog_to_file_result(
+            str(source),
+            tmp_path / "denied.bin",
+        )
+
+
+async def test_trusted_catalog_local_fetch_accepts_only_managed_revision_and_raw_stays_denied(tmp_path):
+    root = tmp_path / "lake"
+    source = root / RESERVED_REVISIONS_PREFIX / "artifact" / "operation.data"
+    source.parent.mkdir(parents=True)
+    source.write_text("managed revision")
+    fetcher = LocalFileFetcher(allowed_roots=[str(root)])
+    destination = tmp_path / "revision.bin"
+
+    result = await fetcher._fetch_catalog_to_file_result(str(source), destination)
+
+    assert result.bytes_transferred == len("managed revision")
+    assert destination.read_text() == "managed revision"
+    with pytest.raises(PermissionError, match="reserved"):
+        await fetcher.fetch_to_file(str(source), tmp_path / "raw-denied.bin")
+
+
+async def test_standalone_catalog_shaped_resolver_does_not_receive_managed_revision_trust(tmp_path):
+    source = tmp_path / RESERVED_REVISIONS_PREFIX / "artifact" / "operation.data"
+    source.parent.mkdir(parents=True)
+    source.write_text("provider revision")
+
+    class ArbitraryResolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            assert artifact_id == "catalog-v1:opaque"
+            return str(source)
+
+    manager = DataLakeDataManager(
+        credential=MagicMock(),
+        artifact_resolver=ArbitraryResolver(),
+    )
+    try:
+        assert not manager._catalog_managed_revision_access
+        with pytest.raises(PermissionError, match="reserved"):
+            await manager.get_cache_path("<blob>catalog-v1:opaque</blob>")
+    finally:
+        await manager.aclose()
+
+
 async def test_blob_fetcher_diagnostics_cover_stream_acquisition_failure(tmp_path):
     diagnostics = []
     blob_client = MagicMock()

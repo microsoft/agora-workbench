@@ -28,10 +28,11 @@ from agora_workbench.data_lake.errors import (
 )
 from agora_workbench.data_lake.identity import (
     AzureBlobScope,
-    RESERVED_PROVIDER_PREFIX,
+    is_reserved_provider_path,
     parse_azure_uri,
     sanitize_uri_for_display,
     validate_azure_object_path,
+    validate_managed_revision_path,
 )
 from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
@@ -421,10 +422,9 @@ class BlobFetcher(AssetFetcher):
         *,
         allow_reserved: bool = False,
     ) -> None:
-        validate_azure_object_path(
-            blob_path,
-            allow_reserved=allow_reserved,
-        )
+        validated_path = validate_azure_object_path(blob_path, allow_reserved=allow_reserved)
+        if allow_reserved and is_reserved_provider_path(validated_path):
+            validate_managed_revision_path(validated_path)
         if self._allowed_scopes and not any(
             scope.contains(account, container, blob_path) for scope in self._allowed_scopes
         ):
@@ -670,8 +670,18 @@ class LocalFileFetcher(AssetFetcher):
 
         if not path.exists():
             raise FileNotFoundError(f"Local file not found: {path}")
-        if not allow_reserved and RESERVED_PROVIDER_PREFIX.rstrip("/") in path.parts:
-            raise PermissionError("Local asset path is reserved for provider metadata.")
+        reserved_path = next(
+            (
+                "/".join(path.parts[index:])
+                for index in range(len(path.parts))
+                if is_reserved_provider_path("/".join(path.parts[index:]))
+            ),
+            None,
+        )
+        if reserved_path is not None:
+            if not allow_reserved:
+                raise PermissionError("Local asset path is reserved for provider metadata.")
+            validate_managed_revision_path(reserved_path)
 
         if self._allowed_roots:
             if not any(self._is_within(path, root) for root in self._allowed_roots):

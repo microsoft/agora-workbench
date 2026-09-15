@@ -259,6 +259,7 @@ async def test_local_public_surfaces_roundtrip_isolate_and_converge(tmp_path, mo
         assert not any("facet" in name for name in tools)
 
         load_path = alice_hits[0]["load_path"]
+        assert session_manager.get_session(alice_session).data_manager._catalog_managed_revision_access
         cached = await session_manager.get_session(alice_session).data_manager.get_cache_path(load_path)
         assert cached.read_bytes() == first_payload.read_bytes()
 

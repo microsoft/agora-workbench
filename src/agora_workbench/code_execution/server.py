@@ -322,7 +322,7 @@ class CodeExecutionServer(BaseMCPServer):
         from agora_workbench.data_lake import ResourceOwnership
 
         from .catalog_integration import SessionCredential
-        from .data_access.manager import DataLakeDataManager
+        from .data_access.manager import _catalog_integration_data_manager
 
         assert self.catalog is not None
         existing_factory = self.session_manager.config.data_manager_factory
@@ -342,7 +342,7 @@ class CodeExecutionServer(BaseMCPServer):
                         )
                         binding.add_owned_resource(credential)
                         binding.add_context_refresher(credential.prepare_context_refresh)
-                    manager = DataLakeDataManager(
+                    manager = _catalog_integration_data_manager(
                         credential=credential,
                         credential_ownership=ResourceOwnership.BORROWED,
                         artifact_resolver=binding.resolver,
