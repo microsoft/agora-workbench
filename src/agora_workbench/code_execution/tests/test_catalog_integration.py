@@ -1144,6 +1144,32 @@ async def test_context_refresh_rolls_back_already_committed_refreshers():
     await binding.aclose()
 
 
+async def test_context_refresh_rolls_back_refresher_that_mutates_then_raises():
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    state = {"value": "old"}
+
+    def prepare(context):
+        previous = state["value"]
+
+        def commit():
+            state["value"] = context.user_token
+            raise RuntimeError("commit failed")
+
+        return _PreparedContextRefresh(commit, rollback=lambda: state.__setitem__("value", previous))
+
+    binding.add_context_refresher(prepare)
+
+    with pytest.raises(RuntimeError, match="commit failed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+
+    assert state["value"] == "old"
+    await binding.aclose()
+
+
 async def test_context_refresh_rebuilds_and_retires_capability_extensions():
     extensions = []
 
@@ -1178,6 +1204,22 @@ async def test_context_refresh_rebuilds_and_retires_capability_extensions():
 
     await binding.aclose()
     assert extensions[1].close_calls == 1
+
+
+async def test_effective_capabilities_reuse_authorized_read_snapshot():
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding.catalog.capabilities = AsyncMock(side_effect=AssertionError("capabilities fetched twice"))
+    read_capabilities = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
+
+    capabilities = await integration.capabilities(binding, read_capabilities)
+
+    assert capabilities == read_capabilities
+    binding.catalog.capabilities.assert_not_awaited()
+    await binding.aclose()
 
 
 async def test_context_refresh_extension_failure_closes_new_authorizer():
@@ -1833,8 +1875,8 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
         _get_or_create_session=AsyncMock(return_value=session),
     )
 
-    async def effective_capabilities(current):
-        return await current.catalog.capabilities()
+    async def effective_capabilities(current, read_capabilities=None):
+        return read_capabilities if read_capabilities is not None else await current.catalog.capabilities()
 
     integration = SimpleNamespace(
         capabilities=AsyncMock(side_effect=effective_capabilities),

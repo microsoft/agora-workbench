@@ -220,6 +220,15 @@ class TestAtomicClaim:
         # And the fully-unknown-session case still does not raise.
         await manager._shutdown_kernel("never-existed")
 
+    async def test_active_session_keeps_execute_lock_across_idle_kernel_teardown(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+        execute_lock = manager._get_kernel_execute_lock(session_id)
+
+        await manager._shutdown_kernel(session_id, cleanup_artifacts=False)
+
+        assert manager._get_kernel_execute_lock(session_id) is execute_lock
+
     async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager, tmp_path):
         gate = asyncio.Event()
         session_id = "reused-session"

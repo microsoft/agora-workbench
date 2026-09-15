@@ -610,9 +610,9 @@ class CatalogSessionBinding:
         committed_refreshes: list[_PreparedContextRefresh] = []
         try:
             for prepared in prepared_refreshes:
-                prepared()
                 if isinstance(prepared, _PreparedContextRefresh):
                     committed_refreshes.append(prepared)
+                prepared()
         except BaseException as commit_error:
             rollback_errors: list[Exception] = []
             for prepared in reversed(committed_refreshes):
@@ -1032,10 +1032,18 @@ class CatalogIntegration:
                     bind_error.add_note(f"Catalog session binding rollback also failed: {cleanup_error!r}")
             raise
 
-    async def capabilities(self, binding: CatalogSessionBinding | CatalogSessionView) -> tuple[Any, ...]:
+    async def capabilities(
+        self,
+        binding: CatalogSessionBinding | CatalogSessionView,
+        read_capabilities: tuple[SourceCapabilities, ...] | None = None,
+    ) -> tuple[Any, ...]:
         by_source = {
             capability.source_id: set(capability.supported_operations)
-            for capability in await binding.catalog.capabilities(binding.context)
+            for capability in (
+                read_capabilities
+                if read_capabilities is not None
+                else await binding.catalog.capabilities(binding.context)
+            )
         }
         for extension in binding.capability_extensions:
             capabilities = getattr(extension, "capabilities", None)
@@ -1318,7 +1326,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         try:
             current = snapshot(await binding("get_catalog_capabilities", mcp_ctx))
             read_capabilities = await current.catalog.capabilities(current.context)
-            capabilities = await integration.capabilities(current)
+            capabilities = await integration.capabilities(current, read_capabilities)
             return {
                 "sources": [
                     {

@@ -359,10 +359,18 @@ class CodeExecutionServer(BaseMCPServer):
                     else:
                         manager = custom_result
                     if manager is None or not callable(getattr(manager, "cleanup", None)):
-                        raise TypeError(
+                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(
+                            manager,
+                            custom_extensions,
+                        )
+                        validation_error = TypeError(
                             "SessionConfig.data_manager_factory must return a data manager instance "
                             "with a cleanup() method."
                         )
+                        if cleanup_error is not None:
+                            validation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                        custom_extensions = {}
+                        raise validation_error
                     if "catalog" in custom_extensions:
                         cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(
                             manager,
