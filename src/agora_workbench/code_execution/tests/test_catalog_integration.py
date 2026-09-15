@@ -161,6 +161,14 @@ def test_catalog_reference_rejects_invalid_field_types(payload):
         _decode_reference(f"catalog-v1:{encoded}")
 
 
+def test_catalog_reference_rejects_non_object_payload():
+    import base64
+
+    encoded = base64.urlsafe_b64encode(b"[]").decode().rstrip("=")
+    with pytest.raises(ValueError, match="invalid"):
+        _decode_reference(f"catalog-v1:{encoded}")
+
+
 def test_catalog_error_payload_sanitizes_uri_resource_id():
     error = ArtifactNotFoundError(
         "Artifact not found.",
@@ -533,6 +541,34 @@ async def test_catalog_shutdown_drains_cleanup_before_provider_through_repeated_
     await cleanup_started.wait()
     shutdown.cancel()
     await asyncio.sleep(0)
+    shutdown.cancel()
+    await asyncio.sleep(0)
+
+    assert not shutdown.done()
+    assert provider.close_calls == 0
+    cleanup_gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        _ = await shutdown
+    assert provider.close_calls == 1
+
+
+async def test_catalog_shutdown_cancellation_does_not_close_provider_before_cleanup():
+    cleanup_started = asyncio.Event()
+    cleanup_gate = asyncio.Event()
+    provider = _LifecycleProvider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+
+    async def cleanup():
+        cleanup_started.set()
+        await cleanup_gate.wait()
+
+    integration._cleanup_tracker.schedule(cleanup())
+    shutdown = asyncio.create_task(integration.shutdown())
+    await cleanup_started.wait()
     shutdown.cancel()
     await asyncio.sleep(0)
 
@@ -1003,6 +1039,28 @@ async def test_stale_cache_validation_does_not_remove_newer_cache_entry():
 
     assert await stale == newer_path
     assert manager._cache_index["catalog-v1:opaque"] == newer_path
+    await manager.aclose()
+
+
+async def test_local_catalog_shaped_id_is_not_catalog_generation_scoped(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    source = Path("catalog-v1:local-file")
+    source.write_text("payload")
+
+    class CatalogShapedLocalFetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name == str(source)
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_bytes(Path(qualified_name).read_bytes())
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(extra_fetchers=[cast(AssetFetcher, CatalogShapedLocalFetcher())])
+
+    cached = await manager.get_cache_path(f"<local>{source}</local>")
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+
+    assert await manager.get_cache_path(f"<local>{source}</local>") == cached
     await manager.aclose()
 
 

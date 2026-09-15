@@ -345,9 +345,9 @@ catalog = CatalogIntegration(
 ```
 
 Borrowed providers are neither loaded nor closed by the server by default.
-Owned providers are loaded at startup and must expose `aclose()`, `close()`, or
-`cleanup()` for shutdown. Override `load_on_startup` only when the application
-has a different refresh owner.
+Owned providers are loaded at startup, so they must expose `load()` when
+`load_on_startup=True` (the default), plus `aclose()`, `close()`, or `cleanup()`
+for shutdown. Set `load_on_startup=False` when the application owns refreshes.
 Catalog refresh remains an administrative/application operation; no agent
 reindex or filesystem-watcher tool is registered.
 

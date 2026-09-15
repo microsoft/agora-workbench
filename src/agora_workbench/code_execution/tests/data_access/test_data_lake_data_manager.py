@@ -7,6 +7,7 @@ streams assets directly to disk to avoid high memory usage.
 """
 
 from pathlib import Path
+from typing import Awaitable, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -470,7 +471,8 @@ class TestCleanup:
         # Cleanup
         cleanup = manager.cleanup()
         if cleanup is not None:
-            await cleanup
+            cleanup_task = cast(Awaitable[None], cleanup)
+            assert await cleanup_task is None
 
         assert not cache_dir.exists()
         assert manager._cache_index == {}
@@ -660,7 +662,8 @@ class TestArtifactResolverInjection:
 
         cleanup = manager.cleanup()
         assert cleanup is not None
-        await cleanup
+        cleanup_task = cast(Awaitable[None], cleanup)
+        assert await cleanup_task is None
 
         assert resolver.closed == 1
 

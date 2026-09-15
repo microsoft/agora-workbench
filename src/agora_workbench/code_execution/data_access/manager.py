@@ -374,7 +374,7 @@ class DataLakeDataManager:
         artifact_id = artifact_match.group(2)
         cache_generation = self._cache_generation
         full_cache_generation = self._full_cache_generation
-        generation_scoped = artifact_id.startswith("catalog-v1:")
+        generation_scoped = artifact_type == "blob" and artifact_id.startswith("catalog-v1:")
 
         def cache_was_invalidated() -> bool:
             return full_cache_generation != self._full_cache_generation or (

@@ -88,7 +88,7 @@ def register_kernel(manager: SessionManager, session_id: str, name: str = "k", g
 
 async def let_teardown_start():
     """Yield enough for a scheduled teardown to reach its first await."""
-    for _ in range(3):
+    for _ in range(5):
         await asyncio.sleep(0)
 
 
@@ -817,6 +817,47 @@ class TestAwaitableClose:
         _ = await close_task
         assert manager.storage.count() == 0
 
+    async def test_aclose_all_waits_for_already_closing_kernel(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        kernel, _ = register_kernel(manager, session_id, gate=gate)
+        shutdown = manager.close_session(session_id)
+        assert shutdown is not None
+        await let_teardown_start()
+
+        close_all = asyncio.create_task(manager.aclose_all_sessions())
+        await asyncio.sleep(0)
+        assert not close_all.done()
+
+        gate.set()
+        _ = await close_all
+        assert kernel.shutdown_finished
+
+    async def test_cancelled_close_task_still_finishes_teardown_and_tombstone(self, manager):
+        gate = asyncio.Event()
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        kernel, _ = register_kernel(manager, session_id, gate=gate)
+        shutdown = manager.close_session(session_id)
+        assert shutdown is not None
+        await let_teardown_start()
+
+        shutdown.cancel()
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            _ = await shutdown
+
+        assert kernel.shutdown_finished
+        manager.create_session(
+            data={},
+            user_identity="replacement",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        manager.close_session(session_id)
+
     async def test_aclose_all_skips_same_id_replacement_created_after_snapshot(self, manager, monkeypatch):
         session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
         original_close = manager.aclose_session
@@ -1401,6 +1442,36 @@ class TestNoRunningLoop:
             assert old_session is not None
             manager.storage.delete(closing_session_id)
             old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            return original_close(
+                closing_session_id,
+                caller=caller,
+                expected_generation=expected_generation,
+            )
+
+        monkeypatch.setattr(manager, "_close_session_sync", replace_then_close)
+        manager._cleanup_expired()
+
+        assert manager.storage.retrieve(session_id) is replacement
+
+    def test_expired_restored_session_gets_generation_before_close_snapshot(self, manager, monkeypatch):
+        manager.config.timeout = timedelta(seconds=-1)
+        session_id = "restored-expired"
+        manager.storage.store(session_id, Session(session_id, {}, "default", "old", "t", {}))
+        original_close = manager._close_session_sync
+        replacement = None
+
+        def replace_then_close(closing_session_id, *, caller, expected_generation=None):
+            nonlocal replacement
+            assert expected_generation is not None
+            manager.storage.delete(closing_session_id)
             manager.create_session(
                 data={},
                 user_identity="replacement",

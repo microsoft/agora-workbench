@@ -777,25 +777,24 @@ class SessionManager:
             asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
             for session_id, generation in sessions
         ]
-        if not tasks:
-            await self.await_resource_cleanup()
-            return
-        completion = asyncio.gather(*tasks, return_exceptions=True)
         outer_cancellation: asyncio.CancelledError | None = None
-        try:
-            while True:
-                try:
-                    results = await asyncio.shield(completion)
-                    break
-                except asyncio.CancelledError as exc:
-                    outer_cancellation = outer_cancellation or exc
-                    if completion.done():
-                        results = completion.result()
+        results: list[BaseException | None] = []
+        if tasks:
+            completion = asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                while True:
+                    try:
+                        results = list(await asyncio.shield(completion))
                         break
-        finally:
-            for (session_id, _), task in zip(sessions, tasks):
-                if task.done() and not task.cancelled() and task.exception() is not None:
-                    LOGGER.error("Failed to close session %s: %s", session_id, task.exception())
+                    except asyncio.CancelledError as exc:
+                        outer_cancellation = outer_cancellation or exc
+                        if completion.done():
+                            results = list(completion.result())
+                            break
+            finally:
+                for (session_id, _), task in zip(sessions, tasks):
+                    if task.done() and not task.cancelled() and task.exception() is not None:
+                        LOGGER.error("Failed to close session %s: %s", session_id, task.exception())
         errors: list[Exception] = [
             RuntimeError(f"Failed to close session {session_id}: {result}")
             for (session_id, _), result in zip(sessions, results)
@@ -805,6 +804,12 @@ class SessionManager:
             (result for result in results if isinstance(result, asyncio.CancelledError)),
             outer_cancellation,
         )
+        while self._kernel_shutdown_tasks:
+            shutdowns = tuple(self._kernel_shutdown_tasks.values())
+            try:
+                await asyncio.gather(*(asyncio.shield(task) for task in shutdowns), return_exceptions=True)
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
         resource_cleanup = asyncio.create_task(self.await_resource_cleanup())
         while True:
             try:
@@ -2142,13 +2147,28 @@ class SessionManager:
         expected_kernel_generation = self._kernel_generations.get(session_id)
 
         async def shutdown_and_finalize() -> None:
-            await self._shutdown_kernel(
-                session_id,
-                cleanup_artifacts=cleanup_artifacts,
-                expected_session_generation=expected_session_generation,
-                expected_kernel_generation=expected_kernel_generation,
+            teardown = asyncio.create_task(
+                self._shutdown_kernel(
+                    session_id,
+                    cleanup_artifacts=cleanup_artifacts,
+                    expected_session_generation=expected_session_generation,
+                    expected_kernel_generation=expected_kernel_generation,
+                )
             )
-            self._finalize_closed_session(session_id)
+            cancelled: asyncio.CancelledError | None = None
+            try:
+                while True:
+                    try:
+                        await asyncio.shield(teardown)
+                        break
+                    except asyncio.CancelledError as exc:
+                        cancelled = cancelled or exc
+                        if teardown.done():
+                            break
+            finally:
+                self._finalize_closed_session(session_id)
+            if cancelled is not None:
+                raise cancelled
 
         task = loop.create_task(shutdown_and_finalize())
         self._kernel_shutdown_tasks[session_id] = task
@@ -2249,11 +2269,16 @@ class SessionManager:
         now = datetime.now()
         with self._session_lifecycle_lock:
             sessions = self.storage.list_all()
-            expired = [
-                (session_id, self._session_generations.get(session_id))
-                for session_id, session in sessions.items()
-                if now - session.last_accessed > self.config.timeout
-            ]
+            expired = []
+            for session_id, session in sessions.items():
+                if now - session.last_accessed <= self.config.timeout:
+                    continue
+                generation = self._session_generations.get(session_id)
+                if generation is None:
+                    self._session_generation_seq += 1
+                    generation = self._session_generation_seq
+                    self._session_generations[session_id] = generation
+                expired.append((session_id, generation))
 
         for session_id, generation in expired:
             self._close_session_sync(

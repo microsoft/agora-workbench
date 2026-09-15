@@ -48,6 +48,7 @@ from agora_workbench.data_lake import (
 from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, DiscoveryMode, SourceConfig
 from agora_workbench.data_lake.policy import AuthorizedCatalogProvider
 from agora_workbench.data_lake.providers import SQLiteCatalogProvider
+from agora_workbench.data_lake.transfer import safe_artifact_reference
 
 from .data_access.catalog.indexer import ManifestRefreshError
 from .sessions.session import SessionContext
@@ -461,6 +462,8 @@ def _decode_reference(value: str) -> ArtifactReference:
     encoded = value[len(_REFERENCE_PREFIX) :]
     try:
         payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode())
+        if not isinstance(payload, Mapping):
+            raise ValueError
         artifact_id = payload["artifact_id"]
         source_id = payload["source_id"]
         revision = payload.get("revision")
@@ -916,6 +919,7 @@ class CatalogIntegration:
                         except Exception as drain_error:
                             errors.append(drain_error)
                     break
+                continue
             except Exception as exc:
                 errors.append(exc)
                 break
@@ -1109,7 +1113,7 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 def _agent_safe_identifier(value: str, field_name: str) -> str:
     """Reject locator-shaped identifiers that cannot be safely round-tripped."""
-    if _URI_IN_TEXT_RE.search(value):
+    if safe_artifact_reference(value) != value:
         raise ValueError(f"Catalog {field_name} must be a logical identifier, not a URI.")
     return value
 
