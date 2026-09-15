@@ -223,6 +223,36 @@ def test_sync_binding_cleanup_retries_before_temporary_loop_closes():
     asyncio.run(integration.shutdown())
 
 
+async def test_tracker_retry_updates_binding_cleanup_bookkeeping():
+    class Resource:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("transient cleanup failure")
+            if self.close_calls > 2:
+                raise RuntimeError("resource closed more than twice")
+
+    resource = Resource()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: resource,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    binding.cleanup()
+    assert await integration._cleanup_tracker.drain() == []
+    await binding.aclose()
+
+    assert resource.close_calls == 2
+    assert not binding._scheduled_cleanup_resources
+    assert not binding._scheduled_cleanup_tasks
+    await integration.shutdown()
+
+
 async def test_binding_requeues_failed_scheduled_cleanup_after_pending_initialized():
     class Resource:
         def __init__(self):
