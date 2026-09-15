@@ -520,10 +520,11 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
 
     async def aclose(self) -> None:
         async with self._lifecycle_lock:
-            if self._closed:
+            if self._embedding_closed and self._db_closed:
                 return
             errors: list[Exception] = []
             cancelled: asyncio.CancelledError | None = None
+            self._closed = True
             if not self._embedding_closed:
                 try:
                     embedding_provider = vars(self._indexer).get("_embedding_provider")
@@ -543,7 +544,6 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
                     self._db_closed = True
                 except Exception as exc:
                     errors.append(exc)
-            self._closed = self._embedding_closed and self._db_closed
             if cancelled is not None:
                 if errors:
                     cancelled.add_note(str(ExceptionGroup("Additional configured catalog close failures.", errors)))

@@ -51,6 +51,7 @@ from agora_workbench.data_lake import (
     CatalogArtifact,
     CatalogOperation,
     CatalogPolicyMode,
+    ListRequest,
     Page,
     PermissionDeniedError,
     ResourceLease,
@@ -435,6 +436,36 @@ async def test_configured_catalog_empty_query_embedding_falls_back_to_keyword_se
     assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
     assert captured["query_embedding"] is None
     assert captured["hybrid_alpha"] == 1.0
+
+
+async def test_configured_catalog_failed_embedding_close_still_blocks_reads(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    provider = _ConfiguredCatalogProvider(CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]))
+
+    class FailingEmbeddings:
+        dimensions = 2
+
+        async def embed(self, texts):
+            return []
+
+        async def aclose(self):
+            raise RuntimeError("embedding close failed")
+
+    await provider.load()
+    provider._indexer._embedding_provider = FailingEmbeddings()
+
+    with pytest.raises(ExceptionGroup):
+        await provider.aclose()
+
+    with pytest.raises(BackendUnavailableError):
+        await provider.list(ListRequest(), RequestContext())
+    with pytest.raises(RuntimeError):
+        await provider.load()
+
+    with pytest.raises(ExceptionGroup):
+        await provider.aclose()
 
 
 async def test_configured_catalog_close_waits_for_in_flight_load(tmp_path):
