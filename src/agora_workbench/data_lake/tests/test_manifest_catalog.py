@@ -1697,6 +1697,17 @@ async def test_manifest_provider_uses_configured_query_embedding_and_hybrid_weig
         await provider.aclose()
 
 
+async def test_manifest_provider_closes_cached_embedding_provider(tmp_path):
+    provider = ManifestCatalogProvider(_local_config(tmp_path))
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+    provider._indexer._embedding_provider = embedding_provider
+
+    await provider.aclose()
+    await provider.aclose()
+
+    embedding_provider.close.assert_awaited_once_with()
+
+
 async def test_refresh_error_preserves_source_id_with_colon(tmp_path):
     provider = ManifestCatalogProvider(
         CatalogConfig(

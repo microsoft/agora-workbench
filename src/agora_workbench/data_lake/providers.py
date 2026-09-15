@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 from math import isfinite
 from dataclasses import dataclass
@@ -286,6 +287,8 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             raise ValueError("max_stale_seconds must be finite")
         self._config = config
         self._closed = False
+        self._embedding_closed = False
+        self._db_closed = False
         self._lifecycle_lock = asyncio.Lock()
         self._last_states: tuple[SourceRefreshState, ...] = ()
         self._db_owned = CatalogDB(db_path, vec_dimensions=config.search.embedding_dimensions)
@@ -308,6 +311,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             )
         except BaseException:
             self._db_owned.close()
+            self._db_closed = True
             self._closed = True
             raise
 
@@ -442,15 +446,45 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         return embeddings[0] if embeddings else None
 
     async def aclose(self) -> None:
-        """Close the private per-reader SQLite cache."""
+        """Close embedding resources and the private per-reader SQLite cache."""
         async with self._lifecycle_lock:
-            self._close_unlocked()
+            if self._embedding_closed and self._db_closed:
+                return
+            errors: list[Exception] = []
+            cancelled: asyncio.CancelledError | None = None
+            self._closed = True
+            if not self._embedding_closed:
+                try:
+                    embedding_provider = vars(self._indexer).get("_embedding_provider")
+                    close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
+                    if callable(close):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            _ = await result
+                    self._embedding_closed = True
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+                except Exception as exc:
+                    errors.append(exc)
+            if not self._db_closed:
+                try:
+                    self._db_owned.close()
+                    self._db_closed = True
+                except Exception as exc:
+                    errors.append(exc)
+            if cancelled is not None:
+                if errors:
+                    cancelled.add_note(str(ExceptionGroup("Additional manifest catalog close failures.", errors)))
+                raise cancelled
+            if errors:
+                raise ExceptionGroup("Manifest catalog close failed.", errors)
 
     def _close_unlocked(self) -> None:
-        if not self._closed:
+        if not self._db_closed:
             self._current_source_states()
-            self._closed = True
             self._db_owned.close()
+            self._db_closed = True
+        self._closed = True
 
     async def __aenter__(self) -> "ManifestCatalogProvider":
         return self
