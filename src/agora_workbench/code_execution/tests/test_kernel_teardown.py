@@ -229,6 +229,86 @@ class TestAtomicClaim:
 
         assert manager._get_kernel_execute_lock(session_id) is execute_lock
 
+    async def test_closed_session_reclaims_unused_execute_lock(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager._get_kernel_execute_lock(session_id)
+
+        manager.close_session(session_id)
+
+        assert session_id not in manager._kernel_execute_locks
+
+    async def test_caller_reaching_execute_lock_after_close_does_not_leak_it(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.close_session(session_id)
+
+        async with manager._kernel_execution_lock(session_id):
+            assert session_id in manager._kernel_execute_locks
+
+        assert session_id not in manager._kernel_execute_locks
+
+    async def test_closed_session_reclaims_execute_lock_after_captured_callers_drain(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        holder_entered = asyncio.Event()
+        release_holder = asyncio.Event()
+        waiter_entered = asyncio.Event()
+        release_waiter = asyncio.Event()
+
+        async def holder():
+            async with manager._kernel_execution_lock(session_id):
+                holder_entered.set()
+                await release_holder.wait()
+
+        async def waiter():
+            async with manager._kernel_execution_lock(session_id):
+                waiter_entered.set()
+                await release_waiter.wait()
+
+        holder_task = asyncio.create_task(holder())
+        await holder_entered.wait()
+        execute_lock = manager._kernel_execute_locks[session_id]
+        waiter_task = asyncio.create_task(waiter())
+        await asyncio.sleep(0)
+
+        manager.close_session(session_id)
+
+        assert manager._kernel_execute_locks[session_id] is execute_lock
+        release_holder.set()
+        await waiter_entered.wait()
+        assert manager._kernel_execute_locks[session_id] is execute_lock
+
+        release_waiter.set()
+        await asyncio.gather(holder_task, waiter_task)
+        assert session_id not in manager._kernel_execute_locks
+
+    async def test_replacement_session_keeps_lock_captured_before_close(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        release_holder = asyncio.Event()
+        holder_entered = asyncio.Event()
+
+        async def holder():
+            async with manager._kernel_execution_lock(session_id):
+                holder_entered.set()
+                await release_holder.wait()
+
+        holder_task = asyncio.create_task(holder())
+        await holder_entered.wait()
+        execute_lock = manager._kernel_execute_locks[session_id]
+        manager.close_session(session_id)
+        manager.create_session(
+            data={},
+            user_identity="replacement",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+
+        release_holder.set()
+        await holder_task
+
+        assert manager._kernel_execute_locks[session_id] is execute_lock
+        manager.close_session(session_id)
+        assert session_id not in manager._kernel_execute_locks
+
     async def test_close_then_immediate_replacement_keeps_new_output_directory(self, manager, tmp_path):
         gate = asyncio.Event()
         session_id = "reused-session"
@@ -470,6 +550,14 @@ class TestCoalescing:
 
         assert session_id in manager._closing_session_ids
         assert session_file.exists()
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={"owner": "replacement"},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
 
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
         class PausingStorage(InMemoryStorage):

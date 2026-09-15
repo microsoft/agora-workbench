@@ -9,12 +9,13 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from threading import Condition, RLock
-from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING, cast
+from typing import Any, AsyncIterator, Callable, Optional, Tuple, TYPE_CHECKING, cast
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -240,6 +241,8 @@ class SessionManager:
         # shared Jupyter kernel client (single iopub queue) cannot be raced by
         # concurrent callers (e.g. four parallel push_object MCP calls).
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
+        self._kernel_execute_lock_users: dict[str, int] = {}
+        self._retired_kernel_execute_locks: set[str] = set()
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
         # Artifact pipeline state: the token -> record map used by the HTTP
@@ -319,7 +322,12 @@ class SessionManager:
                 session_id = str(uuid.uuid4())
             else:
                 while session_id in self._closing_session_ids:
-                    self._session_lifecycle_condition.wait()
+                    try:
+                        asyncio.get_running_loop()
+                    except RuntimeError:
+                        self._session_lifecycle_condition.wait()
+                    else:
+                        raise ValueError(f"Session {session_id} is still closing; retry after cleanup completes.")
                 if self.storage.retrieve(session_id) is not None:
                     raise ValueError(f"Session {session_id} already exists.")
 
@@ -396,6 +404,7 @@ class SessionManager:
                 raise
             self._session_generation_seq += 1
             self._session_generations[session_id] = self._session_generation_seq
+            self._retired_kernel_execute_locks.discard(session_id)
 
             # Create the per-session outputs directory.  Done eagerly so the
             # kernel can write to it on the very first execute.  Failure to
@@ -636,6 +645,7 @@ class SessionManager:
                     self._session_lifecycle_condition.notify_all()
                     raise
                 self._session_generations.pop(session_id, None)
+                self._retire_kernel_execute_lock(session_id)
             running_job_id = self._get_running_job_for_session(session_id)
             if running_job_id:
                 job = self._background_jobs.get(running_job_id)
@@ -1448,7 +1458,7 @@ class SessionManager:
         if running_job_id:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
-        async with self._get_kernel_execute_lock(session_id):
+        async with self._kernel_execution_lock(session_id):
             km, kc = await self._get_or_create_kernel(
                 session_id, working_dir, user_token=user_token, user_identity=user_identity
             )
@@ -1668,11 +1678,45 @@ class SessionManager:
         spinning until its timeout fires.  Serializing here is correct because
         the kernel only processes one execute at a time anyway.
         """
-        lock = self._kernel_execute_locks.get(session_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._kernel_execute_locks[session_id] = lock
-        return lock
+        with self._session_lifecycle_lock:
+            lock = self._kernel_execute_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._kernel_execute_locks[session_id] = lock
+            return lock
+
+    @asynccontextmanager
+    async def _kernel_execution_lock(self, session_id: str) -> AsyncIterator[None]:
+        """Retain a session's execute lock until every captured caller releases it."""
+        with self._session_lifecycle_lock:
+            lock = self._get_kernel_execute_lock(session_id)
+            self._kernel_execute_lock_users[session_id] = self._kernel_execute_lock_users.get(session_id, 0) + 1
+            if session_id not in self._session_generations:
+                self._retired_kernel_execute_locks.add(session_id)
+        try:
+            async with lock:
+                yield
+        finally:
+            with self._session_lifecycle_lock:
+                remaining = self._kernel_execute_lock_users[session_id] - 1
+                if remaining:
+                    self._kernel_execute_lock_users[session_id] = remaining
+                else:
+                    self._kernel_execute_lock_users.pop(session_id, None)
+                    if (
+                        session_id in self._retired_kernel_execute_locks
+                        and self._kernel_execute_locks.get(session_id) is lock
+                    ):
+                        self._kernel_execute_locks.pop(session_id, None)
+                        self._retired_kernel_execute_locks.discard(session_id)
+
+    def _retire_kernel_execute_lock(self, session_id: str) -> None:
+        """Reclaim a closed session's lock once callers that captured it drain."""
+        if self._kernel_execute_lock_users.get(session_id, 0):
+            self._retired_kernel_execute_locks.add(session_id)
+        else:
+            self._kernel_execute_locks.pop(session_id, None)
+            self._retired_kernel_execute_locks.discard(session_id)
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
@@ -1720,7 +1764,7 @@ class SessionManager:
         if running_job_id:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
-        async with self._get_kernel_execute_lock(session_id):
+        async with self._kernel_execution_lock(session_id):
             return await self._execute_code_locked(
                 session_id=session_id,
                 code=code,
@@ -2107,7 +2151,7 @@ class SessionManager:
 
         for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
-            async with self._get_kernel_execute_lock(session_id):
+            async with self._kernel_execution_lock(session_id):
                 with self._session_lifecycle_lock:
                     last_used = self._kernel_last_used.get(session_id)
                     if (
