@@ -480,6 +480,7 @@ class CatalogSessionBinding:
     authorizer_factory: AuthorizerFactory | None = None
     owned_authorizer: CatalogAuthorizer | None = None
     context_refreshers: list[Callable[[SessionContext], Callable[[], None] | _PreparedContextRefresh]] | None = None
+    capability_extension_factory: CapabilityExtensionFactory | None = None
     provider: CatalogProvider | None = None
     policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
@@ -525,6 +526,7 @@ class CatalogSessionBinding:
         request_context = _request_context(context)
         authorizer = self.owned_authorizer
         catalog = self.catalog
+        extensions = self.capability_extensions
         if self.authorizer_factory is not None:
             authorizer = self.authorizer_factory(context)
             assert self.provider is not None
@@ -534,11 +536,23 @@ class CatalogSessionBinding:
                 mode=self.policy_mode,
                 per_artifact_enforcer=self.per_artifact_enforcer,
             )
+        if self.capability_extension_factory is not None:
+            created = self.capability_extension_factory(context, catalog, request_context)
+            if created is None:
+                extensions = ()
+            elif isinstance(created, (tuple, list)):
+                extensions = tuple(created)
+            else:
+                extensions = (created,)
         prepared_refreshes: list[Callable[[], None] | _PreparedContextRefresh] = []
         try:
             for refresher in self.context_refreshers or ():
                 prepared_refreshes.append(refresher(context))
         except BaseException:
+            current_extension_ids = {id(extension) for extension in self.capability_extensions}
+            for extension in extensions:
+                if id(extension) not in current_extension_ids:
+                    self._schedule_resource_cleanup(extension)
             for prepared in prepared_refreshes:
                 if isinstance(prepared, _PreparedContextRefresh) and prepared.rollback_resource is not None:
                     self._schedule_resource_cleanup(prepared.rollback_resource)
@@ -573,6 +587,10 @@ class CatalogSessionBinding:
                     rollback_resources.append(prepared.rollback_resource)
             for resource in rollback_resources:
                 self._schedule_resource_cleanup(resource)
+            current_extension_ids = {id(extension) for extension in self.capability_extensions}
+            for extension in extensions:
+                if id(extension) not in current_extension_ids:
+                    self._schedule_resource_cleanup(extension)
             if authorizer is not None and authorizer is not self.owned_authorizer:
                 self._schedule_resource_cleanup(authorizer)
             if rollback_errors:
@@ -583,6 +601,16 @@ class CatalogSessionBinding:
         self.owned_authorizer = authorizer
         self.context = request_context
         self.resolver._context = request_context
+        previous_extensions = self.capability_extensions
+        self.capability_extensions = extensions
+        current_extension_ids = {id(extension) for extension in extensions}
+        for extension in previous_extensions:
+            if id(extension) in current_extension_ids:
+                continue
+            if self._active_snapshots:
+                self._deferred_resources.append(extension)
+            else:
+                self._schedule_resource_cleanup(extension)
         if previous_authorizer is not None and previous_authorizer is not authorizer:
             if self._active_snapshots:
                 self._deferred_resources.append(previous_authorizer)
@@ -929,6 +957,7 @@ class CatalogIntegration:
                 self._cleanup_tracker,
                 authorizer_factory=self._authorizer_factory,
                 owned_authorizer=authorizer if self._authorizer_factory is not None else None,
+                capability_extension_factory=self._capability_extension_factory,
                 provider=self.provider,
                 policy_mode=self._policy_mode,
                 per_artifact_enforcer=self._per_artifact_enforcer,

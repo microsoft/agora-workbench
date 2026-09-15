@@ -1094,6 +1094,42 @@ async def test_context_refresh_rolls_back_already_committed_refreshers():
     await binding.aclose()
 
 
+async def test_context_refresh_rebuilds_and_retires_capability_extensions():
+    extensions = []
+
+    class Extension:
+        def __init__(self, token):
+            self.token = token
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    def extension_factory(context, catalog, request_context):
+        del catalog, request_context
+        extension = Extension(context.user_token)
+        extensions.append(extension)
+        return extension
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=extension_factory,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+
+    binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await integration._cleanup_tracker.drain()
+
+    assert [extension.token for extension in extensions] == ["old-token", "new-token"]
+    assert binding.capability_extensions == (extensions[1],)
+    assert extensions[0].close_calls == 1
+    assert extensions[1].close_calls == 0
+
+    await binding.aclose()
+    assert extensions[1].close_calls == 1
+
+
 async def test_concurrent_catalog_binding_close_coalesces_resource_cleanup():
     started = asyncio.Event()
     gate = asyncio.Event()
