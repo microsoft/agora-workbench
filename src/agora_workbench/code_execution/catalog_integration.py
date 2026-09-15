@@ -985,7 +985,9 @@ class CatalogSessionBinding:
         if cancelled is not None:
             raise cancelled
 
-    def _schedule_resource_cleanup(self, resource: object, *, retry: bool = True) -> asyncio.Task[None] | None:
+    def _schedule_resource_cleanup(
+        self, resource: object, *, retry: bool = True, tracker_retry: bool = False
+    ) -> asyncio.Task[None] | None:
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
         if not self._track_scheduled_resource(resource):
@@ -994,7 +996,7 @@ class CatalogSessionBinding:
         async def cleanup() -> None:
             await self._close_tracked_resource(resource, retry=retry)
 
-        task = self.cleanup_tracker.schedule(cleanup())
+        task = self.cleanup_tracker.schedule(cleanup(), retry=cleanup if tracker_retry else None)
         if task is None:
             return None
         self._scheduled_cleanup_tasks[task] = resource
@@ -1126,6 +1128,7 @@ class CatalogSessionBinding:
             for resource in tuple(self._pending_cleanup_resources):
                 task: asyncio.Task[None] | None = None
                 cleanup_completed = False
+                retry_scheduled = False
                 try:
                     if self.cleanup_tracker is not None and not self.cleanup_tracker.running_synchronously:
                         task = self._schedule_resource_cleanup(resource, retry=False)
@@ -1153,7 +1156,15 @@ class CatalogSessionBinding:
                         pass
                     elif not cleanup_completed:
                         self._release_scheduled_resource_marker(resource)
-                    if cleanup_completed or (task is not None and not task.done()):
+                    if (
+                        not cleanup_completed
+                        and (task is None or task.done())
+                        and self.cleanup_tracker is not None
+                        and not self.cleanup_tracker.running_synchronously
+                    ):
+                        retry_task = self._schedule_resource_cleanup(resource, retry=False, tracker_retry=True)
+                        retry_scheduled = retry_task is not None
+                    if cleanup_completed or (task is not None and not task.done()) or retry_scheduled:
                         _remove_resource_identity(self._pending_cleanup_resources, resource)
         if cancelled is not None:
             if errors:

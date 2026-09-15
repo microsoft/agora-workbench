@@ -281,15 +281,50 @@ async def test_binding_retains_resource_when_fallback_cleanup_also_fails():
 
     assert extension.close_calls == 2
     assert binding._pending_cleanup_resources is not None
-    assert any(pending is extension for pending in binding._pending_cleanup_resources)
-    assert binding._scheduled_cleanup_resources == []
-    assert binding._scheduled_cleanup_tasks == {}
+    assert binding._pending_cleanup_resources == []
 
-    await binding.aclose()
+    assert await integration._cleanup_tracker.drain() == []
 
     assert extension.close_calls == 3
     assert binding._pending_cleanup_resources == []
     await integration.shutdown()
+
+
+async def test_binding_transfers_failed_fallback_cleanup_to_integration_shutdown():
+    retry_started = asyncio.Event()
+    release_retry = asyncio.Event()
+
+    class Extension:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls < 3:
+                raise RuntimeError("transient close failure")
+            retry_started.set()
+            await release_retry.wait()
+
+    extension = Extension()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: extension,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    with pytest.raises(ExceptionGroup, match="Catalog session binding cleanup failed"):
+        await binding.aclose()
+
+    await retry_started.wait()
+    shutdown = asyncio.create_task(integration.shutdown())
+    await asyncio.sleep(0)
+    release_retry.set()
+    await shutdown
+
+    assert extension.close_calls == 3
+    assert binding._scheduled_cleanup_resources == []
+    assert binding._scheduled_cleanup_tasks == {}
 
 
 async def test_binding_requeues_failed_scheduled_cleanup_after_pending_initialized():
@@ -3965,8 +4000,8 @@ async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes
     with pytest.raises(asyncio.CancelledError):
         await integration.shutdown()
 
-    # The scheduled cleanup and the retained integration retry are each bounded.
-    assert attempts == 4
+    # Scheduled cleanup, binding retry, and retained integration retry are bounded.
+    assert attempts == 7
     assert provider.close_calls == 1
 
 
