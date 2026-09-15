@@ -249,8 +249,7 @@ class SessionCredential:
         self._provider_users: dict[int, int] = {}
         self._provider_drained: dict[int, asyncio.Event] = {}
         self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
-        self._retired_cleanup_started: dict[int, Any] = {}
-        self._retired_cleanup_completed: dict[int, Any] = {}
+        self._provider_retirements: dict[int, _RetiredCredentialProvider] = {}
         self._provider_closed = False
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
@@ -284,17 +283,24 @@ class SessionCredential:
         previous_provider = self._provider
         if provider is previous_provider:
             return _PreparedContextRefresh(lambda: None)
-        if self._retired_cleanup_started.get(id(provider)) is provider:
-            raise RuntimeError("Credential provider cleanup has already started.")
+        previous_retirement = self._provider_retirements.get(id(provider))
+        if previous_retirement is not None and previous_retirement.provider is not provider:
+            previous_retirement = None
+        if previous_retirement is not None and previous_retirement.started:
+            raise RuntimeError(f"Credential provider cleanup has already started for session {context.session_id}.")
         reactivated_index = next(
             (index for index, retired in enumerate(self._retired_providers) if retired is provider),
             None,
         )
+        retirement = _RetiredCredentialProvider(self, previous_provider)
 
         def commit() -> None:
             if reactivated_index is not None:
                 self._retired_providers.pop(reactivated_index)
+                if self._provider_retirements.get(id(provider)) is previous_retirement:
+                    self._provider_retirements.pop(id(provider), None)
             self._retired_providers.append(self._provider)
+            self._provider_retirements[id(previous_provider)] = retirement
             self._provider = provider
             self._provider_closed = False
 
@@ -305,21 +311,26 @@ class SessionCredential:
                     if self._retired_providers[index] is previous_provider:
                         self._retired_providers.pop(index)
                         break
+                if self._provider_retirements.get(id(previous_provider)) is retirement:
+                    self._provider_retirements.pop(id(previous_provider), None)
                 if reactivated_index is not None:
                     self._retired_providers.insert(reactivated_index, provider)
+                    if previous_retirement is not None:
+                        self._provider_retirements[id(provider)] = previous_retirement
 
         return _PreparedContextRefresh(
             commit,
-            rollback_resource=provider,
+            rollback_resource=None if previous_retirement is not None else provider,
             rollback=rollback,
-            retire_resource=_RetiredCredentialProvider(self, previous_provider),
+            retire_resource=retirement,
         )
 
-    async def _close_retired_provider(self, provider: Any) -> None:
-        if provider is self._provider:
-            return
+    async def _close_retired_provider(self, retirement: _RetiredCredentialProvider) -> None:
+        provider = retirement.provider
         provider_id = id(provider)
-        if self._retired_cleanup_completed.get(provider_id) is provider:
+        if self._provider_retirements.get(provider_id) is not retirement:
+            return
+        if provider is self._provider:
             return
         existing = self._retired_cleanup_tasks.get(provider_id)
         current_task = asyncio.current_task()
@@ -328,7 +339,7 @@ class SessionCredential:
             return
         if existing is None and current_task is not None:
             self._retired_cleanup_tasks[provider_id] = current_task
-            self._retired_cleanup_started[provider_id] = provider
+            retirement.started = True
         try:
             drained = self._provider_drained.get(provider_id)
             if drained is not None:
@@ -342,7 +353,8 @@ class SessionCredential:
                 if retired is provider:
                     self._retired_providers.pop(index)
                     break
-            self._retired_cleanup_completed[provider_id] = provider
+            if self._provider_retirements.get(provider_id) is retirement:
+                self._provider_retirements.pop(provider_id, None)
         finally:
             if self._retired_cleanup_tasks.get(provider_id) is current_task:
                 self._retired_cleanup_tasks.pop(provider_id, None)
@@ -365,7 +377,9 @@ class SessionCredential:
                         if inspect.isawaitable(result):
                             _ = await result
                 else:
-                    await self._close_retired_provider(provider)
+                    retirement = self._provider_retirements.get(id(provider))
+                    if retirement is not None and retirement.provider is provider:
+                        await self._close_retired_provider(retirement)
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
             except Exception as exc:
@@ -398,13 +412,14 @@ class SessionCredential:
         await self.close()
 
 
-@dataclass(frozen=True)
+@dataclass
 class _RetiredCredentialProvider:
     credential: SessionCredential
     provider: Any
+    started: bool = field(default=False, compare=False)
 
     async def aclose(self) -> None:
-        await self.credential._close_retired_provider(self.provider)
+        await self.credential._close_retired_provider(self)
 
 
 class _ConfiguredCatalogProvider(SQLiteCatalogProvider):

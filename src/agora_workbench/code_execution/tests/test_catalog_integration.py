@@ -1788,6 +1788,32 @@ async def test_session_credential_rejects_provider_reactivation_after_retirement
     await credential.close()
 
 
+async def test_session_credential_reactivation_rollback_restores_pending_retirement():
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    first = CredentialProvider()
+    second = CredentialProvider()
+    providers = iter((second, first))
+    credential = SessionCredential(first, provider_factory=lambda token: next(providers))
+    retire_first = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
+    retire_first()
+    reactivate_first = credential.prepare_context_refresh(SessionContext("session", "user", "first"))
+
+    assert reactivate_first.rollback_resource is None
+    reactivate_first()
+    reactivate_first.rollback()
+    await retire_first.retire_resource.aclose()
+    await credential.close()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+
+
 async def test_session_credential_retires_provider_after_in_flight_token_request():
     token_started = asyncio.Event()
     token_gate = asyncio.Event()
