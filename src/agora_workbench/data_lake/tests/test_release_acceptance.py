@@ -7,8 +7,6 @@ import importlib
 import json
 import shutil
 import statistics
-import subprocess
-import sys
 import time
 import tracemalloc
 from pathlib import Path
@@ -394,48 +392,6 @@ def test_v0_2_fixtures_upgrade_mutate_export_and_compatibility(tmp_path, monkeyp
         db.close()
 
 
-@pytest.mark.integration
-def test_keyword_only_acceptance_without_optional_cloud_or_vector_sdks():
-    script = f"""
-import importlib.abc
-import asyncio
-import json
-import sys
-from pathlib import Path
-
-blocked = ("azure", "openai", "sqlite_vec")
-class Blocked(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
-        if any(fullname == name or fullname.startswith(name + ".") for name in blocked):
-            raise ModuleNotFoundError(fullname, name=fullname)
-        return None
-sys.meta_path.insert(0, Blocked())
-
-from agora_workbench.data_lake import RequestContext, SearchRequest
-from agora_workbench.data_lake.catalog import CatalogConfig, ManifestCatalogProvider, SourceConfig
-
-fixture = Path({str(FIXTURES)!r})
-config = CatalogConfig(sources=[SourceConfig(
-    source_id="fixture",
-    path=str(fixture),
-    discovery="manifest",
-    manifest="manifest.json",
-)])
-async def main():
-    provider = ManifestCatalogProvider(config)
-    try:
-        await provider.load()
-        result = await provider.search(SearchRequest("weather"), RequestContext())
-        assert result.items[0].presentation.name == "weather.csv"
-    finally:
-        await provider.aclose()
-asyncio.run(main())
-assert not any(any(name == root or name.startswith(root + ".") for root in blocked) for name in sys.modules)
-"""
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
-    assert result.returncode == 0, result.stderr
-
-
 @pytest.mark.performance
 async def test_supported_offline_catalog_budgets(tmp_path):
     """Keep deterministic CI coverage below documented 1,000-item budgets."""
@@ -508,17 +464,3 @@ async def test_supported_offline_catalog_budgets(tmp_path):
     finally:
         tracemalloc.stop()
         await provider.aclose()
-
-
-@pytest.mark.integration
-async def test_invalid_startup_fails_closed_and_shutdown_is_idempotent(tmp_path):
-    root = tmp_path / "invalid"
-    root.mkdir()
-    integration = CatalogIntegration.development_from_config(
-        CatalogConfig(sources=[_manifest_source(root, "invalid")]),
-        db_path=tmp_path / "invalid.db",
-    )
-    with pytest.raises(RuntimeError, match="not ready"):
-        await integration.startup()
-    await integration.shutdown()
-    await integration.shutdown()

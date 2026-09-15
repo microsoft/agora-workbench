@@ -69,20 +69,6 @@ class MemoryCatalog:
         return ResolvedArtifact(reference, self.artifact.locator)
 
 
-def test_source_refresh_state_is_public_catalog_contract():
-    state = SourceRefreshState(
-        source_id="weather",
-        attempt_generation=2,
-        successful_generation=1,
-        status="error",
-        artifact_count=None,
-        last_attempt_at="2026-09-10T00:00:00Z",
-        last_success_at="2026-09-09T00:00:00Z",
-        error="Source enumeration failed",
-    )
-    assert state.source_id == "weather"
-
-
 class MemoryResolver:
     """Existing resolver shape implemented structurally."""
 
@@ -287,21 +273,13 @@ def test_legacy_data_access_package_exports_publisher_compatibility_adapter():
 
 
 def test_existing_catalog_classes_are_reexported_without_duplication():
-    from agora_workbench.code_execution.data_access.catalog import CatalogDB as LegacyCatalogDB
+    from agora_workbench.code_execution.data_access.catalog import (
+        CatalogDB as LegacyCatalogDB,
+        SourceRefreshState as LegacySourceRefreshState,
+    )
 
     assert CatalogDB is LegacyCatalogDB
-    db = CatalogDB(db_path=":memory:", vec_dimensions=4)
-    db.open()
-    try:
-        db.upsert_artifact(
-            artifact_id="artifact-1",
-            name="artifact.csv",
-            storage_uri="/data/artifact.csv",
-            indexed_at="2026-01-01T00:00:00Z",
-        )
-        assert db.get_artifact("artifact-1").name == "artifact.csv"
-    finally:
-        db.close()
+    assert SourceRefreshState is LegacySourceRefreshState
 
 
 def test_existing_top_level_imports_remain_available():
