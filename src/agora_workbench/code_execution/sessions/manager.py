@@ -680,6 +680,11 @@ class SessionManager:
                 raise
             for task in tasks:
                 self._on_resource_cleanup_done(task)
+        for session_id, tasks in tuple(self._session_owned_cleanup_tasks.items()):
+            tasks.difference_update(task for task in tuple(tasks) if task.done())
+            if not tasks:
+                self._session_owned_cleanup_tasks.pop(session_id, None)
+                self._finalize_closed_session(session_id)
         errors.extend(self._resource_cleanup_errors)
         self._resource_cleanup_errors.clear()
         if self._resource_cleanup_cancellations:
