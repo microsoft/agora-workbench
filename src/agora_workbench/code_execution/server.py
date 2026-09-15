@@ -359,7 +359,7 @@ class CodeExecutionServer(BaseMCPServer):
                     else:
                         manager = custom_result
                     if manager is None or not callable(getattr(manager, "cleanup", None)):
-                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(
+                        cleanup_error = self.session_manager.rollback_factory_resources(
                             manager,
                             custom_extensions,
                         )
@@ -371,7 +371,7 @@ class CodeExecutionServer(BaseMCPServer):
                             validation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                         raise validation_error
                     if "catalog" in custom_extensions:
-                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(
+                        cleanup_error = self.session_manager.rollback_factory_resources(
                             manager,
                             custom_extensions,
                         )
@@ -384,11 +384,11 @@ class CodeExecutionServer(BaseMCPServer):
             except BaseException as exc:
                 if existing_factory is None:
                     if manager is not None:
-                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(manager, {})
+                        cleanup_error = self.session_manager.rollback_factory_resources(manager, {})
                         if cleanup_error is not None:
                             exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error!r}")
                     elif credential is not None:
-                        binding._schedule_resource_cleanup(credential)
+                        binding.schedule_resource_cleanup(credential)
                 try:
                     binding.cleanup()
                 except Exception as cleanup_error:

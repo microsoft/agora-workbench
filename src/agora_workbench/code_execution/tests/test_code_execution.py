@@ -6,10 +6,10 @@ import asyncio
 import json
 import os
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from fastapi import HTTPException
 
 from .. import CodeExecutionResult
@@ -271,6 +271,74 @@ async def test_execute_code_does_not_exit_unentered_catalog_snapshot(test_server
         set_current_token_claims(None)
         test_server.session_manager.close_session(session_id)
 
+
+@pytest.mark.asyncio
+async def test_execute_code_releases_session_resources_when_catalog_snapshot_exit_fails(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    lease_released = asyncio.Event()
+
+    class _SnapshotContext:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_args):
+            raise RuntimeError("snapshot exit failed")
+
+    class _Resolver:
+        def bind_request_snapshot(self):
+            return _SnapshotContext()
+
+    session.extensions["catalog"] = SimpleNamespace(resolver=_Resolver())
+
+    @asynccontextmanager
+    async def _operation():
+        try:
+            yield
+        finally:
+            lease_released.set()
+
+    original_clear_auth_context = test_server._clear_auth_context
+    clear_auth_context = MagicMock(side_effect=original_clear_auth_context)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(
+                test_server,
+                "_execute_code_with_tracing",
+                AsyncMock(return_value=CodeExecutionResult(success=True, stdout="ok", execution_time=0.01)),
+            ),
+            patch_server_method(
+                test_server.session_manager, "session_resource_operation", lambda _session_id: _operation()
+            ),
+            patch_server_method(test_server, "_clear_auth_context", clear_auth_context),
+        ):
+            execute_code_tool = execution_defaults.build_tool(test_server)
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('ok')",
+                execution_session_id=session_id,
+            )
+            payload = json.loads(result)
+            assert payload["success"] is True
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+    assert lease_released.is_set()
+    clear_auth_context.assert_called_once()
 
 @pytest.mark.asyncio
 async def test_numpy_import(test_server, simple_code_samples):

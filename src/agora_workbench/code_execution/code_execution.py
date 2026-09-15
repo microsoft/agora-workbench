@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -922,8 +923,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             )
             return json.dumps(error_dict, indent=2)
         finally:
-            if catalog_resolution_entered:
-                catalog_resolution.__exit__(None, None, None)
+            exc_type, exc_value, exc_traceback = sys.exc_info()
             if session:
                 set_current_session(None)
             try:
@@ -931,6 +931,14 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                     await session_resource_operation.__aexit__(None, None, None)
             finally:
                 server._clear_auth_context()
+            if catalog_resolution_entered:
+                try:
+                    catalog_resolution.__exit__(exc_type, exc_value, exc_traceback)
+                except Exception as cleanup_error:
+                    LOGGER.warning(
+                        "Failed to close catalog request snapshot; execution result is retained.",
+                        exc_info=cleanup_error,
+                    )
 
     return execute_code_tool
 

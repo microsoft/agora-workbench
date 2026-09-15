@@ -120,6 +120,31 @@ class TestSession:
             == session_id
         )
 
+    def test_cleanup_preserves_original_exception_type(self):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+            data_manager=cast(DataLakeDataManager, _FakeDataManager()),
+        )
+
+        class FailingExtension:
+            def cleanup(self):
+                raise ValueError("extension failed")
+
+        session.extensions["failing"] = FailingExtension()
+
+        with pytest.raises(ExceptionGroup, match="Session cleanup failed") as exc_info:
+            session.cleanup()
+
+        assert len(exc_info.value.exceptions) == 1
+        failure = exc_info.value.exceptions[0]
+        assert isinstance(failure, ValueError)
+        assert "extension failed" in str(failure)
+
     def test_session_creation(self):
         """Test basic session creation."""
         data = {"key": "value"}

@@ -907,6 +907,10 @@ class CatalogSessionBinding:
 
         task.add_done_callback(cleanup_finished)
 
+    def schedule_resource_cleanup(self, resource: object) -> None:
+        """Schedule cleanup for a resource that should be retired asynchronously."""
+        self._schedule_resource_cleanup(resource)
+
     def _cancel_scheduled_resource_cleanup(self, resource: object) -> None:
         """Prevent a resource that became current again from being closed as retired."""
         for task, scheduled_resource in tuple(self._scheduled_cleanup_tasks.items()):
@@ -920,14 +924,15 @@ class CatalogSessionBinding:
 
     @staticmethod
     def _consume_cancelled_resource_cleanup(task: asyncio.Task[None]) -> None:
-        if not task.cancelled():
-            try:
-                error = task.exception()
-            except asyncio.CancelledError:
-                pass
-            else:
-                if error is not None:
-                    LOGGER.error("Cancelled catalog resource cleanup failed: %s", _sanitize_error_message(str(error)))
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            LOGGER.error(
+                "Cancelled catalog resource cleanup failed: %s",
+                _sanitize_error_message(str(error)),
+                exc_info=error,
+            )
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""

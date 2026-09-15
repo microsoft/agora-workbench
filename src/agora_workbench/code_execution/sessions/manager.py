@@ -583,6 +583,14 @@ class SessionManager:
             return exc
         return None
 
+    def rollback_factory_resources(
+        self,
+        data_manager: object | None,
+        extensions: dict[str, Any],
+    ) -> BaseException | None:
+        """Roll back resources from a factory result that cannot be retained."""
+        return self._cleanup_unclaimed_session_resources(data_manager, extensions)
+
     def _start_session_cleanup(self, session: Session) -> None:
         """Start all sync-path cleanup and retain any asynchronous work."""
         with self._session_lifecycle_lock:
@@ -1625,7 +1633,21 @@ class SessionManager:
             if not started:
                 release_task = asyncio.create_task(resource_operation.__aexit__(None, None, None))
                 self._background_lease_release_tasks.add(release_task)
-                release_task.add_done_callback(self._background_lease_release_tasks.discard)
+
+                def on_release_done(done_task: asyncio.Task[None]) -> None:
+                    self._background_lease_release_tasks.discard(done_task)
+                    if done_task.cancelled():
+                        return
+                    error = done_task.exception()
+                    if error is not None:
+                        LOGGER.error(
+                            "Failed to release background lease for job %s: %s",
+                            job.job_id,
+                            error,
+                            exc_info=error,
+                        )
+
+                release_task.add_done_callback(on_release_done)
 
         task.add_done_callback(release_unstarted_collector)
         return task

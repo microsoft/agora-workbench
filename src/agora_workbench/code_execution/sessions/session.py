@@ -309,7 +309,7 @@ class Session(Generic[T]):
             cancellations.append(exc)
             self._schedule_cleanup_retry(resource, label)
         except Exception as exc:
-            errors.append(RuntimeError(f"{label} cleanup failed: {exc}"))
+            self._record_cleanup_error(exc, label, errors)
 
     async def _cleanup_resource_async(
         self,
@@ -332,7 +332,7 @@ class Session(Generic[T]):
             retry = asyncio.create_task(self._retry_resource_cleanup(resource, label))
             self._scheduled_cleanup_tasks.add(retry)
         except Exception as exc:
-            errors.append(RuntimeError(f"{label} cleanup failed: {exc}"))
+            self._record_cleanup_error(exc, label, errors)
 
     def _schedule_cleanup_retry(self, resource: object, label: str) -> None:
         try:
@@ -341,6 +341,11 @@ class Session(Generic[T]):
             return
         retry = loop.create_task(self._retry_resource_cleanup(resource, label))
         self._scheduled_cleanup_tasks.add(retry)
+
+    @staticmethod
+    def _record_cleanup_error(exc: Exception, label: str, errors: list[Exception]) -> None:
+        exc.add_note(f"{label} cleanup failed.")
+        errors.append(exc)
 
     @staticmethod
     async def _retry_resource_cleanup(resource: object, label: str) -> None:
