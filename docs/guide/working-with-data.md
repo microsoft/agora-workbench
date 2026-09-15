@@ -1,6 +1,17 @@
 # Working with data
 
-Agora Workbench provides several mechanisms for making data available to code execution sessions: asset provisioning for large files, a data catalog for discovery, and asset resolution for seamless parameter injection.
+Agora Workbench separates four roles:
+
+1. **asset provisioning** copies fixed startup inputs into an environment;
+2. the **catalog/index** discovers metadata and resolves logical references;
+3. `DataLakeDataManager` is an execution-side **fetch/cache manager**; and
+4. publishers and managed writers handle **publication and durable catalog
+   mutation**.
+
+These roles can be composed, but none implies the others. Indexing does not
+download data into session caches, caching does not register an artifact,
+ordinary publication does not update a catalog manifest, and importing or
+starting the library does not provision storage resources.
 
 ## Asset provisioning
 
@@ -56,13 +67,13 @@ df = pd.read_parquet(reference)
     cost once per kernel. Provision the weights as an asset, then load them once
     in a **[sidecar](sidecars.md)** that serves inference over loopback HTTP.
 
-## Data catalog (DataLakeDataManager)
+## Execution cache manager
 
-The `DataLakeDataManager` provides server-side data discovery and caching for dynamic assets — files the agent finds and uses during a session rather than pre-provisioned at startup.
+`DataLakeDataManager` resolves and caches dynamic assets that a session has
+already selected. It is not the catalog or search index.
 
 Features:
 
-- **Hybrid search** — keyword (FTS5) and vector (sqlite-vec) search over cataloged assets
 - **Automatic caching** — fetched assets are cached to disk; subsequent accesses are instant
 - **Multiple backends** — Azure Blob Storage, local filesystem, or custom fetchers
 
@@ -146,7 +157,7 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.data_lake.execution import BlobPublisher, LocalFilePublisher, create_storage_credential
 
 publishers = [
-    LocalFilePublisher(base_dir="/tmp/artifacts"),
+    LocalFilePublisher(base_dir="/srv/agora/artifacts"),
     BlobPublisher(
         account_url="https://myaccount.blob.core.windows.net",
         container="outputs",
@@ -161,7 +172,15 @@ server = CodeExecutionServer(
 )
 ```
 
-The agent publishes artifacts using `<gui>name</gui>` destinations for interactive display, or blob destinations for persistent storage. To minimize unexpected data egress, the publisher tools instruct the agent not to publish files unless instructed by the user.
+The agent publishes artifacts using `<gui>name</gui>` destinations for
+interactive display, or blob destinations for persistent storage. Ordinary
+publisher calls move bytes but do not register them in the catalog. Durable
+registration, upload, removal, and promotion use
+`AuthorizedManagedCatalogWriter`, which commits a versioned authoritative
+manifest after application authorization. See
+[Data-lake CLI and quickstarts](data-lake-operations.md#managed-registration-and-promotion).
+To minimize unexpected data egress, publisher tools instruct the agent not to
+publish files unless instructed by the user.
 
 ### Publisher dispatch
 
@@ -169,7 +188,12 @@ Publishers are checked in order via `can_handle()`. The first match wins. A `Gui
 
 ## Data catalog
 
-The data catalog provides server-side data discovery — the agent can search for files by natural-language query, browse by domain, or run SQL against the catalog metadata. SQLite FTS5 keyword search is always available; sqlite-vec vector similarity is loaded only when vector search is selected.
+The catalog/index provides server-side metadata discovery and logical
+resolution. The agent can search for files by natural-language query and browse
+by domain. SQLite FTS5 keyword search is always available; sqlite-vec vector
+similarity is loaded only when vector search is selected. Catalog results are
+not execution cache entries; bytes are fetched only when the selected reference
+is resolved by a session's data manager.
 
 ### Catalog installation options
 

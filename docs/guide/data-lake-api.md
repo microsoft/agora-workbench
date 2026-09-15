@@ -17,6 +17,12 @@ Choose the import path that matches your task:
 Importing `agora_workbench.data_lake` does not start a server, create an
 execution session, or load cloud SDK modules.
 
+For supported administrative commands, a runnable local example, Azure Storage
+hosting guidance, and operational limits, see
+[Data-lake CLI and quickstarts](data-lake-operations.md). For import,
+configuration, reference, and rollback changes from 0.2.x, see
+[Data-lake migration](data-lake-migration.md).
+
 ## Stream artifact bytes safely
 
 `AssetFetcher.fetch()` is explicitly a full-memory convenience. Use
