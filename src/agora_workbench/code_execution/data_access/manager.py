@@ -494,6 +494,7 @@ class DataLakeDataManager:
                 cache_path,
                 context=context,
                 transfer_options=transfer_options,
+                trusted_catalog_reference=generation_scoped,
             )
 
             if cache_was_invalidated():
@@ -532,6 +533,7 @@ class DataLakeDataManager:
         *,
         context: RequestContext | None = None,
         transfer_options: TransferOptions | None = None,
+        trusted_catalog_reference: bool = False,
     ) -> int:
         """
         Fetch asset and stream directly to file using appropriate fetcher.
@@ -551,6 +553,16 @@ class DataLakeDataManager:
                     fetcher.__class__.__name__,
                     sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
                 )
+                if trusted_catalog_reference:
+                    catalog_fetch = getattr(fetcher, "_fetch_catalog_to_file_result", None)
+                    if callable(catalog_fetch):
+                        result = await catalog_fetch(
+                            qualified_name,
+                            dest_path,
+                            options=transfer_options or self._transfer_options,
+                            context=context or RequestContext(),
+                        )
+                        return result.bytes_transferred
                 detailed_fetch = getattr(fetcher, "fetch_to_file_result", None)
                 detailed_implementation = getattr(type(fetcher), "fetch_to_file_result", None)
                 if (

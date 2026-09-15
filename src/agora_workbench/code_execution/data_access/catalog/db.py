@@ -1042,6 +1042,17 @@ class CatalogDB:
         with self._read_snapshot() as connection:
             return self._resolve_artifact_id(connection, value, source_id)
 
+    def has_canonical_artifact_id(self, artifact_id: str) -> bool:
+        """Return whether an exact canonical artifact ID is retained."""
+        with self._read_snapshot() as connection:
+            return (
+                connection.execute(
+                    "SELECT 1 FROM artifacts WHERE id=?",
+                    (artifact_id,),
+                ).fetchone()
+                is not None
+            )
+
     @staticmethod
     def _resolve_artifact_id(connection: sqlite3.Connection, value: str, source_id: str | None = None) -> str | None:
         direct = connection.execute(

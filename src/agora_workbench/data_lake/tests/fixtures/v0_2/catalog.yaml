@@ -1,0 +1,10 @@
+sources:
+  - path: assets
+    source_id: accepted-local
+    domain: weather
+    files:
+      weather.csv:
+        description: Synthetic 0.2.x weather observations
+search:
+  embedding_model: none
+

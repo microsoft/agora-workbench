@@ -293,6 +293,40 @@ class BlobFetcher(AssetFetcher):
         context: RequestContext | None = None,
     ) -> TransferResult:
         """Download one Blob object with bounded memory and atomic local commit."""
+        return await self._fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+            allow_reserved=False,
+        )
+
+    async def _fetch_catalog_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Download a locator returned by an authorized catalog resolver."""
+        return await self._fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+            allow_reserved=True,
+        )
+
+    async def _fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None,
+        context: RequestContext | None,
+        allow_reserved: bool,
+    ) -> TransferResult:
         options = options or TransferOptions()
         context = context or RequestContext()
         storage_account, container, blob_path = self._parse_blob_url(qualified_name)
@@ -300,6 +334,7 @@ class BlobFetcher(AssetFetcher):
             storage_account,
             container,
             blob_path,
+            allow_reserved=allow_reserved,
         )
         sanitized_url = sanitize_uri_for_display(qualified_name)
         LOGGER.info("Streaming blob asset to file: %s", sanitized_url)
@@ -383,9 +418,12 @@ class BlobFetcher(AssetFetcher):
         account: str,
         container: str,
         blob_path: str,
+        *,
+        allow_reserved: bool = False,
     ) -> None:
         validate_azure_object_path(
             blob_path,
+            allow_reserved=allow_reserved,
         )
         if self._allowed_scopes and not any(
             scope.contains(account, container, blob_path) for scope in self._allowed_scopes
@@ -543,9 +581,47 @@ class LocalFileFetcher(AssetFetcher):
         context: RequestContext | None = None,
     ) -> TransferResult:
         """Copy a local file through a descriptor that cannot follow symlinks."""
+        return await self._fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+            allow_reserved=False,
+        )
+
+    async def _fetch_catalog_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None = None,
+        context: RequestContext | None = None,
+    ) -> TransferResult:
+        """Copy a provider-owned locator returned by an authorized catalog."""
+        return await self._fetch_to_file_result(
+            qualified_name,
+            dest_path,
+            options=options,
+            context=context,
+            allow_reserved=True,
+        )
+
+    async def _fetch_to_file_result(
+        self,
+        qualified_name: str,
+        dest_path: Any,
+        *,
+        options: TransferOptions | None,
+        context: RequestContext | None,
+        allow_reserved: bool,
+    ) -> TransferResult:
         options = options or TransferOptions()
         context = context or RequestContext()
-        source, descriptor = self._open_checked(qualified_name)
+        source, descriptor = (
+            self._open_checked(qualified_name, allow_reserved=True)
+            if allow_reserved
+            else self._open_checked(qualified_name)
+        )
         LOGGER.info("Streaming local file to cache: %s", source)
 
         async def chunks():
@@ -581,12 +657,20 @@ class LocalFileFetcher(AssetFetcher):
     # ------------------------------------------------------------------
 
     def _resolve_and_check(self, qualified_name: str) -> Path:
+        """Resolve an ordinary caller-supplied local path."""
+        return self._resolve_and_check_with_policy(qualified_name, allow_reserved=False)
+
+    def _resolve_catalog_path_and_check(self, qualified_name: str) -> Path:
+        """Resolve a provider-owned path returned by an authorized catalog."""
+        return self._resolve_and_check_with_policy(qualified_name, allow_reserved=True)
+
+    def _resolve_and_check_with_policy(self, qualified_name: str, *, allow_reserved: bool) -> Path:
         """Resolve the path and validate against allowed roots."""
         path = self._parse_local_path(qualified_name).resolve()
 
         if not path.exists():
             raise FileNotFoundError(f"Local file not found: {path}")
-        if RESERVED_PROVIDER_PREFIX.rstrip("/") in path.parts:
+        if not allow_reserved and RESERVED_PROVIDER_PREFIX.rstrip("/") in path.parts:
             raise PermissionError("Local asset path is reserved for provider metadata.")
 
         if self._allowed_roots:
@@ -597,14 +681,18 @@ class LocalFileFetcher(AssetFetcher):
 
         return path
 
-    def _open_checked(self, qualified_name: str) -> tuple[Path, int]:
+    def _open_checked(self, qualified_name: str, *, allow_reserved: bool = False) -> tuple[Path, int]:
         """Open a contained regular file without following path-component symlinks."""
         if self._allowed_roots and os.name != "posix":
             raise UnsupportedOperationError(
                 "Secure allowed-root local fetching requires POSIX descriptor-relative path operations.",
                 operation="download",
             )
-        path = self._resolve_and_check(qualified_name)
+        path = (
+            self._resolve_catalog_path_and_check(qualified_name)
+            if allow_reserved
+            else self._resolve_and_check(qualified_name)
+        )
         if not self._allowed_roots:
             flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
             descriptor = os.open(path, flags)

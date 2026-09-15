@@ -33,6 +33,7 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from azure.core.credentials import AccessToken
+    from azure.core.credentials_async import AsyncTokenCredential
 
 LOGGER = logging.getLogger(__name__)
 
@@ -155,12 +156,13 @@ class MsalCacheCredential:
         await self.close()
 
 
-def create_storage_credential(client_id: str | None = None):
+def create_storage_credential(client_id: str | None = None) -> AsyncTokenCredential:
     """Create an async credential chain suitable for Azure Storage access.
 
-    Returns a ``ChainedTokenCredential`` that tries:
-      1. **MsalCacheCredential** — reads mounted ``az login`` cache (local dev)
-      2. **ManagedIdentityCredential** — uses Azure-assigned identity (production)
+    The returned ``ChainedTokenCredential`` first tries
+    ``MsalCacheCredential`` (the mounted ``az login`` cache for local
+    development), then ``ManagedIdentityCredential`` (the Azure-assigned
+    production identity).
 
     The chain raises ``CredentialUnavailableError`` from each link until one
     succeeds, making the credential work transparently in both environments.
