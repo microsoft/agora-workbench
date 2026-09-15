@@ -99,6 +99,36 @@ async def test_close_resources_removes_only_the_closed_equal_resource():
     assert resources[0] is failed
 
 
+async def test_cleanup_tracker_retries_only_resources_left_after_cancellation():
+    class Resource:
+        def __init__(self, *, cancel_once: bool = False):
+            self.cancel_once = cancel_once
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls > 1 and not self.cancel_once:
+                raise RuntimeError("non-idempotent resource closed twice")
+            if self.cancel_once and self.close_calls == 1:
+                raise asyncio.CancelledError
+
+    first = Resource()
+    second = Resource(cancel_once=True)
+    resources: list[object] = [first, second]
+    tracker = _AsyncCleanupTracker()
+
+    def cleanup():
+        return _close_resources(resources)
+
+    tracker.schedule(cleanup(), retry=cleanup)
+    with pytest.raises(asyncio.CancelledError):
+        await tracker.drain()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 2
+    assert resources == []
+
+
 def _server_config(tmp_path: Path) -> ServerConfig:
     return ServerConfig(
         name="catalog-test",
