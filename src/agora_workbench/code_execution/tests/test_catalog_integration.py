@@ -1894,6 +1894,47 @@ async def test_context_refresh_rebuilds_and_retires_capability_extensions():
     assert extensions[1].close_calls == 1
 
 
+async def test_session_close_waits_for_refresh_retired_capability_extension():
+    extensions = []
+    old_close_started = asyncio.Event()
+    release_old_close = asyncio.Event()
+
+    class Extension:
+        def __init__(self, token):
+            self.token = token
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.token == "old-token":
+                old_close_started.set()
+                await release_old_close.wait()
+
+    def extension_factory(context, catalog, request_context):
+        del catalog, request_context
+        extension = Extension(context.user_token)
+        extensions.append(extension)
+        return extension
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=extension_factory,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await old_close_started.wait()
+
+    close = asyncio.create_task(binding.aclose())
+    await asyncio.sleep(0)
+    assert not close.done()
+
+    release_old_close.set()
+    assert await close is None
+    assert extensions[0].close_calls == 1
+    assert extensions[1].close_calls == 1
+
+
 async def test_effective_capabilities_reuse_authorized_read_snapshot():
     integration = CatalogIntegration(
         ResourceLease(_LifecycleProvider()),

@@ -1746,7 +1746,7 @@ async def test_manifest_provider_close_waits_for_active_embedding_search(tmp_pat
 
     release_embed.set()
     assert (await search).items == ()
-    await close
+    assert await close is None
     embedding_provider.close.assert_awaited_once_with()
 
 

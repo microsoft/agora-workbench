@@ -104,7 +104,7 @@ class _AsyncCleanupTracker:
         *,
         retry: Callable[[], Any] | None = None,
         cancellation_retries: int = 1,
-    ) -> None:
+    ) -> asyncio.Task[None] | None:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -133,12 +133,17 @@ class _AsyncCleanupTracker:
                     else:
                         if cancelled is not None:
                             raise cancelled
-                        return
+                        return None
             finally:
                 loop.close()
         task = loop.create_task(awaitable)
         self._tasks[task] = (retry, cancellation_retries if retry is not None else 0)
         task.add_done_callback(self._discard_successful)
+        return task
+
+    def discard(self, task: asyncio.Task[None]) -> None:
+        """Release ownership after a session binding has drained the task."""
+        self._tasks.pop(task, None)
 
     def _discard_successful(self, task: asyncio.Task[None]) -> None:
         if task.cancelled():
@@ -688,6 +693,8 @@ class CatalogSessionBinding:
     _deferred_resources: list[object] = field(default_factory=list)
     _resolver_closed: bool = False
     _pending_cleanup_resources: list[object] | None = None
+    _scheduled_cleanup_resources: list[object] = field(default_factory=list)
+    _scheduled_cleanup_tasks: dict[asyncio.Task[None], object] = field(default_factory=dict)
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -836,12 +843,31 @@ class CatalogSessionBinding:
     def _schedule_resource_cleanup(self, resource: object) -> None:
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
+        if not any(existing is resource for existing in self._scheduled_cleanup_resources):
+            self._scheduled_cleanup_resources.append(resource)
         pending_resources = [resource]
 
         def cleanup() -> Any:
             return _close_resources(pending_resources)
 
-        self.cleanup_tracker.schedule(cleanup(), retry=cleanup)
+        task = self.cleanup_tracker.schedule(cleanup(), retry=cleanup)
+        if task is None:
+            _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+            return
+        self._scheduled_cleanup_tasks[task] = resource
+
+        def cleanup_finished(completed: asyncio.Task[None]) -> None:
+            if completed.cancelled():
+                return
+            try:
+                error = completed.exception()
+            except asyncio.CancelledError:
+                return
+            if error is None:
+                _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+                self._scheduled_cleanup_tasks.pop(completed, None)
+
+        task.add_done_callback(cleanup_finished)
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
@@ -849,7 +875,13 @@ class CatalogSessionBinding:
             await self._aclose_once()
 
     async def _aclose_once(self) -> None:
-        if self._closed and self._resolver_closed and self._pending_cleanup_resources == []:
+        if (
+            self._closed
+            and self._resolver_closed
+            and self._pending_cleanup_resources == []
+            and not self._scheduled_cleanup_tasks
+            and not self._scheduled_cleanup_resources
+        ):
             return
         self._closed = True
         errors: list[Exception] = []
@@ -859,6 +891,22 @@ class CatalogSessionBinding:
         except asyncio.CancelledError:
             self._closed = False
             raise
+        if self._scheduled_cleanup_tasks:
+            tasks = tuple(self._scheduled_cleanup_tasks)
+            try:
+                results = await asyncio.gather(
+                    *(asyncio.shield(task) for task in tasks),
+                    return_exceptions=True,
+                )
+            except asyncio.CancelledError:
+                self._closed = False
+                raise
+            for task, result in zip(tasks, results):
+                resource = self._scheduled_cleanup_tasks.pop(task, None)
+                if self.cleanup_tracker is not None:
+                    self.cleanup_tracker.discard(task)
+                if resource is not None and result is None:
+                    _remove_resource_identity(self._scheduled_cleanup_resources, resource)
         try:
             if not self._resolver_closed:
                 await self.resolver.aclose()
@@ -868,13 +916,19 @@ class CatalogSessionBinding:
         except Exception as exc:
             errors.append(exc)
         if self._pending_cleanup_resources is None:
-            resources = (*self._deferred_resources, *self.capability_extensions, self.owned_authorizer)
+            resources = (
+                *self._scheduled_cleanup_resources,
+                *self._deferred_resources,
+                *self.capability_extensions,
+                self.owned_authorizer,
+            )
             seen: set[int] = set()
             self._pending_cleanup_resources = []
             for resource in (resource for resource in resources if resource is not None):
                 if id(resource) not in seen:
                     seen.add(id(resource))
                     self._pending_cleanup_resources.append(resource)
+            self._scheduled_cleanup_resources.clear()
         for extension in tuple(self._pending_cleanup_resources):
             close = (
                 getattr(extension, "aclose", None)
@@ -906,7 +960,13 @@ class CatalogSessionBinding:
 
     def cleanup(self) -> None:
         """Schedule complete async cleanup from synchronous lifecycle paths."""
-        if self._closed and self._resolver_closed and self._pending_cleanup_resources == []:
+        if (
+            self._closed
+            and self._resolver_closed
+            and self._pending_cleanup_resources == []
+            and not self._scheduled_cleanup_tasks
+            and not self._scheduled_cleanup_resources
+        ):
             return
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
