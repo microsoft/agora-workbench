@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import importlib
+import inspect
 import json
 import sqlite3
 import sys
@@ -46,6 +47,19 @@ def _effective_source_ids(config: CatalogConfig) -> tuple[str, ...]:
 
 def _print_json(value: object) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=str))
+
+
+async def _close_optional_resource(resource: object | None) -> None:
+    if resource is None:
+        return
+    close = getattr(resource, "aclose", None)
+    if not callable(close):
+        close = getattr(resource, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 def _artifact_json(artifact: CatalogArtifact) -> dict[str, object]:
@@ -101,10 +115,7 @@ async def _run_validate(args: argparse.Namespace) -> None:
         embedding_provider = indexer.embedding_provider
         report = await indexer.dry_run()
     finally:
-        if embedding_provider is not None:
-            close = getattr(embedding_provider, "close", None)
-            if callable(close):
-                await close()
+        await _close_optional_resource(embedding_provider)
         db.close()
     _print_json(
         {"configuration_valid": report.configuration_valid, "sources": [asdict(item) for item in report.sources]}
@@ -117,10 +128,14 @@ async def _run_refresh(args: argparse.Namespace) -> None:
     config = CatalogConfig.from_yaml(args.config)
     db = CatalogDB(args.database, vec_dimensions=config.search.embedding_dimensions)
     db.open()
+    indexer = CatalogIndexer(config, db)
+    embedding_provider = None
     try:
-        changed = await CatalogIndexer(config, db).index()
+        embedding_provider = indexer.embedding_provider
+        changed = await indexer.index()
         states = [asdict(state) for state in db.list_source_refresh_states()]
     finally:
+        await _close_optional_resource(embedding_provider)
         db.close()
     _print_json({"database": str(args.database), "changed": changed, "sources": states})
 
@@ -156,10 +171,7 @@ async def _run_search(args: argparse.Namespace) -> None:
             RequestContext(caller_id=args.caller_id),
         )
     finally:
-        if embedding_provider is not None:
-            close = getattr(embedding_provider, "close", None)
-            if callable(close):
-                await close()
+        await _close_optional_resource(embedding_provider)
         db.close()
     _print_json({"items": [_artifact_json(item) for item in page.items], "next_cursor": page.next_cursor})
 

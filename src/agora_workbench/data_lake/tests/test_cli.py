@@ -8,10 +8,13 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
-from agora_workbench.data_lake.cli import main
+from agora_workbench.data_lake import cli
+from agora_workbench.data_lake.cli import _close_optional_resource, main
 from agora_workbench.data_lake.catalog import CatalogConfig
 from agora_workbench.data_lake.manifest import CatalogManifest
 
@@ -180,6 +183,60 @@ def test_keyword_cli_does_not_import_optional_backends(tmp_path, monkeypatch):
     assert main(["validate", "--config", str(config)]) == 0
     assert main(["refresh", "--config", str(config), "--database", str(database)]) == 0
     assert main(["search", "weather", "--config", str(config), "--database", str(database)]) == 0
+
+
+@pytest.mark.parametrize("index_error", [None, RuntimeError("refresh failed")])
+def test_refresh_closes_initialized_async_embedding_provider(tmp_path, monkeypatch, index_error):
+    config = tmp_path / "catalog.yaml"
+    config.write_text("version: 1\nsources: []\n", encoding="utf-8")
+    provider = SimpleNamespace(closed=False)
+
+    async def aclose():
+        provider.closed = True
+
+    provider.aclose = aclose
+
+    class FakeIndexer:
+        def __init__(self, config, db):
+            pass
+
+        @property
+        def embedding_provider(self):
+            return provider
+
+        async def index(self):
+            if index_error is not None:
+                raise index_error
+            return 0
+
+    monkeypatch.setattr(cli, "CatalogIndexer", FakeIndexer)
+    result = main(["refresh", "--config", str(config), "--database", str(tmp_path / "catalog.db")])
+
+    assert result == (1 if index_error is not None else 0)
+    assert provider.closed
+
+
+async def test_cleanup_helper_prefers_aclose_and_accepts_sync_cleanup():
+    sync_calls = []
+
+    class SyncResource:
+        def close(self):
+            sync_calls.append("close")
+
+    await _close_optional_resource(SyncResource())
+    assert sync_calls == ["close"]
+
+    preferred_calls = []
+
+    class PreferredResource:
+        def aclose(self):
+            preferred_calls.append("aclose")
+
+        def close(self):
+            preferred_calls.append("close")
+
+    await _close_optional_resource(PreferredResource())
+    assert preferred_calls == ["aclose"]
 
 
 def test_public_api_examples_run_from_clean_workspaces(tmp_path):
