@@ -1723,6 +1723,71 @@ async def test_session_credential_identity_refresh_does_not_retire_current_provi
     assert provider.close_calls == 1
 
 
+async def test_session_credential_reactivates_provider_before_retirement_starts():
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def get_token(self, scope):
+            return scope
+
+        async def close(self):
+            self.close_calls += 1
+
+    first = CredentialProvider()
+    second = CredentialProvider()
+    third = CredentialProvider()
+    providers = iter((second, first, third))
+    credential = SessionCredential(first, provider_factory=lambda token: next(providers))
+    retire_first = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
+    retire_first()
+    retire_second = credential.prepare_context_refresh(SessionContext("session", "user", "first"))
+    retire_second()
+
+    assert first.close_calls == 0
+    assert await credential.get_token("scope") == "scope"
+
+    retire_reactivated = credential.prepare_context_refresh(SessionContext("session", "user", "third"))
+    retire_reactivated()
+    await retire_first.retire_resource.aclose()
+    await retire_reactivated.retire_resource.aclose()
+    await retire_second.retire_resource.aclose()
+    await credential.close()
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+    assert third.close_calls == 1
+
+
+async def test_session_credential_rejects_provider_reactivation_after_retirement_starts():
+    close_started = asyncio.Event()
+    close_gate = asyncio.Event()
+
+    class CredentialProvider:
+        def __init__(self, *, block=False):
+            self.block = block
+
+        async def close(self):
+            if self.block:
+                close_started.set()
+                await close_gate.wait()
+
+    first = CredentialProvider(block=True)
+    second = CredentialProvider()
+    providers = iter((second, first))
+    credential = SessionCredential(first, provider_factory=lambda token: next(providers))
+    retire_first = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
+    retire_first()
+    cleanup = asyncio.create_task(retire_first.retire_resource.aclose())
+    await close_started.wait()
+
+    with pytest.raises(RuntimeError, match="cleanup has already started"):
+        credential.prepare_context_refresh(SessionContext("session", "user", "first"))
+
+    close_gate.set()
+    await cleanup
+    await credential.close()
+
+
 async def test_session_credential_retires_provider_after_in_flight_token_request():
     token_started = asyncio.Event()
     token_gate = asyncio.Event()
