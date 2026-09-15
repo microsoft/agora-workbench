@@ -107,7 +107,19 @@ class _AsyncCleanupTracker:
             finally:
                 loop.close()
             return
-        self._tasks[loop.create_task(awaitable)] = (retry, cancellation_retries if retry is not None else 0)
+        task = loop.create_task(awaitable)
+        self._tasks[task] = (retry, cancellation_retries if retry is not None else 0)
+        task.add_done_callback(self._discard_successful)
+
+    def _discard_successful(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        try:
+            error = task.exception()
+        except asyncio.CancelledError:
+            return
+        if error is None:
+            self._tasks.pop(task, None)
 
     async def drain(self) -> list[Exception]:
         errors: list[Exception] = []
@@ -337,10 +349,10 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
                 unavailable.append(source_id)
         return unavailable
 
-    async def _embed_query(self, query: str) -> list[float]:
+    async def _embed_query(self, query: str) -> list[float] | None:
         provider = self._indexer.embedding_provider
         if provider is None:
-            raise RuntimeError("Catalog query embedding is unavailable.")
+            return None
         embeddings = await provider.embed([query])
         return embeddings[0]
 
@@ -463,6 +475,7 @@ class CatalogSessionBinding:
     _deferred_resources: list[object] = field(default_factory=list)
     _resolver_closed: bool = False
     _pending_cleanup_resources: list[object] | None = None
+    _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
         self._snapshots_drained.set()
@@ -583,6 +596,10 @@ class CatalogSessionBinding:
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
+        async with self._cleanup_lock:
+            await self._aclose_once()
+
+    async def _aclose_once(self) -> None:
         if self._closed and self._resolver_closed and self._pending_cleanup_resources == []:
             return
         self._closed = True

@@ -24,7 +24,9 @@ from urllib.parse import urlparse
 
 from agora_workbench.data_lake import ResourceOwnership
 from agora_workbench.data_lake.errors import (
+    ArtifactNotFoundError,
     BackendUnavailableError,
+    PermissionDeniedError,
     TransferTimeoutError,
     UnsupportedOperationError,
     UnsafePathError,
@@ -393,7 +395,13 @@ class DataLakeDataManager:
             if generation_scoped:
                 try:
                     await self._get_blob_url_from_artifact_id(artifact_id)
-                except Exception:
+                except Exception as exc:
+                    if cache_was_invalidated():
+                        cache_generation = self._cache_generation
+                        full_cache_generation = self._full_cache_generation
+                        continue
+                    if not isinstance(exc, (ArtifactNotFoundError, PermissionDeniedError, PermissionError)):
+                        raise
                     self._cache_index.pop(artifact_id, None)
                     try:
                         validated_cache_path.unlink(missing_ok=True)
@@ -403,10 +411,6 @@ class DataLakeDataManager:
                             validated_cache_path,
                             exc_info=True,
                         )
-                    if cache_was_invalidated():
-                        cache_generation = self._cache_generation
-                        full_cache_generation = self._full_cache_generation
-                        continue
                     raise
 
             async def validate_cached_file() -> None:

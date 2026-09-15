@@ -289,6 +289,34 @@ class TestAtomicClaim:
         assert marker.read_text() == "replacement"
         assert manager._kernels[session_id] == replacement_kernel
 
+    async def test_idle_artifact_deletion_does_not_hold_lifecycle_lock(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
+        register_kernel(manager, session_id, name="OLD")
+        manager._kernel_last_used[session_id] = 0.0
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "result.txt").write_text("payload")
+        lock_was_available = False
+
+        def inspect_lock(path, ignore_errors):
+            nonlocal lock_was_available
+            del path, ignore_errors
+
+            def acquire_lock():
+                nonlocal lock_was_available
+                lock_was_available = manager._session_lifecycle_lock.acquire(timeout=1)
+                if lock_was_available:
+                    manager._session_lifecycle_lock.release()
+
+            worker = threading.Thread(target=acquire_lock)
+            worker.start()
+            worker.join()
+
+        monkeypatch.setattr("agora_workbench.code_execution.sessions.manager.shutil.rmtree", inspect_lock)
+
+        await manager.cleanup_idle_kernels(max_idle_time=-1)
+
+        assert lock_was_available
+
     async def test_outputs_dir_of_a_replacement_kernel_survives(self, manager, tmp_path):
         """The stale teardown also used to rmtree the live session's artifacts."""
         gate = asyncio.Event()
@@ -707,6 +735,24 @@ class TestAwaitableClose:
 
         manager.close_session(session_id)
         await manager.await_resource_cleanup()
+
+        assert attempts == 2
+        assert manager.storage.retrieve(session_id) is None
+
+    async def test_close_outside_event_loop_retries_cancelled_async_resource(self, manager):
+        attempts = 0
+
+        class CancelsOnce:
+            async def aclose(self):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise asyncio.CancelledError
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.get_session(session_id).data_manager = cast(Any, CancelsOnce())
+
+        await asyncio.to_thread(manager.close_session, session_id)
 
         assert attempts == 2
         assert manager.storage.retrieve(session_id) is None

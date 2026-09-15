@@ -271,7 +271,14 @@ class Session(Generic[T]):
             except RuntimeError:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(result)
+                    try:
+                        loop.run_until_complete(result)
+                    except asyncio.CancelledError as exc:
+                        cancellations.append(exc)
+                        try:
+                            loop.run_until_complete(self._retry_resource_cleanup(resource, label))
+                        except BaseException as retry_error:
+                            exc.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
                 finally:
                     loop.close()
             else:

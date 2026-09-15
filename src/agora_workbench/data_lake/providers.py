@@ -143,7 +143,7 @@ class SQLiteCatalogProvider:
         db: CatalogDB,
         source_ids: tuple[str, ...],
         *,
-        query_embedder: Callable[[str], Awaitable[list[float]]] | None = None,
+        query_embedder: Callable[[str], Awaitable[list[float] | None]] | None = None,
         hybrid_alpha: float = 0.5,
     ):
         self._db = db

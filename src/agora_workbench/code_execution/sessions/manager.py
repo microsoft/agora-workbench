@@ -1916,6 +1916,7 @@ class SessionManager:
             self._kernel_execute_locks.pop(session_id, None)
             self._kernel_session_generations.pop(session_id, None)
             self._discard_kernel_generation(session_id)
+        artifacts_dir_to_remove: Path | None = None
         if cleanup_artifacts:
             with self._session_lifecycle_lock:
                 current_session_generation = self._session_generations.get(session_id)
@@ -1923,7 +1924,21 @@ class SessionManager:
                     expected_session_generation is not None
                     and current_session_generation == expected_session_generation
                 ):
-                    self._cleanup_session_artifacts(session_id)
+                    self._session_artifacts.pop(session_id, None)
+                    outputs_dir = self._get_outputs_dir(session_id)
+                    if outputs_dir.exists():
+                        claimed_dir = outputs_dir.with_name(f".{outputs_dir.name}.cleanup-{uuid.uuid4().hex}")
+                        try:
+                            outputs_dir.rename(claimed_dir)
+                        except OSError:
+                            LOGGER.warning("Failed to claim outputs dir for session %s", session_id, exc_info=True)
+                        else:
+                            artifacts_dir_to_remove = claimed_dir
+        if artifacts_dir_to_remove is not None:
+            try:
+                shutil.rmtree(artifacts_dir_to_remove, ignore_errors=True)
+            except OSError:
+                LOGGER.warning("Failed to remove outputs dir for session %s", session_id, exc_info=True)
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:

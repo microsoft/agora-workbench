@@ -270,6 +270,20 @@ async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(t
     assert captured["hybrid_alpha"] == 0.25
 
 
+async def test_configured_keyword_only_catalog_searches_without_embeddings(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    provider = _ConfiguredCatalogProvider(CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))]))
+    try:
+        await provider.load()
+        page = await provider.search(SearchRequest("searchable"), RequestContext())
+    finally:
+        await provider.aclose()
+
+    assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+
+
 def test_from_config_rejects_invalid_authorizer_before_opening_database(tmp_path):
     source_root = tmp_path / "source"
     source_root.mkdir()
@@ -798,6 +812,41 @@ async def test_catalog_cache_hits_are_reauthorized_and_evicted_on_denial(denial)
     await manager.aclose()
 
 
+async def test_catalog_cache_transient_reauthorization_failure_preserves_cached_bytes():
+    class Resolver:
+        unavailable_reason = None
+        fail = False
+
+        async def resolve(self, artifact_id):
+            if self.fail:
+                raise BackendUnavailableError("Catalog unavailable.", operation="resolve")
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_text("blob-payload")
+            return len("blob-payload")
+
+    resolver = Resolver()
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, resolver),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    cached_path = await manager.get_cache_path(reference)
+    resolver.fail = True
+
+    with pytest.raises(BackendUnavailableError):
+        await manager.get_cache_path(reference)
+
+    assert manager._cache_index["catalog-v1:opaque"] == cached_path
+    assert cached_path.read_text() == "blob-payload"
+    await manager.aclose()
+
+
 async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     class CredentialProvider:
         def __init__(self, *, cancel_once=False):
@@ -850,6 +899,20 @@ async def test_cleanup_tracker_retries_only_pending_resources():
     assert completed.close_calls == 1
     assert cancelled.close_calls == 2
     assert pending == []
+
+
+async def test_cleanup_tracker_discards_successful_background_cleanup():
+    tracker = _AsyncCleanupTracker()
+    finished = asyncio.Event()
+
+    async def cleanup():
+        finished.set()
+
+    tracker.schedule(cleanup())
+    await finished.wait()
+    await asyncio.sleep(0)
+
+    assert tracker._tasks == {}
 
 
 async def test_failed_context_refresh_closes_uncommitted_credential_provider():
@@ -927,6 +990,35 @@ async def test_context_refresh_rolls_back_already_committed_refreshers():
     assert state["value"] == "old"
     assert binding.context is previous_context
     await binding.aclose()
+
+
+async def test_concurrent_catalog_binding_close_coalesces_resource_cleanup():
+    started = asyncio.Event()
+    gate = asyncio.Event()
+    close_calls = 0
+
+    class Extension:
+        async def aclose(self):
+            nonlocal close_calls
+            close_calls += 1
+            started.set()
+            await gate.wait()
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+    binding.capability_extensions = (Extension(),)
+
+    first = asyncio.create_task(binding.aclose())
+    await started.wait()
+    second = asyncio.create_task(binding.aclose())
+    await asyncio.sleep(0)
+    gate.set()
+    await asyncio.gather(first, second)
+
+    assert close_calls == 1
 
 
 async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
