@@ -1808,6 +1808,41 @@ async def test_session_credential_close_coalesces_scheduled_retirement():
     assert second.close_calls == 1
 
 
+async def test_session_credential_close_rejects_concurrent_context_refresh():
+    class CredentialProvider:
+        def __init__(self, *, pause: asyncio.Event | None = None, resume: asyncio.Event | None = None):
+            self.close_calls = 0
+            self._pause = pause
+            self._resume = resume
+
+        async def close(self):
+            self.close_calls += 1
+            if self._pause is not None:
+                self._pause.set()
+            if self._resume is not None:
+                await self._resume.wait()
+
+    pause = asyncio.Event()
+    resume = asyncio.Event()
+    current = CredentialProvider(pause=pause, resume=resume)
+    replacement = CredentialProvider()
+    credential = SessionCredential(current, provider_factory=lambda token: replacement)
+
+    close_task = asyncio.create_task(credential.close())
+    await pause.wait()
+
+    prepared = credential.prepare_context_refresh(SessionContext("session", "user", "new-token"))
+    with pytest.raises(RuntimeError, match="cleanup has started"):
+        prepared()
+
+    resume.set()
+    await close_task
+
+    assert current.close_calls == 1
+    assert replacement.close_calls == 0
+    assert credential._provider is current
+
+
 async def test_session_credential_identity_refresh_does_not_retire_current_provider():
     class CredentialProvider:
         def __init__(self):

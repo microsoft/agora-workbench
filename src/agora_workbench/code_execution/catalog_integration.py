@@ -251,6 +251,7 @@ class SessionCredential:
         self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
         self._provider_retirements: list[_RetiredCredentialProvider] = []
         self._provider_closed = False
+        self._closing = False
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
         del kwargs
@@ -298,6 +299,10 @@ class SessionCredential:
 
         def commit() -> None:
             nonlocal previous_retirement_index, reactivated_index
+            if self._closing:
+                raise RuntimeError(
+                    f"Credential cleanup has started for session {context.session_id}; cannot commit a context refresh."
+                )
             reactivated_index = next(
                 (index for index, retired in enumerate(self._retired_providers) if retired is provider),
                 None,
@@ -368,6 +373,7 @@ class SessionCredential:
                 self._retired_cleanup_tasks.pop(provider_id, None)
 
     async def close(self) -> None:
+        self._closing = True
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
         providers = tuple((provider, False) for provider in self._retired_providers)
