@@ -322,6 +322,7 @@ class TestAtomicClaim:
 
         release_holder.set()
         assert await holder_task is None
+        await manager.await_resource_cleanup()
 
         manager.create_session(
             data={},
@@ -822,6 +823,110 @@ class TestAwaitableClose:
                 pass
         await operation.__aexit__(None, None, None)
         _ = await close_task
+        assert cleanup_started.is_set()
+
+    async def test_close_session_waits_for_active_kernel_execution(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
+        session = manager.get_session(session_id)
+        cleanup_started = asyncio.Event()
+        original_aclose = session.aclose
+
+        async def observed_cleanup():
+            cleanup_started.set()
+            await original_aclose()
+
+        session.aclose = observed_cleanup
+        operation = manager._kernel_execution_lock(session_id)
+        await operation.__aenter__()
+        shutdown = manager.close_session(session_id)
+        await asyncio.sleep(0)
+
+        assert shutdown is not None
+        assert not shutdown.done()
+        assert not km.shutdown_finished
+        assert not cleanup_started.is_set()
+
+        await operation.__aexit__(None, None, None)
+        _ = await shutdown
+        await manager.await_resource_cleanup()
+        assert km.shutdown_finished
+        assert cleanup_started.is_set()
+
+    async def test_resource_operation_rejects_session_already_closing(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+        operation = manager.session_resource_operation(session_id)
+        manager.close_session(session_id)
+
+        with pytest.raises(ValueError, match="closing"):
+            await operation.__aenter__()
+
+    async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        cleanup_started = asyncio.Event()
+        cleanup_gate = asyncio.Event()
+
+        async def blocked_cleanup():
+            cleanup_started.set()
+            await cleanup_gate.wait()
+
+        session.aclose = blocked_cleanup
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+        manager.close_session(session_id)
+
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        await operation.__aexit__(None, None, None)
+        await cleanup_started.wait()
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        cleanup_gate.set()
+        await manager.await_resource_cleanup()
+        replacement = manager.create_session(
+            data={},
+            user_identity="replacement",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        assert replacement == session_id
+        manager.close_session(session_id)
+
+    async def test_thread_close_defers_resource_cleanup_until_operation_drains(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        cleanup_started = asyncio.Event()
+        original_aclose = session.aclose
+
+        async def observed_cleanup():
+            cleanup_started.set()
+            await original_aclose()
+
+        session.aclose = observed_cleanup
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+        assert await asyncio.to_thread(manager.close_session, session_id) is None
+        assert not cleanup_started.is_set()
+
+        await operation.__aexit__(None, None, None)
+        await manager.await_resource_cleanup()
         assert cleanup_started.is_set()
 
     async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):

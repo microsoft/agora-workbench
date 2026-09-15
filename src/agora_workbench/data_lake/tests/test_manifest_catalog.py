@@ -39,6 +39,7 @@ from agora_workbench.data_lake.catalog import (
     CatalogDB,
     CatalogIndexer,
     DiscoveryMode,
+    SearchConfig,
     SourceConfig,
     convert_catalog_config,
 )
@@ -1668,6 +1669,32 @@ async def test_sqlite_provider_preserves_internal_credential_capable_locator():
         assert resolved.locator.uri == storage_uri
     finally:
         db.close()
+
+
+async def test_manifest_provider_uses_configured_query_embedding_and_hybrid_weight(tmp_path):
+    config = CatalogConfig(
+        sources=_local_config(tmp_path).sources,
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    (tmp_path / "approved").mkdir()
+    (tmp_path / "approved" / "data.csv").write_text("data")
+    (tmp_path / "manifest.json").write_text(json.dumps(_manifest()))
+    provider = ManifestCatalogProvider(config)
+    embedding_provider = MagicMock()
+    embedding_provider.dimensions = 2
+    embedding_provider.embed = AsyncMock(return_value=[[0.25, 0.75]])
+    try:
+        await provider.load()
+        provider._indexer._embedding_provider = embedding_provider
+        provider._db_owned.search = MagicMock(return_value=[])
+
+        await provider.search(SearchRequest(query="approved"), RequestContext())
+
+        embedding_provider.embed.assert_awaited_once_with(["approved"])
+        assert provider._db_owned.search.call_args.kwargs["query_embedding"] == [0.25, 0.75]
+        assert provider._db_owned.search.call_args.kwargs["hybrid_alpha"] == 0.25
+    finally:
+        await provider.aclose()
 
 
 async def test_refresh_error_preserves_source_id_with_colon(tmp_path):

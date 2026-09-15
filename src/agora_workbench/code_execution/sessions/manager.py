@@ -243,9 +243,12 @@ class SessionManager:
         # concurrent callers (e.g. four parallel push_object MCP calls).
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
         self._kernel_execute_lock_users: dict[str, int] = {}
+        self._kernel_execute_drained: dict[str, asyncio.Event] = {}
         self._retired_kernel_execute_locks: set[str] = set()
         self._session_resource_users: dict[str, int] = {}
         self._session_resources_drained: dict[str, asyncio.Event] = {}
+        self._pending_session_resource_cleanup: dict[str, Session] = {}
+        self._session_resource_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
         # Artifact pipeline state: the token -> record map used by the HTTP
@@ -573,17 +576,43 @@ class SessionManager:
 
     def _start_session_cleanup(self, session: Session) -> None:
         """Start all sync-path cleanup and retain any asynchronous work."""
-        if self._session_resource_users.get(session.session_id, 0):
-            task = asyncio.get_running_loop().create_task(self._cleanup_session_after_operations(session))
-            self._resource_cleanup_tasks.add(task)
-            task.add_done_callback(self._on_resource_cleanup_done)
-            return
+        with self._session_lifecycle_lock:
+            if self._session_resource_users.get(session.session_id, 0) or self._kernel_execute_lock_users.get(
+                session.session_id, 0
+            ):
+                self._pending_session_resource_cleanup[session.session_id] = session
+                return
         try:
             session.cleanup()
         finally:
             self._track_session_cleanup_tasks(session)
 
+    def _schedule_session_cleanup_after_operations(self, session: Session) -> asyncio.Task[None]:
+        existing = self._session_resource_cleanup_tasks.get(session.session_id)
+        if existing is not None and not existing.done():
+            return existing
+        self._pending_session_resource_cleanup.pop(session.session_id, None)
+        task = asyncio.get_running_loop().create_task(self._cleanup_session_after_operations(session))
+        self._session_resource_cleanup_tasks[session.session_id] = task
+        self._resource_cleanup_tasks.add(task)
+        task.add_done_callback(partial(self._on_session_resource_cleanup_done, session.session_id, session))
+        return task
+
+    def _on_session_resource_cleanup_done(
+        self,
+        session_id: str,
+        session: Session,
+        task: asyncio.Task[None],
+    ) -> None:
+        if self._session_resource_cleanup_tasks.get(session_id) is task:
+            self._session_resource_cleanup_tasks.pop(session_id, None)
+        self._on_resource_cleanup_done(task)
+        self._release_closing_session_id_if_safe(session_id, session)
+
     async def _cleanup_session_after_operations(self, session: Session) -> None:
+        execute_event = self._kernel_execute_drained.get(session.session_id)
+        if execute_event is not None:
+            await execute_event.wait()
         event = self._session_resources_drained.get(session.session_id)
         if event is not None:
             await event.wait()
@@ -678,6 +707,7 @@ class SessionManager:
                 session_id,
                 caller=caller,
                 cleanup_artifacts=False,
+                wait_for_executions=True,
             )
         if cleanup_artifacts:
             assert session is not None
@@ -697,6 +727,12 @@ class SessionManager:
                 or session_id in self._kernels
                 or shutdown_in_progress_elsewhere
                 or self._kernel_execute_lock_users.get(session_id, 0)
+                or self._session_resource_users.get(session_id, 0)
+                or session_id in self._pending_session_resource_cleanup
+                or (
+                    (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
+                    and not resource_cleanup.done()
+                )
             ):
                 return
         session.claim_session_file_cleanup()
@@ -717,6 +753,12 @@ class SessionManager:
                 session_id in self._kernels
                 or shutdown_in_progress_elsewhere
                 or self._kernel_execute_lock_users.get(session_id, 0)
+                or self._session_resource_users.get(session_id, 0)
+                or session_id in self._pending_session_resource_cleanup
+                or (
+                    (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
+                    and not resource_cleanup.done()
+                )
             ):
                 return
             self._closing_session_ids.discard(session_id)
@@ -739,7 +781,7 @@ class SessionManager:
         )
         cleanup_task: asyncio.Task[None] | None = None
         if session is not None:
-            cleanup_task = asyncio.create_task(self._cleanup_session_after_operations(session))
+            cleanup_task = self._schedule_session_cleanup_after_operations(session)
 
         async def finish_cleanup() -> None:
             cleanup_error: BaseException | None = None
@@ -1760,6 +1802,11 @@ class SessionManager:
         """Retain a session's execute lock until every captured caller releases it."""
         with self._session_lifecycle_lock:
             lock = self._get_kernel_execute_lock(session_id)
+            event = self._kernel_execute_drained.get(session_id)
+            if event is None:
+                event = asyncio.Event()
+                self._kernel_execute_drained[session_id] = event
+            event.clear()
             self._kernel_execute_lock_users[session_id] = self._kernel_execute_lock_users.get(session_id, 0) + 1
             if session_id not in self._session_generations:
                 self._retired_kernel_execute_locks.add(session_id)
@@ -1767,25 +1814,32 @@ class SessionManager:
             async with lock:
                 yield
         finally:
+            pending_cleanup: Session | None = None
             with self._session_lifecycle_lock:
                 remaining = self._kernel_execute_lock_users[session_id] - 1
                 if remaining:
                     self._kernel_execute_lock_users[session_id] = remaining
                 else:
                     self._kernel_execute_lock_users.pop(session_id, None)
+                    drained = self._kernel_execute_drained.pop(session_id, None)
+                    if drained is not None:
+                        drained.set()
                     if (
                         session_id in self._retired_kernel_execute_locks
                         and self._kernel_execute_locks.get(session_id) is lock
                     ):
                         self._kernel_execute_locks.pop(session_id, None)
                         self._retired_kernel_execute_locks.discard(session_id)
+                    pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
+            if pending_cleanup is not None:
+                self._schedule_session_cleanup_after_operations(pending_cleanup)
             self._finalize_closed_session(session_id)
 
     @asynccontextmanager
     async def session_resource_operation(self, session_id: str) -> AsyncIterator[None]:
         """Keep session-owned data resources alive for one admitted operation."""
         with self._session_lifecycle_lock:
-            if session_id in self._closing_session_ids or self.storage.retrieve(session_id) is None:
+            if session_id in self._closing_session_ids:
                 raise ValueError(f"Session {session_id} not found or is closing")
             event = self._session_resources_drained.get(session_id)
             if event is None:
@@ -1796,6 +1850,7 @@ class SessionManager:
         try:
             yield
         finally:
+            pending_cleanup: Session | None = None
             with self._session_lifecycle_lock:
                 remaining = self._session_resource_users[session_id] - 1
                 if remaining:
@@ -1805,6 +1860,10 @@ class SessionManager:
                     drained = self._session_resources_drained.pop(session_id, None)
                     if drained is not None:
                         drained.set()
+                    pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
+            if pending_cleanup is not None:
+                self._schedule_session_cleanup_after_operations(pending_cleanup)
+            self._finalize_closed_session(session_id)
 
     def _adopt_session_generation_locked(self, session_id: str) -> int:
         """Return a session lifecycle generation, assigning one while the lifecycle lock is held."""
@@ -2163,6 +2222,7 @@ class SessionManager:
         *,
         caller: str = "close_session()",
         cleanup_artifacts: bool = True,
+        wait_for_executions: bool = False,
     ) -> "Optional[asyncio.Task[None]]":
         """Start teardown for a session's kernel, or join one already running.
 
@@ -2207,14 +2267,19 @@ class SessionManager:
         expected_kernel_generation = self._kernel_generations.get(session_id)
 
         async def shutdown_and_finalize() -> None:
-            teardown = asyncio.create_task(
-                self._shutdown_kernel(
+            async def drain_executions_and_shutdown() -> None:
+                if wait_for_executions:
+                    execute_drained = self._kernel_execute_drained.get(session_id)
+                    if execute_drained is not None:
+                        await execute_drained.wait()
+                await self._shutdown_kernel(
                     session_id,
                     cleanup_artifacts=cleanup_artifacts,
                     expected_session_generation=expected_session_generation,
                     expected_kernel_generation=expected_kernel_generation,
                 )
-            )
+
+            teardown = asyncio.create_task(drain_executions_and_shutdown())
             cancelled: asyncio.CancelledError | None = None
             try:
                 while True:
