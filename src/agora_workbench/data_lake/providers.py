@@ -6,11 +6,12 @@ import asyncio
 import base64
 import inspect
 import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from math import isfinite
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from agora_workbench.code_execution.data_access.catalog.config import CatalogConfig, DiscoveryMode
@@ -290,6 +291,9 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         self._embedding_closed = False
         self._db_closed = False
         self._lifecycle_lock = asyncio.Lock()
+        self._active_reads = 0
+        self._reads_drained = asyncio.Event()
+        self._reads_drained.set()
         self._last_states: tuple[SourceRefreshState, ...] = ()
         self._db_owned = CatalogDB(db_path, vec_dimensions=config.search.embedding_dimensions)
         try:
@@ -334,6 +338,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
     async def load(self) -> int:
         """Load or refresh all manifests, retaining the previous valid generation on failure."""
         async with self._lifecycle_lock:
+            await self._reads_drained.wait()
             return await self._load_unlocked()
 
     async def _load_unlocked(self) -> int:
@@ -423,29 +428,37 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
                 operation="catalog",
             )
 
-    async def capabilities(self) -> tuple[SourceCapabilities, ...]:
+    @asynccontextmanager
+    async def _read_operation(self) -> AsyncIterator[None]:
         async with self._lifecycle_lock:
             self._require_ready()
+            self._active_reads += 1
+            self._reads_drained.clear()
+        try:
+            yield
+        finally:
+            self._active_reads -= 1
+            if self._active_reads == 0:
+                self._reads_drained.set()
+
+    async def capabilities(self) -> tuple[SourceCapabilities, ...]:
+        async with self._read_operation():
             return await super().capabilities()
 
     async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().search(request, context)
 
     async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().list(request, context)
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().get(reference, context)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             artifact = await SQLiteCatalogProvider.get(self, reference, context)
             if artifact.locator is None:
                 raise ArtifactNotFoundError(
@@ -465,6 +478,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
     async def aclose(self) -> None:
         """Close embedding resources and the private per-reader SQLite cache."""
         async with self._lifecycle_lock:
+            await self._reads_drained.wait()
             await self._aclose_unlocked()
 
     async def _aclose_unlocked(self) -> None:

@@ -999,12 +999,17 @@ class TestAwaitableClose:
         cleanup_gate = asyncio.Event()
 
         class AsyncResource:
+            def __init__(self):
+                self.close_calls = 0
+
             async def aclose(self):
+                self.close_calls += 1
                 cleanup_started.set()
                 await cleanup_gate.wait()
 
+        resource = AsyncResource()
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
-        manager.get_session(session_id).data_manager = cast(Any, AsyncResource())
+        manager.get_session(session_id).data_manager = cast(Any, resource)
         manager.close_session(session_id)
         await cleanup_started.wait()
 
@@ -1014,6 +1019,7 @@ class TestAwaitableClose:
 
         cleanup_gate.set()
         _ = await close_task
+        assert resource.close_calls == 1
 
     async def test_aclose_all_sessions_joins_pending_resource_cleanup(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
@@ -1271,8 +1277,8 @@ class TestAwaitableClose:
         cleanup = asyncio.create_task(manager._cleanup_session_after_operations(session))
         await retry_started.wait()
         cleanup.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await cleanup
+        cleanup_result = await asyncio.gather(cleanup, return_exceptions=True)
+        assert isinstance(cleanup_result[0], asyncio.CancelledError)
 
         assert manager._session_owned_cleanup_tasks[session_id]
         release_retry.set()

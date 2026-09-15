@@ -1733,6 +1733,29 @@ async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     assert current.close_calls == 1
 
 
+async def test_session_credential_close_coalesces_scheduled_retirement():
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+            if self.close_calls > 1:
+                raise RuntimeError("provider closed twice")
+
+    first = CredentialProvider()
+    second = CredentialProvider()
+    credential = SessionCredential(first, provider_factory=lambda token: second)
+    prepared = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
+    prepared()
+
+    await credential.close()
+    await prepared.retire_resource.aclose()
+
+    assert first.close_calls == 1
+    assert second.close_calls == 1
+
+
 async def test_session_credential_identity_refresh_does_not_retire_current_provider():
     class CredentialProvider:
         def __init__(self):
