@@ -364,6 +364,7 @@ class TestAtomicClaim:
 
         gate.set()
         _ = await shutdown
+        await manager.await_resource_cleanup()
 
         session_dir.mkdir(exist_ok=True)
         session_file.write_text("replacement")
@@ -937,6 +938,40 @@ class TestAwaitableClose:
         await operation.__aexit__(None, None, None)
         await close_task
         assert cleanup_started.is_set()
+
+    async def test_aclose_session_joins_sync_scheduled_async_cleanup(self, manager):
+        cleanup_started = asyncio.Event()
+        cleanup_gate = asyncio.Event()
+
+        class AsyncResource:
+            async def aclose(self):
+                cleanup_started.set()
+                await cleanup_gate.wait()
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.get_session(session_id).data_manager = cast(Any, AsyncResource())
+        manager.close_session(session_id)
+        await cleanup_started.wait()
+
+        close_task = asyncio.create_task(manager.aclose_session(session_id))
+        await asyncio.sleep(0)
+        assert not close_task.done()
+
+        cleanup_gate.set()
+        await close_task
+
+    async def test_aclose_all_sessions_joins_pending_resource_cleanup(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+        manager.close_session(session_id)
+
+        close_all = asyncio.create_task(manager.aclose_all_sessions())
+        await asyncio.sleep(0)
+        assert not close_all.done()
+
+        await operation.__aexit__(None, None, None)
+        await close_all
 
     async def test_thread_close_defers_resource_cleanup_until_operation_drains(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})

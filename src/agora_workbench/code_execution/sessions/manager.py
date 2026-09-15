@@ -249,6 +249,7 @@ class SessionManager:
         self._session_resources_drained: dict[str, asyncio.Event] = {}
         self._pending_session_resource_cleanup: dict[str, Session] = {}
         self._session_resource_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_owned_cleanup_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
         # Artifact pipeline state: the token -> record map used by the HTTP
@@ -623,9 +624,33 @@ class SessionManager:
         """Transfer session-owned cleanup tasks into the manager's strong-reference set."""
         tasks = session.take_cleanup_tasks()
         for task in tasks:
+            self._session_owned_cleanup_tasks.setdefault(session.session_id, set()).add(task)
             self._resource_cleanup_tasks.add(task)
-            task.add_done_callback(self._on_resource_cleanup_done)
+            task.add_done_callback(partial(self._on_session_owned_cleanup_done, session.session_id, session))
         return tasks
+
+    def _on_session_owned_cleanup_done(
+        self,
+        session_id: str,
+        session: Session,
+        task: asyncio.Task[None],
+    ) -> None:
+        session_tasks = self._session_owned_cleanup_tasks.get(session_id)
+        if session_tasks is not None:
+            session_tasks.discard(task)
+            if not session_tasks:
+                self._session_owned_cleanup_tasks.pop(session_id, None)
+        self._on_resource_cleanup_done(task)
+        self._finalize_closed_session(session_id)
+
+    async def _await_session_owned_cleanup(self, session_id: str) -> None:
+        """Wait for every asynchronous cleanup task owned by one session."""
+        errors: list[Exception] = []
+        while tasks := tuple(self._session_owned_cleanup_tasks.get(session_id, ())):
+            results = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+            errors.extend(result for result in results if isinstance(result, Exception))
+        if errors:
+            raise ExceptionGroup(f"Session {session_id} resource cleanup failed.", errors)
 
     def _on_resource_cleanup_done(self, task: asyncio.Task[None]) -> None:
         if task not in self._resource_cleanup_tasks:
@@ -733,6 +758,7 @@ class SessionManager:
                     (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
                     and not resource_cleanup.done()
                 )
+                or any(not task.done() for task in self._session_owned_cleanup_tasks.get(session_id, ()))
             ):
                 return
         session.claim_session_file_cleanup()
@@ -759,6 +785,7 @@ class SessionManager:
                     (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
                     and not resource_cleanup.done()
                 )
+                or any(not task.done() for task in self._session_owned_cleanup_tasks.get(session_id, ()))
             ):
                 return
             self._closing_session_ids.discard(session_id)
@@ -786,15 +813,19 @@ class SessionManager:
             with self._session_lifecycle_lock:
                 cleanup_task = self._session_resource_cleanup_tasks.get(session_id)
                 pending_session = self._pending_session_resource_cleanup.get(session_id)
+                closing_session = self._closing_sessions.get(session_id)
             if cleanup_task is None and pending_session is not None:
                 session = pending_session
                 cleanup_task = self._schedule_session_cleanup_after_operations(session)
+            elif cleanup_task is not None or self._session_owned_cleanup_tasks.get(session_id):
+                session = closing_session
 
         async def finish_cleanup() -> None:
             cleanup_error: BaseException | None = None
             try:
                 if cleanup_task is not None:
                     _ = await cleanup_task
+                await self._await_session_owned_cleanup(session_id)
             except asyncio.CancelledError as exc:
                 cleanup_error = exc
             except Exception as exc:
@@ -833,10 +864,16 @@ class SessionManager:
     async def aclose_all_sessions(self) -> None:
         """Close every active session and wait for all kernel/resource teardown."""
         with self._session_lifecycle_lock:
-            sessions = [
+            sessions: list[tuple[str, int | None]] = [
                 (session_id, self._adopt_session_generation_locked(session_id))
                 for session_id in self.storage.list_all()
             ]
+            active_session_ids = {session_id for session_id, _ in sessions}
+            sessions.extend(
+                (session_id, None)
+                for session_id in self._closing_sessions
+                if session_id not in active_session_ids
+            )
         tasks = [
             asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
             for session_id, generation in sessions
