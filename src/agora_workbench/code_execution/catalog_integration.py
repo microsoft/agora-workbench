@@ -11,7 +11,8 @@ import logging
 import re
 import shutil
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -221,6 +222,7 @@ class _PreparedContextRefresh:
     commit: Callable[[], None]
     rollback_resource: object | None = None
     rollback: Callable[[], None] | None = None
+    retire_resource: object | None = None
 
     def __call__(self) -> None:
         self.commit()
@@ -233,13 +235,33 @@ class SessionCredential:
         self._provider = provider
         self._provider_factory = provider_factory
         self._retired_providers: list[Any] = []
+        self._provider_users: dict[int, int] = {}
+        self._provider_drained: dict[int, asyncio.Event] = {}
+        self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
         self._provider_closed = False
 
     async def get_token(self, *scopes: str, **kwargs: object) -> Any:
         del kwargs
         if not scopes:
             raise ValueError("At least one scope is required.")
-        return await self._provider.get_token(scopes[0])
+        provider = self._provider
+        provider_id = id(provider)
+        event = self._provider_drained.get(provider_id)
+        if event is None:
+            event = asyncio.Event()
+            self._provider_drained[provider_id] = event
+        event.clear()
+        self._provider_users[provider_id] = self._provider_users.get(provider_id, 0) + 1
+        try:
+            return await provider.get_token(scopes[0])
+        finally:
+            remaining = self._provider_users[provider_id] - 1
+            if remaining:
+                self._provider_users[provider_id] = remaining
+            else:
+                self._provider_users.pop(provider_id, None)
+                self._provider_drained.pop(provider_id, None)
+                event.set()
 
     def prepare_context_refresh(self, context: SessionContext) -> _PreparedContextRefresh:
         """Build a replacement provider and return a non-failing commit callback."""
@@ -261,7 +283,38 @@ class SessionCredential:
                         self._retired_providers.pop(index)
                         break
 
-        return _PreparedContextRefresh(commit, rollback_resource=provider, rollback=rollback)
+        return _PreparedContextRefresh(
+            commit,
+            rollback_resource=provider,
+            rollback=rollback,
+            retire_resource=_RetiredCredentialProvider(self, previous_provider),
+        )
+
+    async def _close_retired_provider(self, provider: Any) -> None:
+        provider_id = id(provider)
+        existing = self._retired_cleanup_tasks.get(provider_id)
+        current_task = asyncio.current_task()
+        if existing is not None and existing is not current_task:
+            await asyncio.shield(existing)
+            return
+        if existing is None and current_task is not None:
+            self._retired_cleanup_tasks[provider_id] = current_task
+        try:
+            drained = self._provider_drained.get(provider_id)
+            if drained is not None:
+                await drained.wait()
+            close = getattr(provider, "aclose", None) or getattr(provider, "close", None)
+            if callable(close):
+                result = close()
+                if inspect.isawaitable(result):
+                    _ = await result
+            for index, retired in enumerate(self._retired_providers):
+                if retired is provider:
+                    self._retired_providers.pop(index)
+                    break
+        finally:
+            if self._retired_cleanup_tasks.get(provider_id) is current_task:
+                self._retired_cleanup_tasks.pop(provider_id, None)
 
     async def close(self) -> None:
         errors: list[Exception] = []
@@ -270,12 +323,18 @@ class SessionCredential:
         if not self._provider_closed:
             providers += ((self._provider, True),)
         for provider, is_current in providers:
-            close = getattr(provider, "aclose", None) or getattr(provider, "close", None)
             try:
-                if callable(close):
-                    result = close()
-                    if inspect.isawaitable(result):
-                        _ = await result
+                if is_current:
+                    drained = self._provider_drained.get(id(provider))
+                    if drained is not None:
+                        await drained.wait()
+                    close = getattr(provider, "aclose", None) or getattr(provider, "close", None)
+                    if callable(close):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            _ = await result
+                else:
+                    await self._close_retired_provider(provider)
             except asyncio.CancelledError as exc:
                 cancelled = cancelled or exc
             except Exception as exc:
@@ -306,6 +365,15 @@ class SessionCredential:
     ) -> None:
         del exc_type, exc_value, traceback
         await self.close()
+
+
+@dataclass(frozen=True)
+class _RetiredCredentialProvider:
+    credential: SessionCredential
+    provider: Any
+
+    async def aclose(self) -> None:
+        await self.credential._close_retired_provider(self.provider)
 
 
 class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
@@ -686,6 +754,9 @@ class CatalogSessionBinding:
                 self._deferred_resources.append(previous_authorizer)
             else:
                 self._schedule_resource_cleanup(previous_authorizer)
+        for prepared in prepared_refreshes:
+            if isinstance(prepared, _PreparedContextRefresh) and prepared.retire_resource is not None:
+                self._schedule_resource_cleanup(prepared.retire_resource)
 
     def add_context_refresher(
         self,
@@ -1181,7 +1252,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         )
     setattr(server.mcp, "_agora_catalog_tool_mode", "policy-aware")
 
-    async def binding(tool_name: str, mcp_ctx: Context | None) -> CatalogSessionBinding:
+    @asynccontextmanager
+    async def binding(tool_name: str, mcp_ctx: Context | None) -> AsyncIterator[CatalogSessionView]:
         try:
             session_id = mcp_ctx.session_id if mcp_ctx is not None else None
         except (AttributeError, RuntimeError):
@@ -1189,16 +1261,33 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         restore_auth = getattr(server, "_restore_auth_context_for_mcp_session", None)
         if callable(restore_auth):
             restore_auth(session_id)
-        session = await server._get_or_create_session(tool_name, session_id=session_id)
-        catalog_binding = session.extensions.get("catalog")
-        if catalog_binding is None:
-            raise RuntimeError("Catalog session binding is unavailable.")
-        return catalog_binding
-
-    def clear_auth_context() -> None:
-        clear_auth = getattr(server, "_clear_auth_context", None)
-        if callable(clear_auth):
-            clear_auth()
+        session = None
+        try:
+            if session_id is None:
+                session = await server._get_or_create_session(tool_name, session_id=None)
+            resource_session_id = session.session_id if session is not None else session_id
+            assert resource_session_id is not None
+            session_manager = getattr(server, "session_manager", None)
+            resource_operation = (
+                session_manager.session_resource_operation(resource_session_id)
+                if session_manager is not None
+                else nullcontext()
+            )
+            async with resource_operation:
+                if session is None:
+                    session = await server._get_or_create_session(tool_name, session_id=session_id)
+                catalog_binding = session.extensions.get("catalog")
+                if catalog_binding is None:
+                    raise RuntimeError("Catalog session binding is unavailable.")
+                current = snapshot(catalog_binding)
+                try:
+                    yield current
+                finally:
+                    current.close()
+        finally:
+            clear_auth = getattr(server, "_clear_auth_context", None)
+            if callable(clear_auth):
+                clear_auth()
 
     def snapshot(current: Any) -> CatalogSessionView:
         take_snapshot = getattr(current, "snapshot", None)
@@ -1234,48 +1323,44 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         cursor: Annotated[str | None, Field(max_length=8_192)] = None,
         mcp_ctx: Context | None = None,
     ) -> list[dict[str, Any]] | dict[str, Any]:
-        current: CatalogSessionView | None = None
         try:
-            current = snapshot(await binding("search_data", mcp_ctx))
-            capabilities = {
-                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
-            }
-            search_source_ids = tuple(
-                source_id
-                for source_id, capability in capabilities.items()
-                if capability.supports(CatalogOperation.SEARCH)
-            )
-            if not search_source_ids:
-                return []
-            page = await current.catalog.search(
-                SearchRequest(
-                    query=query,
-                    source_ids=search_source_ids,
-                    page=PageRequest(limit=top, cursor=cursor),
-                    filters={
-                        key: value for key, value in {"domain": domain, "source_type": source_type}.items() if value
-                    },
-                ),
-                current.context,
-            )
-            hits = []
-            for artifact in page.items:
-                hits.append(
-                    _artifact_payload(
-                        artifact,
-                        load_path=execution_reference(artifact, current, capabilities),
-                    )
+            async with binding("search_data", mcp_ctx) as current:
+                capabilities = {
+                    capability.source_id: capability
+                    for capability in await current.catalog.capabilities(current.context)
+                }
+                search_source_ids = tuple(
+                    source_id
+                    for source_id, capability in capabilities.items()
+                    if capability.supports(CatalogOperation.SEARCH)
                 )
-            if page.next_cursor is not None:
-                for hit in hits:
-                    hit["next_cursor"] = page.next_cursor
-            return hits
+                if not search_source_ids:
+                    return []
+                page = await current.catalog.search(
+                    SearchRequest(
+                        query=query,
+                        source_ids=search_source_ids,
+                        page=PageRequest(limit=top, cursor=cursor),
+                        filters={
+                            key: value for key, value in {"domain": domain, "source_type": source_type}.items() if value
+                        },
+                    ),
+                    current.context,
+                )
+                hits = []
+                for artifact in page.items:
+                    hits.append(
+                        _artifact_payload(
+                            artifact,
+                            load_path=execution_reference(artifact, current, capabilities),
+                        )
+                    )
+                if page.next_cursor is not None:
+                    for hit in hits:
+                        hit["next_cursor"] = page.next_cursor
+                return hits
         except Exception as exc:
             return _error_payload(exc)
-        finally:
-            if current is not None:
-                current.close()
-            clear_auth_context()
 
     async def get_artifact(
         artifact_id: Annotated[str, Field(min_length=1, max_length=2_000)],
@@ -1283,114 +1368,100 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         revision: Annotated[int | None, Field(ge=1)] = None,
         mcp_ctx: Context | None = None,
     ) -> dict[str, Any]:
-        current: CatalogSessionView | None = None
         try:
-            current = snapshot(await binding("get_artifact", mcp_ctx))
-            capabilities = {
-                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
-            }
-            if source_id is None:
-                source_ids = [
-                    capability.source_id
-                    for capability in capabilities.values()
-                    if capability.supports(CatalogOperation.GET)
-                ]
-                matches = []
-                for candidate_source_id in source_ids:
-                    try:
-                        match = await current.catalog.get(
-                            ArtifactReference(artifact_id, candidate_source_id, revision),
-                            current.context,
-                        )
-                    except ArtifactNotFoundError:
-                        continue
-                    matches.append(match)
-                if not matches:
-                    raise ArtifactNotFoundError("Artifact not found.", operation="get")
-                if len(matches) > 1:
-                    raise ValueError("source_id is required because this artifact ID matches multiple sources.")
-                artifact = matches[0]
-            else:
-                artifact = await current.catalog.get(
-                    ArtifactReference(artifact_id, source_id, revision), current.context
+            async with binding("get_artifact", mcp_ctx) as current:
+                capabilities = {
+                    capability.source_id: capability
+                    for capability in await current.catalog.capabilities(current.context)
+                }
+                if source_id is None:
+                    source_ids = [
+                        capability.source_id
+                        for capability in capabilities.values()
+                        if capability.supports(CatalogOperation.GET)
+                    ]
+                    matches = []
+                    for candidate_source_id in source_ids:
+                        try:
+                            match = await current.catalog.get(
+                                ArtifactReference(artifact_id, candidate_source_id, revision),
+                                current.context,
+                            )
+                        except ArtifactNotFoundError:
+                            continue
+                        matches.append(match)
+                    if not matches:
+                        raise ArtifactNotFoundError("Artifact not found.", operation="get")
+                    if len(matches) > 1:
+                        raise ValueError("source_id is required because this artifact ID matches multiple sources.")
+                    artifact = matches[0]
+                else:
+                    artifact = await current.catalog.get(
+                        ArtifactReference(artifact_id, source_id, revision), current.context
+                    )
+                return _artifact_payload(
+                    artifact,
+                    load_path=execution_reference(artifact, current, capabilities),
                 )
-            return _artifact_payload(
-                artifact,
-                load_path=execution_reference(artifact, current, capabilities),
-            )
         except Exception as exc:
             return _error_payload(exc)
-        finally:
-            if current is not None:
-                current.close()
-            clear_auth_context()
 
     async def list_domains(mcp_ctx: Context | None = None) -> list[str] | dict[str, Any]:
-        current: CatalogSessionView | None = None
         try:
-            current = snapshot(await binding("list_domains", mcp_ctx))
-            list_source_ids = tuple(
-                capability.source_id
-                for capability in await current.catalog.capabilities(current.context)
-                if capability.supports(CatalogOperation.LIST)
-            )
-            if not list_source_ids:
-                return []
-            domains: set[str] = set()
-            cursor: str | None = None
-            remaining = _MAX_DOMAIN_SCAN
-            while remaining:
-                page_size = min(_MAX_TOOL_PAGE_SIZE, remaining)
-                page = await current.catalog.list(
-                    ListRequest(
-                        source_ids=list_source_ids,
-                        page=PageRequest(limit=page_size, cursor=cursor),
-                    ),
-                    current.context,
+            async with binding("list_domains", mcp_ctx) as current:
+                list_source_ids = tuple(
+                    capability.source_id
+                    for capability in await current.catalog.capabilities(current.context)
+                    if capability.supports(CatalogOperation.LIST)
                 )
-                domains.update(
-                    _sanitize_metadata_value(str(item.metadata["domain"]))
-                    for item in page.items
-                    if item.metadata.get("domain")
-                )
-                remaining -= len(page.items)
-                cursor = page.next_cursor
-                if cursor is None or not page.items:
-                    break
-            return sorted(domains)
+                if not list_source_ids:
+                    return []
+                domains: set[str] = set()
+                cursor: str | None = None
+                remaining = _MAX_DOMAIN_SCAN
+                while remaining:
+                    page_size = min(_MAX_TOOL_PAGE_SIZE, remaining)
+                    page = await current.catalog.list(
+                        ListRequest(
+                            source_ids=list_source_ids,
+                            page=PageRequest(limit=page_size, cursor=cursor),
+                        ),
+                        current.context,
+                    )
+                    domains.update(
+                        _sanitize_metadata_value(str(item.metadata["domain"]))
+                        for item in page.items
+                        if item.metadata.get("domain")
+                    )
+                    remaining -= len(page.items)
+                    cursor = page.next_cursor
+                    if cursor is None or not page.items:
+                        break
+                return sorted(domains)
         except Exception as exc:
             return _error_payload(exc)
-        finally:
-            if current is not None:
-                current.close()
-            clear_auth_context()
 
     async def get_catalog_capabilities(mcp_ctx: Context | None = None) -> dict[str, Any]:
-        current: CatalogSessionView | None = None
         try:
-            current = snapshot(await binding("get_catalog_capabilities", mcp_ctx))
-            read_capabilities = await current.catalog.capabilities(current.context)
-            capabilities = await integration.capabilities(current, read_capabilities)
-            return {
-                "sources": [
-                    {
-                        "source_id": _agent_safe_identifier(capability.source_id, "source ID"),
-                        "operations": sorted(operation.value for operation in capability.supported_operations),
-                    }
-                    for capability in capabilities
-                ],
-                "execution_references": (
-                    current.execution_references
-                    and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
-                    and any(capability.supports(CatalogOperation.RESOLVE) for capability in read_capabilities)
-                ),
-            }
+            async with binding("get_catalog_capabilities", mcp_ctx) as current:
+                read_capabilities = await current.catalog.capabilities(current.context)
+                capabilities = await integration.capabilities(current, read_capabilities)
+                return {
+                    "sources": [
+                        {
+                            "source_id": _agent_safe_identifier(capability.source_id, "source ID"),
+                            "operations": sorted(operation.value for operation in capability.supported_operations),
+                        }
+                        for capability in capabilities
+                    ],
+                    "execution_references": (
+                        current.execution_references
+                        and integration._policy_mode is not CatalogPolicyMode.PER_ARTIFACT
+                        and any(capability.supports(CatalogOperation.RESOLVE) for capability in read_capabilities)
+                    ),
+                }
         except Exception as exc:
             return _error_payload(exc)
-        finally:
-            if current is not None:
-                current.close()
-            clear_auth_context()
 
     server.mcp.tool(
         name="search_data",

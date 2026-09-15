@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1366,6 +1367,59 @@ async def test_session_credential_retries_cancelled_retired_provider_cleanup():
     assert current.close_calls == 1
 
 
+async def test_session_credential_retires_provider_after_in_flight_token_request():
+    token_started = asyncio.Event()
+    token_gate = asyncio.Event()
+
+    class CredentialProvider:
+        def __init__(self, token, *, block=False):
+            self.token = token
+            self.block = block
+            self.close_calls = 0
+
+        async def get_token(self, scope):
+            del scope
+            if self.block:
+                token_started.set()
+                await token_gate.wait()
+            return self.token
+
+        async def close(self):
+            self.close_calls += 1
+
+    providers = []
+
+    def provider_factory(token):
+        provider = CredentialProvider(token, block=token == "old-token")
+        providers.append(provider)
+        return provider
+
+    credential = SessionCredential(provider_factory("old-token"), provider_factory=provider_factory)
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    binding.add_context_refresher(credential.prepare_context_refresh)
+
+    token_request = asyncio.create_task(credential.get_token("scope"))
+    await token_started.wait()
+    binding.refresh_context(SessionContext("session", "user", "new-token"))
+    cleanup = asyncio.create_task(integration._cleanup_tracker.drain())
+    await asyncio.sleep(0)
+
+    assert providers[0].close_calls == 0
+    assert not cleanup.done()
+    token_gate.set()
+    assert await token_request == "old-token"
+    assert await cleanup == []
+    assert providers[0].close_calls == 1
+    assert await credential.get_token("scope") == "new-token"
+
+    await credential.close()
+    await binding.aclose()
+
+
 async def test_cleanup_tracker_retries_only_pending_resources():
     class Resource:
         def __init__(self, *, cancel_once=False):
@@ -2342,7 +2396,9 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
         ),
     )
     binding = SimpleNamespace(catalog=catalog, context=object(), execution_references=True)
-    session = SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+    session = SimpleNamespace(
+        session_id="catalog-session", data_manager=SimpleNamespace(), extensions={"catalog": binding}
+    )
     captured = {}
     fake_server = SimpleNamespace(
         mcp=SimpleNamespace(
@@ -2409,7 +2465,11 @@ async def test_catalog_discovery_restores_transport_auth_before_session_lookup()
         context=RequestContext(),
         execution_references=False,
     )
-    session = SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+    session = SimpleNamespace(
+        session_id="transport-session",
+        data_manager=SimpleNamespace(),
+        extensions={"catalog": binding},
+    )
     captured = {}
 
     def restore_auth(session_id):
@@ -2436,6 +2496,50 @@ async def test_catalog_discovery_restores_transport_auth_before_session_lookup()
     assert await captured["search_data"]("data", mcp_ctx=SimpleNamespace(session_id="transport-session")) == []
 
 
+async def test_catalog_discovery_holds_session_resource_lease_for_operation():
+    lease_active = False
+
+    async def search(request, context):
+        del request, context
+        assert lease_active
+        return Page(())
+
+    binding = SimpleNamespace(
+        catalog=SimpleNamespace(
+            search=AsyncMock(side_effect=search),
+            capabilities=AsyncMock(return_value=(SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)),
+        ),
+        context=RequestContext(),
+        execution_references=False,
+    )
+    session = SimpleNamespace(session_id="transport-session", extensions={"catalog": binding})
+    captured = {}
+
+    @asynccontextmanager
+    async def resource_operation(session_id):
+        nonlocal lease_active
+        assert session_id == "transport-session"
+        lease_active = True
+        try:
+            yield
+        finally:
+            lease_active = False
+
+    server = SimpleNamespace(
+        mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
+        session_manager=SimpleNamespace(session_resource_operation=resource_operation),
+        _get_or_create_session=AsyncMock(return_value=session),
+    )
+    integration = SimpleNamespace(
+        capabilities=AsyncMock(),
+        _policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    )
+    register_catalog_discovery_tools(server, cast(CatalogIntegration, integration))
+
+    assert await captured["search_data"]("data", mcp_ctx=SimpleNamespace(session_id="transport-session")) == []
+    assert not lease_active
+
+
 async def test_application_capability_adapter_holds_binding_snapshot():
     closed = False
 
@@ -2448,7 +2552,7 @@ async def test_application_capability_adapter_holds_binding_snapshot():
     binding = SimpleNamespace(snapshot=lambda: snapshot)
     catalog = SimpleNamespace(capabilities=AsyncMock(return_value=("capability",)))
     server = SimpleNamespace(catalog=catalog)
-    session = SimpleNamespace(extensions={"catalog": binding})
+    session = SimpleNamespace(session_id="catalog-session", extensions={"catalog": binding})
 
     assert await CodeExecutionServer.get_data_lake_capabilities(cast(Any, server), cast(Any, session)) == (
         "capability",
@@ -2492,7 +2596,11 @@ async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguit
     fake_server = SimpleNamespace(
         mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
         _get_or_create_session=AsyncMock(
-            return_value=SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+            return_value=SimpleNamespace(
+                session_id="catalog-session",
+                data_manager=SimpleNamespace(),
+                extensions={"catalog": binding},
+            )
         ),
     )
 
@@ -2544,7 +2652,11 @@ async def test_discovery_request_keeps_immutable_authorization_snapshot():
     server = SimpleNamespace(
         mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
         _get_or_create_session=AsyncMock(
-            return_value=SimpleNamespace(data_manager=SimpleNamespace(), extensions={"catalog": binding})
+            return_value=SimpleNamespace(
+                session_id="catalog-session",
+                data_manager=SimpleNamespace(),
+                extensions={"catalog": binding},
+            )
         ),
     )
     integration = SimpleNamespace(
