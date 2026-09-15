@@ -771,6 +771,118 @@
   
   
     <li class="md-nav__item">
+      <a href="../data-lake-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public data-lake API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake CLI and quickstarts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 migration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 support and acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sidecars/" class="md-nav__link">
         
   
@@ -1662,8 +1774,10 @@ caller, and rejects unknown or expired IDs rather than creating a new kernel.</p
 <li><strong>Asset provisioning</strong> — large, static files declared in <code>ServerConfig.assets</code>
   and fetched into the environment cache at startup.</li>
 <li><strong>Data catalog</strong> <em>(optional)</em> — a searchable index of datasets. When
-  configured, it adds the <code>search_data</code> / <code>get_artifact</code> / <code>list_domains</code> /
-  <code>query_catalog</code> tools (these names are <strong>not</strong> server-prefixed).</li>
+  configured, the legacy unscoped surface adds <code>search_data</code> / <code>get_artifact</code> /
+  <code>list_domains</code> / <code>query_catalog</code> (these names are <strong>not</strong> server-prefixed).
+  It is appropriate only when the whole catalog is authorized to all callers;
+  raw SQL may also be mounted as a separate administrative extension.</li>
 <li><strong>Asset tags</strong> — the agent embeds references like <code>&lt;blob&gt;id&lt;/blob&gt;</code> or
   <code>&lt;local&gt;/path&lt;/local&gt;</code> as string literals; the server resolves them to local
   <code>Path</code> objects before the code runs, handling download and auth for you.</li>

@@ -603,6 +603,118 @@
   
   
     <li class="md-nav__item">
+      <a href="../data-lake-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Public data-lake API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake CLI and quickstarts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 migration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 support and acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../sidecars/" class="md-nav__link">
         
   
@@ -1853,7 +1965,7 @@
 <a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="data-access-assetfetcher">Data access: AssetFetcher<a class="headerlink" href="#data-access-assetfetcher" title="Permanent link">&para;</a></h2>
-<p>Defined in <code>agora_workbench.code_execution.data_access.fetchers</code>:</p>
+<p>Import <code>AssetFetcher</code> from <code>agora_workbench.data_lake.execution</code>.</p>
 <h3 id="assetfetcher">AssetFetcher<a class="headerlink" href="#assetfetcher" title="Permanent link">&para;</a></h3>
 <p>Fetch assets from custom sources:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">AssetFetcher</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
@@ -1869,7 +1981,7 @@
 </code></pre></div>
 <p>Built-in implementations: <code>BlobFetcher</code> (Azure Blob), <code>LocalFileFetcher</code></p>
 <h3 id="custom-fetcher-example">Custom fetcher example<a class="headerlink" href="#custom-fetcher-example" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.data_access.fetchers</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssetFetcher</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssetFetcher</span>
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
 <a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">S3Fetcher</span><span class="p">(</span><span class="n">AssetFetcher</span><span class="p">):</span>
 <a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">can_handle</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">uri</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
@@ -1880,7 +1992,7 @@
 <a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>        <span class="o">...</span>
 </code></pre></div>
 <h2 id="data-access-assetpublisher">Data access: AssetPublisher<a class="headerlink" href="#data-access-assetpublisher" title="Permanent link">&para;</a></h2>
-<p>Defined in <code>agora_workbench.code_execution.data_access.publishers</code>:</p>
+<p>Import <code>AssetPublisher</code> from <code>agora_workbench.data_lake.execution</code>.</p>
 <h3 id="assetpublisher">AssetPublisher<a class="headerlink" href="#assetpublisher" title="Permanent link">&para;</a></h3>
 <p>Publish artifacts from code execution to external storage:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">AssetPublisher</span><span class="p">(</span><span class="n">ABC</span><span class="p">):</span>
@@ -1950,12 +2062,12 @@ constructor as <code>upstreams=[UpstreamConfig(...), ...]</code>:</p>
 </tr>
 <tr>
 <td><code>AssetFetcher</code></td>
-<td><code>agora_workbench.code_execution.data_access.fetchers</code></td>
+<td><code>agora_workbench.data_lake.execution</code></td>
 <td>Custom data sources</td>
 </tr>
 <tr>
 <td><code>AssetPublisher</code></td>
-<td><code>agora_workbench.code_execution.data_access.publishers</code></td>
+<td><code>agora_workbench.data_lake.execution</code></td>
 <td>Custom artifact output</td>
 </tr>
 <tr>
