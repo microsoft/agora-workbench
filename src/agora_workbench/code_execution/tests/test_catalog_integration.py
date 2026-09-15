@@ -245,6 +245,25 @@ def test_catalog_payload_rejects_plain_uri_identifiers(artifact_id):
         _artifact_payload(artifact)
 
 
+def test_catalog_payload_sanitizes_apostrophe_and_redacted_uri_metadata():
+    credentialed_uri = "https://" + "user:password@example.test/data?sig=secret'apostrophe-tail"
+    artifact = CatalogArtifact(
+        ArtifactReference("artifact", "source"),
+        ArtifactPresentation("data.csv", description=f"See {credentialed_uri} after"),
+        metadata={
+            "documentation": "Already redacted: ******example.test/docs?sig=secret after",
+        },
+    )
+
+    payload = _artifact_payload(artifact)
+
+    assert payload["description"] == "See https://example.test/data after"
+    assert payload["documentation"] == "Already redacted: example.test/docs after"
+    assert "password" not in str(payload)
+    assert "secret" not in str(payload)
+    assert "apostrophe-tail" not in str(payload)
+
+
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
     root = tmp_path / "implicit-source"
     root.mkdir()

@@ -1481,7 +1481,7 @@ def test_constructor_rejects_infinite_default_stale_limit(tmp_path):
         ManifestCatalogProvider(_local_config(tmp_path), max_stale_seconds=float("inf"))
 
 
-async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sqlite(tmp_path, monkeypatch):
+async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_resources(tmp_path, monkeypatch):
     missing = ManifestCatalogProvider(_local_config(tmp_path, "missing.json"))
     with pytest.raises(BackendUnavailableError, match="no valid generation"):
         await missing.load()
@@ -1497,6 +1497,8 @@ async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sql
 
     (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "generation": 1, "artifacts": []}))
     cancelled = ManifestCatalogProvider(_local_config(tmp_path))
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+    cancelled._indexer._embedding_provider = embedding_provider
     monkeypatch.setattr(
         cancelled._indexer,
         "index",
@@ -1506,6 +1508,9 @@ async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sql
         await cancelled.load()
     assert cancelled._closed
     assert cancelled._db_owned._conn is None
+    embedding_provider.close.assert_awaited_once_with()
+    await cancelled.aclose()
+    embedding_provider.close.assert_awaited_once_with()
 
 
 async def test_manifest_provider_async_context_closes_owned_sqlite(tmp_path):

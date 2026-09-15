@@ -45,7 +45,6 @@ from agora_workbench.data_lake import (
     ResourceOwnership,
     SearchRequest,
     SourceCapabilities,
-    sanitize_uri_for_display,
     stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, DiscoveryMode, SourceConfig
@@ -61,7 +60,7 @@ LOGGER = logging.getLogger(__name__)
 _MAX_TOOL_PAGE_SIZE = 100
 _MAX_DOMAIN_SCAN = 1_000
 _REFERENCE_PREFIX = "catalog-v1:"
-_URI_IN_TEXT_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s\"'<>]+")
+_URI_IN_TEXT_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://[^\s"<>]+')
 _RESERVED_PAYLOAD_FIELDS = frozenset(
     {
         "id",
@@ -1234,7 +1233,7 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
 
 
 def _sanitize_error_message(message: str) -> str:
-    return _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), message)
+    return safe_artifact_reference(message)
 
 
 def _sanitize_metadata_value(value: Any) -> Any:

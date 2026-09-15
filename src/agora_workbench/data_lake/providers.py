@@ -344,12 +344,17 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         refresh_error: BackendUnavailableError | None = None
         try:
             count = await self._indexer.index()
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancelled:
             self._last_error = "Manifest catalog refresh was cancelled."
             self._current_source_states()
             if not had_successful_generation:
-                self._close_unlocked()
-            raise
+                try:
+                    await self._aclose_unlocked()
+                except asyncio.CancelledError as cleanup_cancelled:
+                    cancelled.add_note(f"Manifest catalog cleanup was also cancelled: {cleanup_cancelled}")
+                except Exception as cleanup_error:
+                    cancelled.add_note(f"Manifest catalog cleanup also failed: {type(cleanup_error).__name__}")
+            raise cancelled
         except Exception as exc:
             self._last_error = _safe_refresh_error(exc)
             self._current_source_states()
@@ -448,43 +453,41 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
     async def aclose(self) -> None:
         """Close embedding resources and the private per-reader SQLite cache."""
         async with self._lifecycle_lock:
-            if self._embedding_closed and self._db_closed:
-                return
-            errors: list[Exception] = []
-            cancelled: asyncio.CancelledError | None = None
-            self._closed = True
-            if not self._embedding_closed:
-                try:
-                    embedding_provider = vars(self._indexer).get("_embedding_provider")
-                    close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
-                    if callable(close):
-                        result = close()
-                        if inspect.isawaitable(result):
-                            _ = await result
-                    self._embedding_closed = True
-                except asyncio.CancelledError as exc:
-                    cancelled = exc
-                except Exception as exc:
-                    errors.append(exc)
-            if not self._db_closed:
-                try:
-                    self._db_owned.close()
-                    self._db_closed = True
-                except Exception as exc:
-                    errors.append(exc)
-            if cancelled is not None:
-                if errors:
-                    cancelled.add_note(str(ExceptionGroup("Additional manifest catalog close failures.", errors)))
-                raise cancelled
-            if errors:
-                raise ExceptionGroup("Manifest catalog close failed.", errors)
+            await self._aclose_unlocked()
 
-    def _close_unlocked(self) -> None:
-        if not self._db_closed:
+    async def _aclose_unlocked(self) -> None:
+        if self._embedding_closed and self._db_closed:
+            return
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        if not self._closed and not self._db_closed:
             self._current_source_states()
-            self._db_owned.close()
-            self._db_closed = True
         self._closed = True
+        if not self._embedding_closed:
+            try:
+                embedding_provider = vars(self._indexer).get("_embedding_provider")
+                close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        _ = await result
+                self._embedding_closed = True
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+            except Exception as exc:
+                errors.append(exc)
+        if not self._db_closed:
+            try:
+                self._db_owned.close()
+                self._db_closed = True
+            except Exception as exc:
+                errors.append(exc)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional manifest catalog close failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("Manifest catalog close failed.", errors)
 
     async def __aenter__(self) -> "ManifestCatalogProvider":
         return self
