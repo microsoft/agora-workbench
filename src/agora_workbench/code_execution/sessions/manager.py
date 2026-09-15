@@ -281,6 +281,7 @@ class SessionManager:
         # strongly referenced for its lifetime (an unreferenced task may be
         # garbage-collected mid-flight).
         self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
+        self._kernel_start_tasks: dict[str, dict[asyncio.Task[Any], int]] = {}
         self._resource_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._background_lease_release_tasks: set[asyncio.Task[None]] = set()
         self._resource_cleanup_errors: list[Exception] = []
@@ -734,6 +735,7 @@ class SessionManager:
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
         with self._session_lifecycle_lock:
+            closing_generation = self._session_generations.get(session_id)
             if expected_closing_session is not None:
                 if self._closing_sessions.get(session_id) is expected_closing_session:
                     shutdown_task = self._kernel_shutdown_tasks.get(session_id)
@@ -776,6 +778,7 @@ class SessionManager:
                 caller=caller,
                 cleanup_artifacts=False,
                 wait_for_executions=True,
+                expected_session_generation=closing_generation,
             )
         return shutdown_task, session
 
@@ -789,6 +792,7 @@ class SessionManager:
             if (
                 session is None
                 or session_id in self._kernels
+                or any(not task.done() for task in self._kernel_start_tasks.get(session_id, ()))
                 or shutdown_in_progress_elsewhere
                 or self._kernel_execute_lock_users.get(session_id, 0)
                 or self._session_resource_users.get(session_id, 0)
@@ -1140,6 +1144,13 @@ class SessionManager:
         kernel_client = None
         kernel_start_attempted = False
         registered = False
+        current_task = asyncio.current_task()
+        if current_task is None:
+            raise RuntimeError("Kernel startup requires an asyncio task.")
+        with self._session_lifecycle_lock:
+            if self._session_generations.get(session_id) != session_generation:
+                raise ValueError(f"Session {session_id} was closed before its kernel could start.")
+            self._kernel_start_tasks.setdefault(session_id, {})[current_task] = session_generation
         try:
             kernel_start_attempted = True
             await kernel_manager.start_kernel(env=env, cwd=working_dir)
@@ -1185,6 +1196,14 @@ class SessionManager:
                         LOGGER.error("Failed to clean up kernel startup for session %s", session_id, exc_info=True)
                         break
             raise
+        finally:
+            with self._session_lifecycle_lock:
+                starts = self._kernel_start_tasks.get(session_id)
+                if starts is not None:
+                    starts.pop(current_task, None)
+                    if not starts:
+                        self._kernel_start_tasks.pop(session_id, None)
+                self._finalize_closed_session(session_id)
 
         LOGGER.info(f"Kernel started for session {session_id}")
         return kernel_manager, kernel_client
@@ -2472,6 +2491,7 @@ class SessionManager:
         caller: str = "close_session()",
         cleanup_artifacts: bool = True,
         wait_for_executions: bool = False,
+        expected_session_generation: int | None = None,
     ) -> "Optional[asyncio.Task[None]]":
         """Start teardown for a session's kernel, or join one already running.
 
@@ -2493,7 +2513,12 @@ class SessionManager:
         if existing is not None and not existing.done():
             return existing
 
-        if session_id not in self._kernels:
+        kernel_starts = tuple(
+            task
+            for task, generation in self._kernel_start_tasks.get(session_id, {}).items()
+            if expected_session_generation is None or generation == expected_session_generation
+        )
+        if session_id not in self._kernels and not kernel_starts:
             return None
 
         try:
@@ -2512,11 +2537,16 @@ class SessionManager:
             )
             return None
 
-        expected_session_generation = self._kernel_session_generations.get(session_id)
+        kernel_session_generation = self._kernel_session_generations.get(session_id)
         expected_kernel_generation = self._kernel_generations.get(session_id)
 
         async def shutdown_and_finalize() -> None:
             async def drain_executions_and_shutdown() -> None:
+                if kernel_starts:
+                    await asyncio.gather(
+                        *(asyncio.shield(start) for start in kernel_starts),
+                        return_exceptions=True,
+                    )
                 if wait_for_executions:
                     execute_drained = self._kernel_execute_drained.get(session_id)
                     if execute_drained is not None:
@@ -2524,7 +2554,7 @@ class SessionManager:
                 await self._shutdown_kernel(
                     session_id,
                     cleanup_artifacts=cleanup_artifacts,
-                    expected_session_generation=expected_session_generation,
+                    expected_session_generation=kernel_session_generation,
                     expected_kernel_generation=expected_kernel_generation,
                 )
 

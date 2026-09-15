@@ -19,6 +19,7 @@ from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     SessionCredential,
     _AsyncCleanupTracker,
+    _ClosedResourceTracker,
     _ConfiguredCatalogProvider,
     _PreparedContextRefresh,
     _artifact_payload,
@@ -98,6 +99,22 @@ async def test_close_resources_removes_only_the_closed_equal_resource():
 
     assert resources == [failed]
     assert resources[0] is failed
+
+
+def test_closed_resource_tracker_bounds_non_weak_referenceable_tombstones():
+    class Resource:
+        __slots__ = ()
+
+    tracker = _ClosedResourceTracker(strong_limit=2)
+    first, second, third = Resource(), Resource(), Resource()
+
+    tracker.add(first)
+    tracker.add(second)
+    tracker.add(third)
+
+    assert not tracker.contains(first)
+    assert tracker.contains(second)
+    assert tracker.contains(third)
 
 
 async def test_cleanup_tracker_retries_only_resources_left_after_cancellation():
@@ -633,6 +650,40 @@ async def test_failed_provider_close_retains_private_cache_for_shutdown_retry(tm
     await integration.shutdown()
     assert not private_directory.exists()
     assert integration._private_cache_directory is None
+
+
+async def test_embedding_close_failure_does_not_retain_closed_private_database(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "data.txt").write_text("payload")
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[SourceConfig(source_id="source", path=str(root))])
+    )
+    await integration.startup()
+    private_directory = integration._private_cache_directory
+    assert private_directory is not None
+
+    class EmbeddingProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("embedding close failed")
+
+    embedding_provider = EmbeddingProvider()
+    cast(Any, integration.provider)._indexer._embedding_provider = embedding_provider
+
+    with pytest.raises(ExceptionGroup, match="shutdown failed"):
+        await integration.shutdown()
+
+    assert cast(Any, integration.provider).persistent_storage_closed
+    assert integration._private_cache_directory is None
+    assert not private_directory.exists()
+
+    await integration.shutdown()
+    assert embedding_provider.close_calls == 2
 
 
 async def test_failed_private_cache_removal_is_retried(tmp_path, monkeypatch):
@@ -2000,6 +2051,10 @@ async def test_session_credential_close_coalesces_scheduled_retirement():
         def __init__(self):
             self.close_calls = 0
 
+        async def get_token(self, scope):
+            del scope
+            return None
+
         async def close(self):
             self.close_calls += 1
             if self.close_calls > 1:
@@ -2177,6 +2232,10 @@ async def test_session_credential_rejects_provider_reactivation_after_retirement
         def __init__(self):
             self.close_calls = 0
 
+        async def get_token(self, scope):
+            del scope
+            return None
+
         async def close(self):
             self.close_calls += 1
 
@@ -2184,15 +2243,16 @@ async def test_session_credential_rejects_provider_reactivation_after_retirement
     second = CredentialProvider()
     providers = iter((second, first))
     credential = SessionCredential(first, provider_factory=lambda token: next(providers))
-    retired_first = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
-    retired_first()
-    await retired_first.retire_resource.aclose()
+    retire_first = credential.prepare_context_refresh(SessionContext("session", "user", "second"))
+    retire_first()
+    await retire_first.retire_resource.aclose()
 
-    with pytest.raises(RuntimeError, match="cleanup has completed"):
+    with pytest.raises(RuntimeError, match="cleanup has already completed"):
         credential.prepare_context_refresh(SessionContext("session", "user", "first"))
 
-    await credential.close()
     assert first.close_calls == 1
+    assert await credential.get_token("scope") is None
+    await credential.close()
     assert second.close_calls == 1
 
 
@@ -3336,12 +3396,41 @@ async def test_refresh_rejects_authorizer_whose_retirement_has_started():
     await drain
 
     assert id(first) not in binding._retirement_started_resources
-    assert binding._retired_resources[id(first)] is first
+    assert binding._retired_resources.contains(first)
     with pytest.raises(RuntimeError, match="cleanup has started"):
         binding.refresh_context(SessionContext("session", "user", "first-again"))
     assert binding.owned_authorizer is second
     assert first.close_calls == 1
     await binding.aclose()
+
+
+async def test_sync_binding_cleanup_marshals_to_tracker_owner_loop():
+    cleanup_started = asyncio.Event()
+    cleanup_gate = asyncio.Event()
+
+    class Authorizer:
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            cleanup_started.set()
+            await cleanup_gate.wait()
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: Authorizer(),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "first"), execution_references=True)
+    binding.refresh_context(SessionContext("session", "user", "second"))
+    await cleanup_started.wait()
+
+    cleanup = asyncio.create_task(asyncio.to_thread(binding.cleanup))
+    await asyncio.sleep(0)
+    assert not cleanup.done()
+
+    cleanup_gate.set()
+    await cleanup
+    await integration._cleanup_tracker.drain()
 
 
 async def test_resolver_retains_authorizer_until_resolution_finishes():

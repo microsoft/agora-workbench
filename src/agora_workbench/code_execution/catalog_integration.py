@@ -10,6 +10,8 @@ import json
 import logging
 import shutil
 import uuid
+import weakref
+from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import ContextVar, Token
@@ -95,6 +97,7 @@ class _AsyncCleanupTracker:
 
     def __init__(self) -> None:
         self._tasks: dict[asyncio.Task[None], tuple[Callable[[], Any] | None, int]] = {}
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
         # Cleanup trackers are owned by one session manager event-loop context;
         # this depth only guards nested temporary-loop cleanup on that owner.
         self._synchronous_depth = 0
@@ -114,6 +117,14 @@ class _AsyncCleanupTracker:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
+            owner_loop = self._owner_loop
+            if owner_loop is not None and not owner_loop.is_closed():
+                cleanup = self._run_synchronous_cleanup(awaitable, retry, cancellation_retries)
+                if owner_loop.is_running():
+                    asyncio.run_coroutine_threadsafe(cleanup, owner_loop).result()
+                else:
+                    owner_loop.run_until_complete(cleanup)
+                return None
             loop = asyncio.new_event_loop()
             cancelled: asyncio.CancelledError | None = None
             current = awaitable
@@ -144,10 +155,45 @@ class _AsyncCleanupTracker:
             finally:
                 self._synchronous_depth -= 1
                 loop.close()
+        if self._owner_loop is None:
+            self._owner_loop = loop
+        elif self._owner_loop is not loop:
+            raise RuntimeError("Catalog cleanup must be scheduled on its owning event loop.")
         task = loop.create_task(awaitable)
         self._tasks[task] = (retry, cancellation_retries if retry is not None else 0)
         task.add_done_callback(self._discard_successful)
         return task
+
+    async def _run_synchronous_cleanup(
+        self,
+        awaitable: Any,
+        retry: Callable[[], Any] | None,
+        cancellation_retries: int,
+    ) -> None:
+        current = awaitable
+        remaining_retries = cancellation_retries if retry is not None else 0
+        cancelled: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await current
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+                if retry is None or remaining_retries <= 0:
+                    raise cancelled
+                remaining_retries -= 1
+                current = retry()
+            except Exception as exc:
+                if retry is None or remaining_retries <= 0:
+                    if cancelled is not None:
+                        cancelled.add_note(f"Additional catalog cleanup failure: {exc!r}")
+                        raise cancelled
+                    raise
+                remaining_retries -= 1
+                current = retry()
+            else:
+                if cancelled is not None:
+                    raise cancelled
+                return
 
     def discard(self, task: asyncio.Task[None]) -> None:
         """Release ownership after a session binding has drained the task."""
@@ -164,6 +210,13 @@ class _AsyncCleanupTracker:
             self._tasks.pop(task, None)
 
     async def drain(self) -> list[Exception]:
+        owner_loop = self._owner_loop
+        current_loop = asyncio.get_running_loop()
+        if owner_loop is not None and owner_loop is not current_loop:
+            if not owner_loop.is_running():
+                raise RuntimeError("Catalog cleanup owner event loop is not running.")
+            future = asyncio.run_coroutine_threadsafe(self.drain(), owner_loop)
+            return await asyncio.wrap_future(future)
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
         while self._tasks:
@@ -238,6 +291,37 @@ def _remove_resource_identity(resources: list[Any], resource: object) -> None:
             return
 
 
+class _ClosedResourceTracker:
+    """Remember closed identities without retaining every weak-referenceable resource."""
+
+    def __init__(self, *, strong_limit: int = 128) -> None:
+        self._weak: dict[int, weakref.ReferenceType[Any]] = {}
+        self._strong: deque[object] = deque(maxlen=strong_limit)
+
+    def contains(self, resource: object) -> bool:
+        reference = self._weak.get(id(resource))
+        if reference is not None:
+            return reference() is resource
+        return any(candidate is resource for candidate in self._strong)
+
+    def add(self, resource: object) -> None:
+        resource_id = id(resource)
+        try:
+            reference = weakref.ref(
+                resource,
+                lambda completed, resource_id=resource_id: self._discard_weak(resource_id, completed),
+            )
+        except TypeError:
+            if not any(candidate is resource for candidate in self._strong):
+                self._strong.append(resource)
+            return
+        self._weak[resource_id] = reference
+
+    def _discard_weak(self, resource_id: int, reference: weakref.ReferenceType[Any]) -> None:
+        if self._weak.get(resource_id) is reference:
+            self._weak.pop(resource_id, None)
+
+
 @dataclass(frozen=True)
 class _PreparedContextRefresh:
     commit: Callable[[], None]
@@ -260,7 +344,7 @@ class SessionCredential:
         self._provider_drained: dict[int, asyncio.Event] = {}
         self._retired_cleanup_tasks: dict[int, asyncio.Task[None]] = {}
         self._provider_retirements: list[_RetiredCredentialProvider] = []
-        self._closed_retired_providers: dict[int, Any] = {}
+        self._closed_providers = _ClosedResourceTracker()
         self._provider_closed = False
         self._closing = False
 
@@ -297,9 +381,9 @@ class SessionCredential:
         previous_provider = self._provider
         if provider is previous_provider:
             return _PreparedContextRefresh(lambda: None)
-        if self._closed_retired_providers.get(id(provider)) is provider:
+        if self._closed_providers.contains(provider):
             raise RuntimeError(
-                f"Credential provider cleanup has completed for session {context.session_id}; "
+                f"Credential provider cleanup has already completed for session {context.session_id}; "
                 "return a new provider instance."
             )
         previous_retirement = next(
@@ -381,7 +465,7 @@ class SessionCredential:
                 result = close()
                 if inspect.isawaitable(result):
                     _ = await result
-                self._closed_retired_providers[provider_id] = provider
+                self._closed_providers.add(provider)
             for index, retired in enumerate(self._retired_providers):
                 if retired is provider:
                     self._retired_providers.pop(index)
@@ -409,6 +493,7 @@ class SessionCredential:
                         result = close()
                         if inspect.isawaitable(result):
                             _ = await result
+                        self._closed_providers.add(provider)
                 else:
                     retirement = next(
                         (candidate for candidate in self._provider_retirements if candidate.provider is provider),
@@ -643,6 +728,11 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             if errors:
                 raise ExceptionGroup("Configured catalog close failed.", errors)
 
+    @property
+    def persistent_storage_closed(self) -> bool:
+        """Whether the owned catalog database has completed cleanup."""
+        return self._db_closed
+
 
 def _encode_reference(reference: ArtifactReference) -> str:
     payload = json.dumps(
@@ -774,10 +864,8 @@ class CatalogSessionBinding:
     _pending_cleanup_resources: list[object] | None = None
     _scheduled_cleanup_resources: list[object] = field(default_factory=list)
     _scheduled_cleanup_tasks: dict[asyncio.Task[None], object] = field(default_factory=dict)
-    # Keep retired resources strongly referenced for the binding lifetime so the
-    # exact closed object cannot be returned by a later factory refresh.
     _retirement_started_resources: dict[int, object] = field(default_factory=dict)
-    _retired_resources: dict[int, object] = field(default_factory=dict)
+    _retired_resources: _ClosedResourceTracker = field(default_factory=_ClosedResourceTracker)
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -836,7 +924,7 @@ class CatalogSessionBinding:
                     extensions = (created,)
             for resource in (*extensions, authorizer):
                 if resource is not None and (
-                    id(resource) in self._retirement_started_resources or id(resource) in self._retired_resources
+                    id(resource) in self._retirement_started_resources or self._retired_resources.contains(resource)
                 ):
                     raise RuntimeError("Catalog refresh cannot reactivate a resource whose cleanup has started.")
             for refresher in self.context_refreshers or ():
@@ -847,7 +935,7 @@ class CatalogSessionBinding:
                 if (
                     id(extension) not in current_extension_ids
                     and id(extension) not in self._retirement_started_resources
-                    and id(extension) not in self._retired_resources
+                    and not self._retired_resources.contains(extension)
                 ):
                     self._schedule_resource_cleanup(extension)
             for prepared in prepared_refreshes:
@@ -857,7 +945,7 @@ class CatalogSessionBinding:
                 authorizer is not None
                 and authorizer is not self.owned_authorizer
                 and id(authorizer) not in self._retirement_started_resources
-                and id(authorizer) not in self._retired_resources
+                and not self._retired_resources.contains(authorizer)
             ):
                 self._schedule_resource_cleanup(authorizer)
             raise
@@ -948,7 +1036,7 @@ class CatalogSessionBinding:
     def _complete_scheduled_resource_cleanup(self, resource: object) -> None:
         _remove_resource_identity(self._scheduled_cleanup_resources, resource)
         retired = self._retirement_started_resources.pop(id(resource), resource)
-        self._retired_resources[id(resource)] = retired
+        self._retired_resources.add(retired)
         for task, scheduled_resource in tuple(self._scheduled_cleanup_tasks.items()):
             if scheduled_resource is resource:
                 self._scheduled_cleanup_tasks.pop(task, None)
@@ -1346,7 +1434,7 @@ class CatalogIntegration:
             except BaseException as exc:
                 close_error = exc
             finally:
-                if self._provider_closed:
+                if self._provider_closed or self._provider_persistent_storage_closed():
                     try:
                         self._cleanup_private_cache_directory()
                     except Exception as cache_cleanup_error:
@@ -1428,7 +1516,7 @@ class CatalogIntegration:
         except Exception as exc:
             errors.append(exc)
         finally:
-            if self._provider_closed:
+            if self._provider_closed or self._provider_persistent_storage_closed():
                 try:
                     self._cleanup_private_cache_directory()
                 except Exception as exc:
@@ -1466,6 +1554,9 @@ class CatalogIntegration:
         finally:
             if task.done() and self._provider_close_task is task:
                 self._provider_close_task = None
+
+    def _provider_persistent_storage_closed(self) -> bool:
+        return isinstance(self.provider, _ConfiguredCatalogProvider) and self.provider.persistent_storage_closed
 
     def _cleanup_private_cache_directory(self) -> None:
         if self._private_cache_directory is not None:

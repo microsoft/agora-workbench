@@ -1558,6 +1558,66 @@ class TestKernelRebuildWaits:
         assert manager._session_generations["restored"] == manager._kernel_session_generations["restored"]
         await manager.aclose_session("restored")
 
+    async def test_close_waits_for_unregistered_kernel_start(self, manager, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        start_entered = asyncio.Event()
+        start_gate = asyncio.Event()
+
+        class FakeKernelManager:
+            shutdown_calls = 0
+            cleanup_calls = 0
+
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                start_entered.set()
+                await start_gate.wait()
+
+            def client(self):
+                return FakeKernelClient()
+
+            async def shutdown_kernel(self, now=False):
+                self.shutdown_calls += 1
+
+            async def cleanup_resources(self):
+                self.cleanup_calls += 1
+
+        class FakeKernelClient:
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                pass
+
+            def stop_channels(self):
+                pass
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", FakeKernelManager)
+        session_id = manager.create_session(data={}, user_identity="user", user_token="token", token_claims={})
+        startup = asyncio.create_task(manager._get_or_create_kernel(session_id))
+        await start_entered.wait()
+
+        shutdown = manager.close_session(session_id)
+        assert shutdown is not None
+        await asyncio.sleep(0)
+        assert not shutdown.done()
+        assert session_id in manager._closing_session_ids
+
+        start_gate.set()
+        with pytest.raises(ValueError, match="closed while its kernel was starting"):
+            await startup
+        await shutdown
+
+        assert session_id not in manager._kernel_start_tasks
+        assert session_id not in manager._kernels
+        assert session_id not in manager._closing_session_ids
+
     async def test_get_or_create_waits_for_pending_teardown(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg
 
