@@ -2502,9 +2502,6 @@ async def test_custom_manager_opt_in_failure_rolls_back_factory_resources(tmp_pa
             close_calls.append("extension")
 
     class Manager(DataLakeDataManager):
-        def __init__(self):
-            super().__init__()
-
         def cleanup(self):
             close_calls.append("manager")
             super().cleanup()
