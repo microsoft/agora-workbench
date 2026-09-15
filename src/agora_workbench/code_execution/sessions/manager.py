@@ -1607,6 +1607,12 @@ class SessionManager:
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> dict[str, str]:
         """Start execution and return immediately with a background job id."""
+        async with self.session_resource_operation(session_id):
+            return await self._start_background_execution_for_session(session_id, code, timeout, working_dir)
+
+    async def _start_background_execution_for_session(
+        self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
+    ) -> dict[str, str]:
         try:
             session = self.get_session(session_id)
             user_token = session.user_token
@@ -1692,7 +1698,23 @@ class SessionManager:
             raise ValueError(
                 f"timeout ({timeout}s) must be greater than promotion_threshold_s ({promotion_threshold_s}s)"
             )
+        async with self.session_resource_operation(session_id):
+            return await self._start_promoted_execution_for_session(
+                session_id,
+                code,
+                timeout,
+                promotion_threshold_s,
+                working_dir,
+            )
 
+    async def _start_promoted_execution_for_session(
+        self,
+        session_id: str,
+        code: str,
+        timeout: float,
+        promotion_threshold_s: float,
+        working_dir: Optional[str] = None,
+    ) -> "Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]":
         try:
             session = self.get_session(session_id)
             user_token = session.user_token

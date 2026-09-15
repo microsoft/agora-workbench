@@ -1958,6 +1958,46 @@ class TestNoRunningLoop:
         assert collector_cancelled.is_set()
         assert manager_closed.is_set()
 
+    @pytest.mark.parametrize(
+        ("method_name", "arguments"),
+        [
+            ("start_background_execution_for_session", ("pass", 30)),
+            ("start_promoted_execution_for_session", ("pass", 30, 1)),
+        ],
+    )
+    async def test_background_dispatch_holds_session_resources(self, manager, monkeypatch, method_name, arguments):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        dispatch_started = asyncio.Event()
+        release_dispatch = asyncio.Event()
+        manager_closed = asyncio.Event()
+
+        class DataManager:
+            async def aclose(self):
+                manager_closed.set()
+
+        session.data_manager = DataManager()
+
+        async def blocked_dispatch(*_args):
+            assert manager._session_resource_users[session_id] == 1
+            dispatch_started.set()
+            await release_dispatch.wait()
+            return {"status": "running"}
+
+        monkeypatch.setattr(manager, f"_{method_name}", blocked_dispatch)
+        dispatch = asyncio.create_task(getattr(manager, method_name)(session_id, *arguments))
+        await dispatch_started.wait()
+        close = asyncio.create_task(manager.aclose_session(session_id))
+        await asyncio.sleep(0)
+
+        assert not close.done()
+        assert not manager_closed.is_set()
+
+        release_dispatch.set()
+        assert await dispatch == {"status": "running"}
+        await close
+        assert manager_closed.is_set()
+
 
 # ---------------------------------------------------------------------------
 # Batch cleanup does not report success while kernels are still resident
