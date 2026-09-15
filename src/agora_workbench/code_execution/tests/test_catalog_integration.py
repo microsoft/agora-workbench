@@ -152,6 +152,11 @@ async def test_binding_failed_cleanup_is_retained_for_integration_retry():
 
     await integration._cleanup_tracker.drain()
     assert extension.close_calls == 2
+    assert binding._scheduled_cleanup_resources == []
+    assert binding._scheduled_cleanup_tasks == {}
+    assert id(extension) not in binding._retirement_started_resource_ids
+    await binding.aclose()
+    assert extension.close_calls == 2
     await integration.shutdown()
 
 
@@ -277,6 +282,37 @@ async def test_binding_requeues_failed_scheduled_cleanup_after_pending_initializ
     assert resource.close_calls == 3
     assert binding._pending_cleanup_resources == []
     await integration.shutdown()
+
+
+def test_temporary_loop_binding_close_drains_pending_resource_retry():
+    class Extension:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("transient cleanup failure")
+
+    extension = Extension()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: extension,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    loop = asyncio.new_event_loop()
+    try:
+        with pytest.raises(ExceptionGroup, match="Catalog session binding cleanup failed"):
+            loop.run_until_complete(binding.aclose())
+    finally:
+        loop.close()
+
+    assert extension.close_calls == 2
+    assert binding._scheduled_cleanup_resources == []
+    assert binding._scheduled_cleanup_tasks == {}
+    assert integration._cleanup_tracker._tasks == {}
 
 
 def _server_config(tmp_path: Path) -> ServerConfig:
@@ -3060,6 +3096,9 @@ async def test_refresh_reactivates_scheduled_authorizer_without_closing_it():
 
 
 async def test_refresh_rejects_authorizer_whose_retirement_has_started():
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
     class Authorizer:
         def __init__(self, name):
             self.name = name
@@ -3070,6 +3109,9 @@ async def test_refresh_rejects_authorizer_whose_retirement_has_started():
 
         async def aclose(self):
             self.close_calls += 1
+            if self.name == "first":
+                cleanup_started.set()
+                await release_cleanup.wait()
 
     first = Authorizer("first")
     second = Authorizer("second")
@@ -3081,11 +3123,17 @@ async def test_refresh_rejects_authorizer_whose_retirement_has_started():
     binding = integration.bind_session(SessionContext("session", "user", "first"), execution_references=True)
 
     binding.refresh_context(SessionContext("session", "user", "second"))
-    await integration._cleanup_tracker.drain()
+    drain = asyncio.create_task(integration._cleanup_tracker.drain())
+    await cleanup_started.wait()
 
     with pytest.raises(RuntimeError, match="cleanup has started"):
         binding.refresh_context(SessionContext("session", "user", "first-again"))
     assert binding.owned_authorizer is second
+    release_cleanup.set()
+    await drain
+
+    binding.refresh_context(SessionContext("session", "user", "first-again"))
+    assert binding.owned_authorizer is first
     assert first.close_calls == 1
     await binding.aclose()
 
@@ -3850,8 +3898,9 @@ async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes
     with pytest.raises(asyncio.CancelledError):
         await integration.shutdown()
 
-    # The scheduled cleanup and the integration shutdown retry are each bounded.
-    assert attempts == 4
+    # The scheduled cleanup is bounded and awaited instead of escaping into a
+    # later shutdown retry cycle.
+    assert attempts == 2
     assert provider.close_calls == 1
 
 
