@@ -88,7 +88,7 @@ async def test_close_resources_removes_only_the_closed_equal_resource():
 
     failed = Resource(fail=True)
     closed = Resource(fail=False)
-    resources = [failed, closed]
+    resources: list[object] = [failed, closed]
 
     with pytest.raises(ExceptionGroup):
         await _close_resources(resources)
