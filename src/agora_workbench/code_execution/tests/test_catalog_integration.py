@@ -829,6 +829,36 @@ async def test_catalog_cache_refresh_does_not_publish_in_flight_stale_fetch():
     await manager.aclose()
 
 
+async def test_catalog_cache_refresh_keeps_previously_returned_path_until_session_cleanup():
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_text("payload")
+            return dest_path.stat().st_size
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    cached_path = await manager.get_cache_path(reference)
+
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+
+    assert "catalog-v1:opaque" not in manager._cache_index
+    assert cached_path.read_text() == "payload"
+    await manager.aclose()
+    assert not cached_path.exists()
+
+
 async def test_repeated_cache_invalidation_has_bounded_fetch_retries():
     fetch_calls = 0
     manager = None
