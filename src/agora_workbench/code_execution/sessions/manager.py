@@ -691,6 +691,8 @@ class SessionManager:
 
     def _release_closing_session_id_if_safe(self, session_id: str, session: Session) -> None:
         if not session.session_file_cleanup_claimed():
+            session.claim_session_file_cleanup()
+        if not session.session_file_cleanup_claimed():
             return
         with self._session_lifecycle_condition:
             shutdown_task = self._kernel_shutdown_tasks.get(session_id)

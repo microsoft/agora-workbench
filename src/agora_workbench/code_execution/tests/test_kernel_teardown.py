@@ -560,7 +560,9 @@ class TestCoalescing:
         await asyncio.wait_for(shutdown_task, timeout=1)
         assert manager.storage.retrieve(session_id) is None
 
-    async def test_session_file_cleanup_failure_keeps_explicit_id_tombstone(self, manager, monkeypatch, tmp_path):
+    async def test_session_file_cleanup_failure_releases_id_without_deleting_replacement(
+        self, manager, monkeypatch, tmp_path
+    ):
         session_file = tmp_path / "session.json"
         session_file.write_text("active")
         session_id = "explicit-session"
@@ -582,16 +584,21 @@ class TestCoalescing:
 
         manager.close_session(session_id)
 
-        assert session_id in manager._closing_session_ids
+        # Removal failed, so the old session gives up instead of pinning the ID
+        # forever; it never retries, so a replacement file stays safe.
+        assert session_id not in manager._closing_session_ids
         assert session_file.exists()
-        with pytest.raises(ValueError, match="still closing"):
-            manager.create_session(
-                data={"owner": "replacement"},
-                user_identity="replacement",
-                user_token="t",
-                token_claims={},
-                session_id=session_id,
-            )
+        replacement_file = tmp_path / "replacement.json"
+        replacement_file.write_text("replacement")
+        manager.create_session(
+            data={"session_file": str(replacement_file)},
+            user_identity="replacement",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        session.claim_session_file_cleanup()
+        assert replacement_file.exists()
 
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
         class PausingStorage(InMemoryStorage):

@@ -70,6 +70,56 @@ class TestSession:
         assert attempts == 2
         assert session._session_file_cleanup_claimed
 
+    def test_session_file_cleanup_claim_is_terminal_after_repeated_failures(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError("permanent failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+
+        # A permanently undeletable session file must not pin the session ID.
+        assert session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+        assert attempts == 2
+        assert len(session._claimed_cleanup_errors) == 2
+
+    def test_close_session_releases_id_when_session_file_removal_fails(self, monkeypatch):
+        manager = SessionManager()
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}, session_id="pinned"
+        )
+        session = manager.get_session(session_id)
+        assert session is not None
+
+        def remove_session_file():
+            raise PermissionError("permanent failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        _ = manager.close_session(session_id)
+
+        assert session_id not in manager._closing_session_ids
+        # The ID is reusable instead of being pinned by the failed removal.
+        assert (
+            manager.create_session(data={}, user_identity="u", user_token="t", token_claims={}, session_id=session_id)
+            == session_id
+        )
+
     def test_session_creation(self):
         """Test basic session creation."""
         data = {"key": "value"}

@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import logging
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -14,6 +15,12 @@ if TYPE_CHECKING:
     from ..data_access.manager import DataLakeDataManager
 
 T = TypeVar("T")
+
+LOGGER = logging.getLogger(__name__)
+
+#: Bounded number of session-file removal attempts. After this many failures the
+#: claim is treated as terminal so an undeletable file cannot pin a session ID.
+_MAX_SESSION_FILE_CLEANUP_ATTEMPTS = 2
 
 
 @dataclass(frozen=True)
@@ -139,6 +146,7 @@ class Session(Generic[T]):
         self._scheduled_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._claimed_cleanup_errors: list[Exception] = []
         self._session_file_cleanup_claimed = False
+        self._session_file_cleanup_attempts = 0
 
         # Initialize data manager for DataLake asset access. Constructing the
         # default lazily matters: DataLakeDataManager.__init__ eagerly allocates
@@ -382,6 +390,18 @@ class Session(Generic[T]):
             self._cleanup_session_file()
         except Exception as exc:
             self._claimed_cleanup_errors.append(exc)
+            self._session_file_cleanup_attempts += 1
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                # Give up rather than pin the session ID forever. The claim is
+                # terminal, so this session never deletes the path again and a
+                # replacement session reusing the ID keeps its own file.
+                self._session_file_cleanup_claimed = True
+                LOGGER.warning(
+                    "Giving up on removing the session file for session %s after %d attempts: %s",
+                    self.session_id,
+                    self._session_file_cleanup_attempts,
+                    exc,
+                )
 
     def session_file_cleanup_claimed(self) -> bool:
         return self._session_file_cleanup_claimed
