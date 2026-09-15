@@ -391,6 +391,63 @@ async def test_server_startup_failure_rolls_back_owned_catalog(tmp_path):
     assert (provider.load_calls, provider.close_calls) == (1, 1)
 
 
+async def test_default_data_manager_rollback_tracks_owned_credential_cleanup(tmp_path, monkeypatch):
+    """A failure after the default catalog data manager is built must route its
+    rollback through the manager's tracked async cleanup, not an untracked task."""
+    import dataclasses
+
+    from agora_workbench.code_execution.catalog_integration import CatalogSessionBinding
+
+    gate = asyncio.Event()
+    closed = asyncio.Event()
+
+    class _FakeCredential:
+        async def get_token(self, scope):
+            raise NotImplementedError
+
+        async def close(self):
+            await gate.wait()
+            closed.set()
+
+    provider = _LifecycleProvider()
+    integration = CatalogIntegration(
+        ResourceLease(provider),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    auth_config = dataclasses.replace(
+        create_noop_auth_config(),
+        credential_provider_factory=lambda user_token: _FakeCredential(),
+    )
+    server = CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=auth_config,
+        catalog=integration,
+    )
+
+    call_count = {"n": 0}
+    original = CatalogSessionBinding.add_context_refresher
+
+    def flaky_add_context_refresher(self, refresher):
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise RuntimeError("refresher registration failed")
+        return original(self, refresher)
+
+    monkeypatch.setattr(CatalogSessionBinding, "add_context_refresher", flaky_add_context_refresher)
+
+    with pytest.raises(RuntimeError, match="refresher registration failed"):
+        server.session_manager.create_session({}, "user", "token", {})
+
+    drain = asyncio.create_task(server.session_manager.await_resource_cleanup())
+    await asyncio.sleep(0)
+    assert not drain.done()
+    assert not closed.is_set()
+
+    gate.set()
+    await drain
+    assert closed.is_set()
+
+
 async def test_server_shutdown_cancellation_still_closes_sessions_and_catalog(tmp_path):
     provider = _LifecycleProvider()
     integration = CatalogIntegration(

@@ -384,10 +384,9 @@ class CodeExecutionServer(BaseMCPServer):
             except BaseException as exc:
                 if existing_factory is None:
                     if manager is not None:
-                        try:
-                            manager.cleanup()
-                        except Exception as cleanup_error:
-                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error}")
+                        cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(manager, {})
+                        if cleanup_error is not None:
+                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error!r}")
                     elif credential is not None:
                         binding._schedule_resource_cleanup(credential)
                 try:
