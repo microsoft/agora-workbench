@@ -52,6 +52,7 @@ from agora_workbench.data_lake import (
     CatalogOperation,
     CatalogPolicyMode,
     Page,
+    PermissionDeniedError,
     ResourceLease,
     ResourceOwnership,
     RequestContext,
@@ -434,6 +435,28 @@ async def test_configured_catalog_empty_query_embedding_falls_back_to_keyword_se
     assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
     assert captured["query_embedding"] is None
     assert captured["hybrid_alpha"] == 1.0
+
+
+async def test_configured_catalog_close_waits_for_in_flight_load(tmp_path):
+    provider = _ConfiguredCatalogProvider(CatalogConfig(sources=[SourceConfig(source_id="source", path=str(tmp_path))]))
+    load_started = asyncio.Event()
+    load_gate = asyncio.Event()
+
+    async def blocked_load():
+        load_started.set()
+        await load_gate.wait()
+        return 0
+
+    provider._load_unlocked = blocked_load
+    load_task = asyncio.create_task(provider.load())
+    await load_started.wait()
+    close_task = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+    assert not close_task.done()
+
+    load_gate.set()
+    assert await load_task == 0
+    await close_task
 
 
 async def test_configured_keyword_only_catalog_searches_without_embeddings(tmp_path):
@@ -2595,9 +2618,12 @@ async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguit
         ArtifactPresentation("second.csv"),
     )
     matches = {"first": first}
+    denied_sources: set[str] = set()
 
     async def get(reference, context):
         del context
+        if reference.source_id in denied_sources:
+            raise PermissionDeniedError("Denied.", operation="get")
         artifact = matches.get(reference.source_id)
         if artifact is None:
             from agora_workbench.data_lake import ArtifactNotFoundError
@@ -2640,6 +2666,12 @@ async def test_source_less_get_uses_unique_authorized_match_and_rejects_ambiguit
     assert unique["source_id"] == "first"
     assert unique["score"] == 0.5
 
+    denied_sources.add("first")
+    matches["second"] = second
+    authorized_after_denied = await captured["get_artifact"]("shared-id")
+    assert authorized_after_denied["source_id"] == "second"
+
+    denied_sources.clear()
     matches["second"] = second
     ambiguous = await captured["get_artifact"]("shared-id")
     assert ambiguous["error_type"] == "invalid_request"

@@ -38,6 +38,7 @@ from agora_workbench.data_lake import (
     ListRequest,
     Page,
     PageRequest,
+    PermissionDeniedError,
     RequestContext,
     ResolvedArtifact,
     ResourceLease,
@@ -393,6 +394,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         self._closed = False
         self._embedding_closed = False
         self._db_closed = False
+        self._lifecycle_lock = asyncio.Lock()
         try:
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
@@ -419,6 +421,10 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             raise
 
     async def load(self) -> int:
+        async with self._lifecycle_lock:
+            return await self._load_unlocked()
+
+    async def _load_unlocked(self) -> int:
         if self._closed:
             raise RuntimeError("Catalog provider is closed.")
         try:
@@ -474,24 +480,36 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             )
 
     async def capabilities(self) -> tuple[SourceCapabilities, ...]:
-        self._require_ready()
-        return await super().capabilities()
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().capabilities()
 
     async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().search(request, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().search(request, context)
 
     async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().list(request, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().list(request, context)
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        self._require_ready()
-        return await super().get(reference, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().get(reference, context)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        self._require_ready()
-        return await super().resolve(reference, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            artifact = await SQLiteCatalogProvider.get(self, reference, context)
+            if artifact.locator is None:
+                raise ArtifactNotFoundError(
+                    "Catalog artifact has no storage locator.",
+                    resource_id=reference.artifact_id,
+                    operation="resolve",
+                )
+            return ResolvedArtifact(reference=artifact.reference, locator=artifact.locator)
 
     async def _embed_query(self, query: str) -> list[float] | None:
         provider = self._indexer.embedding_provider
@@ -501,36 +519,37 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         return embeddings[0] if embeddings else None
 
     async def aclose(self) -> None:
-        if self._closed:
-            return
-        errors: list[Exception] = []
-        cancelled: asyncio.CancelledError | None = None
-        if not self._embedding_closed:
-            try:
-                embedding_provider = vars(self._indexer).get("_embedding_provider")
-                close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
-                if callable(close):
-                    result = close()
-                    if inspect.isawaitable(result):
-                        _ = await result
-                self._embedding_closed = True
-            except asyncio.CancelledError as exc:
-                cancelled = exc
-            except Exception as exc:
-                errors.append(exc)
-        if not self._db_closed:
-            try:
-                self._db_owned.close()
-                self._db_closed = True
-            except Exception as exc:
-                errors.append(exc)
-        self._closed = self._embedding_closed and self._db_closed
-        if cancelled is not None:
+        async with self._lifecycle_lock:
+            if self._closed:
+                return
+            errors: list[Exception] = []
+            cancelled: asyncio.CancelledError | None = None
+            if not self._embedding_closed:
+                try:
+                    embedding_provider = vars(self._indexer).get("_embedding_provider")
+                    close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
+                    if callable(close):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            _ = await result
+                    self._embedding_closed = True
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+                except Exception as exc:
+                    errors.append(exc)
+            if not self._db_closed:
+                try:
+                    self._db_owned.close()
+                    self._db_closed = True
+                except Exception as exc:
+                    errors.append(exc)
+            self._closed = self._embedding_closed and self._db_closed
+            if cancelled is not None:
+                if errors:
+                    cancelled.add_note(str(ExceptionGroup("Additional configured catalog close failures.", errors)))
+                raise cancelled
             if errors:
-                cancelled.add_note(str(ExceptionGroup("Additional configured catalog close failures.", errors)))
-            raise cancelled
-        if errors:
-            raise ExceptionGroup("Configured catalog close failed.", errors)
+                raise ExceptionGroup("Configured catalog close failed.", errors)
 
 
 def _encode_reference(reference: ArtifactReference) -> str:
@@ -1416,7 +1435,7 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                                 ArtifactReference(artifact_id, candidate_source_id, revision),
                                 current.context,
                             )
-                        except ArtifactNotFoundError:
+                        except (ArtifactNotFoundError, PermissionDeniedError):
                             continue
                         matches.append(match)
                     if not matches:
