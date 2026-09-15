@@ -2023,7 +2023,7 @@ class TestNoRunningLoop:
 
         release_dispatch.set()
         assert await dispatch == {"status": "running"}
-        await close
+        assert await close is None
         assert manager_closed.is_set()
 
 
