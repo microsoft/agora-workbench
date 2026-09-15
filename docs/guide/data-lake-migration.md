@@ -1,5 +1,8 @@
 # Data-lake migration: 0.2.x to 0.3.0
 
+This page is only for an existing 0.2.x deployment. New users should start with
+[Add a data catalog to your server](data-lake.md).
+
 Version 0.3.0 separates stable contracts, catalog implementations, execution
 adapters, authorization, and managed publication. Existing compatibility
 imports remain available for transition, but new code should use the public
