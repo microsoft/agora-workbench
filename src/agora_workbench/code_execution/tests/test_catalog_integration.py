@@ -54,6 +54,8 @@ from agora_workbench.data_lake import (
     CatalogOperation,
     CatalogPolicyMode,
     ListRequest,
+    LocalManagedStorage,
+    ManagedCatalogWriter,
     Page,
     PermissionDeniedError,
     ResourceLease,
@@ -64,6 +66,8 @@ from agora_workbench.data_lake import (
     SourceCapabilities,
     StorageLocator,
     TransferOptions,
+    WRITE_OPERATIONS,
+    managed_writer_extension_factory,
     stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogConfig, CatalogIndexer, DiscoveryMode, SearchConfig, SourceConfig
@@ -4115,6 +4119,22 @@ async def test_cancelled_extension_cleanup_still_attempts_later_extensions():
     assert resolver_close_calls == 1
     assert later_extension.close_calls == 1
     assert binding._closed
+
+
+async def test_managed_writer_factory_uses_session_authorizer_and_merges_write_capabilities(tmp_path):
+    writer = ManagedCatalogWriter("source", LocalManagedStorage(tmp_path / "managed"))
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: _PerUserAuthorizer("source"),
+        capability_extension_factory=managed_writer_extension_factory(writer),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    capabilities = await integration.capabilities(binding)
+
+    source = next(capability for capability in capabilities if capability.source_id == "source")
+    assert WRITE_OPERATIONS <= source.supported_operations
+    assert binding.capability_extensions[0].__class__.__name__ == "AuthorizedManagedCatalogWriter"
 
 
 async def test_sync_session_close_tracks_async_only_extension_until_shutdown(tmp_path):

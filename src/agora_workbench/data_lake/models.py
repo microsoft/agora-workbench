@@ -20,12 +20,16 @@ def _immutable_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
 
 
 class CatalogOperation(StrEnum):
-    """Read operations a catalog provider may support."""
+    """Catalog operations a provider or writer may support."""
 
     SEARCH = "search"
     LIST = "list"
     GET = "get"
     RESOLVE = "resolve"
+    REGISTER = "register"
+    UPLOAD = "upload"
+    REMOVE = "remove"
+    PROMOTE = "promote"
 
 
 class CatalogPolicyMode(StrEnum):
@@ -41,6 +45,15 @@ READ_OPERATIONS = frozenset(
         CatalogOperation.LIST,
         CatalogOperation.GET,
         CatalogOperation.RESOLVE,
+    }
+)
+
+WRITE_OPERATIONS = frozenset(
+    {
+        CatalogOperation.REGISTER,
+        CatalogOperation.UPLOAD,
+        CatalogOperation.REMOVE,
+        CatalogOperation.PROMOTE,
     }
 )
 

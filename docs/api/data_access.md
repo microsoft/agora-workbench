@@ -8,6 +8,10 @@
 
 ::: agora_workbench.data_lake.catalog
 
+## Managed writes
+
+::: agora_workbench.data_lake.managed
+
 ## Resolvers
 
 ::: agora_workbench.data_lake.resolvers
