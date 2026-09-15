@@ -293,10 +293,11 @@ class SessionCredential:
                 "return a new provider instance."
             )
         reactivated_index: int | None = None
+        previous_retirement_index: int | None = None
         retirement = _RetiredCredentialProvider(self, previous_provider)
 
         def commit() -> None:
-            nonlocal reactivated_index
+            nonlocal previous_retirement_index, reactivated_index
             reactivated_index = next(
                 (index for index, retired in enumerate(self._retired_providers) if retired is provider),
                 None,
@@ -304,8 +305,9 @@ class SessionCredential:
             if reactivated_index is not None:
                 self._retired_providers.pop(reactivated_index)
                 if previous_retirement is not None:
-                    _remove_resource_identity(self._provider_retirements, previous_retirement)
-            self._retired_providers.append(self._provider)
+                    previous_retirement_index = self._provider_retirements.index(previous_retirement)
+                    self._provider_retirements.pop(previous_retirement_index)
+            self._retired_providers.append(previous_provider)
             self._provider_retirements.append(retirement)
             self._provider = provider
             self._provider_closed = False
@@ -321,7 +323,8 @@ class SessionCredential:
                 if reactivated_index is not None:
                     self._retired_providers.insert(reactivated_index, provider)
                     if previous_retirement is not None:
-                        self._provider_retirements.append(previous_retirement)
+                        insertion_index = previous_retirement_index or 0
+                        self._provider_retirements.insert(insertion_index, previous_retirement)
 
         return _PreparedContextRefresh(
             commit,
@@ -420,7 +423,7 @@ class SessionCredential:
         await self.close()
 
 
-@dataclass
+@dataclass(eq=False)
 class _RetiredCredentialProvider:
     credential: SessionCredential
     provider: Any
