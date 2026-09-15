@@ -4,6 +4,7 @@ import sqlite3
 import struct
 import threading
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,6 +23,19 @@ def db():
     catalog_db.open()
     yield catalog_db
     catalog_db.close()
+
+
+def test_open_closes_connection_when_initial_pragma_fails(monkeypatch):
+    connection = MagicMock()
+    connection.execute.side_effect = [None, None, sqlite3.DatabaseError("corrupt")]
+    monkeypatch.setattr(db_module.sqlite3, "connect", MagicMock(return_value=connection))
+    catalog = CatalogDB(":memory:")
+
+    with pytest.raises(sqlite3.DatabaseError, match="corrupt"):
+        catalog.open()
+
+    connection.close.assert_called_once_with()
+    assert catalog._conn is None
 
 
 class TestArtifactIdGeneration:

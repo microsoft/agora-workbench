@@ -133,7 +133,7 @@ class AssetResolutionMiddleware(Middleware):
         if fastmcp_ctx:
             try:
                 session_id = fastmcp_ctx.session_id
-            except RuntimeError:
+            except (RuntimeError, AttributeError):
                 pass
 
         self.server._restore_auth_context_for_mcp_session(session_id)

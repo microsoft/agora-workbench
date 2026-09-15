@@ -356,6 +356,28 @@ class TestAssetResolutionMiddleware:
         # Verify session was created with correct session_id
         mock_server._restore_auth_context_for_mcp_session.assert_called_once_with("custom-session-456")
 
+    async def test_missing_context_session_id_falls_back_to_unscoped_session(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        class MissingSessionContext:
+            @property
+            def session_id(self):
+                raise AttributeError("session unavailable")
+
+        mock_context.message.arguments = {"asset": "<blob>test</blob>"}
+        mock_context.fastmcp_context = MissingSessionContext()
+        mock_server._get_or_create_session.return_value = mock_session
+        mock_session.data_manager.get_cache_path.return_value = Path("/cache/test")
+
+        with _patch_set_current_session():
+            await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock(return_value="result"))
+
+        mock_server._restore_auth_context_for_mcp_session.assert_called_once_with(None)
+        mock_server._get_or_create_session.assert_awaited_once_with("test_tool", session_id=None)
+
     async def test_asset_counter_increments(self, mock_server, mock_context, mock_session):
         """Test that asset counter increments for each resolution."""
         mock_context.message.arguments = {
