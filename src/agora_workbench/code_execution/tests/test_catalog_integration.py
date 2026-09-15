@@ -1383,6 +1383,55 @@ async def test_failed_context_refresh_closes_uncommitted_credential_provider():
     await binding.aclose()
 
 
+async def test_cancelled_context_refresh_closes_uncommitted_credential_provider():
+    class CredentialProvider:
+        def __init__(self, token):
+            self.token = token
+            self.close_calls = 0
+
+        async def get_token(self, scope):
+            del scope
+            return self.token
+
+        async def close(self):
+            self.close_calls += 1
+
+    providers = []
+
+    def provider_factory(token):
+        provider = CredentialProvider(token)
+        providers.append(provider)
+        return provider
+
+    credential = SessionCredential(provider_factory("old-token"), provider_factory=provider_factory)
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+    binding.add_context_refresher(credential.prepare_context_refresh)
+
+    def cancel_refresh(context):
+        del context
+        raise asyncio.CancelledError
+
+    binding.add_context_refresher(cancel_refresh)
+
+    with pytest.raises(asyncio.CancelledError):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await integration._cleanup_tracker.drain()
+
+    # The uncommitted replacement provider is closed exactly once, while the
+    # prior committed provider is left untouched and still serves tokens.
+    assert providers[1].close_calls == 1
+    assert providers[0].close_calls == 0
+    assert credential._provider is providers[0]
+    assert await credential.get_token("scope") == "old-token"
+
+    await credential.close()
+    await binding.aclose()
+
+
 async def test_context_refresh_rolls_back_already_committed_refreshers():
     integration = CatalogIntegration(
         ResourceLease(_LifecycleProvider()),

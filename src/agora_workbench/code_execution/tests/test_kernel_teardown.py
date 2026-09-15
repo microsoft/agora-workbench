@@ -1301,6 +1301,125 @@ class TestKernelRebuildWaits:
         assert old_kernel.shutdown_finished
         assert "s1" not in manager._kernels
 
+    async def test_repeatedly_cancelled_kernel_start_still_drains_stale_teardown(self, manager, monkeypatch):
+        """A second cancellation must not let the request return early.
+
+        ``_shutdown_kernel`` removes the registry entry before its first await,
+        so if the kernel-start request returns while the shared teardown is
+        still in flight the old Jupyter kernel is left running with nothing to
+        reclaim it. Draining must survive repeated cancellation, matching the
+        canonical shielded drain loops elsewhere in this module.
+        """
+        from .. import sessions as sessions_pkg
+
+        gate = asyncio.Event()
+        manager.create_session(
+            data={},
+            user_identity="old",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
+        old_kernel, _ = register_kernel(manager, "s1", name="OLD", gate=gate)
+        manager.storage.delete("s1")
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id="s1",
+        )
+
+        class UnexpectedKernelManager:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("replacement kernel started before the stale teardown drained")
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", UnexpectedKernelManager)
+
+        create = asyncio.create_task(manager._get_or_create_kernel("s1"))
+        await let_teardown_start()
+        assert old_kernel.shutdown_started
+
+        # First cancellation: the caller parks awaiting the shared teardown.
+        create.cancel()
+        await asyncio.sleep(0)
+        assert not create.done()
+        assert not old_kernel.shutdown_finished
+
+        # Second cancellation while still draining must not propagate before the
+        # captured teardown completes.
+        create.cancel()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not create.done(), "request returned before the stale teardown drained"
+        assert not old_kernel.shutdown_finished
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            _ = await create
+
+        assert old_kernel.shutdown_finished
+        assert "s1" not in manager._kernels
+
+    async def test_cancelled_kernel_start_does_not_cancel_teardown_for_concurrent_waiter(self, manager, monkeypatch):
+        """Cancelling one waiter must not cancel the shared teardown task.
+
+        The teardown scheduled for a stale kernel is shared with every other
+        consumer awaiting it. A cancelled kernel-start request must leave that
+        task running so concurrent waiters still observe a clean completion.
+        """
+        from .. import sessions as sessions_pkg
+
+        gate = asyncio.Event()
+        manager.create_session(
+            data={},
+            user_identity="old",
+            user_token="token",
+            token_claims={},
+            session_id="s1",
+        )
+        old_kernel, _ = register_kernel(manager, "s1", name="OLD", gate=gate)
+        manager.storage.delete("s1")
+        manager.create_session(
+            data={},
+            user_identity="new",
+            user_token="replacement-token",
+            token_claims={},
+            session_id="s1",
+        )
+
+        class UnexpectedKernelManager:
+            def __init__(self, *args, **kwargs):
+                raise AssertionError("replacement kernel started after request cancellation")
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", UnexpectedKernelManager)
+
+        create = asyncio.create_task(manager._get_or_create_kernel("s1"))
+        await let_teardown_start()
+        assert old_kernel.shutdown_started
+        shared_teardown = manager._kernel_shutdown_tasks["s1"]
+
+        # A second, independent consumer waits directly on the same task.
+        async def co_wait() -> None:
+            await shared_teardown
+
+        co_waiter = asyncio.create_task(co_wait())
+        await asyncio.sleep(0)
+
+        create.cancel()
+        await asyncio.sleep(0)
+        assert not shared_teardown.cancelled(), "a cancelled waiter cancelled the shared teardown"
+        assert not co_waiter.done()
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            _ = await create
+        await co_waiter
+
+        assert old_kernel.shutdown_finished
+        assert not shared_teardown.cancelled()
+        assert "s1" not in manager._kernels
+
     async def test_failed_kernel_start_rolls_back_unregistered_kernel(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg
 

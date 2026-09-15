@@ -891,11 +891,22 @@ class SessionManager:
                 else None
             )
         if stale_shutdown is not None:
-            try:
-                _ = await asyncio.shield(stale_shutdown)
-            except asyncio.CancelledError:
-                _ = await asyncio.shield(stale_shutdown)
-                raise
+            # Drain the captured teardown under a shield so a cancelled
+            # kernel-start request cannot cancel the shared task and leave the
+            # old kernel running after its registry entry was already claimed.
+            # Repeated cancellation must not return before it finishes, mirroring
+            # the shielded drain loops used for session and rollback cleanup.
+            stale_cancelled: asyncio.CancelledError | None = None
+            while True:
+                try:
+                    _ = await asyncio.shield(stale_shutdown)
+                    break
+                except asyncio.CancelledError as exc:
+                    stale_cancelled = stale_cancelled or exc
+                    if stale_shutdown.done():
+                        break
+            if stale_cancelled is not None:
+                raise stale_cancelled
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
