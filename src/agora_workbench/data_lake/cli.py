@@ -7,8 +7,10 @@ import asyncio
 import importlib
 import inspect
 import json
+import os
 import sqlite3
 import sys
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ from . import (
     DevelopmentAllowAllCatalogAuthorizer,
     LocalManagedStorage,
     ManagedCatalogWriter,
+    ReconciliationError,
     RegisterArtifactRequest,
     RequestContext,
 )
@@ -59,7 +62,75 @@ async def _close_optional_resource(resource: object | None) -> None:
         return
     result = close()
     if inspect.isawaitable(result):
-        await result
+        _ = await result
+
+
+def _paths_alias(first: Path, second: Path) -> bool:
+    if first == second:
+        return True
+    try:
+        return first.exists() and second.exists() and first.samefile(second)
+    except OSError:
+        return False
+
+
+def _stage_text(destination: Path, content: str, token: str) -> Path:
+    stage = destination.parent / f".{destination.name}.{token}.stage"
+    with stage.open("x", encoding="utf-8") as stream:
+        stream.write(content)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return stage
+
+
+def _install_files(outputs: tuple[tuple[Path, str], ...], *, force: bool) -> None:
+    token = uuid.uuid4().hex
+    stages: dict[Path, Path] = {}
+    backups: dict[Path, Path] = {}
+    installed: set[Path] = set()
+    committed = False
+    try:
+        for destination, _ in outputs:
+            if destination.exists() and not destination.is_file():
+                raise FileExistsError(f"{destination} exists and is not a regular file.")
+            if destination.exists() and not force:
+                raise FileExistsError(f"{destination} already exists; pass --force to replace it.")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        for destination, content in outputs:
+            stages[destination] = _stage_text(destination, content, token)
+        for destination, _ in outputs:
+            if destination.exists():
+                backup = destination.parent / f".{destination.name}.{token}.backup"
+                os.replace(destination, backup)
+                backups[destination] = backup
+        for destination, _ in outputs:
+            os.replace(stages[destination], destination)
+            installed.add(destination)
+        committed = True
+    except BaseException:
+        for destination in reversed(tuple(installed)):
+            try:
+                destination.unlink(missing_ok=True)
+            except OSError:
+                pass
+        for destination, backup in reversed(tuple(backups.items())):
+            try:
+                os.replace(backup, destination)
+            except OSError:
+                pass
+        raise
+    finally:
+        for stage in stages.values():
+            try:
+                stage.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if committed:
+            for backup in backups.values():
+                try:
+                    backup.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
 
 def _artifact_json(artifact: CatalogArtifact) -> dict[str, object]:
@@ -78,6 +149,25 @@ def _artifact_json(artifact: CatalogArtifact) -> dict[str, object]:
         "score": artifact.score,
         "storage_uri": sanitize_uri_for_display(locator.uri) if locator is not None else None,
     }
+
+
+def _safe_refresh_error(error: str | None) -> str | None:
+    if error is None:
+        return None
+    safe_categories = (
+        "credential_or_access_failure:",
+        "manifest_invalid:",
+        "manifest_missing:",
+        "optional_dependency_missing:",
+        "source_unavailable:",
+    )
+    if error.startswith(safe_categories):
+        return error
+    if error.startswith("FileNotFoundError:"):
+        return "source_missing: configured source was not found"
+    if error.startswith("PermissionError:"):
+        return "credential_or_access_failure: source refresh failed"
+    return "source_unavailable: source refresh failed"
 
 
 def _load_authorizer(spec: str | None, allow_development_writes: bool) -> CatalogAuthorizer:
@@ -130,14 +220,35 @@ async def _run_refresh(args: argparse.Namespace) -> None:
     db.open()
     indexer = CatalogIndexer(config, db)
     embedding_provider = None
+    changed: int | None = None
+    refresh_error: Exception | None = None
+    source_states = []
+    states = []
     try:
         embedding_provider = indexer.embedding_provider
-        changed = await indexer.index()
-        states = [asdict(state) for state in db.list_source_refresh_states()]
+        try:
+            changed = await indexer.index()
+        except Exception as exc:
+            refresh_error = exc
+        source_states = db.list_source_refresh_states()
+        states = [{**asdict(state), "error": _safe_refresh_error(state.error)} for state in source_states]
     finally:
         await _close_optional_resource(embedding_provider)
         db.close()
-    _print_json({"database": str(args.database), "changed": changed, "sources": states})
+    failed_states = [state for state in source_states if state.status == "error" or state.error is not None]
+    output: dict[str, object] = {"database": str(args.database), "changed": changed, "sources": states}
+    if failed_states:
+        if any((state.error or "").startswith("optional_dependency_missing:") for state in failed_states):
+            output["hint"] = (
+                "Azure catalog sources require optional dependencies. Install with: uv add 'agora-workbench[azure]'."
+            )
+        elif any((state.error or "").startswith(("FileNotFoundError:", "PermissionError:")) for state in failed_states):
+            output["hint"] = "Check that each configured local source exists and is readable by this process."
+        _print_json(output)
+        raise ValueError("Catalog refresh failed for one or more sources; inspect the structured source states.")
+    if refresh_error is not None:
+        raise refresh_error
+    _print_json(output)
 
 
 async def _run_search(args: argparse.Namespace) -> None:
@@ -212,7 +323,20 @@ async def _run_reconcile(args: argparse.Namespace) -> None:
     if not args.root.is_dir():
         raise FileNotFoundError(f"Managed storage root not found: {args.root}")
     writer = ManagedCatalogWriter(args.source_id, LocalManagedStorage(args.root))
-    report = await writer.reconcile(grace_seconds=args.grace_seconds)
+    try:
+        report = await writer.reconcile(grace_seconds=args.grace_seconds)
+    except ReconciliationError as exc:
+        _print_json(
+            {
+                "recovered": [],
+                "removed_orphans": [],
+                "deferred": [],
+                "removed_staging": [],
+                "deferred_staging": [],
+                "failures": dict(exc.failures),
+            }
+        )
+        raise ValueError("Reconciliation completed with failures; inspect the reported operation IDs.") from None
     value = asdict(report)
     value["failures"] = dict(report.failures)
     _print_json(value)
@@ -221,8 +345,6 @@ async def _run_reconcile(args: argparse.Namespace) -> None:
 
 
 def _run_init(args: argparse.Namespace) -> None:
-    if args.config.exists() and not args.force:
-        raise FileExistsError(f"{args.config} already exists; pass --force to replace it.")
     source: dict[str, Any] = {
         "path": args.source,
         "discovery": args.discovery,
@@ -235,29 +357,35 @@ def _run_init(args: argparse.Namespace) -> None:
         if not args.manifest:
             raise ValueError("--manifest is required for manifest discovery.")
         source["manifest"] = args.manifest
+    config_path = args.config.resolve()
     manifest_path = None
     if args.create_empty_manifest:
         if args.discovery != "manifest":
             raise ValueError("--create-empty-manifest requires --discovery manifest.")
         if "://" in args.source:
             raise ValueError("--create-empty-manifest is local-only and never provisions cloud resources.")
-        manifest_path = Path(args.manifest)
-        if not manifest_path.is_absolute():
-            manifest_path = Path(args.source) / manifest_path
-        if manifest_path.exists() and not args.force:
-            raise FileExistsError(f"{manifest_path} already exists; pass --force to replace it.")
-    args.config.parent.mkdir(parents=True, exist_ok=True)
-    args.config.write_text(
-        yaml.safe_dump({"version": 1, "sources": [source]}, sort_keys=False),
-        encoding="utf-8",
-    )
-    created = [str(args.config)]
-    if manifest_path is not None:
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        manifest_path.write_text(
-            json.dumps(CatalogManifest(version=1, generation=1, artifacts=()).to_mapping(), indent=2) + "\n",
-            encoding="utf-8",
+        source_root = Path(args.source).resolve()
+        configured_manifest = Path(args.manifest)
+        manifest_path = (
+            configured_manifest.resolve()
+            if configured_manifest.is_absolute()
+            else (source_root / configured_manifest).resolve()
         )
+        if not manifest_path.is_relative_to(source_root):
+            raise ValueError("The empty manifest path must stay within the resolved local source root.")
+        if _paths_alias(config_path, manifest_path):
+            raise ValueError("Catalog config and manifest paths must refer to different files.")
+    config_value = {"version": 1, "sources": [source]}
+    CatalogConfig.model_validate(config_value)
+    config_content = yaml.safe_dump(config_value, sort_keys=False)
+    outputs: list[tuple[Path, str]] = []
+    if manifest_path is not None:
+        manifest = CatalogManifest(version=1, generation=1, artifacts=())
+        outputs.append((manifest_path, json.dumps(manifest.to_mapping(), indent=2) + "\n"))
+    outputs.append((config_path, config_content))
+    _install_files(tuple(outputs), force=args.force)
+    created = [str(config_path)]
+    if manifest_path is not None:
         created.append(str(manifest_path))
     _print_json({"created": created, "scan_policy": args.discovery == "scan"})
 

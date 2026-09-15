@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
+from types import MappingProxyType
 
 
 class DataLakeErrorCode(StrEnum):
@@ -125,3 +127,14 @@ class ReconciliationError(DataLakeError):
     """Recovery could not safely classify or clean an interrupted operation."""
 
     code = DataLakeErrorCode.RECONCILIATION_FAILED
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        failures: Mapping[str, str] | None = None,
+        resource_id: str | None = None,
+        operation: str | None = None,
+    ) -> None:
+        super().__init__(message, resource_id=resource_id, operation=operation)
+        self.failures = MappingProxyType(dict(failures or {}))

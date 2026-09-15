@@ -151,6 +151,106 @@ def test_cli_init_failure_does_not_write_partial_config(tmp_path, capsys):
     assert not config.exists()
 
 
+@pytest.mark.parametrize("absolute", [False, True])
+def test_cli_init_rejects_manifest_outside_source(tmp_path, capsys, absolute):
+    source = tmp_path / "source"
+    outside = tmp_path / "outside" / "manifest.json"
+    manifest = str(outside) if absolute else "../outside/manifest.json"
+    config = tmp_path / "catalog.yaml"
+
+    result = main(
+        [
+            "init",
+            "--config",
+            str(config),
+            "--source",
+            str(source),
+            "--source-id",
+            "approved",
+            "--discovery",
+            "manifest",
+            "--manifest",
+            manifest,
+            "--create-empty-manifest",
+        ]
+    )
+
+    assert result == 1
+    assert "must stay within" in capsys.readouterr().err
+    assert not config.exists()
+    assert not outside.exists()
+
+
+def test_cli_init_rejects_config_manifest_alias_before_writes(tmp_path, capsys):
+    source = tmp_path / "source"
+    config = source / "nested" / ".." / "catalog.yaml"
+
+    result = main(
+        [
+            "init",
+            "--config",
+            str(config),
+            "--source",
+            str(source),
+            "--source-id",
+            "approved",
+            "--discovery",
+            "manifest",
+            "--manifest",
+            "catalog.yaml",
+            "--create-empty-manifest",
+        ]
+    )
+
+    assert result == 1
+    assert "must refer to different files" in capsys.readouterr().err
+    assert not (source / "catalog.yaml").exists()
+
+
+def test_cli_init_manifest_stage_failure_preserves_prior_files_and_retries(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "source"
+    source.mkdir()
+    config = tmp_path / "catalog.yaml"
+    manifest = source / "manifest.json"
+    config.write_text("prior config\n", encoding="utf-8")
+    manifest.write_text("prior manifest\n", encoding="utf-8")
+    original_stage = cli._stage_text
+    fail_once = True
+
+    def fail_manifest_stage(destination, content, token):
+        nonlocal fail_once
+        if fail_once and destination == manifest:
+            fail_once = False
+            raise OSError("injected manifest write failure")
+        return original_stage(destination, content, token)
+
+    monkeypatch.setattr(cli, "_stage_text", fail_manifest_stage)
+    arguments = [
+        "init",
+        "--config",
+        str(config),
+        "--source",
+        str(source),
+        "--source-id",
+        "approved",
+        "--discovery",
+        "manifest",
+        "--manifest",
+        "manifest.json",
+        "--create-empty-manifest",
+        "--force",
+    ]
+
+    assert main(arguments) == 1
+    assert "injected manifest write failure" in capsys.readouterr().err
+    assert config.read_text(encoding="utf-8") == "prior config\n"
+    assert manifest.read_text(encoding="utf-8") == "prior manifest\n"
+
+    assert main(arguments) == 0
+    assert CatalogConfig.from_yaml(config).sources[0].manifest == "manifest.json"
+    assert CatalogManifest.from_mapping(json.loads(manifest.read_text(encoding="utf-8"))).generation == 1
+
+
 def test_keyword_cli_does_not_require_unrelated_optional_configuration(tmp_path):
     source = tmp_path / "data"
     source.mkdir()
@@ -161,6 +261,54 @@ def test_keyword_cli_does_not_require_unrelated_optional_configuration(tmp_path)
 
     assert main(["refresh", "--config", str(config), "--database", str(database)]) == 0
     assert main(["search", "weather", "--config", str(config), "--database", str(database)]) == 0
+
+
+def test_refresh_missing_local_source_prints_state_and_fails(tmp_path, capsys):
+    config = tmp_path / "catalog.yaml"
+    database = tmp_path / "catalog.db"
+    _scan_config(tmp_path / "missing", config)
+
+    assert main(["refresh", "--config", str(config), "--database", str(database)]) == 1
+    streams = capsys.readouterr()
+    output = json.loads(streams.out)
+    assert output["sources"][0]["status"] == "error"
+    assert output["sources"][0]["error"] == "source_missing: configured source was not found"
+    assert "exists and is readable" in output["hint"]
+    assert "inspect the structured source states" in streams.err
+
+
+def test_refresh_missing_azure_extra_has_actionable_sanitized_hint(tmp_path, monkeypatch, capsys):
+    class BlockAzure(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "azure" or fullname.startswith("azure."):
+                raise ModuleNotFoundError("blocked Azure import with SECRET", name=fullname)
+            return None
+
+    monkeypatch.setattr(sys, "meta_path", [BlockAzure(), *sys.meta_path])
+    config = tmp_path / "catalog.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "sources": [
+                    {
+                        "source_id": "azure",
+                        "path": "az://exampleaccount/example-container/data/",
+                        "discovery": "scan",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert main(["refresh", "--config", str(config), "--database", str(tmp_path / "catalog.db")]) == 1
+    streams = capsys.readouterr()
+    output = json.loads(streams.out)
+    assert output["sources"][0]["error"] == "optional_dependency_missing: source refresh failed"
+    assert "uv add 'agora-workbench[azure]'" in output["hint"]
+    assert "SECRET" not in streams.out
+    assert "SECRET" not in streams.err
 
 
 def test_keyword_cli_does_not_import_optional_backends(tmp_path, monkeypatch):
@@ -237,6 +385,30 @@ async def test_cleanup_helper_prefers_aclose_and_accepts_sync_cleanup():
 
     await _close_optional_resource(PreferredResource())
     assert preferred_calls == ["aclose"]
+
+
+def test_reconcile_prints_sanitized_failure_details_and_returns_nonzero(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "lake"
+    root.mkdir()
+
+    class FailingWriter:
+        def __init__(self, source_id, backend):
+            pass
+
+        async def reconcile(self, *, grace_seconds):
+            raise cli.ReconciliationError(
+                "generic failure without SECRET backend detail",
+                failures={"operation-7": "RuntimeError"},
+                operation="reconcile",
+            )
+
+    monkeypatch.setattr(cli, "ManagedCatalogWriter", FailingWriter)
+
+    assert main(["reconcile", "--root", str(root), "--source-id", "managed"]) == 1
+    streams = capsys.readouterr()
+    assert json.loads(streams.out)["failures"] == {"operation-7": "RuntimeError"}
+    assert "SECRET" not in streams.out
+    assert "SECRET" not in streams.err
 
 
 def test_public_api_examples_run_from_clean_workspaces(tmp_path):

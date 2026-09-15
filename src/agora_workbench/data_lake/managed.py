@@ -2391,6 +2391,7 @@ class ManagedCatalogWriter:
         if failures:
             raise ReconciliationError(
                 "One or more interrupted operations could not be reconciled.",
+                failures=failures,
                 operation="reconcile",
             )
         async with self._backend.serialized():
