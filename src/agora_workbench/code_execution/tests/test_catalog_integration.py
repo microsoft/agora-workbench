@@ -613,6 +613,40 @@ async def test_configured_catalog_keyword_search_does_not_call_query_embedder(tm
     assert captured["hybrid_alpha"] == 1.0
 
 
+async def test_configured_catalog_slow_embedding_does_not_block_other_reads(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root))],
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    provider = _ConfiguredCatalogProvider(config)
+    embedding_started = asyncio.Event()
+    release_embedding = asyncio.Event()
+
+    async def embed_query(query):
+        del query
+        embedding_started.set()
+        await release_embedding.wait()
+        return [0.1, 0.2]
+
+    try:
+        await provider.load()
+        provider._query_embedder = embed_query
+        search = asyncio.create_task(provider.search(SearchRequest("searchable"), RequestContext()))
+        await embedding_started.wait()
+
+        page = await asyncio.wait_for(provider.list(ListRequest(), RequestContext()), timeout=1)
+        assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+
+        release_embedding.set()
+        await search
+    finally:
+        release_embedding.set()
+        await provider.aclose()
+
+
 async def test_configured_catalog_empty_query_embedding_falls_back_to_keyword_search(tmp_path, monkeypatch):
     root = tmp_path / "source"
     root.mkdir()

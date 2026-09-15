@@ -633,8 +633,10 @@ class SessionManager:
         event = self._session_resources_drained.get(session.session_id)
         if event is not None:
             await event.wait()
-        await session.aclose()
-        self._track_session_cleanup_tasks(session)
+        try:
+            await session.aclose()
+        finally:
+            self._track_session_cleanup_tasks(session)
 
     def _track_session_cleanup_tasks(self, session: Session) -> tuple[asyncio.Task[None], ...]:
         """Transfer session-owned cleanup tasks into the manager's strong-reference set."""

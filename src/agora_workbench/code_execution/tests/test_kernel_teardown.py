@@ -1250,6 +1250,35 @@ class TestAwaitableClose:
         assert attempts == 2
         assert manager.storage.retrieve(session_id) is None
 
+    async def test_cancelled_deferred_session_cleanup_transfers_retry_task(self, manager):
+        retry_started = asyncio.Event()
+        release_retry = asyncio.Event()
+        attempts = 0
+
+        class CancelsThenBlocks:
+            async def aclose(self):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise asyncio.CancelledError
+                retry_started.set()
+                await release_retry.wait()
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        session.data_manager = cast(Any, CancelsThenBlocks())
+
+        cleanup = asyncio.create_task(manager._cleanup_session_after_operations(session))
+        await retry_started.wait()
+        cleanup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cleanup
+
+        assert manager._session_owned_cleanup_tasks[session_id]
+        release_retry.set()
+        await manager.await_resource_cleanup()
+        assert attempts == 2
+
     async def test_sync_close_retains_retry_after_synchronous_cancellation(self, manager):
         attempts = 0
 
