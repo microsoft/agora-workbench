@@ -289,6 +289,39 @@ class TestAtomicClaim:
         assert marker.read_text() == "replacement"
         assert manager._kernels[session_id] == replacement_kernel
 
+    async def test_idle_cleanup_rechecks_last_used_after_execution_lock(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
+        manager._kernel_last_used[session_id] = 0.0
+        lock = manager._get_kernel_execute_lock(session_id)
+
+        await lock.acquire()
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=1))
+        await asyncio.sleep(0)
+        manager._kernel_last_used[session_id] = time.time()
+        lock.release()
+        await cleanup
+
+        assert manager._kernels[session_id][0] is km
+        assert km.shutdown_started is False
+
+    async def test_cancelling_idle_cleanup_does_not_cancel_kernel_teardown(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        gate = asyncio.Event()
+        km, _ = register_kernel(manager, session_id, gate=gate)
+
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=-1))
+        await let_teardown_start()
+        cleanup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cleanup
+
+        shutdown = manager._kernel_shutdown_tasks[session_id]
+        assert km.shutdown_started
+        assert not shutdown.cancelled()
+        gate.set()
+        await shutdown
+
     async def test_idle_artifact_deletion_does_not_hold_lifecycle_lock(self, manager, monkeypatch):
         session_id = manager.create_session(data={}, user_identity="old", user_token="t", token_claims={})
         register_kernel(manager, session_id, name="OLD")

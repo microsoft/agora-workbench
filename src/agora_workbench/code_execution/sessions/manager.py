@@ -2073,18 +2073,20 @@ class SessionManager:
 
         for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
-            with self._session_lifecycle_lock:
-                if (
-                    self._kernel_session_generations.get(session_id) != session_generation
-                    or self._kernel_generations.get(session_id) != kernel_generation
-                ):
-                    continue
-                shutdown_task = self._schedule_kernel_shutdown(
-                    session_id,
-                    caller="cleanup_idle_kernels()",
-                )
-            if shutdown_task is not None:
-                _ = await shutdown_task
+            async with self._get_kernel_execute_lock(session_id):
+                with self._session_lifecycle_lock:
+                    if (
+                        self._kernel_session_generations.get(session_id) != session_generation
+                        or self._kernel_generations.get(session_id) != kernel_generation
+                        or now - self._kernel_last_used.get(session_id, now) <= max_idle_time
+                    ):
+                        continue
+                    shutdown_task = self._schedule_kernel_shutdown(
+                        session_id,
+                        caller="cleanup_idle_kernels()",
+                    )
+                if shutdown_task is not None:
+                    _ = await asyncio.shield(shutdown_task)
 
     # ========================================================================
     # Session Listing and Cleanup
