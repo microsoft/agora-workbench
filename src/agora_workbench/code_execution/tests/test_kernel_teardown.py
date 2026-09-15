@@ -311,6 +311,18 @@ class TestAtomicClaim:
         await holder_entered.wait()
         execute_lock = manager._kernel_execute_locks[session_id]
         manager.close_session(session_id)
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        release_holder.set()
+        assert await holder_task is None
+
         manager.create_session(
             data={},
             user_identity="replacement",
@@ -318,11 +330,7 @@ class TestAtomicClaim:
             token_claims={},
             session_id=session_id,
         )
-
-        release_holder.set()
-        assert await holder_task is None
-
-        assert manager._kernel_execute_locks[session_id] is execute_lock
+        assert manager._kernel_execute_locks.get(session_id) is not execute_lock
         manager.close_session(session_id)
         assert session_id not in manager._kernel_execute_locks
 

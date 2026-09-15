@@ -556,6 +556,25 @@ async def test_catalog_cleanup_returns_terminal_cleanup_cancellation():
     assert isinstance(cancelled, asyncio.CancelledError)
 
 
+async def test_catalog_cleanup_retries_one_ordinary_failure():
+    calls = 0
+
+    async def cleanup():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient close failure")
+
+    cancelled = await CodeExecutionServer._await_catalog_cleanup(
+        cleanup(),
+        "test cleanup",
+        retry=cleanup,
+    )
+
+    assert cancelled is None
+    assert calls == 2
+
+
 @pytest.mark.parametrize("cancelled_stage", ["tool_search", "publisher", "activity"])
 async def test_server_shutdown_drains_each_cancelled_resource_once(tmp_path, cancelled_stage):
     started = asyncio.Event()
@@ -2070,9 +2089,11 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert _decode_reference(encoded_reference).revision == 3
     assert catalog.resolve.await_count == 0
     assert catalog.capabilities.await_count == 1
+    assert catalog.search.await_args.args[0].source_ids == ("source",)
     details = await captured["get_artifact"]("artifact")
     assert details["current_revision"] == 2
     assert await captured["list_domains"]() == ["science https://example.test/domain"]
+    assert catalog.list.await_args.args[0].source_ids == ("source",)
 
     integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
     per_artifact = await captured["search_data"]("data")

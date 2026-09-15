@@ -1360,6 +1360,28 @@ class TestDataManagerInjection:
 
         assert session_manager.storage.count() == 0
 
+    async def test_factory_returning_async_only_manager_is_closed_when_rejected(self):
+        """Invalid async-only managers are still rolled back before rejection."""
+
+        class AsyncOnlyManager:
+            def __init__(self):
+                self.closed = False
+
+            async def aclose(self):
+                self.closed = True
+
+        invalid_manager = AsyncOnlyManager()
+        session_manager = SessionManager(
+            SessionConfig(data_manager_factory=lambda _ctx: invalid_manager)  # type: ignore[arg-type, return-value]
+        )
+
+        with pytest.raises(TypeError, match="cleanup\\(\\) method"):
+            session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+        await session_manager.await_resource_cleanup()
+
+        assert invalid_manager.closed
+        assert session_manager.storage.count() == 0
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

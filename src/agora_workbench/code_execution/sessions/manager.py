@@ -368,7 +368,7 @@ class SessionManager:
                         "would silently fall back to a default DataLakeDataManager and discard the "
                         "customization the factory exists to provide."
                     )
-                    cleanup_error = self._cleanup_unclaimed_session_resources(None, extensions)
+                    cleanup_error = self._cleanup_unclaimed_session_resources(data_manager, extensions)
                     if cleanup_error is not None:
                         error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                     raise error
@@ -554,7 +554,8 @@ class SessionManager:
                 Any,
                 (
                     data_manager
-                    if data_manager is not None and callable(getattr(data_manager, "cleanup", None))
+                    if data_manager is not None
+                    and any(callable(getattr(data_manager, method, None)) for method in ("aclose", "cleanup", "close"))
                     else _NoopDataManager()
                 ),
             ),
@@ -671,9 +672,19 @@ class SessionManager:
         return shutdown_task, session
 
     def _finalize_closed_session(self, session_id: str) -> None:
-        session = self._closing_sessions.get(session_id)
-        if session is None:
-            return
+        with self._session_lifecycle_lock:
+            session = self._closing_sessions.get(session_id)
+            shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+            shutdown_in_progress_elsewhere = (
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not asyncio.current_task()
+            )
+            if (
+                session is None
+                or session_id in self._kernels
+                or shutdown_in_progress_elsewhere
+                or self._kernel_execute_lock_users.get(session_id, 0)
+            ):
+                return
         session.claim_session_file_cleanup()
         self._cleanup_session_artifacts(session_id)
         self._release_closing_session_id_if_safe(session_id, session)
@@ -686,7 +697,11 @@ class SessionManager:
             shutdown_in_progress_elsewhere = (
                 shutdown_task is not None and not shutdown_task.done() and shutdown_task is not asyncio.current_task()
             )
-            if session_id in self._kernels or shutdown_in_progress_elsewhere:
+            if (
+                session_id in self._kernels
+                or shutdown_in_progress_elsewhere
+                or self._kernel_execute_lock_users.get(session_id, 0)
+            ):
                 return
             self._closing_session_ids.discard(session_id)
             if self._closing_sessions.get(session_id) is session:
@@ -1733,6 +1748,7 @@ class SessionManager:
                     ):
                         self._kernel_execute_locks.pop(session_id, None)
                         self._retired_kernel_execute_locks.discard(session_id)
+            self._finalize_closed_session(session_id)
 
     def _retire_kernel_execute_lock(self, session_id: str) -> None:
         """Reclaim a closed session's lock once callers that captured it drain."""

@@ -1211,9 +1211,20 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("search_data", mcp_ctx))
+            capabilities = {
+                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
+            }
+            search_source_ids = tuple(
+                source_id
+                for source_id, capability in capabilities.items()
+                if capability.supports(CatalogOperation.SEARCH)
+            )
+            if not search_source_ids:
+                return []
             page = await current.catalog.search(
                 SearchRequest(
                     query=query,
+                    source_ids=search_source_ids,
                     page=PageRequest(limit=top, cursor=cursor),
                     filters={
                         key: value for key, value in {"domain": domain, "source_type": source_type}.items() if value
@@ -1221,9 +1232,6 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
                 ),
                 current.context,
             )
-            capabilities = {
-                capability.source_id: capability for capability in await current.catalog.capabilities(current.context)
-            }
             hits = []
             for artifact in page.items:
                 hits.append(
@@ -1295,13 +1303,23 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         current: CatalogSessionView | None = None
         try:
             current = snapshot(await binding("list_domains", mcp_ctx))
+            list_source_ids = tuple(
+                capability.source_id
+                for capability in await current.catalog.capabilities(current.context)
+                if capability.supports(CatalogOperation.LIST)
+            )
+            if not list_source_ids:
+                return []
             domains: set[str] = set()
             cursor: str | None = None
             remaining = _MAX_DOMAIN_SCAN
             while remaining:
                 page_size = min(_MAX_TOOL_PAGE_SIZE, remaining)
                 page = await current.catalog.list(
-                    ListRequest(page=PageRequest(limit=page_size, cursor=cursor)),
+                    ListRequest(
+                        source_ids=list_source_ids,
+                        page=PageRequest(limit=page_size, cursor=cursor),
+                    ),
                     current.context,
                 )
                 domains.update(

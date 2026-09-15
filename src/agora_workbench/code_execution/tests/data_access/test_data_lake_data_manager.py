@@ -6,7 +6,6 @@ The manager accepts type-tagged qualified names (<type>id</type>) and
 streams assets directly to disk to avoid high memory usage.
 """
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -469,7 +468,9 @@ class TestCleanup:
         assert cache_dir.exists()
 
         # Cleanup
-        manager.cleanup()
+        cleanup = manager.cleanup()
+        if cleanup is not None:
+            await cleanup
 
         assert not cache_dir.exists()
         assert manager._cache_index == {}
@@ -657,10 +658,20 @@ class TestArtifactResolverInjection:
         resolver = _SyncCloseResolver()
         manager = DataLakeDataManager(artifact_resolver=resolver)
 
-        manager.cleanup()
-        await asyncio.sleep(0)  # let the scheduled close run
+        cleanup = manager.cleanup()
+        assert cleanup is not None
+        await cleanup
 
         assert resolver.closed == 1
+
+    def test_invalid_resolver_is_rejected_before_cache_allocation(self, monkeypatch):
+        mkdir = MagicMock(side_effect=AssertionError("cache allocated before validation"))
+        monkeypatch.setattr("agora_workbench.code_execution.data_access.manager.tempfile.mkdtemp", mkdir)
+
+        with pytest.raises(TypeError, match="missing"):
+            DataLakeDataManager(artifact_resolver=object())  # type: ignore[arg-type]
+
+        mkdir.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_aclose_tolerates_a_sync_aclose(self):

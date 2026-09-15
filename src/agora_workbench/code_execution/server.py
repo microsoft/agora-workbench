@@ -2882,6 +2882,7 @@ else:
                 cleanup_cancellation = await self._await_catalog_cleanup(
                     self.catalog.shutdown(),
                     "Catalog rollback",
+                    retry=self.catalog.shutdown,
                 )
                 rollback_cancellation = rollback_cancellation or cleanup_cancellation
             if rollback_cancellation is not None and not isinstance(startup_error, asyncio.CancelledError):
@@ -2926,6 +2927,7 @@ else:
                 cleanup_cancelled = await self._await_catalog_cleanup(
                     self.catalog.shutdown(),
                     "Catalog shutdown",
+                    retry=self.catalog.shutdown,
                 )
                 cancelled = cancelled or cleanup_cancelled
         LOGGER.info("Server shutdown complete")
@@ -2933,10 +2935,16 @@ else:
             raise cancelled
 
     @staticmethod
-    async def _await_catalog_cleanup(awaitable: Any, label: str) -> asyncio.CancelledError | None:
+    async def _await_catalog_cleanup(
+        awaitable: Any,
+        label: str,
+        *,
+        retry: Any | None = None,
+    ) -> asyncio.CancelledError | None:
         """Finish one catalog cleanup step even when server shutdown is cancelled."""
         task = asyncio.create_task(awaitable)
         cancelled: asyncio.CancelledError | None = None
+        retry_factory = retry
         while True:
             try:
                 await asyncio.shield(task)
@@ -2946,7 +2954,10 @@ else:
                     break
             except Exception:
                 LOGGER.warning("%s raised; continuing", label, exc_info=True)
-                break
+                if retry_factory is None:
+                    break
+                task = asyncio.create_task(retry_factory())
+                retry_factory = None
             else:
                 break
         return cancelled

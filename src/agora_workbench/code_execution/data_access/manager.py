@@ -256,6 +256,9 @@ class DataLakeDataManager:
             TypeError: If ``artifact_resolver`` does not implement the
                 ``ArtifactResolver`` protocol.
         """
+        if artifact_resolver is not None:
+            _validate_artifact_resolver(artifact_resolver)
+
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
         self._cache_generation = 0
@@ -293,7 +296,6 @@ class DataLakeDataManager:
             self._fetchers.append(BlobFetcher(credential=self._credential))
 
         if artifact_resolver is not None:
-            _validate_artifact_resolver(artifact_resolver)
             self._artifact_resolver: ArtifactResolver = artifact_resolver
         else:
             # The deferred credential error is handed over so the resolver can
@@ -720,52 +722,19 @@ class DataLakeDataManager:
         for artifact_id in keys:
             self._cache_index.pop(artifact_id, None)
 
-    def cleanup(self) -> None:
+    def cleanup(self) -> asyncio.Task[None] | None:
         """
         Clean up cache directory, credentials, and resources.
 
         Removes the temporary cache directory if it was created by this manager.
         Call this when the session is ending to free up disk space.
         """
-        # Clear cache index
-        self._cache_index.clear()
-
-        # Close the artifact resolver (releases any catalog client it owns)
-        resolver_close = _resolver_aclose(getattr(self, "_artifact_resolver", None))
-        if resolver_close is not None:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(resolver_close())
-            except RuntimeError:
-                try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(resolver_close())
-                    loop.close()
-                except Exception as e:
-                    LOGGER.debug(f"Error closing artifact resolver: {e}")
-
-        # Close managed identity credential
-        if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
-            try:
-                loop = asyncio.get_running_loop()
-                # We're inside a running loop — schedule close as a task
-                loop.create_task(self._credential.close())
-            except RuntimeError:
-                # No running loop — safe to create a temporary one
-                try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(self._credential.close())
-                    loop.close()
-                except Exception as e:
-                    LOGGER.debug(f"Error closing credential: {e}")
-
-        # Remove temp directory
-        if self._cache_dir and self._cache_dir.exists():
-            try:
-                shutil.rmtree(self._cache_dir)
-                LOGGER.info(f"Cleaned up cache directory: {self._cache_dir}")
-            except Exception as e:
-                LOGGER.warning(f"Failed to clean up cache directory: {e}")
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(self.aclose())
+            return None
+        return loop.create_task(self.aclose())
 
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
