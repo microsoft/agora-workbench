@@ -95,6 +95,8 @@ class _AsyncCleanupTracker:
 
     def __init__(self) -> None:
         self._tasks: dict[asyncio.Task[None], tuple[Callable[[], Any] | None, int]] = {}
+        # Cleanup trackers are owned by one session manager event-loop context;
+        # this depth only guards nested temporary-loop cleanup on that owner.
         self._synchronous_depth = 0
 
     @property
@@ -762,6 +764,8 @@ class CatalogSessionBinding:
     _pending_cleanup_resources: list[object] | None = None
     _scheduled_cleanup_resources: list[object] = field(default_factory=list)
     _scheduled_cleanup_tasks: dict[asyncio.Task[None], object] = field(default_factory=dict)
+    # Keep retired resources strongly referenced for the binding lifetime so the
+    # exact closed object cannot be returned by a later factory refresh.
     _retirement_started_resources: dict[int, object] = field(default_factory=dict)
     _retired_resources: dict[int, object] = field(default_factory=dict)
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -934,7 +938,20 @@ class CatalogSessionBinding:
             if scheduled_resource is resource:
                 self._scheduled_cleanup_tasks.pop(task, None)
 
+    def _track_scheduled_resource(self, resource: object) -> bool:
+        if any(existing is resource for existing in self._scheduled_cleanup_resources):
+            return False
+        self._scheduled_cleanup_resources.append(resource)
+        return True
+
     async def _close_tracked_resource(self, resource: object, *, retry: bool) -> None:
+        """Close one retired resource while preserving retry/cancellation state.
+
+        ``retry=True`` gives the resource one immediate retry for transient
+        cleanup failure. Use ``retry=False`` when this is already a handoff from
+        a broader cleanup retry path, so cancellation/error reporting remains
+        bounded and owned by the caller.
+        """
         self._retirement_started_resources[id(resource)] = resource
         pending_resources = [resource]
         cancelled: asyncio.CancelledError | None = None
@@ -963,9 +980,8 @@ class CatalogSessionBinding:
     def _schedule_resource_cleanup(self, resource: object, *, retry: bool = True) -> asyncio.Task[None] | None:
         if self.cleanup_tracker is None:
             raise RuntimeError("Catalog session binding has no cleanup tracker.")
-        if any(existing is resource for existing in self._scheduled_cleanup_resources):
+        if not self._track_scheduled_resource(resource):
             return None
-        self._scheduled_cleanup_resources.append(resource)
 
         async def cleanup() -> None:
             await self._close_tracked_resource(resource, retry=retry)
@@ -1107,8 +1123,7 @@ class CatalogSessionBinding:
                         if task is not None:
                             await asyncio.shield(task)
                     else:
-                        if not any(existing is resource for existing in self._scheduled_cleanup_resources):
-                            self._scheduled_cleanup_resources.append(resource)
+                        self._track_scheduled_resource(resource)
                         await self._close_tracked_resource(resource, retry=False)
                 except asyncio.CancelledError as exc:
                     cancelled = cancelled or exc
@@ -1119,6 +1134,11 @@ class CatalogSessionBinding:
                         self._scheduled_cleanup_tasks.pop(task, None)
                         if self.cleanup_tracker is not None:
                             self.cleanup_tracker.discard(task)
+                    elif task is not None:
+                        # The shielded cleanup is still running after caller
+                        # cancellation; keep both registries owning it so a
+                        # later shutdown drain observes completion.
+                        pass
                     _remove_resource_identity(self._pending_cleanup_resources, resource)
         if cancelled is not None:
             if errors:
