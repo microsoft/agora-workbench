@@ -405,10 +405,12 @@ The factory receives the session context, authorized read catalog, and
 immutable request context. The managed-writer adapter reuses that catalog's
 authorizer, so write capabilities are visible only when the caller is
 authorized. Returned extension capabilities are merged into
-`get_catalog_capabilities`, and the extension is closed with the session. The
-read provider and backend writer retain their separately declared ownership.
+`get_catalog_capabilities`. The managed-writer adapter has no independent
+resource lifecycle: session teardown releases the adapter but does not close
+the backend writer. The read provider and backend writer retain their
+separately declared ownership and must be closed by their owner when needed.
 
-Custom extensions may implement async-only `aclose()`. Synchronous session
+Other custom extensions may implement async-only `aclose()`. Synchronous session
 closure and timeout cleanup schedule and retain that work; server shutdown
 waits for it before closing the shared provider. Cleanup attempts the manager,
 every extension, session payload, and session files independently, reporting

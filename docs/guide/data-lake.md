@@ -58,17 +58,17 @@ printf 'day,temperature_c\n2026-01-01,7\n' > data/weather.csv
 Create, validate, and index a scan catalog:
 
 ```bash
-agora-workbench-data-lake init \
+uv run agora-workbench-data-lake init \
   --config catalog.yaml \
   --source ./data \
   --source-id local-data \
   --discovery scan
 
-agora-workbench-data-lake validate --config catalog.yaml
-agora-workbench-data-lake refresh \
+uv run agora-workbench-data-lake validate --config catalog.yaml
+uv run agora-workbench-data-lake refresh \
   --config catalog.yaml \
   --database catalog.db
-agora-workbench-data-lake search weather \
+uv run agora-workbench-data-lake search weather \
   --config catalog.yaml \
   --database catalog.db
 ```
@@ -99,6 +99,7 @@ catalog = CatalogIntegration.from_config(
     CatalogConfig.from_yaml("catalog.yaml"),
     authorizer=DevelopmentAllowAllCatalogAuthorizer(),  # local development only
     policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
+    db_path="catalog.db",
 )
 
 server = CodeExecutionServer(
@@ -108,8 +109,9 @@ server = CodeExecutionServer(
 )
 ```
 
-Here, `config` and `auth` are the server configuration and authentication
-objects from your existing server. If you do not have one yet, build
+The `db_path` points the server at the SQLite index refreshed in the preceding
+CLI steps. Here, `config` and `auth` are the server configuration and
+authentication objects from your existing server. If you do not have one yet, build
 [your first server](../tutorials/first_server/README.md) before adding the
 catalog.
 
