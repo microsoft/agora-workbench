@@ -72,6 +72,7 @@ changelog = "https://github.com/microsoft/agora-workbench/blob/main/CHANGELOG.md
 [project.scripts]
 mcp-connector-server = "agora_workbench.connector.cli:main"
 agora-workbench-deploy = "agora_workbench.deployment.cli:main"
+agora-workbench-data-lake = "agora_workbench.data_lake.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src", activity_ui = "activity_ui"}

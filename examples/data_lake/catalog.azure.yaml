@@ -1,0 +1,9 @@
+version: 1
+sources:
+  - source_id: approved-observations
+    path: az://exampleaccount/example-container/approved/
+    discovery: manifest
+    manifest: .agora/manifest.json
+    max_stale_seconds: 300
+search:
+  embedding_model: none

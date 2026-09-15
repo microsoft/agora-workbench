@@ -1871,8 +1871,10 @@ async def test_crash_after_fence_clear_preserves_unrelated_generation_detection(
         return result
 
     monkeypatch.setattr(recovering, "_clear_commit_fence", clear_then_crash)
-    with pytest.raises(ReconciliationError):
+    with pytest.raises(ReconciliationError) as exc_info:
         await recovering.reconcile(grace_seconds=0)
+    assert exc_info.value.failures == {"clear-crash": "RuntimeError"}
+    assert "after clear crash" not in str(exc_info.value)
 
     await base.upload(UploadArtifactRequest("after-clear", "unrelated.txt", unrelated))
     await base.reconcile(grace_seconds=0)

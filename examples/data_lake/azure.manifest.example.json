@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "generation": 1,
+  "artifacts": [
+    {
+      "path": "synthetic-observations.csv",
+      "artifact_id": "synthetic-observations",
+      "description": "Placeholder synthetic observations",
+      "domain": "example",
+      "media_type": "text/csv"
+    }
+  ]
+}
