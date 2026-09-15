@@ -416,7 +416,7 @@ class DataLakeDataManager:
                         )
                     raise
 
-            async def validate_cached_file() -> None:
+            async def validate_cached_file() -> tuple[int, int]:
                 check_transfer_cancelled(options, operation="download", resource=str(validated_cache_path))
                 cache_file = await _run_blocking_io(
                     lambda: _open_cached_file_no_follow(validated_cache_path),
@@ -445,11 +445,13 @@ class DataLakeDataManager:
                             operation="download",
                             resource=str(validated_cache_path),
                         )
+                    return file_stat.st_dev, file_stat.st_ino
                 finally:
                     await _run_blocking_io(cache_file.close)
 
+            validated_identity: tuple[int, int] | None = None
             try:
-                await await_transfer(
+                validated_identity = await await_transfer(
                     validate_cached_file(),
                     options,
                     operation="download",
@@ -462,8 +464,7 @@ class DataLakeDataManager:
                 if not cache_was_invalidated():
                     LOGGER.debug(f"Asset already cached: {cache_path}")
                     return cache_path
-            if self._cache_index.get(artifact_id) == validated_cache_path:
-                self._cache_index.pop(artifact_id, None)
+            self._remove_validated_cache_entry(artifact_id, validated_cache_path, validated_identity)
             cache_generation = self._cache_generation
             full_cache_generation = self._full_cache_generation
 
@@ -515,6 +516,32 @@ class DataLakeDataManager:
             return cache_path
 
         raise AssertionError("bounded cache fetch loop exited unexpectedly")
+
+    def _remove_validated_cache_entry(
+        self,
+        artifact_id: str,
+        path: Path,
+        expected_identity: tuple[int, int] | None,
+    ) -> None:
+        """Remove an invalidated cache file only if it is still the validated entry."""
+        if self._cache_index.get(artifact_id) == path:
+            self._cache_index.pop(artifact_id, None)
+        if expected_identity is None:
+            return
+        try:
+            cache_root = self._cache_dir.resolve(strict=True)
+            if not path.parent.resolve(strict=True).is_relative_to(cache_root):
+                LOGGER.warning("Skipped cleanup of cache entry outside the owned cache directory: %s", path.name)
+                return
+            entry_stat = path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(entry_stat.st_mode) or (entry_stat.st_dev, entry_stat.st_ino) != expected_identity:
+                LOGGER.warning("Skipped cleanup of replaced cache entry: %s", path.name)
+                return
+            path.unlink()
+        except FileNotFoundError:
+            return
+        except OSError:
+            LOGGER.debug("Failed to remove invalidated catalog cache entry %s", path, exc_info=True)
 
     async def _fetch_asset_to_file(
         self,

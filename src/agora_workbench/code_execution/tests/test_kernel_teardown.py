@@ -1618,6 +1618,70 @@ class TestKernelRebuildWaits:
         assert session_id not in manager._kernels
         assert session_id not in manager._closing_session_ids
 
+    @pytest.mark.parametrize("cancel_phase", ["start", "ready"])
+    async def test_cancelled_kernel_start_cleans_partial_kernel(self, manager, monkeypatch, cancel_phase):
+        from .. import sessions as sessions_pkg
+
+        phase_entered = asyncio.Event()
+        never = asyncio.Event()
+
+        class FakeKernelManager:
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+                self.shutdown_calls = 0
+                self.cleanup_calls = 0
+                instances.append(self)
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                if cancel_phase == "start":
+                    phase_entered.set()
+                    await never.wait()
+
+            def client(self):
+                return client
+
+            async def shutdown_kernel(self, now=False):
+                self.shutdown_calls += 1
+
+            async def cleanup_resources(self):
+                self.cleanup_calls += 1
+
+        class FakeKernelClient:
+            def __init__(self):
+                self.stop_calls = 0
+
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                if cancel_phase == "ready":
+                    phase_entered.set()
+                    await never.wait()
+
+            def stop_channels(self):
+                self.stop_calls += 1
+
+        instances = []
+        client = FakeKernelClient()
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", FakeKernelManager)
+        session_id = manager.create_session(data={}, user_identity="user", user_token="token", token_claims={})
+        startup = asyncio.create_task(manager._get_or_create_kernel(session_id))
+        await phase_entered.wait()
+
+        startup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await startup
+
+        assert instances[0].shutdown_calls == 1
+        assert instances[0].cleanup_calls == 1
+        assert client.stop_calls == (1 if cancel_phase == "ready" else 0)
+        assert session_id not in manager._kernel_start_tasks
+        assert session_id not in manager._kernels
+
     async def test_get_or_create_waits_for_pending_teardown(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg
 

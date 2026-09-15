@@ -196,7 +196,8 @@ class Session(Generic[T]):
         Async cleanup tasks are retained until the SessionManager claims them;
         callers that need completion should use :meth:`aclose`.
         """
-        errors = self._take_claimed_cleanup_errors()
+        claimed_cleanup_errors = self._take_claimed_cleanup_errors()
+        errors: list[Exception] = []
         cancellations: list[asyncio.CancelledError] = []
         self._cleanup_resource_sync(self.data_manager, "data manager", errors, cancellations)
         for resource in self.extensions.values():
@@ -205,7 +206,11 @@ class Session(Generic[T]):
         try:
             self._cleanup_session_file()
         except Exception as exc:
+            errors.extend(claimed_cleanup_errors)
             errors.append(exc)
+        else:
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                errors.extend(claimed_cleanup_errors)
         if cancellations:
             if errors:
                 cancellations[0].add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
@@ -215,7 +220,8 @@ class Session(Generic[T]):
 
     async def aclose(self) -> None:
         """Attempt all asynchronous cleanup steps, then report aggregated failures."""
-        errors = self._take_claimed_cleanup_errors()
+        claimed_cleanup_errors = self._take_claimed_cleanup_errors()
+        errors: list[Exception] = []
         cancellations: list[asyncio.CancelledError] = []
         await self._cleanup_resource_async(self.data_manager, "data manager", errors, cancellations)
         for resource in self.extensions.values():
@@ -229,7 +235,11 @@ class Session(Generic[T]):
         try:
             self._cleanup_session_file()
         except Exception as exc:
+            errors.extend(claimed_cleanup_errors)
             errors.append(exc)
+        else:
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                errors.extend(claimed_cleanup_errors)
         retry_tasks = tuple(self._scheduled_cleanup_tasks)
         if retry_tasks:
             results = await asyncio.gather(

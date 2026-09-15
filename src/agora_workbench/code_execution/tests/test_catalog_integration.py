@@ -2256,6 +2256,26 @@ async def test_session_credential_rejects_provider_reactivation_after_retirement
     assert second.close_calls == 1
 
 
+async def test_session_credential_shared_provider_refresh_closes_once():
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    provider = CredentialProvider()
+    credential = SessionCredential(provider, provider_factory=lambda token: provider)
+
+    refresh = credential.prepare_context_refresh(SessionContext("session", "user", "new-token"))
+    refresh()
+    assert refresh.retire_resource is None
+
+    await credential.close()
+    await credential.close()
+    assert provider.close_calls == 1
+
+
 async def test_session_credential_reactivation_rollback_restores_pending_retirement():
     class CredentialProvider:
         def __init__(self):
@@ -3028,6 +3048,42 @@ async def test_invalid_factory_manager_rolls_back_extensions():
     assert extension.cleanup_calls == 1
 
 
+async def test_catalog_wrapper_invalid_factory_manager_rolls_back_extensions(tmp_path):
+    class Extension:
+        def __init__(self):
+            self.cleanup_calls = 0
+
+        def cleanup(self):
+            self.cleanup_calls += 1
+
+    extension = Extension()
+    session_manager = SessionManager(
+        SessionConfig(
+            data_manager_factory=lambda context: SessionResources(
+                cast(Any, object()),
+                {"extension": extension},
+            )
+        )
+    )
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    with pytest.raises(TypeError, match="cleanup\\(\\) method"):
+        session_manager.create_session({}, "user", "token", {})
+    await session_manager.await_resource_cleanup()
+    await integration.shutdown()
+
+    assert extension.cleanup_calls == 1
+
+
 class _LifecycleProvider:
     def __init__(self, *, fail: BaseException | None = None):
         self.fail = fail
@@ -3656,14 +3712,18 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
     per_artifact = await captured["search_data"]("data")
     assert "load_path" not in per_artifact[0]
+    calls_before_capabilities = catalog.capabilities.await_count
     per_artifact_capabilities = await captured["get_catalog_capabilities"]()
+    assert catalog.capabilities.await_count == calls_before_capabilities + 1
     assert not per_artifact_capabilities["execution_references"]
 
     catalog.capabilities.return_value = (SourceCapabilities("source", frozenset({CatalogOperation.SEARCH})),)
     integration.capabilities.return_value = (
         SourceCapabilities("source", frozenset({CatalogOperation.SEARCH, CatalogOperation.RESOLVE})),
     )
+    calls_before_capabilities = catalog.capabilities.await_count
     capabilities = await captured["get_catalog_capabilities"]()
+    assert catalog.capabilities.await_count == calls_before_capabilities + 1
     assert not capabilities["execution_references"]
 
 

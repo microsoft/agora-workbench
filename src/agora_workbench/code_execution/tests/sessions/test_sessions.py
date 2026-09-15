@@ -70,6 +70,33 @@ class TestSession:
         assert attempts == 2
         assert session._session_file_cleanup_claimed
 
+    def test_session_cleanup_retries_transient_claim_failure_without_reporting_recovered_error(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("temporary failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.cleanup()
+
+        assert attempts == 2
+        assert session._session_file_cleanup_claimed
+        assert not session._claimed_cleanup_errors
+
     def test_session_file_cleanup_claim_is_terminal_after_repeated_failures(self, monkeypatch):
         session = Session(
             session_id="test-123",

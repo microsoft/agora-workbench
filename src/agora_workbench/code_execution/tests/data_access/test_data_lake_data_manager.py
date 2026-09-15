@@ -224,6 +224,41 @@ class TestGetCachePath:
             assert cache_path1 == cache_path2
 
     @pytest.mark.asyncio
+    async def test_catalog_cache_invalidation_removes_superseded_validated_files(self, tmp_path):
+        source_path = tmp_path / "artifact.bin"
+        source_path.write_bytes(b"payload")
+        artifact_id = "catalog-v1:artifact"
+
+        class InvalidatingResolver(_StubResolver):
+            invalidate_next = False
+            manager: DataLakeDataManager
+
+            async def resolve(self, artifact_id: str) -> str:
+                result = await super().resolve(artifact_id)
+                if self.invalidate_next:
+                    self.invalidate_next = False
+                    self.manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+                return result
+
+        resolver = InvalidatingResolver({artifact_id: str(source_path)})
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+        resolver.manager = manager
+
+        await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
+        unrelated = manager._cache_dir / "unrelated.txt"
+        unrelated.write_text("keep")
+        assert len(tuple(manager._cache_dir.iterdir())) == 2
+
+        for _ in range(3):
+            resolver.invalidate_next = True
+            refreshed = await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
+            assert refreshed.read_bytes() == b"payload"
+            assert unrelated.read_text() == "keep"
+            assert len(tuple(manager._cache_dir.iterdir())) == 2
+
+        await manager.aclose()
+
+    @pytest.mark.asyncio
     async def test_fetch_error_propagates(self):
         """Test that fetch errors are propagated."""
         manager = DataLakeDataManager()
