@@ -83,6 +83,13 @@ jobs:
         run: |
           uv run pytest src/agora_workbench/code_execution/tests/ -m "not live" -v --json-report --json-report-file=code-execution-report.json
 
+      - name: Run data lake tests
+        if: ${{ needs.changes.outputs.tests == 'true' }}
+        id: data_lake_tests
+        continue-on-error: true
+        run: |
+          uv run pytest src/agora_workbench/data_lake/tests/ -m "not live" -v --json-report --json-report-file=data-lake-report.json
+
       - name: Run connector tests
         if: ${{ needs.changes.outputs.tests == 'true' }}
         id: connector_tests
@@ -116,6 +123,7 @@ jobs:
         if: ${{ always() && needs.changes.outputs.tests == 'true' }}
         run: |
           code_execution_status="${{ steps.code_execution_tests.outcome }}"
+          data_lake_status="${{ steps.data_lake_tests.outcome }}"
           connector_status="${{ steps.connector_tests.outcome }}"
           deployment_status="${{ steps.deployment_tests.outcome }}"
           servers_status="${{ steps.servers_tests.outcome }}"
@@ -126,6 +134,12 @@ jobs:
             echo "✅ Code execution tests passed"
           else
             echo "❌ Code execution tests failed"
+          fi
+
+          if [ "$data_lake_status" == "success" ]; then
+            echo "✅ Data lake tests passed"
+          else
+            echo "❌ Data lake tests failed"
           fi
 
           if [ "$connector_status" == "success" ]; then
@@ -152,7 +166,7 @@ jobs:
             echo "❌ Activity UI tests failed"
           fi
           
-          if [ "$code_execution_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$deployment_status" == "success" ] && [ "$servers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
+          if [ "$code_execution_status" == "success" ] && [ "$data_lake_status" == "success" ] && [ "$connector_status" == "success" ] && [ "$deployment_status" == "success" ] && [ "$servers_status" == "success" ] && [ "$activity_ui_status" == "success" ]; then
             exit 0
           else
             exit 1

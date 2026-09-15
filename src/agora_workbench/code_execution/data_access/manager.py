@@ -51,6 +51,13 @@ from .credentials import create_storage_credential
 from .fetchers import AssetFetcher, BlobFetcher, LocalFileFetcher
 
 LOGGER = logging.getLogger(__name__)
+_CATALOG_INTEGRATION_MANAGER_TOKEN = object()
+
+
+def _catalog_integration_data_manager(**kwargs: Any) -> "DataLakeDataManager":
+    """Build the integration-owned manager allowed to read managed revisions."""
+    return DataLakeDataManager(_catalog_integration_token=_CATALOG_INTEGRATION_MANAGER_TOKEN, **kwargs)
+
 
 if TYPE_CHECKING:
     from azure.core.credentials_async import AsyncTokenCredential
@@ -214,6 +221,7 @@ class DataLakeDataManager:
         artifact_resolver: ArtifactResolver | None = None,
         transfer_options: TransferOptions | None = None,
         credential_ownership: ResourceOwnership = ResourceOwnership.BORROWED,
+        _catalog_integration_token: object | None = None,
     ):
         """
         Initialize the data manager.
@@ -264,6 +272,7 @@ class DataLakeDataManager:
         self._cache_generation = 0
         self._full_cache_generation = 0
         self._transfer_options = transfer_options or TransferOptions()
+        self._catalog_managed_revision_access = _catalog_integration_token is _CATALOG_INTEGRATION_MANAGER_TOKEN
 
         self._credential_init_error: str | None = None
         self._credential: "AsyncTokenCredential | None" = None
@@ -494,6 +503,7 @@ class DataLakeDataManager:
                 cache_path,
                 context=context,
                 transfer_options=transfer_options,
+                trusted_catalog_reference=self._catalog_managed_revision_access and generation_scoped,
             )
 
             if cache_was_invalidated():
@@ -532,6 +542,7 @@ class DataLakeDataManager:
         *,
         context: RequestContext | None = None,
         transfer_options: TransferOptions | None = None,
+        trusted_catalog_reference: bool = False,
     ) -> int:
         """
         Fetch asset and stream directly to file using appropriate fetcher.
@@ -551,6 +562,16 @@ class DataLakeDataManager:
                     fetcher.__class__.__name__,
                     sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
                 )
+                if trusted_catalog_reference:
+                    catalog_fetch = getattr(fetcher, "_fetch_catalog_to_file_result", None)
+                    if callable(catalog_fetch):
+                        result = await catalog_fetch(
+                            qualified_name,
+                            dest_path,
+                            options=transfer_options or self._transfer_options,
+                            context=context or RequestContext(),
+                        )
+                        return result.bytes_transferred
                 detailed_fetch = getattr(fetcher, "fetch_to_file_result", None)
                 detailed_implementation = getattr(type(fetcher), "fetch_to_file_result", None)
                 if (

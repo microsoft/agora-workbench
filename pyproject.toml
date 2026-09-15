@@ -156,6 +156,8 @@ python_functions = ["test_*"]
 markers = [
     "unit: Unit tests (fast, mocked dependencies)",
     "integration: Integration tests (mocked dependencies)",
+    "azurite: Actual Azure Blob emulator tests (require an explicitly started Azurite service)",
+    "performance: Deterministic synthetic performance and resource-budget tests",
     "live: Live tests (require real API calls, credentials, network)",
     "asyncio: Async tests",
 ]

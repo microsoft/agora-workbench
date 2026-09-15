@@ -2872,6 +2872,7 @@ async def test_custom_manager_can_opt_in_to_catalog_execution_references(tmp_pat
 
     assert accepted_resolvers == [session.extensions["catalog"].resolver]
     assert session.data_manager._artifact_resolver is custom_resolver
+    assert not session.data_manager._catalog_managed_revision_access
     assert session.extensions["catalog"].execution_references
     await session_manager.aclose_all_sessions()
     await integration.shutdown()

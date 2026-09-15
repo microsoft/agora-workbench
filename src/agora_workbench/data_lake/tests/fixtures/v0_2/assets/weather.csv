@@ -1,0 +1,4 @@
+station,timestamp,temperature_c
+SEA,2026-01-01T00:00:00Z,7.2
+PDX,2026-01-01T00:00:00Z,6.8
+

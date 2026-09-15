@@ -68,6 +68,7 @@ nav:
       - Public data-lake API: guide/data-lake-api.md
       - Data-lake CLI and quickstarts: guide/data-lake-operations.md
       - Data-lake 0.3 migration: guide/data-lake-migration.md
+      - Data-lake 0.3 support and acceptance: guide/data-lake-support.md
       - Sidecars (shared helper processes): guide/sidecars.md
       - Server networks with ConnectorServer: guide/server-networks.md
       - Deploying your server: guide/deploying.md

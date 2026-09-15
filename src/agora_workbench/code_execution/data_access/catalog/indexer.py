@@ -1114,8 +1114,7 @@ class CatalogIndexer:
             for alias_value in artifact.get("aliases", []):
                 alias = split_alias(alias_value)
                 for candidate_id in _alias_canonical_candidates(*alias):
-                    existing_candidate = self._db.get_artifact(candidate_id, include_deleted=True)
-                    if existing_candidate is not None and existing_candidate.id != artifact_id:
+                    if candidate_id != artifact_id and self._db.has_canonical_artifact_id(candidate_id):
                         raise ValueError(
                             f"Manifest source {source_id!r} assigns alias "
                             f"{alias[0]}:{alias[1]} that collides with a canonical artifact ID"

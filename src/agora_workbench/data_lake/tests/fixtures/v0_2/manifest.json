@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "generation": 1,
+  "artifacts": [
+    {
+      "path": "assets/weather.csv",
+      "artifact_id": "fixture-weather",
+      "name": "weather.csv",
+      "description": "Synthetic compatibility observations",
+      "domain": "weather",
+      "media_type": "text/csv",
+      "aliases": [
+        "legacy:weather"
+      ]
+    }
+  ]
+}

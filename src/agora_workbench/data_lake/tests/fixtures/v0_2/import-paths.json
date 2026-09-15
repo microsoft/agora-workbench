@@ -1,0 +1,25 @@
+{
+  "agora_workbench.code_execution.data_access": [
+    "ArtifactResolver",
+    "LocalFilePublisher"
+  ],
+  "agora_workbench.code_execution.data_access.manager": [
+    "DataLakeDataManager"
+  ],
+  "agora_workbench.code_execution.data_access.catalog": [
+    "CatalogConfig",
+    "CatalogDB",
+    "CatalogIndexer",
+    "SourceConfig"
+  ],
+  "agora_workbench.data_lake": [
+    "ArtifactReference",
+    "CatalogProvider",
+    "ManagedCatalogWriter"
+  ],
+  "agora_workbench.data_lake.catalog": [
+    "CatalogConfig",
+    "CatalogDB",
+    "convert_catalog_config"
+  ]
+}
