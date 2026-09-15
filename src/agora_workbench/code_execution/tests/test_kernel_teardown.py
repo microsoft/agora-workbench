@@ -112,7 +112,7 @@ class TestAtomicClaim:
         assert "s1" not in manager._kernels
         assert "s1" not in manager._kernel_last_used
         assert "s1" not in manager._kernel_tokens
-        assert "s1" not in manager._kernel_execute_locks
+        assert "s1" in manager._kernel_execute_locks
         assert manager.get_kernel_generation("s1") is None
 
         gate.set()
@@ -436,6 +436,31 @@ class TestCoalescing:
         assert shutdown_task is not None
         await asyncio.wait_for(shutdown_task, timeout=1)
         assert manager.storage.retrieve(session_id) is None
+
+    async def test_session_file_cleanup_failure_keeps_explicit_id_tombstone(self, manager, monkeypatch, tmp_path):
+        session_file = tmp_path / "session.json"
+        session_file.write_text("active")
+        session_id = "explicit-session"
+        manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="user",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+        session = manager.storage.retrieve(session_id)
+        assert session is not None
+
+        monkeypatch.setattr(
+            session,
+            "_remove_session_file",
+            lambda: (_ for _ in ()).throw(PermissionError("locked")),
+        )
+
+        manager.close_session(session_id)
+
+        assert session_id in manager._closing_session_ids
+        assert session_file.exists()
 
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
         class PausingStorage(InMemoryStorage):

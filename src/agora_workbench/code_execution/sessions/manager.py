@@ -511,6 +511,10 @@ class SessionManager:
                     f"Error during cleanup of session {session_id}: {e}. "
                     f"Session was removed, but resources may be leaked."
                 )
+            finally:
+                if not session.session_file_cleanup_claimed():
+                    session.claim_session_file_cleanup()
+                self._release_closing_session_id_if_safe(session_id, session)
             if cleanup_failed:
                 LOGGER.warning(f"Closed session {session_id} with failed cleanup (remaining={self.storage.count()})")
             else:
@@ -648,15 +652,18 @@ class SessionManager:
                 cleanup_artifacts=False,
             )
         if cleanup_artifacts:
-            try:
-                assert session is not None
-                session.claim_session_file_cleanup()
-                self._cleanup_session_artifacts(session_id)
-            finally:
-                with self._session_lifecycle_condition:
-                    self._closing_session_ids.discard(session_id)
-                    self._session_lifecycle_condition.notify_all()
+            assert session is not None
+            session.claim_session_file_cleanup()
+            self._cleanup_session_artifacts(session_id)
+            self._release_closing_session_id_if_safe(session_id, session)
         return shutdown_task, session
+
+    def _release_closing_session_id_if_safe(self, session_id: str, session: Session) -> None:
+        if not session.session_file_cleanup_claimed():
+            return
+        with self._session_lifecycle_condition:
+            self._closing_session_ids.discard(session_id)
+            self._session_lifecycle_condition.notify_all()
 
     async def aclose_session(self, session_id: str, *, expected_generation: int | None = None) -> None:
         """Close a session and wait for its kernel to actually shut down.
@@ -686,6 +693,9 @@ class SessionManager:
                 cleanup_error = exc
             finally:
                 if session is not None:
+                    if not session.session_file_cleanup_claimed():
+                        session.claim_session_file_cleanup()
+                    self._release_closing_session_id_if_safe(session_id, session)
                     self._track_session_cleanup_tasks(session)
             if shutdown_task is not None:
                 _ = await shutdown_task
@@ -1942,7 +1952,6 @@ class SessionManager:
             # a *replacement* kernel started for this session in the meantime.
             self._kernel_last_used.pop(session_id, None)
             self._kernel_tokens.pop(session_id, None)
-            self._kernel_execute_locks.pop(session_id, None)
             self._kernel_session_generations.pop(session_id, None)
             self._discard_kernel_generation(session_id)
         artifacts_dir_to_remove: Path | None = None

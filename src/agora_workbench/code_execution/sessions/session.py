@@ -357,6 +357,7 @@ class Session(Generic[T]):
         if self._session_file_cleanup_claimed:
             return
         self._remove_session_file()
+        self._session_file_cleanup_claimed = True
 
     def _remove_session_file(self) -> None:
         if not isinstance(self.data, dict) or "session_file" not in self.data:
@@ -378,11 +379,12 @@ class Session(Generic[T]):
         if self._session_file_cleanup_claimed:
             return
         try:
-            self._remove_session_file()
+            self._cleanup_session_file()
         except Exception as exc:
             self._claimed_cleanup_errors.append(exc)
-        else:
-            self._session_file_cleanup_claimed = True
+
+    def session_file_cleanup_claimed(self) -> bool:
+        return self._session_file_cleanup_claimed
 
     def _take_claimed_cleanup_errors(self) -> list[Exception]:
         errors = self._claimed_cleanup_errors
