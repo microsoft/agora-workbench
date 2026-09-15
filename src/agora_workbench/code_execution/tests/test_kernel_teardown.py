@@ -867,7 +867,7 @@ class TestAwaitableClose:
 
         gate.set()
         with pytest.raises(asyncio.CancelledError):
-            await closing
+            _ = await closing
         assert manager.storage.retrieve(session_id) is None
         assert not manager._resource_cleanup_tasks
 

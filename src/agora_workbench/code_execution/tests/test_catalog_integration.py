@@ -454,7 +454,7 @@ async def test_catalog_shutdown_drains_cleanup_before_provider_through_repeated_
     assert provider.close_calls == 0
     cleanup_gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await shutdown
+        _ = await shutdown
     assert provider.close_calls == 1
 
 
