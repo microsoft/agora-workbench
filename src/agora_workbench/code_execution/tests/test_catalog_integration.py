@@ -2326,6 +2326,29 @@ async def test_owned_provider_closes_once_across_concurrent_and_repeated_shutdow
     assert provider.close_calls == 1
 
 
+async def test_concurrent_shutdowns_share_cleanup_retry_result():
+    provider = _LifecycleProvider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+    attempts = 0
+
+    async def cleanup():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient cleanup failure")
+
+    integration._cleanup_tracker.schedule(cleanup(), retry=cleanup)
+
+    await asyncio.gather(integration.shutdown(), integration.shutdown())
+
+    assert attempts == 2
+    assert provider.close_calls == 1
+
+
 async def test_refreshed_session_token_updates_catalog_request_context_and_authorizer(tmp_path):
     provider = _LifecycleProvider()
     authorizers = []
@@ -2500,6 +2523,37 @@ async def test_refresh_reactivates_deferred_authorizer_without_closing_it():
     assert await binding.catalog.capabilities(binding.context)
     await binding.aclose()
     assert first.close_calls == 1
+
+
+async def test_refresh_reactivates_scheduled_authorizer_without_closing_it():
+    class Authorizer:
+        def __init__(self, name):
+            self.name = name
+            self.close_calls = 0
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    first = Authorizer("first")
+    second = Authorizer("second")
+    by_token = {"first": first, "second": second, "first-again": first}
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: by_token[context.user_token],
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "first"), execution_references=True)
+
+    binding.refresh_context(SessionContext("session", "user", "second"))
+    binding.refresh_context(SessionContext("session", "user", "first-again"))
+    await integration._cleanup_tracker.drain()
+
+    assert binding.owned_authorizer is first
+    assert first.close_calls == 0
+    assert second.close_calls == 1
+    await binding.aclose()
 
 
 async def test_resolver_retains_authorizer_until_resolution_finishes():

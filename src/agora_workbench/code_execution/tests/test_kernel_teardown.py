@@ -892,6 +892,22 @@ class TestAwaitableClose:
         with pytest.raises(ValueError, match="closing"):
             await operation.__aenter__()
 
+    async def test_resource_operation_rejects_closed_or_replaced_session(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        operation = manager.session_resource_operation(session_id)
+        manager.close_session(session_id)
+        await manager.aclose_session(session_id)
+        manager.create_session(
+            data={},
+            user_identity="replacement",
+            user_token="t",
+            token_claims={},
+            session_id=session_id,
+        )
+
+        with pytest.raises(ValueError, match="not found or is closing"):
+            await operation.__aenter__()
+
     async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         session = manager.get_session(session_id)
@@ -1985,6 +2001,28 @@ class TestNoRunningLoop:
         assert result["status"] == "running"
         assert collector_cancelled.is_set()
         assert manager_closed.is_set()
+
+    async def test_cancelled_unstarted_background_collector_releases_resource_lease(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        resource_operation = manager.session_resource_operation(session_id)
+        await resource_operation.__aenter__()
+        job = _BackgroundJob("job", session_id, "message", 30, time.monotonic())
+
+        async def collector(*_args):
+            pytest.fail("cancelled collector should not start")
+
+        monkeypatch.setattr(manager, "_collect_background_job", collector)
+        task = manager._start_background_job_collector(
+            job,
+            cast(Any, StubKernelManager()),
+            cast(Any, StubKernelClient()),
+            resource_operation,
+        )
+        task.cancel()
+        _ = await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+
+        assert session_id not in manager._session_resource_users
 
     @pytest.mark.parametrize(
         ("method_name", "arguments"),

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from threading import Condition, RLock
-from typing import Any, AsyncIterator, Callable, Optional, Tuple, TYPE_CHECKING, cast
+from typing import Any, AsyncContextManager, AsyncIterator, Callable, Optional, Tuple, TYPE_CHECKING, cast
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -1603,6 +1603,30 @@ class SessionManager:
         finally:
             await resource_operation.__aexit__(None, None, None)
 
+    def _start_background_job_collector(
+        self,
+        job: _BackgroundJob,
+        km: AsyncKernelManager,
+        kc: "AsyncKernelClient",
+        resource_operation: Any,
+    ) -> asyncio.Task[None]:
+        """Start a collector and release its lease even if cancelled before first execution."""
+        started = False
+
+        async def collect() -> None:
+            nonlocal started
+            started = True
+            await self._collect_background_job_with_resources(job, km, kc, resource_operation)
+
+        task = asyncio.create_task(collect())
+
+        def release_unstarted_collector(_completed: asyncio.Task[None]) -> None:
+            if not started:
+                asyncio.create_task(resource_operation.__aexit__(None, None, None))
+
+        task.add_done_callback(release_unstarted_collector)
+        return task
+
     async def start_background_execution_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> dict[str, str]:
@@ -1654,7 +1678,7 @@ class SessionManager:
         resource_operation = self.session_resource_operation(session_id)
         await resource_operation.__aenter__()
         try:
-            job.task = asyncio.create_task(self._collect_background_job_with_resources(job, km, kc, resource_operation))
+            job.task = self._start_background_job_collector(job, km, kc, resource_operation)
         except BaseException:
             await resource_operation.__aexit__(None, None, None)
             raise
@@ -1875,9 +1899,7 @@ class SessionManager:
             resource_operation = self.session_resource_operation(session_id)
             await resource_operation.__aenter__()
             try:
-                job.task = asyncio.create_task(
-                    self._collect_background_job_with_resources(job, km, kc, resource_operation)
-                )
+                job.task = self._start_background_job_collector(job, km, kc, resource_operation)
             except BaseException:
                 await resource_operation.__aexit__(None, None, None)
                 raise
@@ -2008,35 +2030,46 @@ class SessionManager:
                 self._schedule_session_cleanup_after_operations(pending_cleanup)
             self._finalize_closed_session(session_id)
 
-    @asynccontextmanager
-    async def session_resource_operation(self, session_id: str) -> AsyncIterator[None]:
+    def session_resource_operation(self, session_id: str) -> AsyncContextManager[None]:
         """Keep session-owned data resources alive for one admitted operation."""
         with self._session_lifecycle_lock:
-            if session_id in self._closing_session_ids:
-                raise ValueError(f"Session {session_id} not found or is closing")
-            event = self._session_resources_drained.get(session_id)
-            if event is None:
-                event = asyncio.Event()
-                self._session_resources_drained[session_id] = event
-            event.clear()
-            self._session_resource_users[session_id] = self._session_resource_users.get(session_id, 0) + 1
-        try:
-            yield
-        finally:
-            pending_cleanup: Session | None = None
+            session_generation = self._session_generations.get(session_id)
+
+        @asynccontextmanager
+        async def operation() -> AsyncIterator[None]:
             with self._session_lifecycle_lock:
-                remaining = self._session_resource_users[session_id] - 1
-                if remaining:
-                    self._session_resource_users[session_id] = remaining
-                else:
-                    self._session_resource_users.pop(session_id, None)
-                    drained = self._session_resources_drained.pop(session_id, None)
-                    if drained is not None:
-                        drained.set()
-                    pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
-            if pending_cleanup is not None:
-                self._schedule_session_cleanup_after_operations(pending_cleanup)
-            self._finalize_closed_session(session_id)
+                if (
+                    session_generation is None
+                    or self._session_generations.get(session_id) != session_generation
+                    or session_id in self._closing_session_ids
+                    or self.storage.retrieve(session_id) is None
+                ):
+                    raise ValueError(f"Session {session_id} not found or is closing")
+                event = self._session_resources_drained.get(session_id)
+                if event is None:
+                    event = asyncio.Event()
+                    self._session_resources_drained[session_id] = event
+                event.clear()
+                self._session_resource_users[session_id] = self._session_resource_users.get(session_id, 0) + 1
+            try:
+                yield
+            finally:
+                pending_cleanup: Session | None = None
+                with self._session_lifecycle_lock:
+                    remaining = self._session_resource_users[session_id] - 1
+                    if remaining:
+                        self._session_resource_users[session_id] = remaining
+                    else:
+                        self._session_resource_users.pop(session_id, None)
+                        drained = self._session_resources_drained.pop(session_id, None)
+                        if drained is not None:
+                            drained.set()
+                        pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
+                if pending_cleanup is not None:
+                    self._schedule_session_cleanup_after_operations(pending_cleanup)
+                self._finalize_closed_session(session_id)
+
+        return operation()
 
     def _adopt_session_generation_locked(self, session_id: str) -> int:
         """Return a session lifecycle generation, assigning one while the lifecycle lock is held."""

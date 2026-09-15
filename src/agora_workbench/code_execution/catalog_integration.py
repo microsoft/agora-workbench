@@ -813,6 +813,9 @@ class CatalogSessionBinding:
         self._deferred_resources = [
             resource for resource in self._deferred_resources if id(resource) not in current_resource_ids
         ]
+        for resource in (*extensions, authorizer):
+            if resource is not None:
+                self._cancel_scheduled_resource_cleanup(resource)
         for extension in previous_extensions:
             if id(extension) in current_extension_ids:
                 continue
@@ -866,6 +869,16 @@ class CatalogSessionBinding:
                 self._scheduled_cleanup_tasks.pop(completed, None)
 
         task.add_done_callback(cleanup_finished)
+
+    def _cancel_scheduled_resource_cleanup(self, resource: object) -> None:
+        """Prevent a resource that became current again from being closed as retired."""
+        for task, scheduled_resource in tuple(self._scheduled_cleanup_tasks.items()):
+            if scheduled_resource is resource:
+                self._scheduled_cleanup_tasks.pop(task, None)
+                if self.cleanup_tracker is not None:
+                    self.cleanup_tracker.discard(task)
+                task.cancel()
+        _remove_resource_identity(self._scheduled_cleanup_resources, resource)
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
@@ -1023,6 +1036,7 @@ class CatalogIntegration:
         self._cleanup_tracker = _AsyncCleanupTracker()
         self._provider_closed = False
         self._provider_close_task: asyncio.Task[None] | None = None
+        self._shutdown_task: asyncio.Task[None] | None = None
 
     @classmethod
     def from_config(
@@ -1123,6 +1137,33 @@ class CatalogIntegration:
 
     async def shutdown(self) -> None:
         """Close only resources owned by this integration."""
+        task = self._shutdown_task
+        if task is None:
+            task = asyncio.create_task(self._shutdown_once())
+            self._shutdown_task = task
+        cancelled: asyncio.CancelledError | None = None
+        try:
+            while True:
+                try:
+                    await asyncio.shield(task)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancelled = cancelled or exc
+                    if task.done():
+                        break
+        finally:
+            if task.done() and self._shutdown_task is task:
+                self._shutdown_task = None
+        if cancelled is not None:
+            if not task.cancelled():
+                try:
+                    task.result()
+                except Exception as error:
+                    cancelled.add_note(f"Catalog shutdown also failed: {error!r}")
+            raise cancelled
+
+    async def _shutdown_once(self) -> None:
+        """Perform one shared catalog integration shutdown."""
         self._started = False
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
