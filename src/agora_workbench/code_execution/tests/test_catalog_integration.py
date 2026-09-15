@@ -258,6 +258,40 @@ async def test_tracker_retry_updates_binding_cleanup_bookkeeping():
     await integration.shutdown()
 
 
+async def test_binding_retains_resource_when_fallback_cleanup_also_fails():
+    class Extension:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls < 3:
+                raise RuntimeError("transient close failure")
+
+    extension = Extension()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        capability_extension_factory=lambda context, catalog, request_context: extension,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "token"), execution_references=True)
+
+    with pytest.raises(ExceptionGroup, match="Catalog session binding cleanup failed"):
+        await binding.aclose()
+
+    assert extension.close_calls == 2
+    assert binding._pending_cleanup_resources is not None
+    assert any(pending is extension for pending in binding._pending_cleanup_resources)
+    assert binding._scheduled_cleanup_resources == []
+    assert binding._scheduled_cleanup_tasks == {}
+
+    await binding.aclose()
+
+    assert extension.close_calls == 3
+    assert binding._pending_cleanup_resources == []
+    await integration.shutdown()
+
+
 async def test_binding_requeues_failed_scheduled_cleanup_after_pending_initialized():
     class Resource:
         def __init__(self):

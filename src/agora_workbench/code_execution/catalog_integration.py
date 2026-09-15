@@ -1119,6 +1119,7 @@ class CatalogSessionBinding:
         if self._pending_cleanup_resources:
             for resource in tuple(self._pending_cleanup_resources):
                 task: asyncio.Task[None] | None = None
+                failed = False
                 try:
                     if self.cleanup_tracker is not None and not self.cleanup_tracker.running_synchronously:
                         task = self._schedule_resource_cleanup(resource, retry=False)
@@ -1130,6 +1131,7 @@ class CatalogSessionBinding:
                 except asyncio.CancelledError as exc:
                     cancelled = cancelled or exc
                 except Exception as exc:
+                    failed = True
                     errors.append(exc)
                 finally:
                     if task is not None and task.done():
@@ -1141,7 +1143,13 @@ class CatalogSessionBinding:
                         # cancellation; keep both registries owning it so a
                         # later shutdown drain observes completion.
                         pass
-                    _remove_resource_identity(self._pending_cleanup_resources, resource)
+                    if failed:
+                        # The fallback close failed, so keep owning the resource
+                        # here and drop its scheduled marker: a later close then
+                        # retries it instead of orphaning it.
+                        _remove_resource_identity(self._scheduled_cleanup_resources, resource)
+                    else:
+                        _remove_resource_identity(self._pending_cleanup_resources, resource)
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))
