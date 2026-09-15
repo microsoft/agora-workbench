@@ -621,6 +621,18 @@ class SessionManager:
         with self._session_lifecycle_lock:
             if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
                 return None, None
+            session = self.storage.retrieve(session_id)
+            if session is not None:
+                session.claim_session_file_cleanup()
+                self._closing_session_ids.add(session_id)
+                cleanup_artifacts = True
+                try:
+                    self.storage.delete(session_id)
+                except BaseException:
+                    self._closing_session_ids.discard(session_id)
+                    self._session_lifecycle_condition.notify_all()
+                    raise
+                self._session_generations.pop(session_id, None)
             running_job_id = self._get_running_job_for_session(session_id)
             if running_job_id:
                 job = self._background_jobs.get(running_job_id)
@@ -636,18 +648,6 @@ class SessionManager:
                 caller=caller,
                 cleanup_artifacts=False,
             )
-            session = self.storage.retrieve(session_id)
-            if session is not None:
-                session.claim_session_file_cleanup()
-                self._closing_session_ids.add(session_id)
-                cleanup_artifacts = True
-                try:
-                    self.storage.delete(session_id)
-                except BaseException:
-                    self._closing_session_ids.discard(session_id)
-                    self._session_lifecycle_condition.notify_all()
-                    raise
-                self._session_generations.pop(session_id, None)
         if cleanup_artifacts:
             try:
                 self._cleanup_session_artifacts(session_id)

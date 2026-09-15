@@ -401,6 +401,7 @@ class TestCoalescing:
 
     async def test_storage_delete_failure_releases_closing_session_tombstone(self, manager, monkeypatch):
         session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
         original_delete = manager.storage.delete
         failed = False
 
@@ -415,9 +416,17 @@ class TestCoalescing:
 
         with pytest.raises(RuntimeError, match="delete failed"):
             manager.close_session(session_id)
+        await let_teardown_start()
+
+        assert manager.storage.retrieve(session_id) is not None
+        assert manager._kernels[session_id][0] is km
+        assert not km.shutdown_started
+        assert session_id not in manager._kernel_shutdown_tasks
         assert session_id not in manager._closing_session_ids
 
-        await asyncio.wait_for(asyncio.to_thread(manager.close_session, session_id), timeout=1)
+        shutdown_task = manager.close_session(session_id)
+        assert shutdown_task is not None
+        await asyncio.wait_for(shutdown_task, timeout=1)
         assert manager.storage.retrieve(session_id) is None
 
     async def test_close_claim_is_atomic_with_explicit_id_replacement(self, manager):
