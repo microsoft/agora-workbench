@@ -530,7 +530,7 @@ class SessionManager:
             finally:
                 if not session.session_file_cleanup_claimed():
                     session.claim_session_file_cleanup()
-                self._release_closing_session_id_if_safe(session_id, session)
+                self._finalize_closed_session(session_id)
             if cleanup_failed:
                 LOGGER.warning(f"Closed session {session_id} with failed cleanup (remaining={self.storage.count()})")
             else:
@@ -705,7 +705,6 @@ class SessionManager:
         expected_generation: int | None = None,
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
-        cleanup_artifacts = False
         with self._session_lifecycle_lock:
             if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
                 return None, None
@@ -713,7 +712,6 @@ class SessionManager:
             if session is not None:
                 self._closing_session_ids.add(session_id)
                 self._closing_sessions[session_id] = session
-                cleanup_artifacts = True
                 try:
                     self.storage.delete(session_id)
                 except BaseException:
@@ -739,10 +737,6 @@ class SessionManager:
                 cleanup_artifacts=False,
                 wait_for_executions=True,
             )
-        if cleanup_artifacts:
-            assert session is not None
-            if shutdown_task is None and session_id not in self._kernels:
-                self._finalize_closed_session(session_id)
         return shutdown_task, session
 
     def _finalize_closed_session(self, session_id: str) -> None:
@@ -926,6 +920,15 @@ class SessionManager:
             except Exception as exc:
                 errors.append(exc)
                 break
+        with self._session_lifecycle_lock:
+            remaining_sessions = bool(self._closing_sessions)
+        if remaining_sessions:
+            try:
+                await self.aclose_all_sessions()
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+            except Exception as exc:
+                errors.append(exc)
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))

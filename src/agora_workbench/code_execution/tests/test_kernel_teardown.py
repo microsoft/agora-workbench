@@ -585,6 +585,7 @@ class TestCoalescing:
         )
 
         manager.close_session(session_id)
+        await manager.await_resource_cleanup()
 
         # Removal failed, so the old session gives up instead of pinning the ID
         # forever; it never retries, so a replacement file stays safe.
