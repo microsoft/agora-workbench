@@ -772,12 +772,13 @@ class DataLakeDataManager:
             loop = None
 
         task: asyncio.Task[None] | None = None
-        if loop is not None:
-            task = loop.create_task(self._aclose_async_resources())
-        else:
-            asyncio.run(self._aclose_async_resources())
-
-        self._remove_cache_dir()
+        try:
+            if loop is not None:
+                task = loop.create_task(self._aclose_async_resources())
+            else:
+                asyncio.run(self._aclose_async_resources())
+        finally:
+            self._remove_cache_dir()
         return task
 
     async def aclose(self) -> None:

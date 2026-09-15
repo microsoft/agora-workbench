@@ -6,6 +6,7 @@ The manager accepts type-tagged qualified names (<type>id</type>) and
 streams assets directly to disk to avoid high memory usage.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Awaitable, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -550,6 +551,21 @@ class TestCleanup:
 
         if task is not None:
             await task
+
+    def test_cleanup_removes_cache_dir_when_async_close_is_cancelled(self):
+        """Cache cleanup must survive cancellation from a resource close."""
+        fetcher = MagicMock()
+        fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
+        manager = DataLakeDataManager(extra_fetchers=[fetcher])
+        cache_dir = manager._cache_dir
+        assert cache_dir.exists()
+
+        with pytest.raises(asyncio.CancelledError):
+            manager.cleanup()
+
+        assert not cache_dir.exists()
+        assert manager._cache_index == {}
+        fetcher.close.side_effect = None
 
 
 class TestBlobUrlResolution:
