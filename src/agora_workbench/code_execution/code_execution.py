@@ -670,6 +670,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                 pass
 
         session = None
+        catalog_resolution = None
         try:
             # Restore auth ContextVars using the MCP transport session id
             server._restore_auth_context_for_mcp_session(session_id)
@@ -694,6 +695,11 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             else:
                 session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
             set_current_session(session)
+            catalog_binding = session.extensions.get("catalog")
+            bind_request_snapshot = getattr(getattr(catalog_binding, "resolver", None), "bind_request_snapshot", None)
+            if callable(bind_request_snapshot):
+                catalog_resolution = bind_request_snapshot()
+                catalog_resolution.__enter__()
 
             # Inject tool proxies on first use of this session
             await server._inject_tool_proxies(session.session_id)
@@ -909,6 +915,8 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             )
             return json.dumps(error_dict, indent=2)
         finally:
+            if catalog_resolution is not None:
+                catalog_resolution.__exit__(None, None, None)
             if session:
                 set_current_session(None)
             server._clear_auth_context()

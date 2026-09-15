@@ -41,7 +41,7 @@ TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
 _REDACTED_URI_RE = re.compile(r"^\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#].*)?$")
 _REDACTED_URI_IN_TEXT_RE = re.compile(r"\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#][^\s<>]*)?")
-_URI_IN_TEXT_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
+_URI_IN_TEXT_RE = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"<>]+', re.IGNORECASE)
 
 
 async def _run_blocking_io(

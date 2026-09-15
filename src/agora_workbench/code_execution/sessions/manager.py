@@ -47,6 +47,13 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_SGR_RE.sub("", text)
 
 
+def _current_asyncio_task() -> asyncio.Task[Any] | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
+
+
 def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
     """Pick the richest renderable representation from a Jupyter display payload.
 
@@ -714,9 +721,14 @@ class SessionManager:
         *,
         caller: str,
         expected_generation: int | None = None,
+        expected_closing_session: Session | None = None,
     ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
         with self._session_lifecycle_lock:
+            if expected_closing_session is not None:
+                if self._closing_sessions.get(session_id) is expected_closing_session:
+                    return self._kernel_shutdown_tasks.get(session_id), None
+                return None, None
             if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
                 return None, None
             session = self.storage.retrieve(session_id)
@@ -755,7 +767,7 @@ class SessionManager:
             session = self._closing_sessions.get(session_id)
             shutdown_task = self._kernel_shutdown_tasks.get(session_id)
             shutdown_in_progress_elsewhere = (
-                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not asyncio.current_task()
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not _current_asyncio_task()
             )
             if (
                 session is None
@@ -783,7 +795,7 @@ class SessionManager:
         with self._session_lifecycle_condition:
             shutdown_task = self._kernel_shutdown_tasks.get(session_id)
             shutdown_in_progress_elsewhere = (
-                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not asyncio.current_task()
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not _current_asyncio_task()
             )
             if (
                 session_id in self._kernels
@@ -803,7 +815,13 @@ class SessionManager:
                 self._closing_sessions.pop(session_id, None)
             self._session_lifecycle_condition.notify_all()
 
-    async def aclose_session(self, session_id: str, *, expected_generation: int | None = None) -> None:
+    async def aclose_session(
+        self,
+        session_id: str,
+        *,
+        expected_generation: int | None = None,
+        expected_closing_session: Session | None = None,
+    ) -> None:
         """Close a session and wait for its kernel to actually shut down.
 
         The awaitable counterpart to :meth:`close_session`. Prefer this
@@ -815,11 +833,12 @@ class SessionManager:
             session_id,
             caller="aclose_session()",
             expected_generation=expected_generation,
+            expected_closing_session=expected_closing_session,
         )
         cleanup_task: asyncio.Task[None] | None = None
         if session is not None:
             cleanup_task = self._schedule_session_cleanup_after_operations(session)
-        elif expected_generation is None:
+        elif expected_generation is None or expected_closing_session is not None:
             with self._session_lifecycle_lock:
                 cleanup_task = self._session_resource_cleanup_tasks.get(session_id)
                 pending_session = self._pending_session_resource_cleanup.get(session_id)
@@ -874,18 +893,22 @@ class SessionManager:
     async def aclose_all_sessions(self) -> None:
         """Close every active session and wait for all kernel/resource teardown."""
         with self._session_lifecycle_lock:
-            sessions: list[tuple[str, int | None]] = [
-                (session_id, self._adopt_session_generation_locked(session_id))
+            sessions: list[tuple[str, int | None, Session | None]] = [
+                (session_id, self._adopt_session_generation_locked(session_id), None)
                 for session_id in self.storage.list_all()
             ]
-            active_session_ids = {session_id for session_id, _ in sessions}
+            active_session_ids = {session_id for session_id, _, _ in sessions}
             sessions.extend(
-                (session_id, None) for session_id in self._closing_sessions if session_id not in active_session_ids
+                (session_id, None, session)
+                for session_id, session in self._closing_sessions.items()
+                if session_id not in active_session_ids
             )
-        tasks = [
-            asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
-            for session_id, generation in sessions
-        ]
+        tasks = []
+        for session_id, generation, closing_session in sessions:
+            kwargs: dict[str, Any] = {"expected_generation": generation}
+            if closing_session is not None:
+                kwargs["expected_closing_session"] = closing_session
+            tasks.append(asyncio.create_task(self.aclose_session(session_id, **kwargs)))
         outer_cancellation: asyncio.CancelledError | None = None
         results: list[BaseException | None] = []
         if tasks:
@@ -901,12 +924,12 @@ class SessionManager:
                             results = list(completion.result())
                             break
             finally:
-                for (session_id, _), task in zip(sessions, tasks):
+                for (session_id, _, _), task in zip(sessions, tasks):
                     if task.done() and not task.cancelled() and task.exception() is not None:
                         LOGGER.error("Failed to close session %s: %s", session_id, task.exception())
         errors: list[Exception] = [
             RuntimeError(f"Failed to close session {session_id}: {result}")
-            for (session_id, _), result in zip(sessions, results)
+            for (session_id, _, _), result in zip(sessions, results)
             if isinstance(result, Exception)
         ]
         cancelled = next(

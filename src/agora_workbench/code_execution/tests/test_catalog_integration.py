@@ -74,6 +74,29 @@ class _PerUserAuthorizer:
         return request.source_id == self.allowed_source and context.caller_id is not None
 
 
+async def test_close_resources_removes_only_the_closed_equal_resource():
+    class Resource:
+        def __init__(self, fail: bool):
+            self.fail = fail
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, Resource)
+
+        def close(self) -> None:
+            if self.fail:
+                raise RuntimeError("retry me")
+
+    failed = Resource(fail=True)
+    closed = Resource(fail=False)
+    resources = [failed, closed]
+
+    with pytest.raises(ExceptionGroup):
+        await _close_resources(resources)
+
+    assert resources == [failed]
+    assert resources[0] is failed
+
+
 def _server_config(tmp_path: Path) -> ServerConfig:
     return ServerConfig(
         name="catalog-test",

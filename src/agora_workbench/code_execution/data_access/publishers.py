@@ -1313,7 +1313,7 @@ class LocalFilePublisher(AssetPublisher):
             output_fd = os.open(
                 temporary_name,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-                0o640,
+                0o600,
                 dir_fd=parent_fd,
             )
             temporary_created = True

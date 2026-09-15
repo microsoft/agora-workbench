@@ -11,8 +11,9 @@ import logging
 import re
 import shutil
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
-from contextlib import asynccontextmanager, nullcontext
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager, nullcontext
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,7 +198,7 @@ async def _close_resources(resources: list[object]) -> None:
             getattr(resource, "aclose", None) or getattr(resource, "close", None) or getattr(resource, "cleanup", None)
         )
         if not callable(close):
-            resources.remove(resource)
+            _remove_resource_identity(resources, resource)
             continue
         try:
             result = close()
@@ -208,13 +209,20 @@ async def _close_resources(resources: list[object]) -> None:
         except Exception as exc:
             errors.append(exc)
         else:
-            resources.remove(resource)
+            _remove_resource_identity(resources, resource)
     if cancelled is not None:
         if errors:
             cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
         raise cancelled
     if errors:
         raise ExceptionGroup("Resource cleanup failed.", errors)
+
+
+def _remove_resource_identity(resources: list[object], resource: object) -> None:
+    for index, candidate in enumerate(resources):
+        if candidate is resource:
+            resources.pop(index)
+            return
 
 
 @dataclass(frozen=True)
@@ -573,6 +581,9 @@ class CatalogSessionResolver:
         self._context = context
         self._snapshot: Callable[[], CatalogSessionView] | None = None
         self._closed = False
+        self._request_snapshot: ContextVar[CatalogSessionView | None] = ContextVar(
+            f"catalog-session-view-{id(self)}", default=None
+        )
 
     @property
     def unavailable_reason(self) -> str | None:
@@ -581,13 +592,31 @@ class CatalogSessionResolver:
     async def resolve(self, artifact_id: str) -> str:
         if self._closed:
             raise ValueError(self.unavailable_reason)
-        current = self._snapshot() if self._snapshot is not None else None
+        current = self._request_snapshot.get()
+        owns_snapshot = current is None
+        if current is None and self._snapshot is not None:
+            current = self._snapshot()
         try:
             catalog = current.catalog if current is not None else self._catalog
             context = current.context if current is not None else self._context
             resolved = await catalog.resolve(_decode_reference(artifact_id), context)
             return resolved.locator.uri
         finally:
+            if owns_snapshot and current is not None:
+                current.close()
+
+    @contextmanager
+    def bind_request_snapshot(self) -> Iterator[None]:
+        """Keep resolution on this request's authorization snapshot."""
+        current = self._snapshot() if self._snapshot is not None else None
+        token: Token[CatalogSessionView | None] | None = None
+        if current is not None:
+            token = self._request_snapshot.set(current)
+        try:
+            yield
+        finally:
+            if token is not None:
+                self._request_snapshot.reset(token)
             if current is not None:
                 current.close()
 
@@ -825,9 +854,9 @@ class CatalogSessionBinding:
                 except Exception as exc:
                     errors.append(exc)
                 else:
-                    self._pending_cleanup_resources.remove(extension)
+                    _remove_resource_identity(self._pending_cleanup_resources, extension)
             else:
-                self._pending_cleanup_resources.remove(extension)
+                _remove_resource_identity(self._pending_cleanup_resources, extension)
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog session cleanup failures.", errors)))

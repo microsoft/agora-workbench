@@ -95,6 +95,8 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
     )
     embedded_uri = "failed <broken " + "s3" + "://" + "user:secret@" + "example.com/data?token=secret retry"
     assert safe_artifact_reference(embedded_uri) == "failed <broken s3://example.com/data retry"
+    apostrophe_uri = "failed s3://user:sec" + "'ret@example.com/data?token=secret retry"
+    assert safe_artifact_reference(apostrophe_uri) == "failed s3://example.com/data retry"
     redacted_marker = "failed <broken " + "*" * 6 + "example.com/data?token=secret retry"
     assert safe_artifact_reference(redacted_marker) == "failed <broken example.com/data retry"
     assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"
@@ -1179,6 +1181,9 @@ def test_transfer_object_metadata_is_copied_immutable_and_rejects_credential_key
         TransferOptions(
             object_metadata={"source": "copied from https://account123.blob.core.windows.net/container/data?sig=secret"}
         )
+    apostrophe_userinfo_uri = "https://user:sec" + "'ret@account123.blob.core.windows.net/container/data?sig=secret"
+    with pytest.raises(ValueError, match="URI values"):
+        TransferOptions(object_metadata={"source": apostrophe_userinfo_uri})
     with pytest.raises(ValueError, match="URI values"):
         TransferOptions(object_metadata={"source": "https://user:secret@example.com/data"})
     redacted_locator = "*" * 6 + "example.com/data?sig=secret"
