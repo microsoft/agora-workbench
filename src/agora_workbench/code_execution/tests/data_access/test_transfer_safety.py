@@ -97,6 +97,8 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
     assert safe_artifact_reference(embedded_uri) == "failed <broken s3://example.com/data retry"
     apostrophe_uri = "failed s3://user:sec" + "'ret@example.com/data?token=secret retry"
     assert safe_artifact_reference(apostrophe_uri) == "failed s3://example.com/data retry"
+    quoted_uri = "failed 's3" + "://user:secret@example.com/data?token=secret' retry"
+    assert safe_artifact_reference(quoted_uri) == "failed 's3://example.com/data' retry"
     redacted_marker = "failed <broken " + "*" * 6 + "example.com/data?token=secret retry"
     assert safe_artifact_reference(redacted_marker) == "failed <broken example.com/data retry"
     assert safe_artifact_reference("ordinary text?token=not-a-uri") == "ordinary text?token=not-a-uri"

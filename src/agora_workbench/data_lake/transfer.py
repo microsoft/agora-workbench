@@ -223,11 +223,19 @@ def contains_artifact_locator(value: str) -> bool:
 def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
 
+    def sanitize_uri_match(match: re.Match[str]) -> str:
+        uri = match.group(0)
+        trailing_quote = uri.endswith("'") and match.start() > 0 and match.string[match.start() - 1] == "'"
+        if trailing_quote:
+            uri = uri[:-1]
+        sanitized = sanitize_uri_for_display(uri)
+        return f"{sanitized}'" if trailing_quote else sanitized
+
     def sanitize_reference(reference: str) -> str:
         redacted = _REDACTED_URI_RE.fullmatch(reference)
         if redacted is not None:
             return redacted.group("location")
-        sanitized = _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), reference)
+        sanitized = _URI_IN_TEXT_RE.sub(sanitize_uri_match, reference)
         return _REDACTED_URI_IN_TEXT_RE.sub(
             lambda match: match.group("location"),
             sanitized,
