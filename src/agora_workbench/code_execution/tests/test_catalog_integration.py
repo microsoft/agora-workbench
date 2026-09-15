@@ -154,7 +154,7 @@ async def test_binding_failed_cleanup_is_retained_for_integration_retry():
     assert extension.close_calls == 2
     assert binding._scheduled_cleanup_resources == []
     assert binding._scheduled_cleanup_tasks == {}
-    assert id(extension) not in binding._retirement_started_resource_ids
+    assert id(extension) not in binding._retirement_started_resources
     await binding.aclose()
     assert extension.close_calls == 2
     await integration.shutdown()
@@ -197,7 +197,7 @@ async def test_binding_tracks_same_cleanup_task_through_cancelled_retry():
     await close_binding
 
     assert resource.close_calls == 2
-    assert binding._retirement_started_resources == [resource]
+    assert binding._retirement_started_resources == {}
     await integration.shutdown()
 
 
