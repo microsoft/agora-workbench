@@ -112,11 +112,13 @@ def _install_files(outputs: tuple[tuple[Path, str], ...], *, force: bool) -> Non
             try:
                 destination.unlink(missing_ok=True)
             except OSError:
+                # Best-effort rollback must not mask the original install failure.
                 pass
         for destination, backup in reversed(tuple(backups.items())):
             try:
                 os.replace(backup, destination)
             except OSError:
+                # Best-effort rollback must not mask the original install failure.
                 pass
         raise
     finally:
@@ -124,12 +126,14 @@ def _install_files(outputs: tuple[tuple[Path, str], ...], *, force: bool) -> Non
             try:
                 stage.unlink(missing_ok=True)
             except OSError:
+                # Best-effort staging cleanup must not mask the operation result.
                 pass
         if committed:
             for backup in backups.values():
                 try:
                     backup.unlink(missing_ok=True)
                 except OSError:
+                    # The outputs are committed; stale backup cleanup is non-fatal.
                     pass
 
 
