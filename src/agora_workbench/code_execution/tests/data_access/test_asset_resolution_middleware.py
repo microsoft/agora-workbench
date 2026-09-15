@@ -66,6 +66,7 @@ def mock_session():
     session.object_store.store = MagicMock()
     session.data_manager = MagicMock()
     session.data_manager.get_cache_path = AsyncMock()
+    session.extensions = {}
     return session
 
 
@@ -238,6 +239,50 @@ class TestAssetResolutionMiddleware:
         with _patch_set_current_session():
             assert await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, call_next) == "result"
         assert not lease_active
+
+    async def test_catalog_request_snapshot_covers_resolution_and_tool_execution(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+
+        snapshot_active = False
+
+        class _SnapshotContext:
+            def __enter__(self):
+                nonlocal snapshot_active
+                snapshot_active = True
+
+            def __exit__(self, *_args):
+                nonlocal snapshot_active
+                snapshot_active = False
+                return False
+
+        class _Resolver:
+            def bind_request_snapshot(self):
+                return _SnapshotContext()
+
+        catalog_binding = MagicMock()
+        catalog_binding.resolver = _Resolver()
+        mock_session.extensions = {"catalog": catalog_binding}
+
+        async def _get_cache_path(_asset_id, **_kwargs):
+            assert snapshot_active
+            return Path("/cache/test")
+
+        def _call_next(_context):
+            assert snapshot_active
+            return "result"
+
+        mock_session.data_manager.get_cache_path.side_effect = _get_cache_path
+        call_next = AsyncMock(side_effect=_call_next)
+
+        with _patch_set_current_session():
+            assert await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, call_next) == "result"
+        assert not snapshot_active
 
     @pytest.mark.parametrize(
         "secret_uri",
