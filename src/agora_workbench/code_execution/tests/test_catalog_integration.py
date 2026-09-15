@@ -333,6 +333,34 @@ async def test_configured_keyword_only_catalog_searches_without_embeddings(tmp_p
     assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
 
 
+async def test_configured_keyword_only_catalog_uses_fts_weight(tmp_path, monkeypatch):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root))],
+        search=SearchConfig(embedding_model="none", hybrid_alpha=0.0),
+    )
+    provider = _ConfiguredCatalogProvider(config)
+    captured = {}
+    original_search = CatalogDB.search
+
+    def search(db, query, **kwargs):
+        captured.update(kwargs)
+        return original_search(db, query, **kwargs)
+
+    monkeypatch.setattr(CatalogDB, "search", search)
+    try:
+        await provider.load()
+        page = await provider.search(SearchRequest("searchable"), RequestContext())
+    finally:
+        await provider.aclose()
+
+    assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+    assert captured["query_embedding"] is None
+    assert captured["hybrid_alpha"] == 1.0
+
+
 def test_from_config_rejects_invalid_authorizer_before_opening_database(tmp_path):
     source_root = tmp_path / "source"
     source_root.mkdir()

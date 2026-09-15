@@ -27,7 +27,8 @@ from typing import Any, cast
 import pytest
 
 from ..server import CodeExecutionServer
-from ..sessions.manager import KERNEL_BOOTSTRAP_TOOL_PROXIES, SessionManager, _BackgroundJob
+from ..sessions.manager import KERNEL_BOOTSTRAP_TOOL_PROXIES, SessionConfig, SessionManager, _BackgroundJob
+from ..sessions.session import Session
 from ..sessions.storage import InMemoryStorage
 
 
@@ -1052,6 +1053,51 @@ class TestKernelRebuildWaits:
 
         assert not shutdown_waited
         assert "s1" not in manager._kernels
+
+    async def test_preexisting_storage_session_gets_kernel_generation(self, monkeypatch):
+        from .. import sessions as sessions_pkg
+
+        storage = InMemoryStorage()
+        storage.store("restored", Session("restored", {}, "default", "user", "token", {}))
+        manager = SessionManager(SessionConfig(storage_backend=storage))
+
+        class FakeKernelManager:
+            def __init__(self, kernel_name=None):
+                self.kernel_name = kernel_name
+
+            @property
+            def kernel_spec(self):
+                raise RuntimeError("no kernelspec in tests")
+
+            async def start_kernel(self, env=None, cwd=None):
+                pass
+
+            def client(self):
+                return FakeKernelClient()
+
+            async def shutdown_kernel(self, now=False):
+                pass
+
+            async def cleanup_resources(self):
+                pass
+
+        class FakeKernelClient:
+            def start_channels(self):
+                pass
+
+            async def wait_for_ready(self):
+                pass
+
+            def stop_channels(self):
+                pass
+
+        monkeypatch.setattr(sessions_pkg.manager, "AsyncKernelManager", FakeKernelManager)
+
+        kernel = await manager._get_or_create_kernel("restored")
+
+        assert kernel == manager._kernels["restored"]
+        assert manager._session_generations["restored"] == manager._kernel_session_generations["restored"]
+        await manager.aclose_session("restored")
 
     async def test_get_or_create_waits_for_pending_teardown(self, manager, monkeypatch):
         from .. import sessions as sessions_pkg

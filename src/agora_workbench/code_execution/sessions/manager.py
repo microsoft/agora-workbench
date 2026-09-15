@@ -820,7 +820,13 @@ class SessionManager:
         with self._session_lifecycle_lock:
             session_generation = self._session_generations.get(session_id)
             if session_generation is None:
-                raise ValueError(f"Session {session_id} does not exist.")
+                if session_id in self._closing_session_ids or self.storage.retrieve(session_id) is None:
+                    raise ValueError(f"Session {session_id} does not exist.")
+                # Pluggable storage may be pre-populated before this manager
+                # starts. Adopt such sessions lazily under the lifecycle lock.
+                self._session_generation_seq += 1
+                session_generation = self._session_generation_seq
+                self._session_generations[session_id] = session_generation
         await self.await_kernel_shutdown(session_id)
 
         with self._session_lifecycle_lock:

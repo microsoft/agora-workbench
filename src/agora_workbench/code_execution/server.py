@@ -369,7 +369,6 @@ class CodeExecutionServer(BaseMCPServer):
                         )
                         if cleanup_error is not None:
                             validation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
-                        custom_extensions = {}
                         raise validation_error
                     if "catalog" in custom_extensions:
                         cleanup_error = self.session_manager._cleanup_unclaimed_session_resources(

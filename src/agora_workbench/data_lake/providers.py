@@ -196,7 +196,7 @@ class SQLiteCatalogProvider:
             source_ids=source_ids,
             top=request.page.limit + 1,
             offset=offset,
-            hybrid_alpha=self._hybrid_alpha,
+            hybrid_alpha=self._hybrid_alpha if query_embedding is not None else 1.0,
         )
         page_records = records[: request.page.limit]
         has_more = len(records) > request.page.limit
