@@ -89,6 +89,43 @@ def test_safe_artifact_reference_sanitizes_raw_and_tagged_uris():
     raw = "*" * 6 + "example.com/data?sig=secret#fragment"
     assert safe_artifact_reference(raw) == "example.com/data"
     assert safe_artifact_reference(f"<blob>{raw}</blob>") == "<blob>example.com/data</blob>"
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "expected"),
+    [
+        ("https://storage.example.test", "https://storage.example.test"),
+        ("http://127.0.0.1:10000/devstoreaccount1/", "http://127.0.0.1:10000/devstoreaccount1"),
+        ("http://localhost:10000/devstoreaccount1", "http://localhost:10000/devstoreaccount1"),
+    ],
+)
+def test_blob_fetcher_accepts_explicit_https_and_loopback_emulator_endpoints(endpoint, expected):
+    fetcher = BlobFetcher(
+        credential=MagicMock(),
+        account_endpoints={"account123": endpoint},
+    )
+
+    assert fetcher._account_url("account123") == expected
+    assert fetcher._account_url("otheraccount") == "https://otheraccount.blob.core.windows.net"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        "http://storage.example.test",
+        "ftp://127.0.0.1/storage",
+        "https://user:password@storage.example.test",
+        "https://storage.example.test?sig=secret",
+        "https://storage.example.test/#fragment",
+        "http://127.0.0.1:10000/../other",
+    ],
+)
+def test_blob_fetcher_rejects_unsafe_explicit_endpoints(endpoint):
+    with pytest.raises(ValueError):
+        BlobFetcher(
+            credential=MagicMock(),
+            account_endpoints={"account123": endpoint},
+        )
     assert (
         safe_artifact_reference("failed <broken s3://user:secret@example.com/data?token=secret retry")
         == "failed <broken s3://example.com/data retry"

@@ -263,6 +263,31 @@ def test_noop_auth_import_does_not_require_azure_sdk():
     assert result.returncode == 0, result.stderr
 
 
+def test_storage_credential_annotation_is_introspectable_without_azure_sdk():
+    result = _run_isolated(
+        """
+        import importlib.abc
+        import sys
+        from typing import Any, get_type_hints
+
+        class BlockAzure(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "azure" or fullname.startswith("azure."):
+                    raise ModuleNotFoundError(f"blocked Azure SDK import: {fullname}", name=fullname)
+                return None
+
+        sys.meta_path.insert(0, BlockAzure())
+
+        from agora_workbench.code_execution.data_access.credentials import create_storage_credential
+
+        assert get_type_hints(create_storage_credential)["return"] is Any
+        assert not any(name == "azure" or name.startswith("azure.") for name in sys.modules)
+        """
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_public_and_compatibility_exports_do_not_require_optional_sdks():
     result = _run_isolated(
         """

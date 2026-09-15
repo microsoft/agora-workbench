@@ -34,6 +34,8 @@ from typing import Any, TYPE_CHECKING
 if TYPE_CHECKING:
     from azure.core.credentials import AccessToken
     from azure.core.credentials_async import AsyncTokenCredential
+else:
+    AsyncTokenCredential = Any
 
 LOGGER = logging.getLogger(__name__)
 
