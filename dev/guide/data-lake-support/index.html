@@ -1737,16 +1737,27 @@ failure, shutdown cleanup, and the measured budgets above.</p>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>src/agora_workbench/data_lake/tests/test_azurite_acceptance.py<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-m<span class="w"> </span>azurite<span class="w"> </span>-v
 </code></pre></div>
-<p>The test creates a uniquely named container, exercises real Blob uploads,
-downloads, register transfer, ETag manifest CAS, interruption and orphan
-reconciliation, then deletes the container. If the variable is absent, it
-skips cleanly.</p>
-<p>Azurite does not provide Entra ID or Azure RBAC. Also, the public catalog
-configuration intentionally canonicalizes Azure sources to production
-<code>az://account/container/...</code> endpoints; it does not expose an arbitrary Blob
-endpoint override. Therefore Azurite proves the public
-<code>BlobManagedStorage</code>/managed-writer mechanics, while catalog enumeration,
-identity and RBAC remain live-Azure gates.</p>
+<p>The tests create uniquely named containers and prove two public paths against
+actual emulator network I/O:</p>
+<ul>
+<li><code>BlobManagedStorage</code> plus <code>ManagedCatalogWriter</code> uploads, downloads,
+  registration transfer, ETag manifest CAS, interruption and reconciliation;</li>
+<li><code>SQLiteCatalogProvider</code> plus <code>CatalogIntegration</code>, policy-aware MCP
+  <code>search_data</code>, opaque execution-reference resolution, <code>DataLakeDataManager</code>
+  and <code>BlobFetcher</code> transfer of actual emulator bytes.</li>
+</ul>
+<p>The execution composition supplies <code>BlobFetcher.account_endpoints</code> for the
+<code>devstoreaccount1</code> account. Explicit endpoints may use HTTPS, or plain HTTP
+only on loopback for emulators; credentials, query strings, fragments and dot
+segments are rejected. The canonical artifact locator remains
+<code>az://account/container/path</code>, and configured account/container/prefix scopes
+still apply.</p>
+<p><code>CatalogConfig</code> Blob enumeration intentionally continues to target canonical
+Azure production endpoints; the Azurite acceptance provider is populated
+through the public SQLite catalog API rather than weakening source URI
+validation. Azurite does not provide Entra ID or Azure RBAC, so production
+catalog enumeration, identity and RBAC remain live-Azure gates. Every Azurite
+test deletes its container. If the variable is absent, the gate skips cleanly.</p>
 <h3 id="live-azure">Live Azure<a class="headerlink" href="#live-azure" title="Permanent link">&para;</a></h3>
 <p>Use dedicated, disposable prefixes in one existing test storage account. Do
 not use production data. Configure:</p>
