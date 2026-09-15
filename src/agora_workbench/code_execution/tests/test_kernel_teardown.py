@@ -865,6 +865,9 @@ class TestAwaitableClose:
     async def test_resource_operation_holds_explicit_id_until_deferred_cleanup_finishes(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         session = manager.get_session(session_id)
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "result.csv").write_text("data")
+        manager._session_artifacts[session_id] = {}
         cleanup_started = asyncio.Event()
         cleanup_gate = asyncio.Event()
 
@@ -899,6 +902,8 @@ class TestAwaitableClose:
 
         cleanup_gate.set()
         await manager.await_resource_cleanup()
+        assert session_id not in manager._session_artifacts
+        assert not outputs.exists()
         replacement = manager.create_session(
             data={},
             user_identity="replacement",
@@ -908,6 +913,30 @@ class TestAwaitableClose:
         )
         assert replacement == session_id
         manager.close_session(session_id)
+
+    async def test_aclose_session_joins_deferred_resource_cleanup(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        cleanup_started = asyncio.Event()
+        original_aclose = session.aclose
+
+        async def observed_cleanup():
+            cleanup_started.set()
+            await original_aclose()
+
+        session.aclose = observed_cleanup
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+        manager.close_session(session_id)
+
+        close_task = asyncio.create_task(manager.aclose_session(session_id))
+        await asyncio.sleep(0)
+        assert not close_task.done()
+        assert not cleanup_started.is_set()
+
+        await operation.__aexit__(None, None, None)
+        await close_task
+        assert cleanup_started.is_set()
 
     async def test_thread_close_defers_resource_cleanup_until_operation_drains(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})

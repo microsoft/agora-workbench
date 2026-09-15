@@ -607,7 +607,7 @@ class SessionManager:
         if self._session_resource_cleanup_tasks.get(session_id) is task:
             self._session_resource_cleanup_tasks.pop(session_id, None)
         self._on_resource_cleanup_done(task)
-        self._release_closing_session_id_if_safe(session_id, session)
+        self._finalize_closed_session(session_id)
 
     async def _cleanup_session_after_operations(self, session: Session) -> None:
         execute_event = self._kernel_execute_drained.get(session.session_id)
@@ -782,6 +782,13 @@ class SessionManager:
         cleanup_task: asyncio.Task[None] | None = None
         if session is not None:
             cleanup_task = self._schedule_session_cleanup_after_operations(session)
+        elif expected_generation is None:
+            with self._session_lifecycle_lock:
+                cleanup_task = self._session_resource_cleanup_tasks.get(session_id)
+                pending_session = self._pending_session_resource_cleanup.get(session_id)
+            if cleanup_task is None and pending_session is not None:
+                session = pending_session
+                cleanup_task = self._schedule_session_cleanup_after_operations(session)
 
         async def finish_cleanup() -> None:
             cleanup_error: BaseException | None = None
@@ -794,10 +801,8 @@ class SessionManager:
                 cleanup_error = exc
             finally:
                 if session is not None:
-                    if not session.session_file_cleanup_claimed():
-                        session.claim_session_file_cleanup()
-                    self._release_closing_session_id_if_safe(session_id, session)
                     self._track_session_cleanup_tasks(session)
+                    self._finalize_closed_session(session_id)
             if shutdown_task is not None:
                 _ = await shutdown_task
             else:
