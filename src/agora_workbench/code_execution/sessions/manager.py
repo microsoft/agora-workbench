@@ -244,6 +244,8 @@ class SessionManager:
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
         self._kernel_execute_lock_users: dict[str, int] = {}
         self._retired_kernel_execute_locks: set[str] = set()
+        self._session_resource_users: dict[str, int] = {}
+        self._session_resources_drained: dict[str, asyncio.Event] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
         # Artifact pipeline state: the token -> record map used by the HTTP
@@ -571,10 +573,22 @@ class SessionManager:
 
     def _start_session_cleanup(self, session: Session) -> None:
         """Start all sync-path cleanup and retain any asynchronous work."""
+        if self._session_resource_users.get(session.session_id, 0):
+            task = asyncio.get_running_loop().create_task(self._cleanup_session_after_operations(session))
+            self._resource_cleanup_tasks.add(task)
+            task.add_done_callback(self._on_resource_cleanup_done)
+            return
         try:
             session.cleanup()
         finally:
             self._track_session_cleanup_tasks(session)
+
+    async def _cleanup_session_after_operations(self, session: Session) -> None:
+        event = self._session_resources_drained.get(session.session_id)
+        if event is not None:
+            await event.wait()
+        await session.aclose()
+        self._track_session_cleanup_tasks(session)
 
     def _track_session_cleanup_tasks(self, session: Session) -> tuple[asyncio.Task[None], ...]:
         """Transfer session-owned cleanup tasks into the manager's strong-reference set."""
@@ -725,7 +739,7 @@ class SessionManager:
         )
         cleanup_task: asyncio.Task[None] | None = None
         if session is not None:
-            cleanup_task = asyncio.create_task(session.aclose())
+            cleanup_task = asyncio.create_task(self._cleanup_session_after_operations(session))
 
         async def finish_cleanup() -> None:
             cleanup_error: BaseException | None = None
@@ -1766,6 +1780,29 @@ class SessionManager:
                         self._kernel_execute_locks.pop(session_id, None)
                         self._retired_kernel_execute_locks.discard(session_id)
             self._finalize_closed_session(session_id)
+
+    @asynccontextmanager
+    async def session_resource_operation(self, session_id: str) -> AsyncIterator[None]:
+        """Keep session-owned data resources alive for one admitted operation."""
+        with self._session_lifecycle_lock:
+            event = self._session_resources_drained.get(session_id)
+            if event is None:
+                event = asyncio.Event()
+                self._session_resources_drained[session_id] = event
+            event.clear()
+            self._session_resource_users[session_id] = self._session_resource_users.get(session_id, 0) + 1
+        try:
+            yield
+        finally:
+            with self._session_lifecycle_lock:
+                remaining = self._session_resource_users[session_id] - 1
+                if remaining:
+                    self._session_resource_users[session_id] = remaining
+                else:
+                    self._session_resource_users.pop(session_id, None)
+                    drained = self._session_resources_drained.pop(session_id, None)
+                    if drained is not None:
+                        drained.set()
 
     def _adopt_session_generation_locked(self, session_id: str) -> int:
         """Return a session lifecycle generation, assigning one while the lifecycle lock is held."""

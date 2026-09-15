@@ -653,6 +653,12 @@ class CatalogSessionBinding:
         previous_extensions = self.capability_extensions
         self.capability_extensions = extensions
         current_extension_ids = {id(extension) for extension in extensions}
+        current_resource_ids = set(current_extension_ids)
+        if authorizer is not None:
+            current_resource_ids.add(id(authorizer))
+        self._deferred_resources = [
+            resource for resource in self._deferred_resources if id(resource) not in current_resource_ids
+        ]
         for extension in previous_extensions:
             if id(extension) in current_extension_ids:
                 continue
@@ -945,7 +951,10 @@ class CatalogIntegration:
             errors.append(exc)
         finally:
             if self._provider_closed:
-                self._cleanup_private_cache_directory()
+                try:
+                    self._cleanup_private_cache_directory()
+                except Exception as exc:
+                    errors.append(exc)
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog shutdown failures.", errors)))
@@ -982,7 +991,7 @@ class CatalogIntegration:
 
     def _cleanup_private_cache_directory(self) -> None:
         if self._private_cache_directory is not None:
-            shutil.rmtree(self._private_cache_directory, ignore_errors=True)
+            shutil.rmtree(self._private_cache_directory)
             self._private_cache_directory = None
 
     def bind_session(self, context: SessionContext, *, execution_references: bool) -> CatalogSessionBinding:
@@ -1113,7 +1122,7 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 def _agent_safe_identifier(value: str, field_name: str) -> str:
     """Reject locator-shaped identifiers that cannot be safely round-tripped."""
-    if safe_artifact_reference(value) != value:
+    if _URI_IN_TEXT_RE.search(value) or safe_artifact_reference(value) != value:
         raise ValueError(f"Catalog {field_name} must be a logical identifier, not a URI.")
     return value
 

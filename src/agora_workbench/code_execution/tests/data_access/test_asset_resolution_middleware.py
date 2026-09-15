@@ -6,6 +6,7 @@ before FastMCP/Pydantic validation runs.
 """
 
 import importlib
+from contextlib import asynccontextmanager
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
@@ -32,6 +33,12 @@ def mock_server():
     server._restore_auth_context_for_mcp_session = MagicMock()
     server._clear_auth_context = MagicMock()
     server._get_or_create_session = AsyncMock()
+
+    @asynccontextmanager
+    async def session_resource_operation(_session_id):
+        yield
+
+    server.session_manager.session_resource_operation = session_resource_operation
     return server
 
 

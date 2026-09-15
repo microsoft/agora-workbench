@@ -799,6 +799,28 @@ class TestAwaitableClose:
         _ = await close_task
         assert manager.storage.retrieve(session_id) is None
 
+    async def test_aclose_session_waits_for_active_session_resource_operation(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        cleanup_started = asyncio.Event()
+        original_aclose = session.aclose
+
+        async def observed_cleanup():
+            cleanup_started.set()
+            await original_aclose()
+
+        session.aclose = observed_cleanup
+        operation = manager.session_resource_operation(session_id)
+        await operation.__aenter__()
+        close_task = asyncio.create_task(manager.aclose_session(session_id))
+        await asyncio.sleep(0)
+
+        assert not cleanup_started.is_set()
+        assert not close_task.done()
+        await operation.__aexit__(None, None, None)
+        _ = await close_task
+        assert cleanup_started.is_set()
+
     async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):
         session_ids = [
             manager.create_session(data={}, user_identity="u", user_token="t", token_claims={}) for _ in range(2)
@@ -1401,7 +1423,8 @@ class TestKernelRebuildWaits:
 
         # A second, independent consumer waits directly on the same task.
         async def co_wait() -> None:
-            await shared_teardown
+            result = await shared_teardown
+            assert result is None
 
         co_waiter = asyncio.create_task(co_wait())
         await asyncio.sleep(0)
@@ -1414,7 +1437,7 @@ class TestKernelRebuildWaits:
         gate.set()
         with pytest.raises(asyncio.CancelledError):
             _ = await create
-        await co_waiter
+        assert await co_waiter is None
 
         assert old_kernel.shutdown_finished
         assert not shared_teardown.cancelled()

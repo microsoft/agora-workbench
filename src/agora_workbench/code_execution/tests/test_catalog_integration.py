@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -198,6 +199,17 @@ def test_catalog_payload_rejects_locator_shaped_identifiers(artifact_id, source_
     assert "secret" not in str(error.value)
 
 
+@pytest.mark.parametrize("artifact_id", ["https://example.test/data", "az://container/data"])
+def test_catalog_payload_rejects_plain_uri_identifiers(artifact_id):
+    artifact = CatalogArtifact(
+        ArtifactReference(artifact_id, "source"),
+        ArtifactPresentation("data.csv"),
+    )
+
+    with pytest.raises(ValueError, match="logical identifier"):
+        _artifact_payload(artifact)
+
+
 async def test_configured_catalog_uses_stable_fallback_source_id(tmp_path):
     root = tmp_path / "implicit-source"
     root.mkdir()
@@ -253,6 +265,33 @@ async def test_failed_provider_close_retains_private_cache_for_shutdown_retry(tm
     await integration.shutdown()
     assert not private_directory.exists()
     assert integration._private_cache_directory is None
+
+
+async def test_failed_private_cache_removal_is_retried(tmp_path, monkeypatch):
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[SourceConfig(source_id="source", path=str(tmp_path))])
+    )
+    private_directory = integration._private_cache_directory
+    assert private_directory is not None
+    original_rmtree = shutil.rmtree
+    attempts = 0
+
+    def fail_once(path):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PermissionError("busy")
+        original_rmtree(path)
+
+    monkeypatch.setattr(shutil, "rmtree", fail_once)
+    with pytest.raises(ExceptionGroup, match="shutdown failed"):
+        await integration.shutdown()
+
+    assert integration._private_cache_directory == private_directory
+    assert private_directory.exists()
+    await integration.shutdown()
+    assert integration._private_cache_directory is None
+    assert attempts == 2
 
 
 async def test_configured_catalog_preserves_valid_manifest_generation_after_refresh_failure(tmp_path):
@@ -2029,6 +2068,41 @@ async def test_refresh_retains_authorizer_until_request_snapshot_releases():
     assert authorizers[0].close_calls == 1
 
     await binding.aclose()
+
+
+async def test_refresh_reactivates_deferred_authorizer_without_closing_it():
+    class Authorizer:
+        def __init__(self, name):
+            self.name = name
+            self.close_calls = 0
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    first = Authorizer("first")
+    second = Authorizer("second")
+    by_token = {"first": first, "second": second, "first-again": first}
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=lambda context: by_token[context.user_token],
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "first"), execution_references=True)
+    snapshot = binding.snapshot()
+
+    binding.refresh_context(SessionContext("session", "user", "second"))
+    binding.refresh_context(SessionContext("session", "user", "first-again"))
+    snapshot.close()
+    await integration._cleanup_tracker.drain()
+
+    assert binding.owned_authorizer is first
+    assert first.close_calls == 0
+    assert second.close_calls == 1
+    assert await binding.catalog.capabilities(binding.context)
+    await binding.aclose()
+    assert first.close_calls == 1
 
 
 async def test_resolver_retains_authorizer_until_resolution_finishes():
