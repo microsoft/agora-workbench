@@ -1591,6 +1591,18 @@ class SessionManager:
             self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
 
+    async def _collect_background_job_with_resources(
+        self,
+        job: _BackgroundJob,
+        km: AsyncKernelManager,
+        kc: "AsyncKernelClient",
+        resource_operation: Any,
+    ) -> None:
+        try:
+            await self._collect_background_job(job, km, kc)
+        finally:
+            await resource_operation.__aexit__(None, None, None)
+
     async def start_background_execution_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> dict[str, str]:
@@ -1633,7 +1645,13 @@ class SessionManager:
             user_identity=user_identity,
             outputs_before=outputs_before,
         )
-        job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
+        resource_operation = self.session_resource_operation(session_id)
+        await resource_operation.__aenter__()
+        try:
+            job.task = asyncio.create_task(self._collect_background_job_with_resources(job, km, kc, resource_operation))
+        except BaseException:
+            await resource_operation.__aexit__(None, None, None)
+            raise
         self._background_jobs[job_id] = job
         self._session_running_jobs[session_id] = job_id
 
@@ -1832,7 +1850,15 @@ class SessionManager:
                 success=success,
                 outputs_before=outputs_before,
             )
-            job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
+            resource_operation = self.session_resource_operation(session_id)
+            await resource_operation.__aenter__()
+            try:
+                job.task = asyncio.create_task(
+                    self._collect_background_job_with_resources(job, km, kc, resource_operation)
+                )
+            except BaseException:
+                await resource_operation.__aexit__(None, None, None)
+                raise
             self._background_jobs[job_id] = job
             self._session_running_jobs[session_id] = job_id
 

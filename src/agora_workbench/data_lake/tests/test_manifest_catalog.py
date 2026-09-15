@@ -1713,6 +1713,43 @@ async def test_manifest_provider_closes_cached_embedding_provider(tmp_path):
     embedding_provider.close.assert_awaited_once_with()
 
 
+async def test_manifest_provider_close_waits_for_active_embedding_search(tmp_path):
+    config = CatalogConfig(
+        sources=_local_config(tmp_path).sources,
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2),
+    )
+    (tmp_path / "approved").mkdir()
+    (tmp_path / "approved" / "data.csv").write_text("data")
+    (tmp_path / "manifest.json").write_text(json.dumps(_manifest()))
+    provider = ManifestCatalogProvider(config)
+    await provider.load()
+    embed_started = asyncio.Event()
+    release_embed = asyncio.Event()
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+
+    async def blocked_embed(_queries):
+        embed_started.set()
+        await release_embed.wait()
+        return [[0.25, 0.75]]
+
+    embedding_provider.embed = AsyncMock(side_effect=blocked_embed)
+    provider._indexer._embedding_provider = embedding_provider
+    provider._db_owned.search = MagicMock(return_value=[])
+
+    search = asyncio.create_task(provider.search(SearchRequest(query="approved"), RequestContext()))
+    await embed_started.wait()
+    close = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+
+    assert not close.done()
+    embedding_provider.close.assert_not_awaited()
+
+    release_embed.set()
+    assert (await search).items == ()
+    await close
+    embedding_provider.close.assert_awaited_once_with()
+
+
 async def test_refresh_error_preserves_source_id_with_colon(tmp_path):
     provider = ManifestCatalogProvider(
         CatalogConfig(

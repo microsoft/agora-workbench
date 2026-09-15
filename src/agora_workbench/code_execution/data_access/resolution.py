@@ -139,16 +139,10 @@ class AssetResolutionMiddleware(Middleware):
 
         self.server._restore_auth_context_for_mcp_session(session_id)
         tool_name = context.message.name
-        session = None
         try:
-            if session_id is None:
-                session = await self.server._get_or_create_session(tool_name, session_id=None)
-            resource_session_id = session.session_id if session is not None else session_id
-            assert resource_session_id is not None
+            session = await self.server._get_or_create_session(tool_name, session_id=session_id)
 
-            async with self.server.session_manager.session_resource_operation(resource_session_id):
-                if session is None:
-                    session = await self.server._get_or_create_session(tool_name, session_id=session_id)
+            async with self.server.session_manager.session_resource_operation(session.session_id):
                 set_current_session(session)
                 extensions = getattr(session, "extensions", None)
                 catalog_binding = extensions.get("catalog") if hasattr(extensions, "get") else None

@@ -456,7 +456,11 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         unavailable = []
         for source_id in self._configured_source_ids:
             state = states.get(source_id)
-            if state is None or state.successful_generation < 1:
+            if (
+                state is None
+                or state.successful_generation < 1
+                or (source_id in self._manifest_source_ids and state.manifest_generation is None)
+            ):
                 unavailable.append(source_id)
                 continue
             if source_id not in failed_source_ids:
@@ -1328,21 +1332,15 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         restore_auth = getattr(server, "_restore_auth_context_for_mcp_session", None)
         if callable(restore_auth):
             restore_auth(session_id)
-        session = None
         try:
-            if session_id is None:
-                session = await server._get_or_create_session(tool_name, session_id=None)
-            resource_session_id = session.session_id if session is not None else session_id
-            assert resource_session_id is not None
+            session = await server._get_or_create_session(tool_name, session_id=session_id)
             session_manager = getattr(server, "session_manager", None)
             resource_operation = (
-                session_manager.session_resource_operation(resource_session_id)
+                session_manager.session_resource_operation(session.session_id)
                 if session_manager is not None
                 else nullcontext()
             )
             async with resource_operation:
-                if session is None:
-                    session = await server._get_or_create_session(tool_name, session_id=session_id)
                 catalog_binding = session.extensions.get("catalog")
                 if catalog_binding is None:
                     raise RuntimeError("Catalog session binding is unavailable.")

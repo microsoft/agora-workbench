@@ -424,24 +424,36 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             )
 
     async def capabilities(self) -> tuple[SourceCapabilities, ...]:
-        self._require_ready()
-        return await super().capabilities()
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().capabilities()
 
     async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().search(request, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().search(request, context)
 
     async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().list(request, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().list(request, context)
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        self._require_ready()
-        return await super().get(reference, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            return await super().get(reference, context)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        self._require_ready()
-        return await super().resolve(reference, context)
+        async with self._lifecycle_lock:
+            self._require_ready()
+            artifact = await SQLiteCatalogProvider.get(self, reference, context)
+            if artifact.locator is None:
+                raise ArtifactNotFoundError(
+                    "Catalog artifact has no storage locator.",
+                    resource_id=reference.artifact_id,
+                    operation="resolve",
+                )
+            return ResolvedArtifact(reference=artifact.reference, locator=artifact.locator)
 
     async def _embed_query(self, query: str) -> list[float] | None:
         provider = self._indexer.embedding_provider

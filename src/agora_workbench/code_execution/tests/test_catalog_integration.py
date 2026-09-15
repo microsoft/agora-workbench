@@ -64,7 +64,7 @@ from agora_workbench.data_lake import (
     TransferOptions,
     stable_source_id,
 )
-from agora_workbench.data_lake.catalog import CatalogConfig, DiscoveryMode, SearchConfig, SourceConfig
+from agora_workbench.data_lake.catalog import CatalogConfig, CatalogIndexer, DiscoveryMode, SearchConfig, SourceConfig
 from agora_workbench.code_execution.data_access.catalog import CatalogDB
 
 
@@ -400,6 +400,43 @@ async def test_configured_catalog_rejects_manifest_generation_after_stale_bound(
             await replacement.get(ArtifactReference("artifact", "source"), RequestContext())
     finally:
         await replacement.aclose()
+
+
+async def test_configured_catalog_rejects_scan_generation_for_manifest_source(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "data.txt").write_text("payload")
+    database = tmp_path / "catalog.db"
+    scan_config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(root), discovery=DiscoveryMode.SCAN)]
+    )
+    db = CatalogDB(database)
+    db.open()
+    try:
+        await CatalogIndexer(scan_config, db).index()
+        state = db.get_source_refresh_state("source")
+        assert state is not None
+        assert state.successful_generation > 0
+        assert state.manifest_generation is None
+    finally:
+        db.close()
+
+    manifest_config = CatalogConfig(
+        sources=[
+            SourceConfig(
+                source_id="source",
+                path=str(root),
+                discovery=DiscoveryMode.MANIFEST,
+                manifest="missing.json",
+            )
+        ]
+    )
+    provider = _ConfiguredCatalogProvider(manifest_config, db_path=database)
+    try:
+        with pytest.raises(RuntimeError, match="not ready"):
+            await provider.load()
+    finally:
+        await provider.aclose()
 
 
 async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(tmp_path, monkeypatch):
@@ -2654,6 +2691,7 @@ async def test_catalog_discovery_restores_transport_auth_before_session_lookup()
 
 async def test_catalog_discovery_holds_session_resource_lease_for_operation():
     lease_active = False
+    session_resolved = False
 
     async def search(request, context):
         del request, context
@@ -2675,16 +2713,24 @@ async def test_catalog_discovery_holds_session_resource_lease_for_operation():
     async def resource_operation(session_id):
         nonlocal lease_active
         assert session_id == "transport-session"
+        assert session_resolved
         lease_active = True
         try:
             yield
         finally:
             lease_active = False
 
+    async def get_session(tool_name, *, session_id):
+        nonlocal session_resolved
+        assert tool_name == "search_data"
+        assert session_id == "transport-session"
+        session_resolved = True
+        return session
+
     server = SimpleNamespace(
         mcp=SimpleNamespace(tool=lambda name, description: lambda function: captured.setdefault(name, function)),
         session_manager=SimpleNamespace(session_resource_operation=resource_operation),
-        _get_or_create_session=AsyncMock(return_value=session),
+        _get_or_create_session=get_session,
     )
     integration = SimpleNamespace(
         capabilities=AsyncMock(),

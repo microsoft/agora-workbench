@@ -1925,6 +1925,39 @@ class TestNoRunningLoop:
         assert second_kernel.shutdown_finished
         assert not manager._closing_sessions
 
+    async def test_background_job_holds_session_resources_until_cancelled(self, manager, monkeypatch):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        session = manager.get_session(session_id)
+        _, kernel_client = register_kernel(manager, session_id)
+        kernel_client.execute = lambda _code: "message-id"
+        collector_started = asyncio.Event()
+        collector_cancelled = asyncio.Event()
+        manager_closed = asyncio.Event()
+
+        class DataManager:
+            async def aclose(self):
+                manager_closed.set()
+
+        session.data_manager = DataManager()
+
+        async def blocked_collector(_job, _kernel_manager, _kernel_client):
+            collector_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                assert not manager_closed.is_set()
+                collector_cancelled.set()
+
+        monkeypatch.setattr(manager, "_collect_background_job", blocked_collector)
+        result = await manager.start_background_execution_for_session(session_id, "pass", 30)
+        await collector_started.wait()
+
+        await manager.aclose_session(session_id)
+
+        assert result["status"] == "running"
+        assert collector_cancelled.is_set()
+        assert manager_closed.is_set()
+
 
 # ---------------------------------------------------------------------------
 # Batch cleanup does not report success while kernels are still resident

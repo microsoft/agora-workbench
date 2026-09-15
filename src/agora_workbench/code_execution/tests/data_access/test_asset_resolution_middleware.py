@@ -217,13 +217,20 @@ class TestAssetResolutionMiddleware:
         mock_session,
     ):
         mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
-        mock_server._get_or_create_session.return_value = mock_session
         mock_session.data_manager.get_cache_path.return_value = Path("/cache/test")
         lease_active = False
+        session_resolved = False
+
+        async def get_session(_tool_name, *, session_id):
+            nonlocal session_resolved
+            assert session_id == "test-session-123"
+            session_resolved = True
+            return mock_session
 
         @asynccontextmanager
         async def session_resource_operation(_session_id):
             nonlocal lease_active
+            assert session_resolved
             lease_active = True
             try:
                 yield
@@ -234,6 +241,7 @@ class TestAssetResolutionMiddleware:
             assert lease_active
             return "result"
 
+        mock_server._get_or_create_session.side_effect = get_session
         mock_server.session_manager.session_resource_operation = session_resource_operation
         call_next = AsyncMock(side_effect=assert_lease)
         with _patch_set_current_session():
