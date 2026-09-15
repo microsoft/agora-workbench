@@ -300,7 +300,12 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             }
             self._last_error: str | None = None
             self._load_attempted = False
-            super().__init__(self._db_owned, tuple(source.source_id or "" for source in config.sources))
+            super().__init__(
+                self._db_owned,
+                tuple(source.source_id or "" for source in config.sources),
+                query_embedder=self._embed_query,
+                hybrid_alpha=config.search.hybrid_alpha,
+            )
         except BaseException:
             self._db_owned.close()
             self._closed = True
@@ -428,6 +433,13 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
         self._require_ready()
         return await super().resolve(reference, context)
+
+    async def _embed_query(self, query: str) -> list[float] | None:
+        provider = self._indexer.embedding_provider
+        if provider is None:
+            return None
+        embeddings = await provider.embed([query])
+        return embeddings[0] if embeddings else None
 
     async def aclose(self) -> None:
         """Close the private per-reader SQLite cache."""

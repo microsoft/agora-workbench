@@ -5,6 +5,7 @@ Tests the middleware's ability to detect, resolve, and inject asset references
 before FastMCP/Pydantic validation runs.
 """
 
+import asyncio
 import importlib
 from contextlib import asynccontextmanager
 import pytest
@@ -182,6 +183,61 @@ class TestAssetResolutionMiddleware:
 
         # Verify cleanup was called
         mock_server._clear_auth_context.assert_called_once()
+
+    async def test_session_lookup_failure_clears_auth_context(self, mock_server, mock_context):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.side_effect = ValueError("session unavailable")
+
+        with pytest.raises(ValueError, match="session unavailable"):
+            await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock())
+
+        mock_server._clear_auth_context.assert_called_once()
+
+    async def test_cancellation_during_resolution_clears_auth_context(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+        mock_session.data_manager.get_cache_path.side_effect = asyncio.CancelledError()
+
+        with _patch_set_current_session():
+            with pytest.raises(asyncio.CancelledError):
+                await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock())
+
+        mock_server._clear_auth_context.assert_called_once()
+
+    async def test_resource_lease_covers_downstream_tool_execution(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+        mock_session.data_manager.get_cache_path.return_value = Path("/cache/test")
+        lease_active = False
+
+        @asynccontextmanager
+        async def session_resource_operation(_session_id):
+            nonlocal lease_active
+            lease_active = True
+            try:
+                yield
+            finally:
+                lease_active = False
+
+        def assert_lease(_context):
+            assert lease_active
+            return "result"
+
+        mock_server.session_manager.session_resource_operation = session_resource_operation
+        call_next = AsyncMock(side_effect=assert_lease)
+        with _patch_set_current_session():
+            assert await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, call_next) == "result"
+        assert not lease_active
 
     @pytest.mark.parametrize(
         "secret_uri",

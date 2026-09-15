@@ -139,13 +139,12 @@ class AssetResolutionMiddleware(Middleware):
         self.server._restore_auth_context_for_mcp_session(session_id)
         tool_name = context.message.name
         session = None
-        if session_id is None:
-            session = await self.server._get_or_create_session(tool_name, session_id=None)
-        resource_session_id = session.session_id if session is not None else session_id
-        assert resource_session_id is not None
-
-        # --- Resolve all tagged assets concurrently ---
         try:
+            if session_id is None:
+                session = await self.server._get_or_create_session(tool_name, session_id=None)
+            resource_session_id = session.session_id if session is not None else session_id
+            assert resource_session_id is not None
+
             async with self.server.session_manager.session_resource_operation(resource_session_id):
                 if session is None:
                     session = await self.server._get_or_create_session(tool_name, session_id=session_id)
@@ -205,15 +204,7 @@ class AssetResolutionMiddleware(Middleware):
                 # Update context with modified arguments for downstream processing
                 context.message.arguments = arguments
 
-        except Exception:
-            # Clean up on failure
-            set_current_session(None)
-            self.server._clear_auth_context()
-            raise
-
-        try:
-            return await call_next(context)
+                return await call_next(context)
         finally:
-            # always clean up session and auth context after tool execution
             set_current_session(None)
             self.server._clear_auth_context()
