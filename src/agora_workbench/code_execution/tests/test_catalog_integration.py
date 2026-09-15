@@ -180,6 +180,15 @@ def test_catalog_error_payload_sanitizes_uri_resource_id():
     assert _error_payload(error)["resource_id"] == "https://example.test/data"
 
 
+def test_catalog_error_payload_sanitizes_tagged_uri_resource_id():
+    error = ArtifactNotFoundError(
+        "Artifact not found.",
+        resource_id="<blob>******example.test/data?sig=secret</blob>",
+    )
+
+    assert _error_payload(error)["resource_id"] == "<blob>example.test/data</blob>"
+
+
 @pytest.mark.parametrize(
     ("artifact_id", "source_id"),
     [
@@ -1347,6 +1356,25 @@ async def test_cleanup_tracker_retries_only_pending_resources():
 
     assert completed.close_calls == 1
     assert cancelled.close_calls == 2
+    assert pending == []
+
+
+async def test_cleanup_tracker_retries_failed_cleanup():
+    attempts = 0
+    pending = [object()]
+    tracker = _AsyncCleanupTracker()
+
+    async def cleanup():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient cleanup failure")
+        pending.clear()
+
+    tracker.schedule(cleanup(), retry=cleanup)
+
+    assert await tracker.drain() == []
+    assert attempts == 2
     assert pending == []
 
 

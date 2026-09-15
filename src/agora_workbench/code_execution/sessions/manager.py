@@ -1785,6 +1785,8 @@ class SessionManager:
     async def session_resource_operation(self, session_id: str) -> AsyncIterator[None]:
         """Keep session-owned data resources alive for one admitted operation."""
         with self._session_lifecycle_lock:
+            if session_id in self._closing_session_ids or self.storage.retrieve(session_id) is None:
+                raise ValueError(f"Session {session_id} not found or is closing")
             event = self._session_resources_drained.get(session_id)
             if event is None:
                 event = asyncio.Event()

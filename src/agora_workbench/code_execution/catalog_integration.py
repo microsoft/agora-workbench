@@ -165,7 +165,14 @@ class _AsyncCleanupTracker:
                             cancellation_retries=cancellation_retries - 1,
                         )
                 elif isinstance(result, Exception):
-                    errors.append(result)
+                    if retry is not None and cancellation_retries > 0:
+                        self.schedule(
+                            retry(),
+                            retry=retry,
+                            cancellation_retries=cancellation_retries - 1,
+                        )
+                    else:
+                        errors.append(result)
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional catalog cleanup failures.", errors)))
@@ -1091,9 +1098,7 @@ def _error_payload(exc: Exception) -> dict[str, Any]:
         if exc.operation is not None:
             payload["operation"] = exc.operation
         if exc.resource_id is not None:
-            payload["resource_id"] = (
-                sanitize_uri_for_display(exc.resource_id) if "://" in exc.resource_id else exc.resource_id
-            )
+            payload["resource_id"] = safe_artifact_reference(exc.resource_id)
         return payload
     if isinstance(exc, ValueError):
         return {"error": _sanitize_error_message(str(exc)), "error_type": "invalid_request"}

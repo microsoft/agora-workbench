@@ -817,6 +817,9 @@ class TestAwaitableClose:
 
         assert not cleanup_started.is_set()
         assert not close_task.done()
+        with pytest.raises(ValueError, match="not found or is closing"):
+            async with manager.session_resource_operation(session_id):
+                pass
         await operation.__aexit__(None, None, None)
         _ = await close_task
         assert cleanup_started.is_set()
