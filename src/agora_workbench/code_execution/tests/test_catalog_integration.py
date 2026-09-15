@@ -3348,6 +3348,36 @@ async def test_refresh_retains_authorizer_until_request_snapshot_releases():
     await binding.aclose()
 
 
+async def test_session_binding_deep_copies_authorization_context():
+    metadata = {"scope": {"projects": ["alpha"]}}
+    claims = {"roles": ["reader"], "limits": {"domains": ["science"]}}
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    binding = integration.bind_session(
+        SessionContext(
+            "session",
+            "user",
+            "token",
+            token_claims=claims,
+            metadata=metadata,
+        ),
+        execution_references=True,
+    )
+
+    metadata["scope"]["projects"].append("forbidden")
+    claims["roles"].append("admin")
+    claims["limits"]["domains"].clear()
+
+    assert binding.context.attributes["metadata"] == {"scope": {"projects": ["alpha"]}}
+    assert binding.context.attributes["claims"] == {
+        "roles": ["reader"],
+        "limits": {"domains": ["science"]},
+    }
+    await binding.aclose()
+
+
 async def test_refresh_reactivates_deferred_authorizer_without_closing_it():
     class Authorizer:
         def __init__(self, name):

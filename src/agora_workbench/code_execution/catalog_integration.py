@@ -13,6 +13,7 @@ import uuid
 import weakref
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from copy import deepcopy
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -1648,8 +1649,8 @@ def _request_context(context: SessionContext) -> RequestContext:
         attributes={
             "session_id": context.session_id,
             "session_type": context.session_type,
-            "metadata": dict(context.metadata),
-            "claims": dict(context.token_claims),
+            "metadata": deepcopy(context.metadata),
+            "claims": deepcopy(context.token_claims),
         },
     )
 
