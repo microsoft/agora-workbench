@@ -5,6 +5,7 @@ Tests for code execution functionality.
 import asyncio
 import json
 import os
+from contextvars import ContextVar
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -339,6 +340,89 @@ async def test_execute_code_releases_session_resources_when_catalog_snapshot_exi
 
     assert lease_released.is_set()
     clear_auth_context.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("execution_mode", "execution_method"),
+    [
+        ("async_only", "_execute_code_background"),
+        ("adaptive", "_execute_code_with_promotion"),
+    ],
+)
+async def test_background_execution_does_not_inherit_catalog_snapshot(
+    test_server,
+    execution_mode,
+    execution_method,
+):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    current_snapshot: ContextVar[str | None] = ContextVar("test_catalog_snapshot", default=None)
+    snapshot_closed = asyncio.Event()
+
+    class SnapshotContext:
+        def __enter__(self):
+            self.token = current_snapshot.set("request-snapshot")
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            current_snapshot.reset(self.token)
+            snapshot_closed.set()
+
+    class SuspendedSnapshot:
+        def __enter__(self):
+            self.token = current_snapshot.set(None)
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            current_snapshot.reset(self.token)
+
+    session.extensions["catalog"] = SimpleNamespace(
+        resolver=SimpleNamespace(
+            bind_request_snapshot=SnapshotContext,
+            suspend_request_snapshot=SuspendedSnapshot,
+        )
+    )
+
+    async def execute(*_args):
+        assert current_snapshot.get() is None
+        inherited_snapshot = asyncio.create_task(asyncio.sleep(0, result=current_snapshot.get()))
+        assert await inherited_snapshot is None
+        return {"status": "running"}
+
+    original_mode = test_server.server_config.execution_mode
+    test_server.server_config.execution_mode = execution_mode
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(test_server, execution_method, execute),
+        ):
+            execute_code_tool = execution_defaults.build_tool(test_server)
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('background')",
+                execution_session_id=session_id,
+            )
+
+        assert json.loads(result)["status"] == "running"
+        assert snapshot_closed.is_set()
+        assert current_snapshot.get() is None
+    finally:
+        test_server.server_config.execution_mode = original_mode
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
 
 
 @pytest.mark.asyncio

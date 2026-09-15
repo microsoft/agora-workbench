@@ -660,6 +660,15 @@ class CatalogSessionResolver:
             if current is not None:
                 current.close()
 
+    @contextmanager
+    def suspend_request_snapshot(self) -> Iterator[None]:
+        """Prevent child tasks from inheriting this request's snapshot."""
+        token = self._request_snapshot.set(None)
+        try:
+            yield
+        finally:
+            self._request_snapshot.reset(token)
+
     async def aclose(self) -> None:
         self._closed = True
 
