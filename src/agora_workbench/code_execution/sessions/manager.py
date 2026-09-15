@@ -773,7 +773,8 @@ class SessionManager:
         """Close every active session and wait for all kernel/resource teardown."""
         with self._session_lifecycle_lock:
             sessions = [
-                (session_id, self._session_generations.get(session_id)) for session_id in self.storage.list_all()
+                (session_id, self._adopt_session_generation_locked(session_id))
+                for session_id in self.storage.list_all()
             ]
         tasks = [
             asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
@@ -864,9 +865,7 @@ class SessionManager:
                     raise ValueError(f"Session {session_id} does not exist.")
                 # Pluggable storage may be pre-populated before this manager
                 # starts. Adopt such sessions lazily under the lifecycle lock.
-                self._session_generation_seq += 1
-                session_generation = self._session_generation_seq
-                self._session_generations[session_id] = session_generation
+                session_generation = self._adopt_session_generation_locked(session_id)
         await self.await_kernel_shutdown(session_id)
 
         with self._session_lifecycle_lock:
@@ -1756,6 +1755,15 @@ class SessionManager:
                         self._kernel_execute_locks.pop(session_id, None)
                         self._retired_kernel_execute_locks.discard(session_id)
             self._finalize_closed_session(session_id)
+
+    def _adopt_session_generation_locked(self, session_id: str) -> int:
+        """Return a session lifecycle generation, assigning one while the lifecycle lock is held."""
+        session_generation = self._session_generations.get(session_id)
+        if session_generation is None:
+            self._session_generation_seq += 1
+            session_generation = self._session_generation_seq
+            self._session_generations[session_id] = session_generation
+        return session_generation
 
     def _retire_kernel_execute_lock(self, session_id: str) -> None:
         """Reclaim a closed session's lock once callers that captured it drain."""

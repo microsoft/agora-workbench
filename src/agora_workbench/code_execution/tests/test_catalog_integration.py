@@ -399,6 +399,36 @@ async def test_server_startup_failure_rolls_back_owned_catalog(tmp_path):
     assert (provider.load_calls, provider.close_calls) == (1, 1)
 
 
+async def test_catalog_startup_failure_uses_server_shutdown_retry(tmp_path):
+    class Provider(_LifecycleProvider):
+        async def load(self):
+            self.load_calls += 1
+            raise RuntimeError("load failed")
+
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("close failed")
+
+    provider = Provider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    server = CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        catalog=integration,
+    )
+    server._ensure_environment = AsyncMock()
+
+    with pytest.raises(RuntimeError, match="load failed"):
+        await server._startup()
+
+    server._ensure_environment.assert_not_awaited()
+    assert (provider.load_calls, provider.close_calls) == (1, 2)
+
+
 async def test_default_data_manager_rollback_tracks_owned_credential_cleanup(tmp_path, monkeypatch):
     """A failure after the default catalog data manager is built must route its
     rollback through the manager's tracked async cleanup, not an untracked task."""

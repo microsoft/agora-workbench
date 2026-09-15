@@ -2838,10 +2838,10 @@ else:
         """Initialize environment and register kernel on server startup."""
         LOGGER.info("Initializing server...")
 
-        if self.catalog is not None:
-            await self.catalog.startup()
-
         try:
+            if self.catalog is not None:
+                await self.catalog.startup()
+
             # Build environment if needed
             await self._ensure_environment()
 

@@ -891,6 +891,34 @@ class TestAwaitableClose:
 
         assert manager.storage.retrieve(session_id) is replacement
 
+    async def test_aclose_all_adopts_restored_session_generation_before_close_snapshot(self, manager, monkeypatch):
+        session_id = "restored-close-all"
+        manager.storage.store(session_id, Session(session_id, {}, "default", "old", "t", {}))
+        original_close = manager.aclose_session
+        replacement = None
+
+        async def replace_then_close(closing_session_id, *, expected_generation=None):
+            nonlocal replacement
+            assert expected_generation is not None
+            old_session = manager.storage.retrieve(closing_session_id)
+            assert old_session is not None
+            manager.storage.delete(closing_session_id)
+            old_session.cleanup()
+            manager.create_session(
+                data={},
+                user_identity="replacement",
+                user_token="t",
+                token_claims={},
+                session_id=closing_session_id,
+            )
+            replacement = manager.storage.retrieve(closing_session_id)
+            await original_close(closing_session_id, expected_generation=expected_generation)
+
+        monkeypatch.setattr(manager, "aclose_session", replace_then_close)
+        await manager.aclose_all_sessions()
+
+        assert manager.storage.retrieve(session_id) is replacement
+
     @pytest.mark.parametrize("async_close", [False, True])
     async def test_session_cleanup_attempts_every_resource_before_reporting(self, manager, tmp_path, async_close):
         attempted = []
