@@ -340,6 +340,7 @@ async def test_execute_code_releases_session_resources_when_catalog_snapshot_exi
     assert lease_released.is_set()
     clear_auth_context.assert_called_once()
 
+
 @pytest.mark.asyncio
 async def test_numpy_import(test_server, simple_code_samples):
     """Test that environment dependencies are available."""

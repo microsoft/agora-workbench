@@ -924,21 +924,22 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             return json.dumps(error_dict, indent=2)
         finally:
             exc_type, exc_value, exc_traceback = sys.exc_info()
-            if session:
-                set_current_session(None)
             try:
-                if session_resource_operation_entered:
-                    await session_resource_operation.__aexit__(None, None, None)
-            finally:
-                server._clear_auth_context()
-            if catalog_resolution_entered:
-                try:
+                if catalog_resolution_entered:
                     catalog_resolution.__exit__(exc_type, exc_value, exc_traceback)
-                except Exception as cleanup_error:
-                    LOGGER.warning(
-                        "Failed to close catalog request snapshot; execution result is retained.",
-                        exc_info=cleanup_error,
-                    )
+            except Exception as cleanup_error:
+                LOGGER.warning(
+                    "Failed to close catalog request snapshot with %s; execution result is retained.",
+                    type(cleanup_error).__name__,
+                )
+            finally:
+                if session:
+                    set_current_session(None)
+                try:
+                    if session_resource_operation_entered:
+                        await session_resource_operation.__aexit__(None, None, None)
+                finally:
+                    server._clear_auth_context()
 
     return execute_code_tool
 

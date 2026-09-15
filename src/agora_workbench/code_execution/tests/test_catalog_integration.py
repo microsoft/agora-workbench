@@ -2868,6 +2868,14 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     assert await captured["list_domains"]() == ["science https://example.test/domain"]
     assert catalog.list.await_args.args[0].source_ids == ("source",)
 
+    metadata_only = CatalogArtifact(
+        ArtifactReference("metadata-only", "source"),
+        ArtifactPresentation("metadata-only.csv"),
+    )
+    catalog.search.return_value = Page((metadata_only,))
+    metadata_only_results = await captured["search_data"]("metadata")
+    assert "load_path" not in metadata_only_results[0]
+
     integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
     per_artifact = await captured["search_data"]("data")
     assert "load_path" not in per_artifact[0]

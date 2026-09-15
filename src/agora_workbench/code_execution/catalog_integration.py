@@ -929,9 +929,9 @@ class CatalogSessionBinding:
         error = task.exception()
         if error is not None:
             LOGGER.error(
-                "Cancelled catalog resource cleanup failed: %s",
+                "Cancelled catalog resource cleanup failed with %s: %s",
+                type(error).__name__,
                 _sanitize_error_message(str(error)),
-                exc_info=error,
             )
 
     async def aclose(self) -> None:
@@ -1529,7 +1529,11 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         current: CatalogSessionBinding | CatalogSessionView,
         capabilities: dict[str, SourceCapabilities],
     ) -> str | None:
-        if not current.execution_references or integration._policy_mode is CatalogPolicyMode.PER_ARTIFACT:
+        if (
+            not current.execution_references
+            or integration._policy_mode is CatalogPolicyMode.PER_ARTIFACT
+            or artifact.locator is None
+        ):
             return None
         source = capabilities.get(artifact.reference.source_id)
         if source is None or not source.supports(CatalogOperation.RESOLVE):
