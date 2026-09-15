@@ -44,6 +44,32 @@ def _as_manager(fake: _FakeDataManager) -> DataLakeDataManager:
 class TestSession:
     """Tests for Session class."""
 
+    def test_session_file_cleanup_claim_retries_after_failure(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("temporary failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+
+        assert attempts == 2
+        assert session._session_file_cleanup_claimed
+
     def test_session_creation(self):
         """Test basic session creation."""
         data = {"key": "value"}

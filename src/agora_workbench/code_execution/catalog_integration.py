@@ -573,17 +573,17 @@ class CatalogSessionBinding:
         authorizer = self.owned_authorizer
         catalog = self.catalog
         extensions = self.capability_extensions
-        if self.authorizer_factory is not None:
-            authorizer = self.authorizer_factory(context)
-            assert self.provider is not None
-            catalog = AuthorizedCatalogProvider(
-                self.provider,
-                authorizer,
-                mode=self.policy_mode,
-                per_artifact_enforcer=self.per_artifact_enforcer,
-            )
         prepared_refreshes: list[Callable[[], None] | _PreparedContextRefresh] = []
         try:
+            if self.authorizer_factory is not None:
+                authorizer = self.authorizer_factory(context)
+                assert self.provider is not None
+                catalog = AuthorizedCatalogProvider(
+                    self.provider,
+                    authorizer,
+                    mode=self.policy_mode,
+                    per_artifact_enforcer=self.per_artifact_enforcer,
+                )
             if self.capability_extension_factory is not None:
                 created = self.capability_extension_factory(context, catalog, request_context)
                 if created is None:
@@ -922,6 +922,7 @@ class CatalogIntegration:
         try:
             if self._provider_lease.should_close:
                 close_task = asyncio.create_task(self._close_provider())
+                retries_remaining = 1
                 while True:
                     try:
                         await asyncio.shield(close_task)
@@ -929,7 +930,10 @@ class CatalogIntegration:
                     except asyncio.CancelledError as close_cancelled:
                         cancelled = cancelled or close_cancelled
                         if close_task.done():
-                            break
+                            if retries_remaining <= 0:
+                                break
+                            retries_remaining -= 1
+                            close_task = asyncio.create_task(self._close_provider())
                     except Exception as close_error:
                         errors.append(close_error)
                         break

@@ -1220,6 +1220,46 @@ async def test_context_refresh_extension_failure_closes_new_authorizer():
     await binding.aclose()
 
 
+async def test_context_refresh_catalog_construction_failure_closes_new_authorizer(monkeypatch):
+    authorizers = []
+
+    class Authorizer:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    def authorizer_factory(context):
+        del context
+        authorizer = Authorizer()
+        authorizers.append(authorizer)
+        return authorizer
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=authorizer_factory,
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+
+    def fail_catalog(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("catalog construction failed")
+
+    monkeypatch.setattr("agora_workbench.code_execution.catalog_integration.AuthorizedCatalogProvider", fail_catalog)
+    with pytest.raises(RuntimeError, match="catalog construction failed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await integration._cleanup_tracker.drain()
+
+    assert binding.owned_authorizer is authorizers[0]
+    assert authorizers[0].close_calls == 0
+    assert authorizers[1].close_calls == 1
+    await binding.aclose()
+
+
 async def test_concurrent_catalog_binding_close_coalesces_resource_cleanup():
     started = asyncio.Event()
     gate = asyncio.Event()
@@ -1280,6 +1320,44 @@ async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     assert session.data_manager._artifact_resolver is resolver
     assert not session.extensions["catalog"].execution_references
     await session_manager.aclose_all_sessions()
+    await integration.shutdown()
+
+
+async def test_data_manager_construction_failure_closes_session_credential(tmp_path, monkeypatch):
+    credentials = []
+
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+
+    def credential_factory(token):
+        del token
+        credential = CredentialProvider()
+        credentials.append(credential)
+        return credential
+
+    class FailingManager:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+            raise RuntimeError("manager construction failed")
+
+    auth = create_noop_auth_config()
+    auth.credential_provider_factory = credential_factory
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    monkeypatch.setattr("agora_workbench.code_execution.data_access.manager.DataLakeDataManager", FailingManager)
+    server = CodeExecutionServer(_server_config(tmp_path), auth_config=auth, catalog=integration)
+
+    with pytest.raises(RuntimeError, match="manager construction failed"):
+        server.session_manager.create_session({}, "user", "token", {})
+    await integration._cleanup_tracker.drain()
+
+    assert credentials[0].close_calls == 1
     await integration.shutdown()
 
 
@@ -2264,6 +2342,26 @@ async def test_catalog_cleanup_cancellation_retry_is_bounded_and_provider_closes
 
     assert attempts == 2
     assert provider.close_calls == 1
+
+
+async def test_cancelled_owned_provider_close_retries_before_propagating():
+    class Provider(_LifecycleProvider):
+        async def aclose(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise asyncio.CancelledError
+
+    provider = Provider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await integration.shutdown()
+
+    assert provider.close_calls == 2
+    assert integration._provider_closed
 
 
 async def test_slots_manager_accepts_catalog_binding_without_mutation(tmp_path):

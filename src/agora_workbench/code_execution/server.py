@@ -330,9 +330,10 @@ class CodeExecutionServer(BaseMCPServer):
         def catalog_data_manager_factory(context):
             binding = self.catalog.bind_session(context, execution_references=existing_factory is None)
             custom_extensions = {}
+            credential = None
+            manager = None
             try:
                 if existing_factory is None:
-                    credential = None
                     credential_factory = self.auth_config.credential_provider_factory
                     if credential_factory is not None:
                         credential = SessionCredential(
@@ -374,6 +375,14 @@ class CodeExecutionServer(BaseMCPServer):
                             collision.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                         raise collision
             except BaseException as exc:
+                if existing_factory is None:
+                    if manager is not None:
+                        try:
+                            manager.cleanup()
+                        except Exception as cleanup_error:
+                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error}")
+                    elif credential is not None:
+                        binding._schedule_resource_cleanup(credential)
                 try:
                     binding.cleanup()
                 except Exception as cleanup_error:

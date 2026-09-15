@@ -377,11 +377,12 @@ class Session(Generic[T]):
         """Remove the owned session file before its session ID can be reused."""
         if self._session_file_cleanup_claimed:
             return
-        self._session_file_cleanup_claimed = True
         try:
             self._remove_session_file()
         except Exception as exc:
             self._claimed_cleanup_errors.append(exc)
+        else:
+            self._session_file_cleanup_claimed = True
 
     def _take_claimed_cleanup_errors(self) -> list[Exception]:
         errors = self._claimed_cleanup_errors
