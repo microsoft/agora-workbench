@@ -870,9 +870,7 @@ class SessionManager:
             ]
             active_session_ids = {session_id for session_id, _ in sessions}
             sessions.extend(
-                (session_id, None)
-                for session_id in self._closing_sessions
-                if session_id not in active_session_ids
+                (session_id, None) for session_id in self._closing_sessions if session_id not in active_session_ids
             )
         tasks = [
             asyncio.create_task(self.aclose_session(session_id, expected_generation=generation))
