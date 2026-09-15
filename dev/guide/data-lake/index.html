@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../..">
+        <link rel="prev" href="../working-with-data/">
       
       
-        <link rel="next" href="../server-options/">
+        <link rel="next" href="../data-lake-operations/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Core concepts - Agora Workbench</title>
+        <title>Data lake - start here - Agora Workbench</title>
       
     
     
@@ -78,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#core-concepts" class="md-skip">
+        <a href="#add-a-data-catalog-to-your-server" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +118,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Core concepts
+              Data lake - start here
             
           </span>
         </div>
@@ -261,8 +261,6 @@
       
   
   
-    
-  
   
   
     
@@ -275,11 +273,13 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_1" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
         
           
           <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
@@ -300,7 +300,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -343,37 +343,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Core concepts
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
         
   
   
@@ -389,147 +362,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#the-core-idea-code-is-the-action-surface" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        The core idea: code is the action surface
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#two-kinds-of-server" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Two kinds of server
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-a-server-actually-exposes-over-mcp" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What a server actually exposes over MCP
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sessions-and-state" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sessions and state
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#three-layers-of-guidance-for-the-agent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Three layers of guidance for the agent
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#working-with-data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Working with data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sidecars-sharing-a-heavy-resource" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sidecars: sharing a heavy resource
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#producing-output-artifacts-and-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Producing output: artifacts and publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#observability-the-activity-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Observability: the activity UI
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#where-to-go-next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Where to go next
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -658,8 +490,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -670,13 +504,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
           <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
@@ -697,7 +529,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -768,10 +600,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../data-lake/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data lake - start here
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -787,6 +646,92 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#choose-the-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Choose the workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-five-parts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The five parts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#try-a-local-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Try a local catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#add-the-catalog-to-a-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Add the catalog to a server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#move-to-production-deliberately" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Move to production deliberately
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1536,10 +1481,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#the-core-idea-code-is-the-action-surface" class="md-nav__link">
+  <a href="#choose-the-workflow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        The core idea: code is the action surface
+        Choose the workflow
       
     </span>
   </a>
@@ -1547,10 +1492,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#two-kinds-of-server" class="md-nav__link">
+  <a href="#the-five-parts" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Two kinds of server
+        The five parts
       
     </span>
   </a>
@@ -1558,10 +1503,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#what-a-server-actually-exposes-over-mcp" class="md-nav__link">
+  <a href="#try-a-local-catalog" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What a server actually exposes over MCP
+        Try a local catalog
       
     </span>
   </a>
@@ -1569,10 +1514,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#sessions-and-state" class="md-nav__link">
+  <a href="#add-the-catalog-to-a-server" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Sessions and state
+        Add the catalog to a server
       
     </span>
   </a>
@@ -1580,65 +1525,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#three-layers-of-guidance-for-the-agent" class="md-nav__link">
+  <a href="#move-to-production-deliberately" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Three layers of guidance for the agent
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#working-with-data" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Working with data
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sidecars-sharing-a-heavy-resource" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sidecars: sharing a heavy resource
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#producing-output-artifacts-and-publishing" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Producing output: artifacts and publishing
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#observability-the-activity-ui" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Observability: the activity UI
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
+        Move to production deliberately
       
     </span>
   </a>
@@ -1676,175 +1566,165 @@
   
 
 
-<h1 id="core-concepts">Core concepts<a class="headerlink" href="#core-concepts" title="Permanent link">&para;</a></h1>
-<p>This page explains the mental model behind Agora Workbench — the <em>what</em> and
-<em>why</em>. For what it is in one paragraph, see the <a href="../../">home page</a>; for
-step-by-step instructions, follow the links to the how-to guides below.</p>
-<h2 id="the-core-idea-code-is-the-action-surface">The core idea: code is the action surface<a class="headerlink" href="#the-core-idea-code-is-the-action-surface" title="Permanent link">&para;</a></h2>
-<p>Most MCP integrations expose each capability as a separate MCP tool with a fixed
-JSON schema, and the agent invokes them one structured call at a time. Agora
-Workbench takes a different stance for the domain logic itself:</p>
-<ul>
-<li>A server exposes <strong>one primary MCP tool</strong>, <code>execute_{name}_code</code>, that runs
-  Python in a sandboxed, session-backed kernel.</li>
-<li><strong>Domain tools are ordinary Python functions injected into that kernel's
-  namespace</strong> — they are <em>not</em> individual MCP tools. The agent calls them by
-  writing code.</li>
-</ul>
-<p>So the agent's loop is: <em>discover what functions exist → write a snippet that
-calls and composes them → read the result.</em> This "code as action" surface fits
-coding agents well and has concrete advantages:</p>
-<ul>
-<li><strong>Composition is free.</strong> Loops, conditionals, intermediate variables, and
-  chaining several tools happen in one round-trip instead of N tool calls.</li>
-<li><strong>Context stays small.</strong> Only one tool schema sits in the agent's context, and
-  intermediate data (DataFrames, arrays) stays server-side instead of being
-  serialized back and forth through the conversation.</li>
-<li><strong>Full expressiveness.</strong> The agent has all of Python plus your domain
-  packages — not just the parameters a wrapper chose to expose.</li>
-</ul>
-<p>The trade-off is that running code requires a sandbox — which is exactly what
-the per-server kernel environment provides.</p>
-<p>→ See <a href="../tool-pattern/">Tool pattern</a> and <a href="../writing-effective-tools/">Writing effective tools and skills</a>.</p>
-<h2 id="two-kinds-of-server">Two kinds of server<a class="headerlink" href="#two-kinds-of-server" title="Permanent link">&para;</a></h2>
+<h1 id="add-a-data-catalog-to-your-server">Add a data catalog to your server<a class="headerlink" href="#add-a-data-catalog-to-your-server" title="Permanent link">&para;</a></h1>
+<p>Use the data-lake API when an agent needs to <strong>discover data by metadata</strong> and
+then load the selected artifact into a code-execution session.</p>
+<p>If you only need to copy fixed files into the server at startup, use
+<a href="../working-with-data/#asset-provisioning">asset provisioning</a>. If you only need
+to return generated files to a user or storage location, use
+<a href="../working-with-data/#publishing-artifacts">publishers</a>. Neither requires a
+catalog.</p>
+<h2 id="choose-the-workflow">Choose the workflow<a class="headerlink" href="#choose-the-workflow" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Server</th>
-<th>Role</th>
+<th>Goal</th>
+<th>Start with</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong><code>CodeExecutionServer</code></strong></td>
-<td>Runs a Python kernel, executes agent code, hosts domain tools and skills, manages sessions. The workhorse.</td>
+<td>Let agents search existing local files</td>
+<td>A read-only catalog with <code>discovery: scan</code></td>
 </tr>
 <tr>
-<td><strong><code>ConnectorServer</code></strong></td>
-<td>A stateless proxy (router / gateway / dispatcher) that aggregates and routes to several upstream servers — it has no kernel of its own.</td>
+<td>Expose only an approved list of files</td>
+<td>A read-only catalog with <code>discovery: manifest</code></td>
+</tr>
+<tr>
+<td>Register, upload, remove, or promote durable artifacts</td>
+<td>An authoritative manifest plus an authorized managed writer</td>
+</tr>
+<tr>
+<td>Use Azure Blob Storage</td>
+<td>The same catalog model with the <code>azure</code> extra</td>
+</tr>
+<tr>
+<td>Upgrade an existing 0.2.x deployment</td>
+<td><a href="../data-lake-migration/">0.3 migration guide</a></td>
 </tr>
 </tbody>
 </table>
-<p>Both subclass <code>BaseMCPServer</code> and speak MCP over Streamable HTTP with
-bearer-token auth.</p>
-<p>→ See <a href="../server-options/">Server options</a> and <a href="../server-networks/">Server networks</a>.</p>
-<h2 id="what-a-server-actually-exposes-over-mcp">What a server actually exposes over MCP<a class="headerlink" href="#what-a-server-actually-exposes-over-mcp" title="Permanent link">&para;</a></h2>
-<p>A <code>CodeExecutionServer</code> registers a small, fixed set of MCP tools (names are
-prefixed with the server name, e.g. <code>chemistry</code>):</p>
-<table>
-<thead>
-<tr>
-<th>MCP tool</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>execute_{name}_code</code></td>
-<td>Run Python in the session kernel — the main action</td>
-</tr>
-<tr>
-<td><code>search_{name}_tools</code></td>
-<td>Discover domain tools and skills by natural-language query</td>
-</tr>
-<tr>
-<td><code>load_{name}_skill</code></td>
-<td>Load a skill's markdown instructions</td>
-</tr>
-<tr>
-<td><code>plan_{name}_workflow</code></td>
-<td>Navigate the state graph (only when tools declare state)</td>
-</tr>
-<tr>
-<td><code>{name}_list_sessions</code>, <code>{name}_inspect_session</code>, <code>{name}_close_session</code></td>
-<td>Inspect, list, or close sessions</td>
-</tr>
-<tr>
-<td><code>{name}_parallel_execute</code>, <code>{name}_check_batch</code></td>
-<td>Fan code out across many inputs</td>
-</tr>
-<tr>
-<td><code>{name}_send</code></td>
-<td>Send data to a destination — a peer server's kernel, blob storage, the user (browser download), or the local filesystem</td>
-</tr>
-</tbody>
-</table>
-<h2 id="sessions-and-state">Sessions and state<a class="headerlink" href="#sessions-and-state" title="Permanent link">&para;</a></h2>
-<p>The first <code>execute_{name}_code</code> call creates a <strong>session</strong> — a long-lived
-kernel. Variables, imports, and loaded data <strong>persist across calls</strong>, so the
-agent builds up state incrementally like a notebook rather than re-sending data
-every turn. This persistence is the main thing a code-execution server gives you
-over stateless tool calls.</p>
-<p>Each execution response includes the execution <code>session_id</code>. To continue an
-active session from another agent or a new MCP connection, pass that value as
-<code>execution_session_id</code> to <code>execute_{name}_code</code>. This is distinct from the MCP
-transport session ID; the server resumes only an existing session owned by the
-caller, and rejects unknown or expired IDs rather than creating a new kernel.</p>
-<p>→ See the <a href="../../api/sessions/">Sessions API</a>.</p>
-<h2 id="three-layers-of-guidance-for-the-agent">Three layers of guidance for the agent<a class="headerlink" href="#three-layers-of-guidance-for-the-agent" title="Permanent link">&para;</a></h2>
+<p>For a first deployment, start with keyword-only local search. It requires no
+cloud account, embedding service, vector extension, or credentials.</p>
+<h2 id="the-five-parts">The five parts<a class="headerlink" href="#the-five-parts" title="Permanent link">&para;</a></h2>
+<p>The components have separate jobs:</p>
 <ol>
-<li><strong>Tools</strong> — typed <code>ToolDefinition</code> functions, found via <code>search_{name}_tools</code>.</li>
-<li><strong>Skills</strong> — markdown playbooks for multi-step tasks, loaded via
-   <code>load_{name}_skill</code>. Preferred over manual planning when one fits the task.</li>
-<li><strong>State graph</strong> <em>(optional)</em> — tools can declare <code>requires</code> / <code>produces</code>
-   states, and <code>plan_{name}_workflow</code> turns these into ordered paths. Registered
-   only when tools carry state annotations.</li>
-<li><strong>Unified state graph</strong> <em>(router only)</em> — when a <code>RouterServer</code> aggregates
-   upstreams with state-annotated tools, it builds a composed <code>StateGraph</code> over
-   all upstreams and exposes <code>plan_{router_name}_workflow</code>. Optionally, <code>bridges</code>
-   in the router config enable cross-server path queries (e.g., "graphormer
-   output → battery simulation") without modifying individual upstream tool
-   definitions.</li>
+<li>A <strong>source</strong> is the local directory or Blob prefix containing data.</li>
+<li>A <strong>catalog configuration</strong> says how files are discovered and describes
+   their default metadata.</li>
+<li>The <strong>SQLite index</strong> makes catalog metadata searchable. It is rebuildable;
+   it is not the source of truth for managed artifacts.</li>
+<li><code>CatalogIntegration</code> adds policy-aware discovery and opaque load references
+   to a <code>CodeExecutionServer</code>.</li>
+<li>A session's <strong>data manager</strong> resolves a selected reference and caches its
+   bytes locally for tool or code execution.</li>
 </ol>
-<p>→ See <a href="../skill-pattern/">Skill pattern</a>.</p>
-<h2 id="working-with-data">Working with data<a class="headerlink" href="#working-with-data" title="Permanent link">&para;</a></h2>
+<p>Publishing an output and registering it in a catalog are different operations.
+A publisher moves bytes. A managed writer performs an authorized, versioned
+catalog mutation.</p>
+<h2 id="try-a-local-catalog">Try a local catalog<a class="headerlink" href="#try-a-local-catalog" title="Permanent link">&para;</a></h2>
+<p>Install the base package:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>add<span class="w"> </span>agora-workbench
+</code></pre></div>
+<p>Create a directory with synthetic data:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>data
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">&#39;day,temperature_c\n2026-01-01,7\n&#39;</span><span class="w"> </span>&gt;<span class="w"> </span>data/weather.csv
+</code></pre></div>
+<p>Create, validate, and index a scan catalog:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>agora-workbench-data-lake<span class="w"> </span>init<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--config<span class="w"> </span>catalog.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--source<span class="w"> </span>./data<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--source-id<span class="w"> </span>local-data<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--discovery<span class="w"> </span>scan
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>uv<span class="w"> </span>run<span class="w"> </span>agora-workbench-data-lake<span class="w"> </span>validate<span class="w"> </span>--config<span class="w"> </span>catalog.yaml
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>uv<span class="w"> </span>run<span class="w"> </span>agora-workbench-data-lake<span class="w"> </span>refresh<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">  </span>--config<span class="w"> </span>catalog.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="w">  </span>--database<span class="w"> </span>catalog.db
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>uv<span class="w"> </span>run<span class="w"> </span>agora-workbench-data-lake<span class="w"> </span>search<span class="w"> </span>weather<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="w">  </span>--config<span class="w"> </span>catalog.yaml<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="w">  </span>--database<span class="w"> </span>catalog.db
+</code></pre></div>
+<p>The search result should include <code>weather.csv</code>. At this point you have tested
+the source policy, configuration, index, and search behavior without starting
+an MCP server.</p>
+<div class="admonition warning">
+<p class="admonition-title">Scan mode exposes the directory</p>
+<p>Scan discovery catalogs every eligible non-hidden file below the source
+root. Use it only when the whole directory is approved for discovery. For
+selective disclosure, use an
+<a href="../data-lake-operations/#zero-cloud-local-quickstart">authoritative manifest</a>.</p>
+</div>
+<h2 id="add-the-catalog-to-a-server">Add the catalog to a server<a class="headerlink" href="#add-the-catalog-to-a-server" title="Permanent link">&para;</a></h2>
+<p>Add <code>CatalogIntegration</code> to an existing <code>CodeExecutionServer</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogIntegration</span><span class="p">,</span> <span class="n">CodeExecutionServer</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">CatalogPolicyMode</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">DevelopmentAllowAllCatalogAuthorizer</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">),</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">DevelopmentAllowAllCatalogAuthorizer</span><span class="p">(),</span>  <span class="c1"># local development only</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">policy_mode</span><span class="o">=</span><span class="n">CatalogPolicyMode</span><span class="o">.</span><span class="n">HOMOGENEOUS_SOURCE</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">db_path</span><span class="o">=</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="p">)</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">auth</span><span class="p">,</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">catalog</span><span class="p">,</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="p">)</span>
+</code></pre></div>
+<p>The <code>db_path</code> points the server at the SQLite index refreshed in the preceding
+CLI steps. Here, <code>config</code> and <code>auth</code> are the server configuration and
+authentication objects from your existing server. If you do not have one yet, build
+<a href="../../tutorials/first_server/">your first server</a> before adding the
+catalog.</p>
+<p>The integration adds these MCP tools:</p>
 <ul>
-<li><strong>Asset provisioning</strong> — large, static files declared in <code>ServerConfig.assets</code>
-  and fetched into the environment cache at startup.</li>
-<li><strong>Data catalog</strong> <em>(optional)</em> — a searchable index of datasets. When
-  configured, the legacy unscoped surface adds <code>search_data</code> / <code>get_artifact</code> /
-  <code>list_domains</code> / <code>query_catalog</code> (these names are <strong>not</strong> server-prefixed).
-  It is appropriate only when the whole catalog is authorized to all callers;
-  raw SQL may also be mounted as a separate administrative extension.</li>
-<li><strong>Asset tags</strong> — the agent embeds references like <code>&lt;blob&gt;id&lt;/blob&gt;</code> or
-  <code>&lt;local&gt;/path&lt;/local&gt;</code> as string literals; the server resolves them to local
-  <code>Path</code> objects before the code runs, handling download and auth for you.</li>
+<li><code>search_data</code> finds authorized artifacts.</li>
+<li><code>get_artifact</code> returns metadata for one artifact.</li>
+<li><code>list_domains</code> lists visible domain labels.</li>
+<li><code>get_catalog_capabilities</code> reports the operations available to the session.</li>
 </ul>
-<p>→ See <a href="../working-with-data/">Working with data</a>.</p>
-<h2 id="sidecars-sharing-a-heavy-resource">Sidecars: sharing a heavy resource<a class="headerlink" href="#sidecars-sharing-a-heavy-resource" title="Permanent link">&para;</a></h2>
-<p>Because every session runs in its own kernel process, anything a tool loads is
-loaded <em>per session</em> — fine for a small import, ruinous for a multi-gigabyte
-model. A <strong>sidecar</strong> is a long-lived helper process the server launches at
-startup so an expensive resource (typically a model) is loaded <strong>once per
-container</strong> and shared by all sessions over loopback HTTP. Declare it in
-<code>ServerConfig.sidecars</code>; the framework starts it, waits for its health check,
-exports its URL to every kernel, and stops it on shutdown. A sidecar is a plain
-internal service — not an MCP endpoint and invisible to the agent (contrast with
-a <code>ConnectorServer</code>, which proxies other MCP servers).</p>
-<p>→ See <a href="../sidecars/">Sidecars</a>.</p>
-<h2 id="producing-output-artifacts-and-publishing">Producing output: artifacts and publishing<a class="headerlink" href="#producing-output-artifacts-and-publishing" title="Permanent link">&para;</a></h2>
-<p>Code writes user-facing files into the session output directory — addressed via
-the injected <code>agora_output("name")</code> helper or the <code>AGORA_OUTPUT_DIR</code> variable.
-To hand a file to the user, the agent calls <code>{name}_publish_artifact</code> with a
-destination tag: <code>&lt;gui&gt;</code> (browser download, always available), <code>&lt;blob&gt;</code>, or
-<code>&lt;local&gt;</code>.</p>
-<h2 id="observability-the-activity-ui">Observability: the activity UI<a class="headerlink" href="#observability-the-activity-ui" title="Permanent link">&para;</a></h2>
-<p>Every server can stream what the agent is doing to the <strong>activity UI</strong> — a
-standalone web dashboard (default <code>http://127.0.0.1:8030</code>) that shows code
-executions, tool searches, skill loads, rendered plots, and published artifacts
-in real time, grouped by session. Servers post events fire-and-forget; if the UI
-isn't running, code execution is unaffected.</p>
-<p>→ See <a href="../monitoring/">Monitoring your servers</a>.</p>
-<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>Auth is pluggable. Use <strong>no-op auth</strong> for local development (requests do not require 
-a bearer token and any bearer token is accepted) and <strong>Entra ID</strong> for production. 
-The server publishes RFC 9728 OAuth metadata so MCP clients can discover how to authenticate.</p>
-<p>→ See <a href="../authentication/">Authentication options</a>.</p>
+<p>Search results may include an opaque <code>load_path</code>. The agent passes that value
+unchanged into an <code>execute_*_code</code> call; the session resolves, authorizes, and
+caches the bytes before execution. Applications should not parse or construct
+load paths themselves.</p>
+<p><code>DevelopmentAllowAllCatalogAuthorizer</code> is only for local development. In
+production, provide a caller-aware <code>CatalogAuthorizer</code> or
+<code>authorizer_factory</code>, and independently grant the server identity only the
+storage permissions it needs.</p>
+<h2 id="move-to-production-deliberately">Move to production deliberately<a class="headerlink" href="#move-to-production-deliberately" title="Permanent link">&para;</a></h2>
+<p>Before deployment:</p>
+<ul>
+<li>Choose <code>manifest</code> discovery when the entire source directory is not approved
+  for disclosure.</li>
+<li>Give every source a stable <code>source_id</code>.</li>
+<li>Keep keyword-only search unless vector search is a real requirement.</li>
+<li>Use one rebuildable SQLite index per reader or pod; do not share one writable
+  SQLite file across pods.</li>
+<li>Treat storage RBAC and application authorization as separate controls.</li>
+<li>Use <code>AuthorizedManagedCatalogWriter</code> for durable mutations.</li>
+<li>Set a refresh process and <code>max_stale_seconds</code> that match your freshness
+  requirement.</li>
+<li>Monitor source refresh state and catalog readiness.</li>
+</ul>
 <h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
 <ul>
-<li><a href="../../tutorials/first_server/">Your First Server</a> — build one end-to-end</li>
-<li><a href="../server-options/">Options for making a CodeExecutionServer</a> — every <code>ServerConfig</code> knob</li>
-<li><a href="../attaching-to-your-agent/">Attaching to your agent</a> — connect a client and inject the workbench skill</li>
+<li><a href="../data-lake-operations/">CLI and quickstarts</a> — local, managed-write, and
+  Azure operating procedures.</li>
+<li><a href="../working-with-data/">Working with data</a> — compare provisioning, caching,
+  publishing, and catalogs.</li>
+<li><a href="../data-lake-api/">API reference and extension points</a> — implement providers,
+  resolvers, transfer policy, and managed writes.</li>
+<li><a href="../data-lake-support/">Support matrix</a> — supported combinations, limits, and
+  release gates.</li>
+<li><a href="../data-lake-migration/">0.3 migration</a> — upgrade an existing 0.2.x
+  deployment.</li>
 </ul>
 
 

@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../data-lake-api/">
+        <link rel="prev" href="../data-lake/">
       
       
-        <link rel="next" href="../data-lake-migration/">
+        <link rel="next" href="../data-lake-api/">
       
       
         
@@ -603,14 +603,14 @@
   
   
     <li class="md-nav__item">
-      <a href="../data-lake-api/" class="md-nav__link">
+      <a href="../data-lake/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Public data-lake API
+    Data lake - start here
   
 
     
@@ -749,6 +749,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -1517,11 +1545,22 @@
 
 
 <h1 id="data-lake-cli-and-quickstarts">Data-lake CLI and quickstarts<a class="headerlink" href="#data-lake-cli-and-quickstarts" title="Permanent link">&para;</a></h1>
+<p><strong>New to the data-lake API?</strong> Read
+<a href="../data-lake/">Add a data catalog to your server</a> first for the component model
+and the shortest path from local data to agent-visible search.</p>
 <p>The <code>agora-workbench-data-lake</code> command is the supported administrative
 surface for local catalog initialization, validation, refresh, search, external
 registration, and managed-write reconciliation. It calls the same public
 library APIs documented in <a href="../data-lake-api/">Data-lake API</a>; it does not
 provision storage, identities, search services, or application hosts.</p>
+<p>Use this page when you are operating a catalog:</p>
+<ul>
+<li><strong>Local read-only:</strong> follow the zero-cloud quickstart.</li>
+<li><strong>Selective disclosure:</strong> choose manifest discovery instead of scanning.</li>
+<li><strong>Durable writes:</strong> use the authorized managed-write example.</li>
+<li><strong>Azure:</strong> bring an existing storage account, container, identity, and
+  application host.</li>
+</ul>
 <h2 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>uv<span class="w"> </span>add<span class="w"> </span>agora-workbench
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># Add only the capabilities the deployment uses:</span>
