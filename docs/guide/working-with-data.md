@@ -302,8 +302,10 @@ and `get_catalog_capabilities` are registered only when `catalog` is supplied.
 Search/get payloads retain `id`, `source_id`, familiar metadata fields, and
 relevance `score` when supplied by the provider. They do not eagerly resolve or
 expose credential-bearing storage locators. A `load_path` is returned only when
-the session uses the integration-provided resolver; paste that opaque,
-revision-pinned tag into `execute_*_code`, where resolution occurs on demand.
+the session's data manager supports the catalog resolver, either through the
+integration-provided manager or the explicit custom-manager opt-in described
+below. Paste that opaque, revision-pinned tag into `execute_*_code`, where
+resolution occurs on demand.
 Per-artifact policy sessions conservatively omit `load_path` because source
 capabilities alone cannot prove that the caller may resolve a specific result.
 

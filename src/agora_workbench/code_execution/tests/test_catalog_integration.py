@@ -2494,6 +2494,49 @@ async def test_custom_manager_can_opt_in_to_catalog_execution_references(tmp_pat
     await integration.shutdown()
 
 
+async def test_custom_manager_opt_in_failure_rolls_back_factory_resources(tmp_path):
+    close_calls = []
+
+    class Extension:
+        def cleanup(self):
+            close_calls.append("extension")
+
+    class Manager(DataLakeDataManager):
+        def __init__(self):
+            super().__init__()
+
+        def cleanup(self):
+            close_calls.append("manager")
+            super().cleanup()
+
+        def supports_catalog_references(self, _resolver):
+            raise ValueError("invalid resolver composition")
+
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[source]))
+    session_manager = SessionManager(
+        SessionConfig(
+            data_manager_factory=lambda _context: SessionResources(
+                Manager(),
+                {"custom": Extension()},
+            )
+        )
+    )
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    with pytest.raises(ValueError, match="invalid resolver composition"):
+        session_manager.create_session({}, "user", "token", {})
+
+    await session_manager.await_resource_cleanup()
+    assert sorted(close_calls) == ["extension", "manager"]
+    await integration.shutdown()
+
+
 async def test_data_manager_construction_failure_closes_session_credential(tmp_path, monkeypatch):
     credentials = []
 

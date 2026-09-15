@@ -359,27 +359,15 @@ class CodeExecutionServer(BaseMCPServer):
                     else:
                         manager = custom_result
                     if manager is None or not callable(getattr(manager, "cleanup", None)):
-                        cleanup_error = self.session_manager.rollback_factory_resources(
-                            manager,
-                            custom_extensions,
-                        )
                         validation_error = TypeError(
                             "SessionConfig.data_manager_factory must return a data manager instance "
                             "with a cleanup() method."
                         )
-                        if cleanup_error is not None:
-                            validation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                         raise validation_error
                     if "catalog" in custom_extensions:
-                        cleanup_error = self.session_manager.rollback_factory_resources(
-                            manager,
-                            custom_extensions,
-                        )
                         collision = ValueError(
                             "SessionConfig.data_manager_factory extensions cannot use the reserved 'catalog' key."
                         )
-                        if cleanup_error is not None:
-                            collision.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
                         raise collision
                     supports_catalog_references = getattr(manager, "supports_catalog_references", None)
                     if callable(supports_catalog_references):
@@ -387,13 +375,12 @@ class CodeExecutionServer(BaseMCPServer):
                     elif getattr(manager, "_artifact_resolver", None) is binding.resolver:
                         binding.execution_references = True
             except BaseException as exc:
-                if existing_factory is None:
-                    if manager is not None:
-                        cleanup_error = self.session_manager.rollback_factory_resources(manager, {})
-                        if cleanup_error is not None:
-                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error!r}")
-                    elif credential is not None:
-                        binding.schedule_resource_cleanup(credential)
+                if manager is not None or custom_extensions:
+                    cleanup_error = self.session_manager.rollback_factory_resources(manager, custom_extensions)
+                    if cleanup_error is not None:
+                        exc.add_note(f"Data manager factory rollback also failed: {cleanup_error!r}")
+                elif credential is not None:
+                    binding.schedule_resource_cleanup(credential)
                 try:
                     binding.cleanup()
                 except Exception as cleanup_error:
