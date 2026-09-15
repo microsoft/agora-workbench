@@ -97,6 +97,123 @@ async def test_local_upload_commits_immutable_revision_and_is_idempotent(tmp_pat
         )
 
 
+async def test_revision_and_removal_provenance_survives_updates_and_manifest_replay(tmp_path):
+    source = tmp_path / "source.csv"
+    source.write_text("one")
+    writer = _writer(tmp_path / "lake")
+    first = await writer.upload(
+        UploadArtifactRequest("upload-alice", "reports/current.csv", source),
+        RequestContext(caller_id="alice"),
+    )
+    source.write_text("two")
+    second = await writer.upload(
+        UploadArtifactRequest("upload-bob", "reports/current.csv", source),
+        RequestContext(caller_id="bob"),
+    )
+    await writer.remove(
+        RemoveArtifactRequest(
+            "remove-carol",
+            ArtifactReference(second.artifact_id, "managed"),
+            garbage_collect=False,
+        ),
+        RequestContext(caller_id="carol"),
+    )
+
+    manifest = await writer.read_manifest()
+    artifact = manifest.artifacts[0]
+    revisions = {revision.operation_id: revision for revision in artifact.revisions}
+    assert revisions[first.operation_id].provenance is not None
+    assert revisions[first.operation_id].provenance.caller_id == "alice"
+    assert revisions[second.operation_id].provenance is not None
+    assert revisions[second.operation_id].provenance.caller_id == "bob"
+    assert artifact.removals[0].provenance is not None
+    assert artifact.removals[0].provenance.caller_id == "carol"
+    assert artifact.provenance is not None
+    assert artifact.provenance.caller_id == "carol"
+
+    replayed = CatalogManifest.from_mapping(json.loads(json.dumps(manifest.to_mapping())))
+    replayed_artifact = replayed.artifacts[0]
+    assert [revision.provenance.caller_id for revision in replayed_artifact.revisions if revision.provenance] == [
+        "alice",
+        "bob",
+    ]
+    assert replayed_artifact.removals[0].provenance is not None
+    assert replayed_artifact.removals[0].provenance.caller_id == "carol"
+
+
+def test_legacy_artifact_provenance_backfills_only_matching_history_entry():
+    provenance = {
+        "operation_id": "upload-current",
+        "kind": "upload",
+        "created_at": "2026-09-15T10:00:00+00:00",
+        "caller_id": "alice",
+    }
+    mapping = {
+        "version": 1,
+        "generation": 2,
+        "artifacts": [
+            {
+                "path": "artifact.txt",
+                "artifact_id": "artifact",
+                "storage_path": ".agora/revisions/artifact/upload-current.data",
+                "revision_id": "upload-current",
+                "content_revision": "checksum",
+                "ownership": "managed",
+                "provenance": provenance,
+                "revisions": [
+                    {
+                        "revision_id": "upload-old",
+                        "storage_path": ".agora/revisions/artifact/upload-old.data",
+                        "content_revision": "old-checksum",
+                        "created_at": "2026-09-15T09:00:00+00:00",
+                        "operation_id": "upload-old",
+                        "ownership": "managed",
+                    },
+                    {
+                        "revision_id": "upload-current",
+                        "storage_path": ".agora/revisions/artifact/upload-current.data",
+                        "content_revision": "checksum",
+                        "created_at": "2026-09-15T10:00:00+00:00",
+                        "operation_id": "upload-current",
+                        "ownership": "managed",
+                    },
+                ],
+            }
+        ],
+    }
+
+    artifact = CatalogManifest.from_mapping(mapping).artifacts[0]
+
+    assert artifact.revisions[0].provenance is None
+    assert artifact.revisions[1].provenance == artifact.provenance
+
+    removal_mapping = json.loads(json.dumps(mapping))
+    removal_provenance = {
+        "operation_id": "remove-current",
+        "kind": "remove",
+        "created_at": "2026-09-15T11:00:00+00:00",
+        "caller_id": "carol",
+    }
+    removal_artifact = removal_mapping["artifacts"][0]
+    removal_artifact["provenance"] = removal_provenance
+    removal_artifact["deleted_at"] = removal_provenance["created_at"]
+    removal_artifact["removals"] = [
+        {
+            "operation_id": "remove-current",
+            "generation": 2,
+            "revision_id": "upload-current",
+            "storage_path": ".agora/revisions/artifact/upload-current.data",
+            "garbage_collect": False,
+            "revisions": removal_artifact["revisions"],
+        }
+    ]
+
+    removed = CatalogManifest.from_mapping(removal_mapping).artifacts[0]
+
+    assert all(revision.provenance is None for revision in removed.revisions)
+    assert removed.removals[0].provenance == removed.provenance
+
+
 async def test_managed_manifest_round_trips_through_read_provider(tmp_path):
     source = tmp_path / "source.csv"
     source.write_text("one")
@@ -763,6 +880,19 @@ class _ArtifactDenyPolicy:
         return request.reference is None
 
 
+class _ScopedRemovePolicy:
+    def __init__(self, *, source_allowed: bool, artifact_allowed: bool):
+        self.source_allowed = source_allowed
+        self.artifact_allowed = artifact_allowed
+        self.requests = []
+
+    async def authorize(self, request, context):
+        self.requests.append(request)
+        if request.operation is not CatalogOperation.REMOVE:
+            return True
+        return self.source_allowed if request.reference is None else self.artifact_allowed
+
+
 @pytest.mark.parametrize("kind", ["register", "upload", "promote"])
 async def test_create_mutations_require_effective_artifact_authorization(tmp_path, kind):
     source = tmp_path / "source"
@@ -799,6 +929,43 @@ async def test_create_mutations_require_effective_artifact_authorization(tmp_pat
     assert policy.requests[1].reference == ArtifactReference(logical_artifact_id("managed", "logical.txt"), "managed")
     assert not (lake / RESERVED_MANIFEST_PATH).exists()
     assert not (lake / ".agora/operations").exists()
+
+
+@pytest.mark.parametrize(
+    ("source_allowed", "artifact_allowed", "expected_checks"),
+    [(False, True, 1), (True, False, 2)],
+)
+async def test_remove_requires_source_and_artifact_authorization(
+    tmp_path,
+    source_allowed,
+    artifact_allowed,
+    expected_checks,
+):
+    source = tmp_path / "source"
+    source.write_text("retained")
+    lake = tmp_path / "lake"
+    backend_writer = _writer(lake)
+    uploaded = await backend_writer.upload(UploadArtifactRequest("upload-before-denial", "artifact", source))
+    revision = lake / str(uploaded.storage_path)
+    manifest_before = (lake / RESERVED_MANIFEST_PATH).read_bytes()
+    policy = _ScopedRemovePolicy(source_allowed=source_allowed, artifact_allowed=artifact_allowed)
+    writer = AuthorizedManagedCatalogWriter(backend_writer, policy)
+
+    with pytest.raises(PermissionDeniedError):
+        await writer.remove(
+            RemoveArtifactRequest(
+                "denied-remove",
+                ArtifactReference(uploaded.artifact_id, "managed"),
+            )
+        )
+
+    assert len(policy.requests) == expected_checks
+    assert policy.requests[0].reference is None
+    if source_allowed:
+        assert policy.requests[1].reference == ArtifactReference(uploaded.artifact_id, "managed")
+    assert revision.read_text() == "retained"
+    assert (lake / RESERVED_MANIFEST_PATH).read_bytes() == manifest_before
+    assert not (lake / ".agora/operations/denied-remove.json").exists()
 
 
 async def test_reconciliation_defers_heartbeating_slow_writer(tmp_path, monkeypatch):
@@ -960,18 +1127,24 @@ class _Blob:
         }
         return {"etag": new_etag}
 
-    async def download_blob(self):
+    async def download_blob(self, *, etag=None, match_condition=None):
+        del match_condition
         await asyncio.sleep(0)
         if self.name not in self.service.values:
             raise _BlobError(404)
         item = self.service.values[self.name]
+        if etag is not None and item["etag"] != etag:
+            raise _BlobError(412)
         return _BlobDownload(item["data"], item["etag"])
 
-    async def get_blob_properties(self):
+    async def get_blob_properties(self, *, etag=None, match_condition=None):
+        del match_condition
         await asyncio.sleep(0)
         if self.name not in self.service.values:
             raise _BlobError(404)
         item = self.service.values[self.name]
+        if etag is not None and item["etag"] != etag:
+            raise _BlobError(412)
         return SimpleNamespace(etag=item["etag"], size=len(item["data"]), metadata=item["metadata"])
 
     async def delete_blob(self, *, etag, match_condition):
@@ -1303,10 +1476,10 @@ async def test_blob_registration_timeout_covers_final_properties(tmp_path, monke
     backend = BlobManagedStorage(_Container(service), prefix="catalog")
     original_properties = _Blob.get_blob_properties
 
-    async def delayed_properties(self):
+    async def delayed_properties(self, **kwargs):
         if self.name.endswith("/properties-timeout.data"):
             await asyncio.sleep(0.1)
-        return await original_properties(self)
+        return await original_properties(self, **kwargs)
 
     monkeypatch.setattr(_Blob, "get_blob_properties", delayed_properties)
     request = RegisterArtifactRequest(
@@ -1319,6 +1492,101 @@ async def test_blob_registration_timeout_covers_final_properties(tmp_path, monke
 
     with pytest.raises(TransferTimeoutError):
         await ManagedCatalogWriter("managed", backend).register(request)
+
+
+@pytest.mark.parametrize("kind", ["upload", "register"])
+async def test_blob_create_rejects_replacement_before_final_verification(tmp_path, monkeypatch, kind):
+    service = _BlobService()
+    source = tmp_path / "source"
+    source.write_bytes(b"original")
+    if kind == "register":
+        service.values["catalog/external.bin"] = {
+            "data": b"original",
+            "etag": '"source-etag"',
+            "metadata": {},
+        }
+    backend = BlobManagedStorage(_Container(service), prefix="catalog")
+    writer = ManagedCatalogWriter("managed", backend)
+    original_properties = _Blob.get_blob_properties
+    replaced = False
+
+    async def replace_before_properties(self, **kwargs):
+        nonlocal replaced
+        if self.name.endswith(f"/race-{kind}.data") and not replaced:
+            replaced = True
+            service.counter += 1
+            service.values[self.name] = {
+                "data": b"replacement",
+                "etag": f'"etag-{service.counter}"',
+                "metadata": {"agora_operation_id": "other-operation"},
+            }
+        return await original_properties(self, **kwargs)
+
+    monkeypatch.setattr(_Blob, "get_blob_properties", replace_before_properties)
+    if kind == "register":
+        request = RegisterArtifactRequest(
+            "race-register",
+            "logical.bin",
+            "external.bin",
+            checksum_sha256=hashlib.sha256(b"original").hexdigest(),
+        )
+    else:
+        request = UploadArtifactRequest("race-upload", "logical.bin", source)
+
+    with pytest.raises(PreconditionFailedError, match="changed"):
+        await getattr(writer, kind)(request)
+
+    assert replaced
+    assert (await writer.read_manifest()).artifacts == ()
+    replacement = next(item for name, item in service.values.items() if name.endswith(f"/race-{kind}.data"))
+    assert replacement["data"] == b"replacement"
+
+
+async def test_blob_exists_rejects_replacement_between_properties_and_download(monkeypatch):
+    service = _BlobService()
+    path = ".agora/revisions/artifact/existing.data"
+    service.values[f"catalog/{path}"] = {
+        "data": b"original",
+        "etag": '"original-etag"',
+        "metadata": {"agora_operation_id": "existing"},
+    }
+    backend = BlobManagedStorage(_Container(service), prefix="catalog")
+    original_download = _Blob.download_blob
+
+    async def replace_before_download(self, **kwargs):
+        service.values[self.name] = {
+            "data": b"replacement",
+            "etag": '"replacement-etag"',
+            "metadata": {"agora_operation_id": "other-operation"},
+        }
+        return await original_download(self, **kwargs)
+
+    monkeypatch.setattr(_Blob, "download_blob", replace_before_download)
+
+    with pytest.raises(ConflictError, match="changed"):
+        await backend.exists(path)
+
+
+async def test_blob_create_verifies_persisted_ownership_metadata(tmp_path, monkeypatch):
+    service = _BlobService()
+    source = tmp_path / "source"
+    source.write_bytes(b"original")
+    backend = BlobManagedStorage(_Container(service), prefix="catalog")
+    writer = ManagedCatalogWriter("managed", backend)
+    original_properties = _Blob.get_blob_properties
+
+    async def strip_ownership(self, **kwargs):
+        properties = await original_properties(self, **kwargs)
+        if self.name.endswith("/missing-ownership.data"):
+            properties.metadata = {}
+        return properties
+
+    monkeypatch.setattr(_Blob, "get_blob_properties", strip_ownership)
+
+    with pytest.raises(PreconditionFailedError, match="ownership"):
+        await writer.upload(UploadArtifactRequest("missing-ownership", "logical.bin", source))
+
+    assert (await writer.read_manifest()).artifacts == ()
 
 
 async def test_managed_transfer_diagnostics_preserve_request_context(tmp_path):

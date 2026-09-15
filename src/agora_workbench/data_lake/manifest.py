@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
@@ -67,6 +67,7 @@ class ManifestRevision:
     size_bytes: int | None = None
     version_token: str | None = None
     committed_generation: int | None = None
+    provenance: ManifestProvenance | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.ownership, ManifestOwnership):
@@ -78,6 +79,8 @@ class ManifestRevision:
             raise _invalid("Manifest revision size_bytes must be non-negative.")
         if self.committed_generation is not None and self.committed_generation < 1:
             raise _invalid("Manifest revision committed_generation must be positive.")
+        if self.provenance is not None and self.provenance.operation_id != self.operation_id:
+            raise _invalid("Manifest revision provenance must match its operation_id.")
         try:
             datetime.fromisoformat(self.created_at.replace("Z", "+00:00"))
         except ValueError as exc:
@@ -96,6 +99,7 @@ class ManifestRevision:
             "size_bytes",
             "version_token",
             "committed_generation",
+            "provenance",
         }
         unknown = set(value) - allowed
         if unknown:
@@ -126,6 +130,11 @@ class ManifestRevision:
             raise _invalid("Manifest revision ownership is invalid.") from exc
         kwargs = dict(value)
         kwargs["ownership"] = ownership
+        provenance = value.get("provenance")
+        if provenance is not None:
+            if not isinstance(provenance, Mapping):
+                raise _invalid("Manifest revision provenance must be an object.")
+            kwargs["provenance"] = ManifestProvenance.from_mapping(provenance)
         return cls(**kwargs)  # type: ignore[arg-type]
 
 
@@ -139,6 +148,7 @@ class ManifestRemoval:
     storage_path: str | None
     garbage_collect: bool
     revisions: tuple[ManifestRevision, ...] = ()
+    provenance: ManifestProvenance | None = None
 
     def __post_init__(self) -> None:
         if not self.operation_id:
@@ -148,10 +158,20 @@ class ManifestRemoval:
         if self.storage_path is not None:
             object.__setattr__(self, "storage_path", validate_managed_revision_path(self.storage_path))
         object.__setattr__(self, "revisions", tuple(self.revisions))
+        if self.provenance is not None and self.provenance.operation_id != self.operation_id:
+            raise _invalid("Manifest removal provenance must match its operation_id.")
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> "ManifestRemoval":
-        allowed = {"operation_id", "generation", "revision_id", "storage_path", "garbage_collect", "revisions"}
+        allowed = {
+            "operation_id",
+            "generation",
+            "revision_id",
+            "storage_path",
+            "garbage_collect",
+            "revisions",
+            "provenance",
+        }
         unknown = set(value) - allowed
         if unknown:
             raise _invalid(f"Unknown manifest removal fields: {', '.join(sorted(unknown))}")
@@ -174,6 +194,11 @@ class ManifestRemoval:
             ManifestRevision.from_mapping(item) if isinstance(item, Mapping) else (_raise_revision_object())
             for item in revisions
         )
+        provenance = value.get("provenance")
+        if provenance is not None:
+            if not isinstance(provenance, Mapping):
+                raise _invalid("Manifest removal provenance must be an object.")
+            kwargs["provenance"] = ManifestProvenance.from_mapping(provenance)
         return cls(**kwargs)  # type: ignore[arg-type]
 
 
@@ -305,31 +330,48 @@ class ManifestArtifact:
             raise _invalid(f"Manifest artifact {path!r} contains duplicate aliases.")
         kwargs = dict(value)
         kwargs["aliases"] = tuple(aliases)
+        provenance = value.get("provenance")
+        parsed_provenance = None
+        if provenance is not None:
+            if not isinstance(provenance, Mapping):
+                raise _invalid("Manifest artifact provenance must be an object.")
+            parsed_provenance = ManifestProvenance.from_mapping(provenance)
+            kwargs["provenance"] = parsed_provenance
         revisions = value.get("revisions", ())
         if not isinstance(revisions, Sequence) or isinstance(revisions, (str, bytes)):
             raise _invalid("Manifest artifact revisions must be a list.")
-        kwargs["revisions"] = tuple(
+        parsed_revisions = tuple(
             ManifestRevision.from_mapping(item) if isinstance(item, Mapping) else (_raise_revision_object())
             for item in revisions
         )
         removals = value.get("removals", ())
         if not isinstance(removals, Sequence) or isinstance(removals, (str, bytes)):
             raise _invalid("Manifest artifact removals must be a list.")
-        kwargs["removals"] = tuple(
+        parsed_removals = tuple(
             ManifestRemoval.from_mapping(item) if isinstance(item, Mapping) else (_raise_removal_object())
             for item in removals
         )
+        if parsed_provenance is not None:
+            parsed_revisions = tuple(
+                replace(revision, provenance=parsed_provenance)
+                if revision.provenance is None and revision.operation_id == parsed_provenance.operation_id
+                else revision
+                for revision in parsed_revisions
+            )
+            parsed_removals = tuple(
+                replace(removal, provenance=parsed_provenance)
+                if removal.provenance is None and removal.operation_id == parsed_provenance.operation_id
+                else removal
+                for removal in parsed_removals
+            )
+        kwargs["revisions"] = parsed_revisions
+        kwargs["removals"] = parsed_removals
         ownership = value.get("ownership")
         if ownership is not None:
             try:
                 kwargs["ownership"] = ManifestOwnership(ownership)
             except (TypeError, ValueError) as exc:
                 raise _invalid("Manifest artifact ownership is invalid.") from exc
-        provenance = value.get("provenance")
-        if provenance is not None:
-            if not isinstance(provenance, Mapping):
-                raise _invalid("Manifest artifact provenance must be an object.")
-            kwargs["provenance"] = ManifestProvenance.from_mapping(provenance)
         return cls(**kwargs)  # type: ignore[arg-type]
 
     def to_mapping(self) -> dict[str, object]:

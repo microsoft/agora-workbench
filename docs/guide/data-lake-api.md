@@ -392,16 +392,20 @@ from pathlib import Path
 
 from agora_workbench.data_lake import (
     ArtifactMetadata,
+    AuthorizedManagedCatalogWriter,
     LocalManagedStorage,
     ManagedCatalogWriter,
     PromoteOutputRequest,
     RequestContext,
 )
 
-writer = ManagedCatalogWriter(
+backend_writer = ManagedCatalogWriter(
     "approved-results",
     LocalManagedStorage("/srv/data/approved"),
 )
+# `catalog_authorizer` is the application's caller-aware CatalogAuthorizer.
+writer = AuthorizedManagedCatalogWriter(backend_writer, catalog_authorizer)
+context = RequestContext(caller_id="researcher@example.com")
 committed = await writer.promote(
     PromoteOutputRequest(
         operation_id="run-42-result",
@@ -411,9 +415,10 @@ committed = await writer.promote(
         session_id="session-7",
         output_name="result.csv",
     ),
-    RequestContext(caller_id="researcher@example.com"),
+    context,
 )
-manifest = await writer.read_manifest(minimum_generation=committed.generation)
+# Direct backend access is trusted-only; ordinary callers mutate through `writer`.
+manifest = await backend_writer.read_manifest(minimum_generation=committed.generation)
 ```
 
 Promotion is always explicit. Ordinary `AssetPublisher.publish()` calls and
@@ -434,6 +439,11 @@ The four mutations have distinct ownership:
 - `remove()` commits a tombstone before optional garbage collection. Collection
   only deletes revisions marked `managed`, created by the recorded operation,
   and still at the recorded storage version.
+
+Each retained revision stores the provenance of the operation that created it,
+and each removal-history entry stores the provenance of its tombstone
+operation. The artifact-level provenance remains the latest operation for
+compatibility, without replacing the audit history of older revisions.
 
 Every request supplies a stable `operation_id`. An operation intent is
 create-exclusive; retries with the same request return the same revision and

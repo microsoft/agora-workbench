@@ -663,6 +663,55 @@ class BlobManagedStorage:
             "ResourceModifiedError",
         }
 
+    @staticmethod
+    def _response_etag(response: object) -> str | None:
+        etag = response.get("etag") if isinstance(response, Mapping) else getattr(response, "etag", None)
+        return str(etag) if etag is not None else None
+
+    async def _created_version(
+        self,
+        blob: object,
+        path: str,
+        operation_id: str,
+        checksum_sha256: str,
+        created_etag: str | None,
+        options: TransferOptions,
+        started: float,
+        operation: str,
+    ) -> _ObjectVersion:
+        from azure.core import MatchConditions
+
+        if created_etag is None:
+            raise PreconditionFailedError(
+                "Created object did not return a version token for safe verification.",
+                operation=operation,
+            )
+        try:
+            properties = await await_transfer(
+                blob.get_blob_properties(  # type: ignore[attr-defined]
+                    etag=created_etag,
+                    match_condition=MatchConditions.IfNotModified,
+                ),
+                _remaining_transfer_options(options, started, operation=operation),
+                operation=operation,
+                resource=path,
+            )
+        except Exception as exc:
+            if self._missing(exc) or self._conflict(exc):
+                raise PreconditionFailedError(
+                    "Created object changed before it could be verified.",
+                    operation=operation,
+                ) from exc
+            raise
+        current_etag = str(properties.etag)
+        metadata = getattr(properties, "metadata", {}) or {}
+        if current_etag != created_etag or metadata.get("agora_operation_id") != operation_id:
+            raise PreconditionFailedError(
+                "Created object identity or ownership metadata did not match the upload.",
+                operation=operation,
+            )
+        return _ObjectVersion(current_etag, int(properties.size), operation_id, checksum_sha256)
+
     @asynccontextmanager
     async def serialized(self) -> AsyncIterator[None]:
         yield
@@ -777,13 +826,16 @@ class BlobManagedStorage:
                 match_condition=MatchConditions.IfNotModified,
             )
             raise PreconditionFailedError("Upload checksum did not match the required SHA-256.", operation="upload")
-        properties = await await_transfer(
-            self._blob(path).get_blob_properties(),
-            _remaining_transfer_options(options, started, operation="upload"),
-            operation="upload",
-            resource=path,
+        return await self._created_version(
+            self._blob(path),
+            path,
+            operation_id,
+            transferred_checksum,
+            self._response_etag(upload_response),
+            options,
+            started,
+            "upload",
         )
-        return _ObjectVersion(str(properties.etag), int(properties.size), operation_id, transferred_checksum)
 
     async def create_from_storage(
         self,
@@ -859,28 +911,48 @@ class BlobManagedStorage:
             if self._conflict(exc):
                 raise _StorageConflict from exc
             raise
-        properties = await await_transfer(
-            target.get_blob_properties(),
-            _remaining_transfer_options(options, started, operation="register"),
-            operation="register",
-            resource=target_path,
+        return await self._created_version(
+            target,
+            target_path,
+            operation_id,
+            checksum_sha256,
+            self._response_etag(upload_response),
+            options,
+            started,
+            "register",
         )
-        return _ObjectVersion(str(properties.etag), int(properties.size), operation_id, checksum_sha256)
 
     async def exists(self, path: str) -> _ObjectVersion | None:
+        from azure.core import MatchConditions
+
         try:
             blob = self._blob(path)
             properties = await blob.get_blob_properties()
-            download = await blob.download_blob()
+            etag = str(properties.etag)
+            download = await blob.download_blob(
+                etag=etag,
+                match_condition=MatchConditions.IfNotModified,
+            )
         except Exception as exc:
             if self._missing(exc):
                 return None
+            if self._conflict(exc):
+                raise ConflictError(
+                    "Stored object changed while its ownership and checksum were being verified.",
+                    operation="managed_write",
+                ) from exc
             raise
+        download_properties = getattr(download, "properties", None)
+        if str(getattr(download_properties, "etag", "")) != etag:
+            raise ConflictError(
+                "Stored object changed while its ownership and checksum were being verified.",
+                operation="managed_write",
+            )
         digest = hashlib.sha256()
         async for chunk in download.chunks():
             digest.update(chunk)
         return _ObjectVersion(
-            str(properties.etag),
+            etag,
             int(properties.size),
             getattr(properties, "metadata", {}).get("agora_operation_id"),
             digest.hexdigest(),
@@ -1130,6 +1202,7 @@ class ManagedCatalogWriter:
                 checksum_sha256=request.checksum_sha256,
                 size_bytes=version.size_bytes,
                 version_token=version.token,
+                provenance=provenance,
             )
             return await self._commit_revision(
                 CatalogOperation.REGISTER,
@@ -1278,6 +1351,7 @@ class ManagedCatalogWriter:
                 checksum_sha256=checksum,
                 size_bytes=version.size_bytes,
                 version_token=version.token,
+                provenance=provenance,
             )
             return await self._commit_revision(
                 kind,
@@ -1383,6 +1457,7 @@ class ManagedCatalogWriter:
                             storage_path=current.storage_path,
                             garbage_collect=request.garbage_collect,
                             revisions=current.revisions,
+                            provenance=provenance,
                         )
                         tombstone = replace(
                             current,
@@ -2404,7 +2479,13 @@ class AuthorizedManagedCatalogWriter:
         request: RemoveArtifactRequest,
         context: RequestContext = RequestContext(),
     ) -> ManagedWriteResult:
-        await self._require(CatalogOperation.REMOVE, context, request.reference)
+        await self._require(CatalogOperation.REMOVE, context)
+        reference = ArtifactReference(
+            request.reference.artifact_id,
+            self._writer.source_id,
+            request.reference.revision,
+        )
+        await self._require(CatalogOperation.REMOVE, context, reference)
         return await self._writer.remove(request, context)
 
 
