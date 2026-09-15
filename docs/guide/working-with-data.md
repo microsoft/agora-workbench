@@ -336,7 +336,9 @@ resolver understands its opaque references. A custom manager that deliberately
 composes the session catalog resolver can opt in by implementing
 `supports_catalog_references(resolver) -> bool`; returning `True` enables
 opaque `load_path` values for that session without replacing the manager's
-resolver.
+resolver. The `SessionResources.extensions` key `catalog` is reserved for this
+binding; returning a custom extension under that name rejects session creation
+and cleans the factory-created manager and extensions.
 
 To mount an application-managed provider, make ownership explicit:
 

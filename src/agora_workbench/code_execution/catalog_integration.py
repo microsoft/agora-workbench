@@ -758,6 +758,7 @@ class CatalogSessionBinding:
     provider: CatalogProvider | None = None
     policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE
     per_artifact_enforcer: CatalogPolicyEnforcer | None = None
+    owned_resources: list[object] = field(default_factory=list)
     _closed: bool = False
     _active_snapshots: int = 0
     _snapshots_drained: asyncio.Event = field(default_factory=asyncio.Event)
@@ -932,6 +933,11 @@ class CatalogSessionBinding:
             self.context_refreshers = []
         self.context_refreshers.append(refresher)
 
+    def add_owned_resource(self, resource: object) -> None:
+        """Retain a session resource for binding-owned cleanup."""
+        if not any(existing is resource for existing in self.owned_resources):
+            self.owned_resources.append(resource)
+
     def _complete_scheduled_resource_cleanup(self, resource: object) -> None:
         _remove_resource_identity(self._scheduled_cleanup_resources, resource)
         retired = self._retirement_started_resources.pop(id(resource), resource)
@@ -1096,6 +1102,7 @@ class CatalogSessionBinding:
                 *self._scheduled_cleanup_resources,
                 *self._deferred_resources,
                 *self.capability_extensions,
+                *self.owned_resources,
                 self.owned_authorizer,
             )
             seen: set[int] = set()
@@ -1174,6 +1181,7 @@ class CatalogSessionBinding:
             raise ExceptionGroup("Catalog session binding cleanup failed.", errors)
         self._deferred_resources.clear()
         self.capability_extensions = ()
+        self.owned_resources.clear()
         self.owned_authorizer = None
 
     def cleanup(self) -> None:
@@ -1690,6 +1698,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
         reference = artifact.reference
         if reference.revision is None and artifact.revision is not None:
             reference = ArtifactReference(reference.artifact_id, reference.source_id, artifact.revision)
+        if reference.revision is None:
+            return None
         return f"<blob>{_encode_reference(reference)}</blob>"
 
     async def search_data(

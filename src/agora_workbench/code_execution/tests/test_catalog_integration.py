@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -771,6 +772,52 @@ async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(t
     assert captured["hybrid_alpha"] == 0.25
 
 
+async def test_catalog_indexer_initializes_embedding_provider_once_across_threads(tmp_path, monkeypatch):
+    config = CatalogConfig(
+        sources=[SourceConfig(source_id="source", path=str(tmp_path))],
+        search=SearchConfig(
+            embedding_model="azure-openai",
+            azure_openai_endpoint="https://example.openai.azure.com",
+            azure_openai_deployment="embedding",
+            embedding_dimensions=2,
+        ),
+    )
+    db = CatalogDB(":memory:", vec_dimensions=2)
+    db.open()
+    indexer = CatalogIndexer(config, db)
+    entered = threading.Event()
+    release = threading.Event()
+    created = []
+
+    class Embeddings:
+        dimensions = 2
+
+    def create_provider(**_kwargs):
+        provider = Embeddings()
+        created.append(provider)
+        entered.set()
+        release.wait(timeout=5)
+        return provider
+
+    monkeypatch.setattr(
+        "agora_workbench.code_execution.data_access.catalog.indexer.create_embedding_provider",
+        create_provider,
+    )
+    try:
+        first = asyncio.create_task(asyncio.to_thread(lambda: indexer.embedding_provider))
+        await asyncio.to_thread(entered.wait, 5)
+        second = asyncio.create_task(asyncio.to_thread(lambda: indexer.embedding_provider))
+        await asyncio.sleep(0.05)
+
+        assert len(created) == 1
+        release.set()
+        first_provider, second_provider = await asyncio.gather(first, second)
+        assert first_provider is second_provider is created[0]
+    finally:
+        release.set()
+        db.close()
+
+
 async def test_configured_catalog_keyword_search_does_not_call_query_embedder(tmp_path, monkeypatch):
     root = tmp_path / "source"
     root.mkdir()
@@ -1069,9 +1116,9 @@ async def test_catalog_startup_failure_uses_server_shutdown_retry(tmp_path):
     assert (provider.load_calls, provider.close_calls) == (1, 2)
 
 
-async def test_default_data_manager_rollback_tracks_owned_credential_cleanup(tmp_path, monkeypatch):
+async def test_default_data_manager_rollback_tracks_binding_owned_credential_cleanup(tmp_path, monkeypatch):
     """A failure after the default catalog data manager is built must route its
-    rollback through the manager's tracked async cleanup, not an untracked task."""
+    credential rollback through the integration's tracked async cleanup."""
     import dataclasses
 
     from agora_workbench.code_execution.catalog_integration import CatalogSessionBinding
@@ -1116,13 +1163,13 @@ async def test_default_data_manager_rollback_tracks_owned_credential_cleanup(tmp
     with pytest.raises(RuntimeError, match="refresher registration failed"):
         server.session_manager.create_session({}, "user", "token", {})
 
-    drain = asyncio.create_task(server.session_manager.await_resource_cleanup())
+    drain = asyncio.create_task(integration._cleanup_tracker.drain())
     await asyncio.sleep(0)
     assert not drain.done()
     assert not closed.is_set()
 
     gate.set()
-    assert await drain is None
+    assert await drain == []
     assert closed.is_set()
 
 
@@ -2800,6 +2847,39 @@ async def test_data_manager_construction_failure_closes_session_credential(tmp_p
     await integration.shutdown()
 
 
+async def test_catalog_binding_owns_session_credential_cleanup(tmp_path):
+    class CredentialProvider:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def close(self):
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("transient credential close failure")
+
+    provider = CredentialProvider()
+    auth = create_noop_auth_config()
+    auth.credential_provider_factory = lambda _token: provider
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+    )
+    server = CodeExecutionServer(_server_config(tmp_path), auth_config=auth, catalog=integration)
+    session_id = server.session_manager.create_session({}, "user", "token", {})
+    session = server.session_manager.get_session(session_id)
+    binding = session.extensions["catalog"]
+
+    assert not session.data_manager._owns_credential
+    assert binding.owned_resources == [session.data_manager._credential]
+
+    with pytest.raises(ExceptionGroup, match="Session cleanup failed"):
+        await server.session_manager.aclose_session(session_id)
+    await integration._cleanup_tracker.drain()
+
+    assert provider.close_calls == 2
+    await integration.shutdown()
+
+
 async def test_catalog_extension_collision_rolls_back_custom_session_resources(tmp_path):
     class Extension:
         def __init__(self):
@@ -3450,6 +3530,15 @@ async def test_discovery_tools_keep_payload_shape_and_enforce_bounds():
     catalog.search.return_value = Page((metadata_only,))
     metadata_only_results = await captured["search_data"]("metadata")
     assert "load_path" not in metadata_only_results[0]
+
+    unrevisioned = CatalogArtifact(
+        ArtifactReference("unrevisioned", "source"),
+        ArtifactPresentation("unrevisioned.csv"),
+        StorageLocator("file:///data/unrevisioned.csv"),
+    )
+    catalog.search.return_value = Page((unrevisioned,))
+    unrevisioned_results = await captured["search_data"]("unrevisioned")
+    assert "load_path" not in unrevisioned_results[0]
 
     integration._policy_mode = CatalogPolicyMode.PER_ARTIFACT
     per_artifact = await captured["search_data"]("data")

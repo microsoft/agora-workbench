@@ -340,10 +340,11 @@ class CodeExecutionServer(BaseMCPServer):
                             credential_factory(context.user_token),
                             provider_factory=credential_factory,
                         )
+                        binding.add_owned_resource(credential)
                         binding.add_context_refresher(credential.prepare_context_refresh)
                     manager = DataLakeDataManager(
                         credential=credential,
-                        credential_ownership=ResourceOwnership.OWNED,
+                        credential_ownership=ResourceOwnership.BORROWED,
                         artifact_resolver=binding.resolver,
                     )
 

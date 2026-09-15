@@ -9,6 +9,7 @@ import logging
 import mimetypes
 import os
 import stat
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -320,6 +321,7 @@ class CatalogIndexer:
         self._db = db
         self._credential_provider = credential_provider
         self._embedding_provider: Optional[EmbeddingProvider] = embedding_provider
+        self._embedding_provider_lock = threading.Lock()
         self._manifest_revisions: dict[str, tuple[int, str]] = {}
         if not _USE_POSIX_DIR_FDS and any(source.source_type == "local" for source in config.sources):
             raise ValueError("Local catalog sources require POSIX descriptor-relative path operations.")
@@ -331,24 +333,25 @@ class CatalogIndexer:
         Re-resolves while unset; a ``None`` result (keyword-only / BM25) is cheap
         to recompute, and tests may inject ``_embedding_provider`` directly.
         """
-        if self._embedding_provider is None:
-            search_cfg = self._config.search
-            self._embedding_provider = create_embedding_provider(
-                model_name=search_cfg.embedding_model,
-                azure_openai_endpoint=search_cfg.azure_openai_endpoint,
-                azure_openai_deployment=search_cfg.azure_openai_deployment,
-                credential_provider=self._credential_provider,
-                dimensions=search_cfg.embedding_dimensions,
-            )
-        provider_dimensions = self._embedding_provider.dimensions if self._embedding_provider is not None else None
-        db_dimensions = self._db.vec_dimensions
-        if provider_dimensions is not None and db_dimensions is not None and provider_dimensions != db_dimensions:
-            raise ValueError(
-                "Embedding provider dimension mismatch: "
-                f"provider returns {provider_dimensions}, but CatalogDB expects {db_dimensions}. "
-                "Construct CatalogDB with vec_dimensions=config.search.embedding_dimensions."
-            )
-        return self._embedding_provider
+        with self._embedding_provider_lock:
+            if self._embedding_provider is None:
+                search_cfg = self._config.search
+                self._embedding_provider = create_embedding_provider(
+                    model_name=search_cfg.embedding_model,
+                    azure_openai_endpoint=search_cfg.azure_openai_endpoint,
+                    azure_openai_deployment=search_cfg.azure_openai_deployment,
+                    credential_provider=self._credential_provider,
+                    dimensions=search_cfg.embedding_dimensions,
+                )
+            provider_dimensions = self._embedding_provider.dimensions if self._embedding_provider is not None else None
+            db_dimensions = self._db.vec_dimensions
+            if provider_dimensions is not None and db_dimensions is not None and provider_dimensions != db_dimensions:
+                raise ValueError(
+                    "Embedding provider dimension mismatch: "
+                    f"provider returns {provider_dimensions}, but CatalogDB expects {db_dimensions}. "
+                    "Construct CatalogDB with vec_dimensions=config.search.embedding_dimensions."
+                )
+            return self._embedding_provider
 
     async def index(self) -> int:
         """
