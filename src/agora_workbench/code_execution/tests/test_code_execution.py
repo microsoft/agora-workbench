@@ -149,8 +149,10 @@ async def test_execute_code_holds_session_resources_through_asset_resolution(tes
             assert not close.done()
 
             release_resolve.set()
-            await execution
-            await close
+            execution_result = await execution
+            close_result = await close
+            assert json.loads(execution_result)["session_id"] == session_id
+            assert close_result is None
             assert manager_closed.is_set()
     finally:
         set_current_session(None)

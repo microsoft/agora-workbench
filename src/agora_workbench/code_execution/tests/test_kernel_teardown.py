@@ -1918,8 +1918,9 @@ class TestNoRunningLoop:
         second_kernel, _ = register_kernel(manager, second_id)
         await asyncio.to_thread(manager.close_session, second_id)
         first_cleanup_gate.set()
-        await close_all
+        close_result = await close_all
 
+        assert close_result is None
         assert first_kernel.shutdown_finished
         assert second_kernel.shutdown_finished
         assert not manager._closing_sessions
