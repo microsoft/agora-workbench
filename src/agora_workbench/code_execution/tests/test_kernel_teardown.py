@@ -1886,6 +1886,44 @@ class TestNoRunningLoop:
         asyncio.run(manager.aclose_session(session_id))
         assert session_id not in manager._kernels, "the documented recovery path did not reclaim the kernel"
 
+    async def test_aclose_all_reclaims_kernel_after_thread_close(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        kernel, _ = register_kernel(manager, session_id)
+
+        await asyncio.to_thread(manager.close_session, session_id)
+        assert session_id in manager._kernels
+
+        await manager.aclose_all_sessions()
+
+        assert kernel.shutdown_finished
+        assert session_id not in manager._kernels
+        assert session_id not in manager._closing_sessions
+
+    async def test_aclose_all_reclaims_thread_close_after_initial_snapshot(self, manager):
+        first_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        first_kernel, _ = register_kernel(manager, first_id)
+        first_cleanup_started = asyncio.Event()
+        first_cleanup_gate = asyncio.Event()
+        first_session = manager.get_session(first_id)
+
+        async def blocked_cleanup():
+            first_cleanup_started.set()
+            await first_cleanup_gate.wait()
+
+        first_session.aclose = blocked_cleanup
+        close_all = asyncio.create_task(manager.aclose_all_sessions())
+        await first_cleanup_started.wait()
+
+        second_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        second_kernel, _ = register_kernel(manager, second_id)
+        await asyncio.to_thread(manager.close_session, second_id)
+        first_cleanup_gate.set()
+        await close_all
+
+        assert first_kernel.shutdown_finished
+        assert second_kernel.shutdown_finished
+        assert not manager._closing_sessions
+
 
 # ---------------------------------------------------------------------------
 # Batch cleanup does not report success while kernels are still resident

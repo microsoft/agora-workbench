@@ -394,6 +394,9 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         self._embedding_closed = False
         self._db_closed = False
         self._lifecycle_lock = asyncio.Lock()
+        self._active_reads = 0
+        self._reads_drained = asyncio.Event()
+        self._reads_drained.set()
         try:
             self._db_owned.open()
             self._indexer = CatalogIndexer(config, self._db_owned, credential_provider=credential_provider)
@@ -421,6 +424,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
 
     async def load(self) -> int:
         async with self._lifecycle_lock:
+            await self._reads_drained.wait()
             return await self._load_unlocked()
 
     async def _load_unlocked(self) -> int:
@@ -478,29 +482,39 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
                 operation="catalog",
             )
 
-    async def capabilities(self) -> tuple[SourceCapabilities, ...]:
+    @asynccontextmanager
+    async def _read_operation(self) -> AsyncIterator[None]:
         async with self._lifecycle_lock:
             self._require_ready()
+            self._active_reads += 1
+            self._reads_drained.clear()
+        try:
+            yield
+        finally:
+            # Writers hold the lifecycle lock while waiting for this lock-free,
+            # non-suspending transition to signal that reads have drained.
+            self._active_reads -= 1
+            if self._active_reads == 0:
+                self._reads_drained.set()
+
+    async def capabilities(self) -> tuple[SourceCapabilities, ...]:
+        async with self._read_operation():
             return await super().capabilities()
 
     async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().search(request, context)
 
     async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().list(request, context)
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             return await super().get(reference, context)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        async with self._lifecycle_lock:
-            self._require_ready()
+        async with self._read_operation():
             artifact = await SQLiteCatalogProvider.get(self, reference, context)
             if artifact.locator is None:
                 raise ArtifactNotFoundError(
@@ -519,6 +533,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
 
     async def aclose(self) -> None:
         async with self._lifecycle_lock:
+            await self._reads_drained.wait()
             if self._embedding_closed and self._db_closed:
                 return
             errors: list[Exception] = []

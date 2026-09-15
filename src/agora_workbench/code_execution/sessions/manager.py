@@ -726,24 +726,25 @@ class SessionManager:
         """Cancel work, schedule kernel teardown, and remove session ownership."""
         with self._session_lifecycle_lock:
             if expected_closing_session is not None:
-                if self._closing_sessions.get(session_id) is expected_closing_session:
-                    return self._kernel_shutdown_tasks.get(session_id), None
-                return None, None
-            if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
-                return None, None
-            session = self.storage.retrieve(session_id)
-            if session is not None:
-                self._closing_session_ids.add(session_id)
-                self._closing_sessions[session_id] = session
-                try:
-                    self.storage.delete(session_id)
-                except BaseException:
-                    self._closing_session_ids.discard(session_id)
-                    self._closing_sessions.pop(session_id, None)
-                    self._session_lifecycle_condition.notify_all()
-                    raise
-                self._session_generations.pop(session_id, None)
-                self._retire_kernel_execute_lock(session_id)
+                if self._closing_sessions.get(session_id) is not expected_closing_session:
+                    return None, None
+                session = None
+            else:
+                if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
+                    return None, None
+                session = self.storage.retrieve(session_id)
+                if session is not None:
+                    self._closing_session_ids.add(session_id)
+                    self._closing_sessions[session_id] = session
+                    try:
+                        self.storage.delete(session_id)
+                    except BaseException:
+                        self._closing_session_ids.discard(session_id)
+                        self._closing_sessions.pop(session_id, None)
+                        self._session_lifecycle_condition.notify_all()
+                        raise
+                    self._session_generations.pop(session_id, None)
+                    self._retire_kernel_execute_lock(session_id)
             running_job_id = self._get_running_job_for_session(session_id)
             if running_job_id:
                 job = self._background_jobs.get(running_job_id)
@@ -932,6 +933,9 @@ class SessionManager:
             for (session_id, _, _), result in zip(sessions, results)
             if isinstance(result, Exception)
         ]
+        failed_session_ids = {
+            session_id for (session_id, _, _), result in zip(sessions, results) if isinstance(result, Exception)
+        }
         cancelled = next(
             (result for result in results if isinstance(result, asyncio.CancelledError)),
             outer_cancellation,
@@ -955,14 +959,46 @@ class SessionManager:
                 errors.append(exc)
                 break
         with self._session_lifecycle_lock:
-            remaining_sessions = bool(self._closing_sessions)
-        if remaining_sessions:
-            try:
-                await self.aclose_all_sessions()
-            except asyncio.CancelledError as exc:
-                cancelled = cancelled or exc
-            except Exception as exc:
-                errors.append(exc)
+            remaining_session_ids = sorted(self._closing_sessions)
+        for _ in range(3):
+            if not remaining_session_ids:
+                break
+            retry_sessions = []
+            with self._session_lifecycle_lock:
+                retry_sessions = [
+                    (session_id, self._closing_sessions[session_id])
+                    for session_id in remaining_session_ids
+                    if session_id in self._closing_sessions
+                ]
+            retry_tasks = [
+                asyncio.create_task(self.aclose_session(session_id, expected_closing_session=closing_session))
+                for session_id, closing_session in retry_sessions
+            ]
+            retry_results: list[BaseException | None] = []
+            if retry_tasks:
+                completion = asyncio.gather(*retry_tasks, return_exceptions=True)
+                while True:
+                    try:
+                        retry_results = list(await asyncio.shield(completion))
+                        break
+                    except asyncio.CancelledError as exc:
+                        cancelled = cancelled or exc
+                        if completion.done():
+                            retry_results = list(completion.result())
+                            break
+            for (session_id, _), result in zip(retry_sessions, retry_results):
+                if isinstance(result, asyncio.CancelledError):
+                    cancelled = cancelled or result
+                elif isinstance(result, Exception) and session_id not in failed_session_ids:
+                    errors.append(RuntimeError(f"Failed to close session {session_id}: {result}"))
+                    failed_session_ids.add(session_id)
+            with self._session_lifecycle_lock:
+                remaining_session_ids = sorted(self._closing_sessions)
+        unreported_session_ids = [
+            session_id for session_id in remaining_session_ids if session_id not in failed_session_ids
+        ]
+        if unreported_session_ids:
+            errors.append(RuntimeError(f"Session teardown did not complete for: {', '.join(unreported_session_ids)}"))
         if cancelled is not None:
             if errors:
                 cancelled.add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))

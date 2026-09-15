@@ -509,6 +509,50 @@ async def test_configured_catalog_close_waits_for_in_flight_load(tmp_path):
     await close_task
 
 
+async def test_configured_catalog_reads_overlap_and_writers_wait(tmp_path):
+    root = tmp_path / "source"
+    root.mkdir()
+    (root / "searchable.txt").write_text("payload")
+    provider = _ConfiguredCatalogProvider(
+        CatalogConfig(
+            sources=[SourceConfig(source_id="source", path=str(root))],
+            search=SearchConfig(embedding_model="none", embedding_dimensions=2),
+        )
+    )
+    embedding_started = asyncio.Event()
+    embedding_gate = asyncio.Event()
+
+    class Embeddings:
+        dimensions = 2
+
+        async def embed(self, texts):
+            embedding_started.set()
+            await embedding_gate.wait()
+            return [[0.1, 0.2] for _ in texts]
+
+    await provider.load()
+    provider._indexer._embedding_provider = Embeddings()
+    search_task = asyncio.create_task(provider.search(SearchRequest("searchable"), RequestContext()))
+    await embedding_started.wait()
+
+    page = await asyncio.wait_for(provider.list(ListRequest(), RequestContext()), timeout=1)
+    assert [artifact.presentation.name for artifact in page.items] == ["searchable.txt"]
+
+    load_task = asyncio.create_task(provider.load())
+    await asyncio.sleep(0)
+    assert not load_task.done()
+
+    close_task = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+    assert not close_task.done()
+
+    embedding_gate.set()
+    _ = await search_task
+    _ = await load_task
+    await close_task
+    assert provider._db_closed
+
+
 async def test_configured_keyword_only_catalog_searches_without_embeddings(tmp_path):
     root = tmp_path / "source"
     root.mkdir()
