@@ -8,7 +8,6 @@ import asyncio
 import inspect
 import json
 import logging
-import re
 import shutil
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
@@ -50,7 +49,7 @@ from agora_workbench.data_lake import (
 from agora_workbench.data_lake.catalog import CatalogConfig, CatalogDB, CatalogIndexer, DiscoveryMode, SourceConfig
 from agora_workbench.data_lake.policy import AuthorizedCatalogProvider
 from agora_workbench.data_lake.providers import SQLiteCatalogProvider
-from agora_workbench.data_lake.transfer import safe_artifact_reference
+from agora_workbench.data_lake.transfer import contains_artifact_locator, safe_artifact_reference
 
 from .data_access.catalog.indexer import ManifestRefreshError
 from .sessions.session import SessionContext
@@ -60,7 +59,6 @@ LOGGER = logging.getLogger(__name__)
 _MAX_TOOL_PAGE_SIZE = 100
 _MAX_DOMAIN_SCAN = 1_000
 _REFERENCE_PREFIX = "catalog-v1:"
-_URI_IN_TEXT_RE = re.compile(r'[A-Za-z][A-Za-z0-9+.-]*://[^\s"<>]+')
 _RESERVED_PAYLOAD_FIELDS = frozenset(
     {
         "id",
@@ -1337,7 +1335,7 @@ def _sanitize_metadata_value(value: Any) -> Any:
 
 def _agent_safe_identifier(value: str, field_name: str) -> str:
     """Reject locator-shaped identifiers that cannot be safely round-tripped."""
-    if _URI_IN_TEXT_RE.search(value) or safe_artifact_reference(value) != value:
+    if contains_artifact_locator(value) or safe_artifact_reference(value) != value:
         raise ValueError(f"Catalog {field_name} must be a logical identifier, not a URI.")
     return value
 

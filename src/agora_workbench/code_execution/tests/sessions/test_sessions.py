@@ -1264,7 +1264,7 @@ class TestDataManagerInjection:
         try:
             assert isinstance(session.data_manager, DataLakeDataManager)
         finally:
-            session.cleanup()
+            assert session.cleanup() is None
 
     def test_session_uses_injected_manager(self, monkeypatch):
         """An injected manager is used verbatim, and no default is constructed."""

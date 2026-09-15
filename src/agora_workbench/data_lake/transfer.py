@@ -215,6 +215,11 @@ def safe_transfer_resource(value: str | os.PathLike[str] | None) -> str | None:
     return safe_artifact_reference(os.fspath(value))
 
 
+def contains_artifact_locator(value: str) -> bool:
+    """Return whether a value contains a URI or redacted URI-like locator."""
+    return _URI_IN_TEXT_RE.search(value) is not None or _REDACTED_URI_IN_TEXT_RE.search(value) is not None
+
+
 def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
 
@@ -775,6 +780,7 @@ __all__ = [
     "await_transfer",
     "check_transfer_cancelled",
     "check_transfer_size",
+    "contains_artifact_locator",
     "emit_transfer_diagnostic",
     "hash_file",
     "safe_transfer_resource",

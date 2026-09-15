@@ -189,7 +189,7 @@ class Session(Generic[T]):
             "status_history": [{"status": s, "timestamp": t.isoformat()} for s, t in self._status_history],
         }
 
-    def cleanup(self) -> tuple[asyncio.Task[None], ...]:
+    def cleanup(self) -> None:
         """
         Start cleanup of every session resource, including async-only clients.
 
@@ -206,14 +206,12 @@ class Session(Generic[T]):
             self._cleanup_session_file()
         except Exception as exc:
             errors.append(exc)
-        tasks = tuple(self._scheduled_cleanup_tasks)
         if cancellations:
             if errors:
                 cancellations[0].add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
             raise cancellations[0]
         if errors:
             raise ExceptionGroup("Session cleanup failed.", errors)
-        return tasks
 
     async def aclose(self) -> None:
         """Attempt all asynchronous cleanup steps, then report aggregated failures."""
