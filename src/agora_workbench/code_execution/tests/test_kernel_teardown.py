@@ -399,8 +399,15 @@ class TestCoalescing:
 
         assert manager.storage.retrieve(session_id) is original
 
-    async def test_storage_delete_failure_releases_closing_session_tombstone(self, manager, monkeypatch):
-        session_id = manager.create_session(data={}, user_identity="user", user_token="t", token_claims={})
+    async def test_storage_delete_failure_releases_closing_session_tombstone(self, manager, monkeypatch, tmp_path):
+        session_file = tmp_path / "session.json"
+        session_file.write_text("active")
+        session_id = manager.create_session(
+            data={"session_file": str(session_file)},
+            user_identity="user",
+            user_token="t",
+            token_claims={},
+        )
         km, _ = register_kernel(manager, session_id)
         original_delete = manager.storage.delete
         failed = False
@@ -423,6 +430,7 @@ class TestCoalescing:
         assert not km.shutdown_started
         assert session_id not in manager._kernel_shutdown_tasks
         assert session_id not in manager._closing_session_ids
+        assert session_file.read_text() == "active"
 
         shutdown_task = manager.close_session(session_id)
         assert shutdown_task is not None

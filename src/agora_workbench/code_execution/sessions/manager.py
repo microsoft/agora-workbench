@@ -623,7 +623,6 @@ class SessionManager:
                 return None, None
             session = self.storage.retrieve(session_id)
             if session is not None:
-                session.claim_session_file_cleanup()
                 self._closing_session_ids.add(session_id)
                 cleanup_artifacts = True
                 try:
@@ -650,6 +649,8 @@ class SessionManager:
             )
         if cleanup_artifacts:
             try:
+                assert session is not None
+                session.claim_session_file_cleanup()
                 self._cleanup_session_artifacts(session_id)
             finally:
                 with self._session_lifecycle_condition:

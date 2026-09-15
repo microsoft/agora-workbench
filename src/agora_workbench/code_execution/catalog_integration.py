@@ -582,16 +582,16 @@ class CatalogSessionBinding:
                 mode=self.policy_mode,
                 per_artifact_enforcer=self.per_artifact_enforcer,
             )
-        if self.capability_extension_factory is not None:
-            created = self.capability_extension_factory(context, catalog, request_context)
-            if created is None:
-                extensions = ()
-            elif isinstance(created, (tuple, list)):
-                extensions = tuple(created)
-            else:
-                extensions = (created,)
         prepared_refreshes: list[Callable[[], None] | _PreparedContextRefresh] = []
         try:
+            if self.capability_extension_factory is not None:
+                created = self.capability_extension_factory(context, catalog, request_context)
+                if created is None:
+                    extensions = ()
+                elif isinstance(created, (tuple, list)):
+                    extensions = tuple(created)
+                else:
+                    extensions = (created,)
             for refresher in self.context_refreshers or ():
                 prepared_refreshes.append(refresher(context))
         except BaseException:

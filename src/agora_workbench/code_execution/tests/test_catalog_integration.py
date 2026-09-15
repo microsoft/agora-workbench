@@ -1180,6 +1180,46 @@ async def test_context_refresh_rebuilds_and_retires_capability_extensions():
     assert extensions[1].close_calls == 1
 
 
+async def test_context_refresh_extension_failure_closes_new_authorizer():
+    authorizers = []
+
+    class Authorizer:
+        def __init__(self):
+            self.close_calls = 0
+
+        async def authorize(self, request, context):
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    def authorizer_factory(context):
+        del context
+        authorizer = Authorizer()
+        authorizers.append(authorizer)
+        return authorizer
+
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer_factory=authorizer_factory,
+        capability_extension_factory=lambda context, catalog, request_context: (
+            (_ for _ in ()).throw(RuntimeError("extension refresh failed"))
+            if context.user_token == "new-token"
+            else None
+        ),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old-token"), execution_references=True)
+
+    with pytest.raises(RuntimeError, match="extension refresh failed"):
+        binding.refresh_context(SessionContext("session", "user", "new-token"))
+    await integration._cleanup_tracker.drain()
+
+    assert binding.owned_authorizer is authorizers[0]
+    assert authorizers[0].close_calls == 0
+    assert authorizers[1].close_calls == 1
+    await binding.aclose()
+
+
 async def test_concurrent_catalog_binding_close_coalesces_resource_cleanup():
     started = asyncio.Event()
     gate = asyncio.Event()
