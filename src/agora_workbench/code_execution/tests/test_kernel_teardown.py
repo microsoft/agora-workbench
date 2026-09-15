@@ -817,12 +817,18 @@ class TestAwaitableClose:
 
         assert not cleanup_started.is_set()
         assert not close_task.done()
-        with pytest.raises(ValueError, match="not found or is closing"):
+        with pytest.raises(ValueError, match="is closing"):
             async with manager.session_resource_operation(session_id):
                 pass
         await operation.__aexit__(None, None, None)
         _ = await close_task
         assert cleanup_started.is_set()
+
+    async def test_session_resource_operation_allows_first_use_session_id(self, manager):
+        async with manager.session_resource_operation("new-transport-session"):
+            assert manager._session_resource_users["new-transport-session"] == 1
+
+        assert "new-transport-session" not in manager._session_resource_users
 
     async def test_aclose_all_sessions_cleans_independently_in_parallel(self, manager):
         session_ids = [

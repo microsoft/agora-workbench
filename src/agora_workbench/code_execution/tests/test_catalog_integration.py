@@ -1408,6 +1408,21 @@ def test_cleanup_tracker_retries_synchronous_cancellation_without_event_loop():
     assert attempts == 2
 
 
+def test_cleanup_tracker_retries_synchronous_failure_without_event_loop():
+    tracker = _AsyncCleanupTracker()
+    attempts = 0
+
+    async def cleanup():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("transient cleanup failure")
+
+    tracker.schedule(cleanup(), retry=cleanup)
+
+    assert attempts == 2
+
+
 async def test_failed_context_refresh_closes_uncommitted_credential_provider():
     class CredentialProvider:
         def __init__(self, token):

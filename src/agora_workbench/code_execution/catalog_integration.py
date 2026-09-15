@@ -120,6 +120,14 @@ class _AsyncCleanupTracker:
                             raise cancelled
                         remaining_retries -= 1
                         current = retry()
+                    except Exception as exc:
+                        if retry is None or remaining_retries <= 0:
+                            if cancelled is not None:
+                                cancelled.add_note(f"Additional catalog cleanup failure: {exc!r}")
+                                raise cancelled
+                            raise
+                        remaining_retries -= 1
+                        current = retry()
                     else:
                         if cancelled is not None:
                             raise cancelled

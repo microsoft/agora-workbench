@@ -589,6 +589,7 @@ class SessionManager:
             await event.wait()
         await session.aclose()
         self._track_session_cleanup_tasks(session)
+        self._release_closing_session_id_if_safe(session.session_id, session)
 
     def _track_session_cleanup_tasks(self, session: Session) -> tuple[asyncio.Task[None], ...]:
         """Transfer session-owned cleanup tasks into the manager's strong-reference set."""
@@ -717,6 +718,7 @@ class SessionManager:
                 session_id in self._kernels
                 or shutdown_in_progress_elsewhere
                 or self._kernel_execute_lock_users.get(session_id, 0)
+                or self._session_resource_users.get(session_id, 0)
             ):
                 return
             self._closing_session_ids.discard(session_id)
@@ -1785,8 +1787,8 @@ class SessionManager:
     async def session_resource_operation(self, session_id: str) -> AsyncIterator[None]:
         """Keep session-owned data resources alive for one admitted operation."""
         with self._session_lifecycle_lock:
-            if session_id in self._closing_session_ids or self.storage.retrieve(session_id) is None:
-                raise ValueError(f"Session {session_id} not found or is closing")
+            if session_id in self._closing_session_ids:
+                raise ValueError(f"Session {session_id} is closing")
             event = self._session_resources_drained.get(session_id)
             if event is None:
                 event = asyncio.Event()
