@@ -646,9 +646,18 @@ class SessionManager:
     async def _await_session_owned_cleanup(self, session_id: str) -> None:
         """Wait for every asynchronous cleanup task owned by one session."""
         errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
         while tasks := tuple(self._session_owned_cleanup_tasks.get(session_id, ())):
             results = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
-            errors.extend(result for result in results if isinstance(result, Exception))
+            for result in results:
+                if isinstance(result, asyncio.CancelledError):
+                    cancelled = cancelled or result
+                elif isinstance(result, Exception):
+                    errors.append(result)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
+            raise cancelled
         if errors:
             raise ExceptionGroup(f"Session {session_id} resource cleanup failed.", errors)
 

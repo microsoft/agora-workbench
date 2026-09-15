@@ -1216,6 +1216,20 @@ class TestAwaitableClose:
         assert attempts == 2
         assert manager.storage.retrieve(session_id) is None
 
+    async def test_aclose_session_reports_cancelled_owned_cleanup_task(self, manager):
+        class CancelsAlways:
+            async def aclose(self):
+                raise asyncio.CancelledError
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.get_session(session_id).data_manager = cast(Any, CancelsAlways())
+
+        manager.close_session(session_id)
+        with pytest.raises(asyncio.CancelledError):
+            await manager.aclose_session(session_id)
+
+        assert manager.storage.retrieve(session_id) is None
+
     async def test_close_outside_event_loop_retries_cancelled_async_resource(self, manager):
         attempts = 0
 
