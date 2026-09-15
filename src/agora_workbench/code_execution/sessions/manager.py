@@ -1997,6 +1997,7 @@ class SessionManager:
                 return
 
             km, kc = entry
+            claimed_session_generation = self._kernel_session_generations.get(session_id)
             # Drop the rest of the per-kernel state in the same synchronous step.
             # Deferring any of it past an await would risk clobbering the state of
             # a *replacement* kernel started for this session in the meantime.
@@ -2008,9 +2009,13 @@ class SessionManager:
         if cleanup_artifacts:
             with self._session_lifecycle_lock:
                 current_session_generation = self._session_generations.get(session_id)
+                cleanup_session_generation = (
+                    expected_session_generation
+                    if expected_session_generation is not None
+                    else claimed_session_generation
+                )
                 if current_session_generation is None or (
-                    expected_session_generation is not None
-                    and current_session_generation == expected_session_generation
+                    cleanup_session_generation is not None and current_session_generation == cleanup_session_generation
                 ):
                     self._session_artifacts.pop(session_id, None)
                     outputs_dir = self._get_outputs_dir(session_id)

@@ -57,6 +57,7 @@ from agora_workbench.data_lake import (
     SearchRequest,
     SourceCapabilities,
     StorageLocator,
+    TransferOptions,
     stable_source_id,
 )
 from agora_workbench.data_lake.catalog import CatalogConfig, DiscoveryMode, SearchConfig, SourceConfig
@@ -893,6 +894,57 @@ async def test_stale_cache_validation_does_not_remove_newer_cache_entry():
     newer_path.write_text("newer")
     manager._cache_index["catalog-v1:opaque"] = newer_path
     reauthorization_gate.set()
+
+    assert await stale == newer_path
+    assert manager._cache_index["catalog-v1:opaque"] == newer_path
+    await manager.aclose()
+
+
+async def test_invalidated_file_validation_does_not_remove_newer_cache_entry(monkeypatch):
+    validation_started = asyncio.Event()
+    validation_gate = asyncio.Event()
+    hash_calls = 0
+
+    class Resolver:
+        unavailable_reason = None
+
+        async def resolve(self, artifact_id):
+            return "az://account/container/blob.csv"
+
+    class Fetcher:
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("az://")
+
+        async def fetch_to_file(self, qualified_name, dest_path):
+            dest_path.write_text("initial")
+            return len("initial")
+
+    async def pause_first_hash(*args, **kwargs):
+        nonlocal hash_calls
+        del args, kwargs
+        hash_calls += 1
+        if hash_calls == 1:
+            validation_started.set()
+            await validation_gate.wait()
+        return "0" * 64
+
+    manager = DataLakeDataManager(
+        extra_fetchers=[cast(AssetFetcher, Fetcher())],
+        artifact_resolver=cast(Any, Resolver()),
+    )
+    reference = "<blob>catalog-v1:opaque</blob>"
+    await manager.get_cache_path(reference)
+    monkeypatch.setattr("agora_workbench.code_execution.data_access.manager.hash_file", pause_first_hash)
+    stale = asyncio.create_task(
+        manager.get_cache_path(reference, transfer_options=TransferOptions(expected_sha256="0" * 64))
+    )
+    await validation_started.wait()
+
+    manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+    newer_path = manager._cache_dir / "newer.csv"
+    newer_path.write_text("newer")
+    manager._cache_index["catalog-v1:opaque"] = newer_path
+    validation_gate.set()
 
     assert await stale == newer_path
     assert manager._cache_index["catalog-v1:opaque"] == newer_path

@@ -230,6 +230,19 @@ class TestAtomicClaim:
 
         assert manager._get_kernel_execute_lock(session_id) is execute_lock
 
+    async def test_direct_live_session_kernel_shutdown_cleans_owned_artifacts(self, manager):
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        register_kernel(manager, session_id)
+        outputs = manager._get_outputs_dir(session_id)
+        (outputs / "result.csv").write_text("data")
+        manager._session_artifacts[session_id] = {}
+
+        await manager._shutdown_kernel(session_id)
+
+        assert session_id not in manager._session_artifacts
+        assert not outputs.exists()
+        manager.close_session(session_id)
+
     async def test_closed_session_reclaims_unused_execute_lock(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         manager._get_kernel_execute_lock(session_id)

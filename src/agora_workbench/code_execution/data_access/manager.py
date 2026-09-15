@@ -403,8 +403,7 @@ class DataLakeDataManager:
                     if not isinstance(exc, (ArtifactNotFoundError, PermissionDeniedError, PermissionError)):
                         raise
                     if self._cache_index.get(artifact_id) == validated_cache_path:
-                        if self._cache_index.get(artifact_id) == validated_cache_path:
-                            self._cache_index.pop(artifact_id, None)
+                        self._cache_index.pop(artifact_id, None)
                     try:
                         validated_cache_path.unlink(missing_ok=True)
                     except OSError:
@@ -461,7 +460,8 @@ class DataLakeDataManager:
                 if not cache_was_invalidated():
                     LOGGER.debug(f"Asset already cached: {cache_path}")
                     return cache_path
-            self._cache_index.pop(artifact_id, None)
+            if self._cache_index.get(artifact_id) == validated_cache_path:
+                self._cache_index.pop(artifact_id, None)
             cache_generation = self._cache_generation
             full_cache_generation = self._full_cache_generation
 
