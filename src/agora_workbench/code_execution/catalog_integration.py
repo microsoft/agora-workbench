@@ -885,9 +885,12 @@ class CatalogSessionBinding:
     def _consume_cancelled_resource_cleanup(task: asyncio.Task[None]) -> None:
         if not task.cancelled():
             try:
-                task.exception()
+                error = task.exception()
             except asyncio.CancelledError:
                 pass
+            else:
+                if error is not None:
+                    LOGGER.error("Cancelled catalog resource cleanup failed: %s", error)
 
     async def aclose(self) -> None:
         """Close session-owned extension resources, never the shared read provider."""
