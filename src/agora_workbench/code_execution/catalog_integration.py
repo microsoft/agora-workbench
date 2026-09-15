@@ -323,7 +323,7 @@ class SessionCredential:
                 if reactivated_index is not None:
                     self._retired_providers.insert(reactivated_index, provider)
                     if previous_retirement is not None:
-                        insertion_index = previous_retirement_index or 0
+                        insertion_index = previous_retirement_index if previous_retirement_index is not None else 0
                         self._provider_retirements.insert(insertion_index, previous_retirement)
 
         return _PreparedContextRefresh(
@@ -427,7 +427,7 @@ class SessionCredential:
 class _RetiredCredentialProvider:
     credential: SessionCredential
     provider: Any
-    started: bool = field(default=False, compare=False)
+    started: bool = False
 
     async def aclose(self) -> None:
         await self.credential._close_retired_provider(self)
