@@ -526,6 +526,31 @@ class TestCleanup:
         # Note: This test is somewhat non-deterministic due to GC timing
         # but works in practice for testing __del__ implementation
 
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_cache_dir_without_draining_returned_task(self):
+        """Cache dir removal must not depend on anyone awaiting the deferred task.
+
+        ``cleanup()`` defers the inherently-async resource closes (fetchers,
+        resolver, owned credential) as a background task when called from a
+        running loop, but the cache directory removal itself must complete
+        synchronously before ``cleanup()`` returns — otherwise a caller (like
+        ``__del__``) that discards the returned task would leak the on-disk
+        cache directory whenever the event loop closes before stepping it.
+        """
+        manager = DataLakeDataManager()
+        cache_dir = manager._cache_dir
+        assert cache_dir.exists()
+
+        task = manager.cleanup()
+
+        # The cache directory must already be gone, even though the returned
+        # task (covering async-only resource closes) has not been awaited.
+        assert not cache_dir.exists()
+        assert manager._cache_index == {}
+
+        if task is not None:
+            await task
+
 
 class TestBlobUrlResolution:
     """Scheme handling in ``_get_blob_url_from_artifact_id`` (blob-details resolution)."""

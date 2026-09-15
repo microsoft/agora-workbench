@@ -755,18 +755,39 @@ class DataLakeDataManager:
 
         Removes the temporary cache directory if it was created by this manager.
         Call this when the session is ending to free up disk space.
+
+        The cache directory removal (and index clearing) always completes
+        synchronously before this method returns — it does not depend on an
+        event loop draining a deferred task. Only the inherently-async
+        resource closes (fetchers, resolver, owned credential) are deferred
+        as a task when a loop is already running; that task is returned so a
+        caller (e.g. ``__del__``) can retain or await it, but losing it never
+        leaks the on-disk cache directory.
         """
+        self._cache_index.clear()
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
-            asyncio.run(self.aclose())
-            return None
-        return loop.create_task(self.aclose())
+            loop = None
+
+        task: asyncio.Task[None] | None = None
+        if loop is not None:
+            task = loop.create_task(self._aclose_async_resources())
+        else:
+            asyncio.run(self._aclose_async_resources())
+
+        self._remove_cache_dir()
+        return task
 
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
         self._cache_index.clear()
+        await self._aclose_async_resources()
+        self._remove_cache_dir()
 
+    async def _aclose_async_resources(self) -> None:
+        """Close fetchers, resolver, and owned credential (async-only resources)."""
         # Close fetchers (releases pooled connections)
         for fetcher in self._fetchers:
             if hasattr(fetcher, "close"):
@@ -788,6 +809,7 @@ class DataLakeDataManager:
             except Exception as e:
                 LOGGER.debug(f"Error closing credential: {e}")
 
+    def _remove_cache_dir(self) -> None:
         if self._cache_dir and self._cache_dir.exists():
             try:
                 shutil.rmtree(self._cache_dir)
