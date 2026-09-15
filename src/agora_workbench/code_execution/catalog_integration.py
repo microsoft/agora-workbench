@@ -763,6 +763,7 @@ class CatalogSessionBinding:
     _scheduled_cleanup_resources: list[object] = field(default_factory=list)
     _scheduled_cleanup_tasks: dict[asyncio.Task[None], object] = field(default_factory=dict)
     _retirement_started_resources: dict[int, object] = field(default_factory=dict)
+    _retired_resources: dict[int, object] = field(default_factory=dict)
     _cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def __post_init__(self) -> None:
@@ -820,7 +821,9 @@ class CatalogSessionBinding:
                 else:
                     extensions = (created,)
             for resource in (*extensions, authorizer):
-                if resource is not None and id(resource) in self._retirement_started_resources:
+                if resource is not None and (
+                    id(resource) in self._retirement_started_resources or id(resource) in self._retired_resources
+                ):
                     raise RuntimeError("Catalog refresh cannot reactivate a resource whose cleanup has started.")
             for refresher in self.context_refreshers or ():
                 prepared_refreshes.append(refresher(context))
@@ -830,6 +833,7 @@ class CatalogSessionBinding:
                 if (
                     id(extension) not in current_extension_ids
                     and id(extension) not in self._retirement_started_resources
+                    and id(extension) not in self._retired_resources
                 ):
                     self._schedule_resource_cleanup(extension)
             for prepared in prepared_refreshes:
@@ -839,6 +843,7 @@ class CatalogSessionBinding:
                 authorizer is not None
                 and authorizer is not self.owned_authorizer
                 and id(authorizer) not in self._retirement_started_resources
+                and id(authorizer) not in self._retired_resources
             ):
                 self._schedule_resource_cleanup(authorizer)
             raise
@@ -921,12 +926,39 @@ class CatalogSessionBinding:
             self.context_refreshers = []
         self.context_refreshers.append(refresher)
 
-    def _forget_scheduled_resource_cleanup(self, resource: object) -> None:
+    def _complete_scheduled_resource_cleanup(self, resource: object) -> None:
         _remove_resource_identity(self._scheduled_cleanup_resources, resource)
-        self._retirement_started_resources.pop(id(resource), None)
+        retired = self._retirement_started_resources.pop(id(resource), resource)
+        self._retired_resources[id(resource)] = retired
         for task, scheduled_resource in tuple(self._scheduled_cleanup_tasks.items()):
             if scheduled_resource is resource:
                 self._scheduled_cleanup_tasks.pop(task, None)
+
+    async def _close_tracked_resource(self, resource: object, *, retry: bool) -> None:
+        self._retirement_started_resources[id(resource)] = resource
+        pending_resources = [resource]
+        cancelled: asyncio.CancelledError | None = None
+        last_error: Exception | None = None
+        for attempt in range(2 if retry else 1):
+            try:
+                await _close_resources(pending_resources)
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+            except Exception as exc:
+                last_error = exc
+            if not pending_resources:
+                self._complete_scheduled_resource_cleanup(resource)
+                break
+            if retry and attempt == 0:
+                continue
+            if cancelled is not None:
+                if last_error is not None:
+                    cancelled.add_note(f"Additional catalog cleanup failure: {last_error!r}")
+                raise cancelled
+            if last_error is not None:
+                raise last_error
+        if cancelled is not None:
+            raise cancelled
 
     def _schedule_resource_cleanup(self, resource: object, *, retry: bool = True) -> asyncio.Task[None] | None:
         if self.cleanup_tracker is None:
@@ -934,43 +966,16 @@ class CatalogSessionBinding:
         if any(existing is resource for existing in self._scheduled_cleanup_resources):
             return None
         self._scheduled_cleanup_resources.append(resource)
-        pending_resources = [resource]
 
         async def cleanup() -> None:
-            self._retirement_started_resources[id(resource)] = resource
-            cancelled: asyncio.CancelledError | None = None
-            last_error: Exception | None = None
-            for attempt in range(2 if retry else 1):
-                try:
-                    await _close_resources(pending_resources)
-                except asyncio.CancelledError as exc:
-                    cancelled = cancelled or exc
-                except Exception as exc:
-                    last_error = exc
-                if not pending_resources:
-                    self._forget_scheduled_resource_cleanup(resource)
-                    break
-                if retry and attempt == 0:
-                    continue
-                if cancelled is not None:
-                    if last_error is not None:
-                        cancelled.add_note(f"Additional catalog cleanup failure: {last_error!r}")
-                    raise cancelled
-                if last_error is not None:
-                    raise last_error
-            if cancelled is not None:
-                raise cancelled
+            await self._close_tracked_resource(resource, retry=retry)
 
         task = self.cleanup_tracker.schedule(cleanup())
         if task is None:
-            self._forget_scheduled_resource_cleanup(resource)
             return None
         self._scheduled_cleanup_tasks[task] = resource
 
         def cleanup_finished(completed: asyncio.Task[None]) -> None:
-            if not pending_resources:
-                self._forget_scheduled_resource_cleanup(resource)
-                return
             if completed.cancelled():
                 return
             try:
@@ -978,7 +983,7 @@ class CatalogSessionBinding:
             except asyncio.CancelledError:
                 return
             if error is None:
-                self._forget_scheduled_resource_cleanup(resource)
+                self._complete_scheduled_resource_cleanup(resource)
 
         task.add_done_callback(cleanup_finished)
         return task
@@ -1104,17 +1109,13 @@ class CatalogSessionBinding:
                     else:
                         if not any(existing is resource for existing in self._scheduled_cleanup_resources):
                             self._scheduled_cleanup_resources.append(resource)
-                        self._retirement_started_resources[id(resource)] = resource
-                        pending_resource = [resource]
-                        await _close_resources(pending_resource)
-                        if not pending_resource:
-                            self._forget_scheduled_resource_cleanup(resource)
+                        await self._close_tracked_resource(resource, retry=False)
                 except asyncio.CancelledError as exc:
                     cancelled = cancelled or exc
                 except Exception as exc:
                     errors.append(exc)
                 finally:
-                    if task is not None:
+                    if task is not None and task.done():
                         self._scheduled_cleanup_tasks.pop(task, None)
                         if self.cleanup_tracker is not None:
                             self.cleanup_tracker.discard(task)

@@ -3132,8 +3132,11 @@ async def test_refresh_rejects_authorizer_whose_retirement_has_started():
     release_cleanup.set()
     await drain
 
-    binding.refresh_context(SessionContext("session", "user", "first-again"))
-    assert binding.owned_authorizer is first
+    assert id(first) not in binding._retirement_started_resources
+    assert binding._retired_resources[id(first)] is first
+    with pytest.raises(RuntimeError, match="cleanup has started"):
+        binding.refresh_context(SessionContext("session", "user", "first-again"))
+    assert binding.owned_authorizer is second
     assert first.close_calls == 1
     await binding.aclose()
 
