@@ -375,12 +375,17 @@ class CodeExecutionServer(BaseMCPServer):
                     elif getattr(manager, "_artifact_resolver", None) is binding.resolver:
                         binding.execution_references = True
             except BaseException as exc:
-                if manager is not None or custom_extensions:
+                if existing_factory is None:
+                    if manager is not None:
+                        cleanup_error = self.session_manager.rollback_factory_resources(manager, {})
+                        if cleanup_error is not None:
+                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error!r}")
+                    elif credential is not None:
+                        binding.schedule_resource_cleanup(credential)
+                elif manager is not None or custom_extensions:
                     cleanup_error = self.session_manager.rollback_factory_resources(manager, custom_extensions)
                     if cleanup_error is not None:
                         exc.add_note(f"Data manager factory rollback also failed: {cleanup_error!r}")
-                elif credential is not None:
-                    binding.schedule_resource_cleanup(credential)
                 try:
                     binding.cleanup()
                 except Exception as cleanup_error:
