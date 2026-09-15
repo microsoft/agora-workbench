@@ -14,7 +14,9 @@ import logging
 import os
 import stat
 import asyncio
+import ipaddress
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -164,6 +166,7 @@ class BlobFetcher(AssetFetcher):
         credential: "AsyncTokenCredential | None" = None,
         *,
         allowed_locations: list[str | AzureBlobScope] | None = None,
+        account_endpoints: Mapping[str, str] | None = None,
     ):
         super().__init__(credential=credential)
         # Cache of account_url -> BlobServiceClient for connection reuse
@@ -172,6 +175,48 @@ class BlobFetcher(AssetFetcher):
             value if isinstance(value, AzureBlobScope) else AzureBlobScope.from_uri(value)
             for value in (allowed_locations or [])
         )
+        self._account_endpoints = {
+            account.lower(): self._validate_account_endpoint(account, endpoint)
+            for account, endpoint in (account_endpoints or {}).items()
+        }
+
+    @staticmethod
+    def _validate_account_endpoint(account: str, endpoint: str) -> str:
+        """Validate an explicit caller-owned service endpoint for one account."""
+        normalized_account = AzureBlobScope(account, "endpoint").account
+        if account != normalized_account:
+            raise ValueError("Blob endpoint account keys must be non-empty lowercase names.")
+        parsed = urlsplit(endpoint)
+        if (
+            not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Blob service endpoints cannot contain credentials, query strings, or fragments.")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Blob service endpoints must use a valid port.") from exc
+        if port == 0:
+            raise ValueError("Blob service endpoint ports must be between 1 and 65535.")
+        if parsed.scheme == "http":
+            hostname = parsed.hostname
+            try:
+                loopback = ipaddress.ip_address(hostname).is_loopback
+            except ValueError:
+                loopback = hostname == "localhost"
+            if not loopback:
+                raise ValueError("Plain HTTP Blob service endpoints are limited to loopback emulators.")
+        elif parsed.scheme != "https":
+            raise ValueError("Blob service endpoints must use HTTPS or loopback HTTP.")
+        if any(segment in {".", ".."} for segment in unquote(parsed.path).split("/")):
+            raise ValueError("Blob service endpoint paths cannot contain dot segments.")
+        return endpoint.rstrip("/")
+
+    def _account_url(self, account: str) -> str:
+        return self._account_endpoints.get(account, f"https://{account}.blob.core.windows.net")
 
     def _get_client(self, account_url: str) -> "AzureBlobServiceClient":
         """Get or create a long-lived BlobServiceClient for the given account."""
@@ -242,7 +287,7 @@ class BlobFetcher(AssetFetcher):
         LOGGER.info(f"Fetching blob asset: {sanitized_url}")
 
         # Get or create authenticated client (connection reuse)
-        account_url = f"https://{storage_account}.blob.core.windows.net"
+        account_url = self._account_url(storage_account)
         client = self._get_client(account_url)
         blob_client = client.get_blob_client(container=container, blob=blob_path)
 
@@ -354,7 +399,7 @@ class BlobFetcher(AssetFetcher):
         )
 
         async def download() -> TransferResult:
-            account_url = f"https://{storage_account}.blob.core.windows.net"
+            account_url = self._account_url(storage_account)
             client = self._get_client(account_url)
             blob_client = client.get_blob_client(container=container, blob=blob_path)
             stream = await await_transfer(

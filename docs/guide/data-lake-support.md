@@ -91,17 +91,28 @@ uv run pytest src/agora_workbench/data_lake/tests/test_azurite_acceptance.py \
   -m azurite -v
 ```
 
-The test creates a uniquely named container, exercises real Blob uploads,
-downloads, register transfer, ETag manifest CAS, interruption and orphan
-reconciliation, then deletes the container. If the variable is absent, it
-skips cleanly.
+The tests create uniquely named containers and prove two public paths against
+actual emulator network I/O:
 
-Azurite does not provide Entra ID or Azure RBAC. Also, the public catalog
-configuration intentionally canonicalizes Azure sources to production
-`az://account/container/...` endpoints; it does not expose an arbitrary Blob
-endpoint override. Therefore Azurite proves the public
-`BlobManagedStorage`/managed-writer mechanics, while catalog enumeration,
-identity and RBAC remain live-Azure gates.
+- `BlobManagedStorage` plus `ManagedCatalogWriter` uploads, downloads,
+  registration transfer, ETag manifest CAS, interruption and reconciliation;
+- `SQLiteCatalogProvider` plus `CatalogIntegration`, policy-aware MCP
+  `search_data`, opaque execution-reference resolution, `DataLakeDataManager`
+  and `BlobFetcher` transfer of actual emulator bytes.
+
+The execution composition supplies `BlobFetcher.account_endpoints` for the
+`devstoreaccount1` account. Explicit endpoints may use HTTPS, or plain HTTP
+only on loopback for emulators; credentials, query strings, fragments and dot
+segments are rejected. The canonical artifact locator remains
+`az://account/container/path`, and configured account/container/prefix scopes
+still apply.
+
+`CatalogConfig` Blob enumeration intentionally continues to target canonical
+Azure production endpoints; the Azurite acceptance provider is populated
+through the public SQLite catalog API rather than weakening source URI
+validation. Azurite does not provide Entra ID or Azure RBAC, so production
+catalog enumeration, identity and RBAC remain live-Azure gates. Every Azurite
+test deletes its container. If the variable is absent, the gate skips cleanly.
 
 ### Live Azure
 
