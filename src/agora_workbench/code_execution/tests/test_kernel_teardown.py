@@ -845,6 +845,32 @@ class TestAwaitableClose:
         assert manager.storage.retrieve(session_id) is None
         assert not manager._resource_cleanup_tasks
 
+    async def test_aclose_session_drains_through_repeated_cancellation(self, manager):
+        gate = asyncio.Event()
+        started = asyncio.Event()
+
+        class Resource:
+            async def aclose(self):
+                started.set()
+                await gate.wait()
+
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        manager.get_session(session_id).data_manager = cast(Any, Resource())
+
+        closing = asyncio.create_task(manager.aclose_session(session_id))
+        await started.wait()
+        closing.cancel()
+        await asyncio.sleep(0)
+        closing.cancel()
+        await asyncio.sleep(0)
+        assert not closing.done()
+
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert manager.storage.retrieve(session_id) is None
+        assert not manager._resource_cleanup_tasks
+
     async def test_await_kernel_shutdown_is_a_noop_when_idle(self, manager):
         await manager.await_kernel_shutdown("never-existed")
 

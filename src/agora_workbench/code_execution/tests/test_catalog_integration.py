@@ -264,6 +264,26 @@ async def test_configured_catalog_preserves_valid_manifest_generation_after_refr
         await replacement.aclose()
 
 
+async def test_configured_catalog_rejects_manifest_generation_after_stale_bound(tmp_path):
+    root = tmp_path / "manifest-source"
+    source = _write_manifest(root, "source", "data.txt", "artifact")
+    source.max_stale_seconds = 0
+    database = tmp_path / "catalog.db"
+    provider = _ConfiguredCatalogProvider(CatalogConfig(sources=[source]), db_path=database)
+    assert await provider.load() == 1
+    await provider.aclose()
+
+    (root / "manifest.json").write_text("{")
+    replacement = _ConfiguredCatalogProvider(CatalogConfig(sources=[source]), db_path=database)
+    try:
+        with pytest.raises(RuntimeError, match="not ready"):
+            await replacement.load()
+        with pytest.raises(BackendUnavailableError, match="not ready"):
+            await replacement.get(ArtifactReference("artifact", "source"), RequestContext())
+    finally:
+        await replacement.aclose()
+
+
 async def test_configured_catalog_search_uses_query_embedding_and_hybrid_alpha(tmp_path, monkeypatch):
     root = tmp_path / "source"
     root.mkdir()
@@ -406,6 +426,36 @@ async def test_catalog_cleanup_drains_through_repeated_cancellation():
     cancelled = await drain
     assert isinstance(cancelled, asyncio.CancelledError)
     assert finished.is_set()
+
+
+async def test_catalog_shutdown_drains_cleanup_before_provider_through_repeated_cancellation():
+    cleanup_started = asyncio.Event()
+    cleanup_gate = asyncio.Event()
+    provider = _LifecycleProvider()
+    integration = CatalogIntegration(
+        ResourceLease(provider, ResourceOwnership.OWNED),
+        authorizer=_PerUserAuthorizer("source"),
+        load_on_startup=False,
+    )
+
+    async def cleanup():
+        cleanup_started.set()
+        await cleanup_gate.wait()
+
+    integration._cleanup_tracker.schedule(cleanup())
+    shutdown = asyncio.create_task(integration.shutdown())
+    await cleanup_started.wait()
+    shutdown.cancel()
+    await asyncio.sleep(0)
+    shutdown.cancel()
+    await asyncio.sleep(0)
+
+    assert not shutdown.done()
+    assert provider.close_calls == 0
+    cleanup_gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await shutdown
+    assert provider.close_calls == 1
 
 
 async def test_catalog_cleanup_returns_terminal_cleanup_cancellation():
@@ -1495,6 +1545,50 @@ async def test_refresh_retains_authorizer_until_request_snapshot_releases():
     await integration._cleanup_tracker.drain()
     assert authorizers[0].close_calls == 1
 
+    await binding.aclose()
+
+
+async def test_resolver_retains_authorizer_until_resolution_finishes():
+    authorize_started = asyncio.Event()
+    authorize_gate = asyncio.Event()
+    authorizers = []
+
+    class Authorizer:
+        def __init__(self):
+            self.close_calls = 0
+            authorizers.append(self)
+
+        async def authorize(self, request, context):
+            if self is authorizers[0]:
+                authorize_started.set()
+                await authorize_gate.wait()
+            return True
+
+        async def aclose(self):
+            self.close_calls += 1
+
+    class Provider(_LifecycleProvider):
+        async def resolve(self, reference, context):
+            return ResolvedArtifact(reference, StorageLocator("https://example.invalid/artifact"))
+
+    integration = CatalogIntegration(
+        ResourceLease(Provider()),
+        authorizer_factory=lambda context: Authorizer(),
+    )
+    binding = integration.bind_session(SessionContext("session", "user", "old"), execution_references=True)
+    resolving = asyncio.create_task(
+        binding.resolver.resolve(_encode_reference(ArtifactReference("artifact", "source")))
+    )
+    await authorize_started.wait()
+
+    binding.refresh_context(SessionContext("session", "user", "new"))
+    await asyncio.sleep(0)
+    assert authorizers[0].close_calls == 0
+
+    authorize_gate.set()
+    assert await resolving == "https://example.invalid/artifact"
+    await integration._cleanup_tracker.drain()
+    assert authorizers[0].close_calls == 1
     await binding.aclose()
 
 

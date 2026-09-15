@@ -221,6 +221,37 @@ class TestSessionManager:
         with pytest.raises(ValueError, match="Session .* not found"):
             manager.get_session("nonexistent")
 
+    def test_get_session_cannot_restore_concurrently_closed_session(self):
+        store_started = threading.Event()
+        store_gate = threading.Event()
+
+        class BlockingStorage(InMemoryStorage):
+            block_store = False
+
+            def store(self, session_id, session):
+                if self.block_store:
+                    store_started.set()
+                    assert store_gate.wait(timeout=5)
+                super().store(session_id, session)
+
+        storage = BlockingStorage()
+        manager = SessionManager(SessionConfig(storage_backend=storage))
+        session_id = manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+        storage.block_store = True
+        getter = threading.Thread(target=manager.get_session, args=(session_id,))
+        getter.start()
+        assert store_started.wait(timeout=5)
+
+        closer = threading.Thread(target=manager.close_session, args=(session_id,))
+        closer.start()
+        store_gate.set()
+        getter.join(timeout=5)
+        closer.join(timeout=5)
+
+        assert not getter.is_alive()
+        assert not closer.is_alive()
+        assert storage.retrieve(session_id) is None
+
     def test_update_status(self):
         """Test status update through manager."""
         manager = SessionManager()

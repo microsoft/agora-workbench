@@ -428,33 +428,36 @@ class SessionManager:
         """
         self._maybe_cleanup()
 
-        session = self.storage.retrieve(session_id)
+        with self._session_lifecycle_lock:
+            session = self.storage.retrieve(session_id)
 
-        if session is None:
-            raise ValueError(
-                f"Session {session_id} not found. It may have expired or been "
-                f"cleaned up. Active sessions: {self.storage.count()}"
-            )
+            if session is None:
+                raise ValueError(
+                    f"Session {session_id} not found. It may have expired or been "
+                    f"cleaned up. Active sessions: {self.storage.count()}"
+                )
 
-        # Update access time
-        session.touch()
-        self.storage.store(session_id, session)
+            # Update access time
+            session.touch()
+            self.storage.store(session_id, session)
 
         return session
 
     def update_session(self, session_id: str, session: Session) -> None:
         """Update an existing session."""
-        if self.storage.retrieve(session_id) is None:
-            raise ValueError(f"Session {session_id} not found")
+        with self._session_lifecycle_lock:
+            if self.storage.retrieve(session_id) is None:
+                raise ValueError(f"Session {session_id} not found")
 
-        session.touch()
-        self.storage.store(session_id, session)
+            session.touch()
+            self.storage.store(session_id, session)
 
     def update_status(self, session_id: str, status: str) -> None:
         """Update the status of a session."""
-        session = self.get_session(session_id)
-        session.update_status(status)
-        self.storage.store(session_id, session)
+        with self._session_lifecycle_lock:
+            session = self.get_session(session_id)
+            session.update_status(status)
+            self.storage.store(session_id, session)
 
     def close_session(self, session_id: str) -> "Optional[asyncio.Task[None]]":
         """
@@ -691,14 +694,24 @@ class SessionManager:
                 raise cleanup_error
 
         completion = asyncio.create_task(finish_cleanup())
+        cancelled: asyncio.CancelledError | None = None
         try:
-            await asyncio.shield(completion)
-        except asyncio.CancelledError as cancelled:
-            try:
-                await asyncio.shield(completion)
-            except BaseException as cleanup_error:
-                cancelled.add_note(f"Session cleanup also failed: {cleanup_error!r}")
-            raise cancelled
+            while True:
+                try:
+                    await asyncio.shield(completion)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancelled = cancelled or exc
+                    if completion.done():
+                        break
+        finally:
+            if cancelled is not None:
+                if completion.done() and not completion.cancelled():
+                    try:
+                        completion.result()
+                    except BaseException as cleanup_error:
+                        cancelled.add_note(f"Session cleanup also failed: {cleanup_error!r}")
+                raise cancelled
 
     async def aclose_all_sessions(self) -> None:
         """Close every active session and wait for all kernel/resource teardown."""

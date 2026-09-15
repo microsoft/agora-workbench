@@ -24,6 +24,8 @@ from pydantic import Field
 from agora_workbench.data_lake import (
     ArtifactNotFoundError,
     ArtifactReference,
+    BackendUnavailableError,
+    CatalogArtifact,
     CatalogAuthorizer,
     CatalogOperation,
     CatalogPolicyEnforcer,
@@ -32,8 +34,10 @@ from agora_workbench.data_lake import (
     DataLakeError,
     DevelopmentAllowAllCatalogAuthorizer,
     ListRequest,
+    Page,
     PageRequest,
     RequestContext,
+    ResolvedArtifact,
     ResourceLease,
     ResourceOwnership,
     SearchRequest,
@@ -310,6 +314,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             self._manifest_source_ids = {
                 _effective_source_id(source) for source in config.sources if source.discovery is DiscoveryMode.MANIFEST
             }
+            self._failed_manifest_source_ids: set[str] = set()
             super().__init__(
                 self._db_owned,
                 self._configured_source_ids,
@@ -327,8 +332,9 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
         try:
             indexed = await self._indexer.index()
         except ManifestRefreshError as exc:
+            self._failed_manifest_source_ids = set(exc.errors)
             states = {state.source_id: state for state in self._db_owned.list_source_refresh_states()}
-            unavailable = self._unavailable_sources(states, failed_source_ids=set(exc.errors))
+            unavailable = self._unavailable_sources(states, failed_source_ids=self._failed_manifest_source_ids)
             if unavailable:
                 raise RuntimeError(f"Catalog sources are not ready: {', '.join(sorted(unavailable))}") from exc
             return sum(state.artifact_count or 0 for state in states.values())
@@ -338,6 +344,7 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             for source_id, state in states.items()
             if source_id in self._manifest_source_ids and state.status != "success"
         }
+        self._failed_manifest_source_ids = failed_source_ids
         unavailable = self._unavailable_sources(states, failed_source_ids=failed_source_ids)
         if unavailable:
             raise RuntimeError(f"Catalog sources are not ready: {', '.join(sorted(unavailable))}")
@@ -362,6 +369,37 @@ class _ConfiguredCatalogProvider(SQLiteCatalogProvider):
             if (now - success_at.astimezone(timezone.utc)).total_seconds() > self._source_stale_limits[source_id]:
                 unavailable.append(source_id)
         return unavailable
+
+    def _require_ready(self) -> None:
+        if self._closed:
+            raise BackendUnavailableError("Catalog provider is closed.", operation="catalog")
+        states = {state.source_id: state for state in self._db_owned.list_source_refresh_states()}
+        unavailable = self._unavailable_sources(states, failed_source_ids=self._failed_manifest_source_ids)
+        if unavailable:
+            raise BackendUnavailableError(
+                f"Catalog sources are not ready: {', '.join(sorted(unavailable))}",
+                operation="catalog",
+            )
+
+    async def capabilities(self) -> tuple[SourceCapabilities, ...]:
+        self._require_ready()
+        return await super().capabilities()
+
+    async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
+        self._require_ready()
+        return await super().search(request, context)
+
+    async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
+        self._require_ready()
+        return await super().list(request, context)
+
+    async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
+        self._require_ready()
+        return await super().get(reference, context)
+
+    async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
+        self._require_ready()
+        return await super().resolve(reference, context)
 
     async def _embed_query(self, query: str) -> list[float] | None:
         provider = self._indexer.embedding_provider
@@ -447,6 +485,7 @@ class CatalogSessionResolver:
     def __init__(self, catalog: AuthorizedCatalogProvider, context: RequestContext):
         self._catalog = catalog
         self._context = context
+        self._snapshot: Callable[[], CatalogSessionView] | None = None
         self._closed = False
 
     @property
@@ -456,8 +495,15 @@ class CatalogSessionResolver:
     async def resolve(self, artifact_id: str) -> str:
         if self._closed:
             raise ValueError(self.unavailable_reason)
-        resolved = await self._catalog.resolve(_decode_reference(artifact_id), self._context)
-        return resolved.locator.uri
+        current = self._snapshot() if self._snapshot is not None else None
+        try:
+            catalog = current.catalog if current is not None else self._catalog
+            context = current.context if current is not None else self._context
+            resolved = await catalog.resolve(_decode_reference(artifact_id), context)
+            return resolved.locator.uri
+        finally:
+            if current is not None:
+                current.close()
 
     async def aclose(self) -> None:
         self._closed = True
@@ -856,33 +902,37 @@ class CatalogIntegration:
         self._started = False
         errors: list[Exception] = []
         cancelled: asyncio.CancelledError | None = None
-        try:
-            errors.extend(await self._cleanup_tracker.drain())
-        except asyncio.CancelledError as exc:
-            cancelled = exc
+        drain_task = asyncio.create_task(self._cleanup_tracker.drain())
+        while True:
             try:
-                errors.extend(await asyncio.shield(self._cleanup_tracker.drain()))
-            except asyncio.CancelledError as drain_cancelled:
-                cancelled = cancelled or drain_cancelled
-            except Exception as drain_error:
-                errors.append(drain_error)
-        except Exception as exc:
-            errors.append(exc)
+                errors.extend(await asyncio.shield(drain_task))
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+                if drain_task.done():
+                    if not drain_task.cancelled():
+                        try:
+                            errors.extend(drain_task.result())
+                        except Exception as drain_error:
+                            errors.append(drain_error)
+                    break
+            except Exception as exc:
+                errors.append(exc)
+                break
         try:
             if self._provider_lease.should_close:
                 close_task = asyncio.create_task(self._close_provider())
-                try:
-                    await asyncio.shield(close_task)
-                except asyncio.CancelledError as exc:
-                    cancelled = cancelled or exc
-                    if close_task.cancelled():
-                        close_task = asyncio.create_task(self._close_provider())
+                while True:
                     try:
                         await asyncio.shield(close_task)
+                        break
                     except asyncio.CancelledError as close_cancelled:
                         cancelled = cancelled or close_cancelled
+                        if close_task.done():
+                            break
                     except Exception as close_error:
                         errors.append(close_error)
+                        break
         except Exception as exc:
             errors.append(exc)
         finally:
@@ -948,7 +998,7 @@ class CatalogIntegration:
                         extensions = tuple(created)
                     else:
                         extensions = (created,)
-            return CatalogSessionBinding(
+            binding = CatalogSessionBinding(
                 catalog,
                 request_context,
                 resolver,
@@ -962,6 +1012,8 @@ class CatalogIntegration:
                 policy_mode=self._policy_mode,
                 per_artifact_enforcer=self._per_artifact_enforcer,
             )
+            resolver._snapshot = binding.snapshot
+            return binding
         except BaseException as bind_error:
             resources = (*extensions, authorizer) if self._authorizer_factory is not None else extensions
             if resources:
