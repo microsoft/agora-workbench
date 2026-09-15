@@ -41,7 +41,9 @@ from .sessions import (
     KERNEL_BOOTSTRAP_TOOL_PROXIES,
     MaxSessionsReachedError,
     SessionConfig,
+    SessionContext,
     SessionManager,
+    SessionResources,
     SessionNotFound,
     get_current_session,
     set_current_session,
@@ -61,6 +63,7 @@ from .tool_proxy import (
 )
 
 if TYPE_CHECKING:
+    from .catalog_integration import CatalogIntegration, CatalogSessionBinding
     from .data_access.publishers import AssetPublisher
     from .sessions import Session
     from .skills import Skill
@@ -154,6 +157,7 @@ class CodeExecutionServer(BaseMCPServer):
         publishers: "Optional[list[AssetPublisher]]" = None,
         skills: "Optional[list[Skill]]" = None,
         states: "Optional[list[State]]" = None,
+        catalog: "Optional[CatalogIntegration]" = None,
     ):
         """
         Initialize the code execution server.
@@ -179,11 +183,15 @@ class CodeExecutionServer(BaseMCPServer):
                 and skill loading. Use :func:`~.skills.discover_skills` to scan a directory.
             states: Optional list of :class:`~.tool_registry.State` objects defining the
                 domain's state vocabulary with descriptions and affordances.
+            catalog: Optional policy-aware data catalog integration. When
+                omitted, catalog lifecycle, tools, and session behavior remain
+                unchanged.
         """
         super().__init__()
         self.server_config = server_config
         self.kernel_name = f"tools-py-{server_config.name}"
         self.tool_registry = tool_registry
+        self.catalog = catalog
 
         # Sidecar processes (e.g. a shared model service). Lazily started in
         # _startup and stopped in _shutdown; no-op when none are declared.
@@ -193,8 +201,11 @@ class CodeExecutionServer(BaseMCPServer):
         self.states: list["State"] = list(states or [])
         self._state_affordances: dict[str, list[str]] = {s.token: s.affordances for s in self.states if s.affordances}
         self._tool_search_backends: list[Any] = []
+        self._closed_tool_search_backends: set[int] = set()
         self._custom_tool_search_backend = tool_search_backend
         self._publishers: "list[AssetPublisher]" = list(publishers or [])
+        self._closed_publishers: set[int] = set()
+        self._activity_publisher_stopped = False
         self._parallel_jobs: dict[str, dict[str, Any]] = {}
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
@@ -246,6 +257,8 @@ class CodeExecutionServer(BaseMCPServer):
                 "or create_noop_auth_config() for development."
             )
         self.auth_config = auth_config
+        if self.catalog is not None:
+            self._configure_catalog_sessions()
 
         # Entra client/tenant IDs for RFC 9728 OAuth protected-resource metadata.
         # Preferred source is auth_config.protected_resource_metadata; these attributes
@@ -303,6 +316,85 @@ class CodeExecutionServer(BaseMCPServer):
         self.mcp.add_middleware(AssetResolutionMiddleware(self))
 
         self._setup_tools()
+
+    def _configure_catalog_sessions(self) -> None:
+        """Compose catalog resolution around the existing session manager factory."""
+        from agora_workbench.data_lake import ResourceOwnership
+
+        from .catalog_integration import SessionCredential
+        from .data_access.manager import DataLakeDataManager
+
+        assert self.catalog is not None
+        existing_factory = self.session_manager.config.data_manager_factory
+
+        def catalog_data_manager_factory(context):
+            binding = self.catalog.bind_session(context, execution_references=existing_factory is None)
+            custom_extensions = {}
+            credential = None
+            manager = None
+            try:
+                if existing_factory is None:
+                    credential_factory = self.auth_config.credential_provider_factory
+                    if credential_factory is not None:
+                        credential = SessionCredential(
+                            credential_factory(context.user_token),
+                            provider_factory=credential_factory,
+                        )
+                        binding.add_owned_resource(credential)
+                        binding.add_context_refresher(credential.prepare_context_refresh)
+                    manager = DataLakeDataManager(
+                        credential=credential,
+                        credential_ownership=ResourceOwnership.BORROWED,
+                        artifact_resolver=binding.resolver,
+                    )
+
+                    def prepare_cache_invalidation(_context):
+                        return lambda: manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+
+                    binding.add_context_refresher(prepare_cache_invalidation)
+                else:
+                    custom_result = existing_factory(context)
+                    if isinstance(custom_result, SessionResources):
+                        manager = custom_result.data_manager
+                        custom_extensions = dict(custom_result.extensions)
+                    else:
+                        manager = custom_result
+                    if manager is None or not callable(getattr(manager, "cleanup", None)):
+                        validation_error = TypeError(
+                            "SessionConfig.data_manager_factory must return a data manager instance "
+                            "with a cleanup() method."
+                        )
+                        raise validation_error
+                    if "catalog" in custom_extensions:
+                        collision = ValueError(
+                            "SessionConfig.data_manager_factory extensions cannot use the reserved 'catalog' key."
+                        )
+                        raise collision
+                    supports_catalog_references = getattr(manager, "supports_catalog_references", None)
+                    if callable(supports_catalog_references):
+                        binding.execution_references = bool(supports_catalog_references(binding.resolver))
+                    elif getattr(manager, "_artifact_resolver", None) is binding.resolver:
+                        binding.execution_references = True
+            except BaseException as exc:
+                if existing_factory is None:
+                    if manager is not None:
+                        cleanup_error = self.session_manager.rollback_factory_resources(manager, {})
+                        if cleanup_error is not None:
+                            exc.add_note(f"Catalog data manager rollback also failed: {cleanup_error!r}")
+                    elif credential is not None:
+                        binding.schedule_resource_cleanup(credential)
+                elif manager is not None or custom_extensions:
+                    cleanup_error = self.session_manager.rollback_factory_resources(manager, custom_extensions)
+                    if cleanup_error is not None:
+                        exc.add_note(f"Data manager factory rollback also failed: {cleanup_error!r}")
+                try:
+                    binding.cleanup()
+                except Exception as cleanup_error:
+                    exc.add_note(f"Catalog binding rollback also failed: {cleanup_error}")
+                raise
+            return SessionResources(manager, {**custom_extensions, "catalog": binding})
+
+        self.session_manager.config.data_manager_factory = catalog_data_manager_factory
 
     # ========================================================================
     # Environment Building
@@ -670,6 +762,13 @@ class CodeExecutionServer(BaseMCPServer):
         )
         if tool_catalog:
             tool_description += "\n\n" + tool_catalog
+        if self.catalog is not None:
+            tool_description += (
+                "\n\nData catalog: use search_data to discover caller-authorized artifacts. "
+                "When a result includes load_path, paste that exact tagged reference into this tool; "
+                "the session-scoped resolver fetches it before execution. If load_path is absent, "
+                "the current session's custom data manager or policy does not support catalog resolution."
+            )
         self.mcp.tool(name=self.get_tool_name(), description=tool_description)(execute_code_tool)
 
         check_job_tool = execution_defaults.build_check_job_tool(self)
@@ -708,6 +807,24 @@ class CodeExecutionServer(BaseMCPServer):
         # Setup unified send tool (replaces push_object + publish_artifact)
         self._setup_send_tool()
 
+        if self.catalog is not None:
+            from .catalog_integration import register_catalog_discovery_tools
+
+            register_catalog_discovery_tools(self, self.catalog)
+
+    async def get_data_lake_capabilities(self, session: "Session") -> tuple[Any, ...]:
+        """Return caller-effective catalog capabilities for application adapters."""
+        if self.catalog is None:
+            return ()
+        binding: "CatalogSessionBinding | None" = session.extensions.get("catalog")
+        if binding is None:
+            return ()
+        snapshot = binding.snapshot()
+        try:
+            return await self.catalog.capabilities(snapshot)
+        finally:
+            snapshot.close()
+
     # ========================================================================
     # Session Management Helpers
     # ========================================================================
@@ -740,6 +857,7 @@ class CodeExecutionServer(BaseMCPServer):
         try:
             # Get cached token claims from context (already validated by AuthMiddleware)
             token_data = get_current_token_claims()
+            claims_validated_here = not token_data
             if not token_data:
                 # No cached claims - validate token now (e.g., in tests or direct calls)
                 LOGGER.debug("Token claims not in context, validating token for ownership check")
@@ -768,6 +886,8 @@ class CodeExecutionServer(BaseMCPServer):
                 )
                 return False
 
+            if claims_validated_here:
+                set_current_token_claims(token_data)
             LOGGER.debug(
                 f"Session {session.session_id} access authorized for app {caller_app_id or 'delegated'} "
                 f"(user: {session.user_identity})"
@@ -811,20 +931,31 @@ class CodeExecutionServer(BaseMCPServer):
         with the claims from the current request context so that they stay
         consistent with the stored bearer token.
 
-        Note: The default `DataLakeDataManager` uses managed identity (not OBO),
-        so it does not depend on the user's bearer token and is not recreated
-        here. A custom `SessionConfig.data_manager_factory` may bind a manager to
-        the token captured at session creation; such a manager is likewise not
-        rebuilt on refresh, so a factory needing a current token should read it
+        The catalog-created manager refreshes its token-bound credential
+        provider in place. A custom `SessionConfig.data_manager_factory` is not
+        rebuilt, so a custom manager needing the current token should read it
         via `get_current_request_token()` at use time rather than caching it.
         """
         fresh_token = get_current_request_token()
         if fresh_token and fresh_token != session.user_token:
-            session.user_token = fresh_token
             # Keep token_claims in sync so cached claims match the new token.
             fresh_claims = get_current_token_claims()
-            if fresh_claims is not None:
-                session.token_claims = fresh_claims
+            refreshed_claims = fresh_claims if fresh_claims is not None else session.token_claims
+            catalog_binding = session.extensions.get("catalog")
+            refresh_context = getattr(catalog_binding, "refresh_context", None)
+            if callable(refresh_context):
+                refresh_context(
+                    SessionContext(
+                        session_id=session.session_id,
+                        user_identity=session.user_identity,
+                        user_token=fresh_token,
+                        token_claims=refreshed_claims,
+                        session_type=session.session_type,
+                        metadata=session.metadata,
+                    )
+                )
+            session.user_token = fresh_token
+            session.token_claims = refreshed_claims
             LOGGER.debug(f"Refreshed token for session {session.session_id[:8]}")
 
     async def _get_existing_session(self, session_id: str) -> "Session":
@@ -874,7 +1005,7 @@ class CodeExecutionServer(BaseMCPServer):
         # If transport provided a session_id, prefer it deterministically.
         if session_id:
             try:
-                return await self._get_existing_session(session_id)
+                session = self.session_manager.get_session(session_id)
             except ValueError:
                 try:
                     self.session_manager.create_session(
@@ -888,6 +1019,11 @@ class CodeExecutionServer(BaseMCPServer):
                 except MaxSessionsReachedError as e:
                     raise HTTPException(status_code=429, detail=self._max_sessions_error_payload(e)) from e
                 return self.session_manager.get_session(session_id)
+            request_token = get_current_request_token()
+            if not await self._verify_session_ownership(session, request_token):
+                raise PermissionError(f"Not authorized to access session {session_id}.")
+            self._refresh_session_token(session)
+            return session
 
         # Prefer ContextVar-based session injection
         try:
@@ -2624,7 +2760,7 @@ else:
             for s in self.skills
         ]
 
-        return {
+        payload = {
             "server_name": self.server_config.name,
             "tools": tools_data,
             "skills": skills_data,
@@ -2635,6 +2771,17 @@ else:
                 "promotion_threshold_s": self.server_config.promotion_threshold_s,
             },
         }
+        if self.catalog is not None:
+            payload["data_lake"] = {
+                "configured": True,
+                "discovery_tools": [
+                    "search_data",
+                    "get_artifact",
+                    "list_domains",
+                    "get_catalog_capabilities",
+                ],
+            }
+        return payload
 
     # ========================================================================
     # Server Lifecycle
@@ -2647,68 +2794,177 @@ else:
             if callable(initialize):
                 result = initialize()
                 if inspect.isawaitable(result):
-                    await result
+                    _ = await result
 
     async def _close_tool_search_backends(self) -> None:
         """Close registered tool search backends."""
+        cancelled: asyncio.CancelledError | None = None
         for backend in self._tool_search_backends:
-            close = getattr(backend, "close", None)
-            if callable(close):
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._close_tool_search_backend(backend),
+                f"Tool-search backend {type(backend).__name__} shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+        if cancelled is not None:
+            raise cancelled
+
+    async def _close_tool_search_backend(self, backend: Any) -> None:
+        resource_id = id(backend)
+        if resource_id in self._closed_tool_search_backends:
+            return
+        close = getattr(backend, "close", None)
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                _ = await result
+        self._closed_tool_search_backends.add(resource_id)
+
+    async def _close_publisher(self, publisher: "AssetPublisher") -> None:
+        resource_id = id(publisher)
+        if resource_id in self._closed_publishers:
+            return
+        await publisher.close()
+        self._closed_publishers.add(resource_id)
+
+    async def _stop_activity_publisher(self) -> None:
+        if self._activity_publisher_stopped:
+            return
+        await self.activity_publisher.stop()
+        self._activity_publisher_stopped = True
 
     async def _startup(self):
         """Initialize environment and register kernel on server startup."""
         LOGGER.info("Initializing server...")
 
-        # Build environment if needed
-        await self._ensure_environment()
-
-        # Expose asset cache directory via env var so kernel-side tool
-        # implementations can locate pre-provisioned assets without hardcoding
-        # paths.  Set on the server process so all spawned kernels inherit it.
-        cache_dir = self.server_config.get_cache_dir()
-        os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
-
-        # Launch declared sidecars now that the environment exists (env-Python
-        # sidecars need the built kernel env). Each sidecar's base URL is
-        # exported to os.environ so kernels spawned below inherit it. This must
-        # precede kernel registration so the discovery env var is in place.
-        await self._sidecar_manager.start_all()
-
-        # Register the environment as a Jupyter kernel
-        await self._register_kernel(kernel_name=self.kernel_name)
-
-        await self._initialize_tool_search_backends()
-
-        # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
-        # Wrapped defensively: observability must never block server startup.
         try:
-            await self.activity_publisher.start()
-        except Exception:
-            LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
+            if self.catalog is not None:
+                await self.catalog.startup()
+
+            # Build environment if needed
+            await self._ensure_environment()
+
+            # Expose asset cache directory via env var so kernel-side tool
+            # implementations can locate pre-provisioned assets without hardcoding
+            # paths.  Set on the server process so all spawned kernels inherit it.
+            cache_dir = self.server_config.get_cache_dir()
+            os.environ.setdefault("MCP_ASSET_CACHE_DIR", str(cache_dir))
+
+            # Launch declared sidecars now that the environment exists (env-Python
+            # sidecars need the built kernel env). Each sidecar's base URL is
+            # exported to os.environ so kernels spawned below inherit it. This must
+            # precede kernel registration so the discovery env var is in place.
+            await self._sidecar_manager.start_all()
+
+            # Register the environment as a Jupyter kernel
+            await self._register_kernel(kernel_name=self.kernel_name)
+
+            await self._initialize_tool_search_backends()
+
+            # Start the activity publisher (no-op if ACTIVITY_UI_URL not set).
+            # Wrapped defensively: observability must never block server startup.
+            try:
+                await self.activity_publisher.start()
+            except Exception:
+                LOGGER.warning("ActivityPublisher failed to start; continuing without it", exc_info=True)
+        except BaseException as startup_error:
+            rollback_cancellation = await self._await_catalog_cleanup(
+                self._sidecar_manager.stop_all(),
+                "Sidecar rollback",
+            )
+            cleanup_cancellation = await self._await_catalog_cleanup(
+                self._close_tool_search_backends(),
+                "Tool-search rollback",
+            )
+            rollback_cancellation = rollback_cancellation or cleanup_cancellation
+            if self.catalog is not None:
+                cleanup_cancellation = await self._await_catalog_cleanup(
+                    self.catalog.shutdown(),
+                    "Catalog rollback",
+                    retry=self.catalog.shutdown,
+                )
+                rollback_cancellation = rollback_cancellation or cleanup_cancellation
+            if rollback_cancellation is not None and not isinstance(startup_error, asyncio.CancelledError):
+                startup_error.add_note(f"Startup rollback was cancelled: {rollback_cancellation!r}")
+            raise
 
         LOGGER.info("Server initialization complete")
 
     async def _shutdown(self):
         """Clean up resources on server shutdown."""
         LOGGER.info("Shutting down server...")
+        cancelled: asyncio.CancelledError | None = None
         try:
-            await self._sidecar_manager.stop_all()
-        except Exception:
-            LOGGER.warning("Sidecar shutdown raised; continuing", exc_info=True)
-        await self._close_tool_search_backends()
-        for publisher in self._publishers:
-            try:
-                await publisher.close()
-            except Exception:
-                LOGGER.debug("Publisher close raised; ignoring during shutdown", exc_info=True)
-        try:
-            await self.activity_publisher.stop()
-        except Exception:
-            LOGGER.debug("ActivityPublisher stop raised; ignoring during shutdown", exc_info=True)
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._sidecar_manager.stop_all(),
+                "Sidecar shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._close_tool_search_backends(),
+                "Tool-search shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+            for publisher in self._publishers:
+                cleanup_cancelled = await self._await_catalog_cleanup(
+                    self._close_publisher(publisher),
+                    f"Publisher {publisher.destination_name} shutdown",
+                )
+                cancelled = cancelled or cleanup_cancelled
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self._stop_activity_publisher(),
+                "Activity publisher shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+        finally:
+            cleanup_cancelled = await self._await_catalog_cleanup(
+                self.session_manager.aclose_all_sessions(),
+                "Session shutdown",
+            )
+            cancelled = cancelled or cleanup_cancelled
+            if self.catalog is not None:
+                cleanup_cancelled = await self._await_catalog_cleanup(
+                    self.catalog.shutdown(),
+                    "Catalog shutdown",
+                    retry=self.catalog.shutdown,
+                )
+                cancelled = cancelled or cleanup_cancelled
         LOGGER.info("Server shutdown complete")
+        if cancelled is not None:
+            raise cancelled
+
+    @staticmethod
+    async def _await_catalog_cleanup(
+        awaitable: Any,
+        label: str,
+        *,
+        retry: Any | None = None,
+    ) -> asyncio.CancelledError | None:
+        """Finish one catalog cleanup step even when server shutdown is cancelled."""
+        task = asyncio.create_task(awaitable)
+        cancelled: asyncio.CancelledError | None = None
+        retry_factory = retry
+        while True:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+                if not task.done():
+                    continue
+            except Exception:
+                pass
+            try:
+                task.result()
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+            except Exception as exc:
+                LOGGER.warning("%s failed with %s; continuing", label, type(exc).__name__)
+            else:
+                break
+            if retry_factory is None:
+                break
+            task = asyncio.create_task(retry_factory())
+            retry_factory = None
+        return cancelled
 
     def _add_custom_endpoints(self, app):
         """Add custom endpoints to FastMCP."""

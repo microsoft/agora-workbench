@@ -5,11 +5,12 @@ Tests for code execution functionality.
 import asyncio
 import json
 import os
+from contextvars import ContextVar
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from fastapi import HTTPException
 
 from .. import CodeExecutionResult
@@ -89,6 +90,334 @@ async def test_execute_code_resumes_explicit_execution_session(test_server):
         assert follow_up.success is True
         assert follow_up.stdout.strip() == "42"
     finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_holds_session_resources_through_asset_resolution(test_server, tmp_path):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    resolve_started = asyncio.Event()
+    release_resolve = asyncio.Event()
+    manager_closed = asyncio.Event()
+
+    class BlockingDataManager:
+        async def get_cache_path(self, reference):
+            del reference
+            resolve_started.set()
+            await release_resolve.wait()
+            return tmp_path / "asset.txt"
+
+        async def aclose(self):
+            manager_closed.set()
+
+    session.data_manager = BlockingDataManager()
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(
+                test_server,
+                "_execute_code_with_tracing",
+                AsyncMock(return_value=CodeExecutionResult(success=True, stdout="ok", execution_time=0.01)),
+            ),
+        ):
+            execution = asyncio.ensure_future(
+                execute_code_tool(
+                    ctx=SimpleNamespace(session_id=None),
+                    code="print('<blob>asset</blob>')",
+                    execution_session_id=session_id,
+                )
+            )
+            await resolve_started.wait()
+            close = asyncio.create_task(test_server.session_manager.aclose_session(session_id))
+            await asyncio.sleep(0)
+
+            assert not manager_closed.is_set()
+            assert not close.done()
+
+            release_resolve.set()
+            execution_result = await execution
+            close_result = await close
+            assert json.loads(execution_result)["session_id"] == session_id
+            assert close_result is None
+            assert manager_closed.is_set()
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_does_not_exit_unentered_session_resource_operation(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+
+    class FailingOperation:
+        def __init__(self):
+            self.exit_calls = 0
+
+        async def __aenter__(self):
+            raise RuntimeError("session admission failed")
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    operation = FailingOperation()
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with patch_server_method(
+            test_server.session_manager,
+            "session_resource_operation",
+            lambda _session_id: operation,
+        ):
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('never runs')",
+                execution_session_id=session_id,
+            )
+
+        assert "session admission failed" in json.loads(result)["error"]
+        assert operation.exit_calls == 0
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_does_not_exit_unentered_catalog_snapshot(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+
+    class ResourceOperation:
+        def __init__(self):
+            self.exit_calls = 0
+
+        async def __aenter__(self):
+            return None
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    class FailingSnapshot:
+        def __init__(self):
+            self.exit_calls = 0
+
+        def __enter__(self):
+            raise RuntimeError("catalog snapshot failed")
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            self.exit_calls += 1
+
+    operation = ResourceOperation()
+    snapshot = FailingSnapshot()
+    session.extensions["catalog"] = SimpleNamespace(resolver=SimpleNamespace(bind_request_snapshot=lambda: snapshot))
+    execute_code_tool = execution_defaults.build_tool(test_server)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with patch_server_method(
+            test_server.session_manager,
+            "session_resource_operation",
+            lambda _session_id: operation,
+        ):
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('never runs')",
+                execution_session_id=session_id,
+            )
+
+        assert "catalog snapshot failed" in json.loads(result)["error"]
+        assert snapshot.exit_calls == 0
+        assert operation.exit_calls == 1
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_code_releases_session_resources_when_catalog_snapshot_exit_fails(test_server):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    lease_released = asyncio.Event()
+
+    class _SnapshotContext:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_args):
+            raise RuntimeError("snapshot exit failed")
+
+    class _Resolver:
+        def bind_request_snapshot(self):
+            return _SnapshotContext()
+
+    session.extensions["catalog"] = SimpleNamespace(resolver=_Resolver())
+
+    @asynccontextmanager
+    async def _operation():
+        try:
+            yield
+        finally:
+            lease_released.set()
+
+    original_clear_auth_context = test_server._clear_auth_context
+    clear_auth_context = MagicMock(side_effect=original_clear_auth_context)
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(
+                test_server,
+                "_execute_code_with_tracing",
+                AsyncMock(return_value=CodeExecutionResult(success=True, stdout="ok", execution_time=0.01)),
+            ),
+            patch_server_method(
+                test_server.session_manager, "session_resource_operation", lambda _session_id: _operation()
+            ),
+            patch_server_method(test_server, "_clear_auth_context", clear_auth_context),
+        ):
+            execute_code_tool = execution_defaults.build_tool(test_server)
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('ok')",
+                execution_session_id=session_id,
+            )
+            payload = json.loads(result)
+            assert payload["success"] is True
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+        test_server.session_manager.close_session(session_id)
+
+    assert lease_released.is_set()
+    clear_auth_context.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("execution_mode", "execution_method"),
+    [
+        ("async_only", "_execute_code_background"),
+        ("adaptive", "_execute_code_with_promotion"),
+    ],
+)
+async def test_background_execution_does_not_inherit_catalog_snapshot(
+    test_server,
+    execution_mode,
+    execution_method,
+):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test-user-oid@test-tenant-id",
+        user_token="fresh-token",
+        token_claims={"oid": "test-user-oid", "tid": "test-tenant-id"},
+    )
+    session = test_server.session_manager.get_session(session_id)
+    current_snapshot: ContextVar[str | None] = ContextVar("test_catalog_snapshot", default=None)
+    snapshot_closed = asyncio.Event()
+
+    class SnapshotContext:
+        def __enter__(self):
+            self.token = current_snapshot.set("request-snapshot")
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            current_snapshot.reset(self.token)
+            snapshot_closed.set()
+
+    class SuspendedSnapshot:
+        def __enter__(self):
+            self.token = current_snapshot.set(None)
+
+        def __exit__(self, exc_type, exc, traceback):
+            del exc_type, exc, traceback
+            current_snapshot.reset(self.token)
+
+    session.extensions["catalog"] = SimpleNamespace(
+        resolver=SimpleNamespace(
+            bind_request_snapshot=SnapshotContext,
+            suspend_request_snapshot=SuspendedSnapshot,
+        )
+    )
+
+    async def execute(*_args):
+        assert current_snapshot.get() is None
+        inherited_snapshot = asyncio.create_task(asyncio.sleep(0, result=current_snapshot.get()))
+        assert await inherited_snapshot is None
+        return {"status": "running"}
+
+    original_mode = test_server.server_config.execution_mode
+    test_server.server_config.execution_mode = execution_mode
+    set_current_user_identity("test-user-oid@test-tenant-id")
+    set_current_request_token("fresh-token")
+    set_current_token_claims({"oid": "test-user-oid", "tid": "test-tenant-id"})
+
+    try:
+        with (
+            patch_server_method(test_server, "_inject_tool_proxies", AsyncMock()),
+            patch_server_method(test_server, execution_method, execute),
+        ):
+            execute_code_tool = execution_defaults.build_tool(test_server)
+            result = await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print('background')",
+                execution_session_id=session_id,
+            )
+
+        assert json.loads(result)["status"] == "running"
+        assert snapshot_closed.is_set()
+        assert current_snapshot.get() is None
+    finally:
+        test_server.server_config.execution_mode = original_mode
         set_current_session(None)
         set_current_user_identity(None)
         set_current_request_token(None)

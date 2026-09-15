@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from math import isfinite
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -125,6 +128,7 @@ def _artifact(record: ArtifactRecord, *, requested_reference: ArtifactReference 
             }.items()
             if value is not None
         },
+        score=record.score,
         revision=record.current_revision,
         content_revision=record.content_revision,
         metadata_revision=record.metadata_revision,
@@ -136,11 +140,22 @@ def _artifact(record: ArtifactRecord, *, requested_reference: ArtifactReference 
 class SQLiteCatalogProvider:
     """CatalogProvider adapter over an opened, caller-owned CatalogDB."""
 
-    def __init__(self, db: CatalogDB, source_ids: tuple[str, ...]):
+    def __init__(
+        self,
+        db: CatalogDB,
+        source_ids: tuple[str, ...],
+        *,
+        query_embedder: Callable[[str], Awaitable[list[float] | None]] | None = None,
+        hybrid_alpha: float = 0.5,
+    ):
         self._db = db
         self._source_ids = tuple(dict.fromkeys(source_ids))
+        self._query_embedder = query_embedder
+        self._hybrid_alpha = hybrid_alpha
         if not self._source_ids or any(not source_id for source_id in self._source_ids):
             raise ValueError("SQLiteCatalogProvider requires at least one non-empty source_id")
+        if not 0.0 <= hybrid_alpha <= 1.0:
+            raise ValueError("hybrid_alpha must be between 0 and 1")
 
     async def capabilities(self) -> tuple[SourceCapabilities, ...]:
         return tuple(SourceCapabilities(source_id, READ_OPERATIONS) for source_id in self._source_ids)
@@ -170,13 +185,20 @@ class SQLiteCatalogProvider:
             "filters": dict(request.filters),
         }
         offset = _cursor_offset(request.page.cursor, cursor_request)
+        query_embedding = (
+            await self._query_embedder(request.query)
+            if self._hybrid_alpha < 1.0 and request.query.strip() and self._query_embedder is not None
+            else None
+        )
         records = self._db.search(
             request.query,
+            query_embedding=query_embedding,
             domain=domain,
             source_type=source_type,
             source_ids=source_ids,
             top=request.page.limit + 1,
             offset=offset,
+            hybrid_alpha=self._hybrid_alpha if query_embedding is not None else 1.0,
         )
         page_records = records[: request.page.limit]
         has_more = len(records) > request.page.limit
@@ -266,7 +288,12 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             raise ValueError("max_stale_seconds must be finite")
         self._config = config
         self._closed = False
+        self._embedding_closed = False
+        self._db_closed = False
         self._lifecycle_lock = asyncio.Lock()
+        self._active_reads = 0
+        self._reads_drained = asyncio.Event()
+        self._reads_drained.set()
         self._last_states: tuple[SourceRefreshState, ...] = ()
         self._db_owned = CatalogDB(db_path, vec_dimensions=config.search.embedding_dimensions)
         try:
@@ -280,9 +307,15 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
             }
             self._last_error: str | None = None
             self._load_attempted = False
-            super().__init__(self._db_owned, tuple(source.source_id or "" for source in config.sources))
+            super().__init__(
+                self._db_owned,
+                tuple(source.source_id or "" for source in config.sources),
+                query_embedder=self._embed_query,
+                hybrid_alpha=config.search.hybrid_alpha,
+            )
         except BaseException:
             self._db_owned.close()
+            self._db_closed = True
             self._closed = True
             raise
 
@@ -305,6 +338,7 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
     async def load(self) -> int:
         """Load or refresh all manifests, retaining the previous valid generation on failure."""
         async with self._lifecycle_lock:
+            await self._reads_drained.wait()
             return await self._load_unlocked()
 
     async def _load_unlocked(self) -> int:
@@ -315,12 +349,17 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
         refresh_error: BackendUnavailableError | None = None
         try:
             count = await self._indexer.index()
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as cancelled:
             self._last_error = "Manifest catalog refresh was cancelled."
             self._current_source_states()
             if not had_successful_generation:
-                self._close_unlocked()
-            raise
+                try:
+                    await self._aclose_unlocked()
+                except asyncio.CancelledError as cleanup_cancelled:
+                    cancelled.add_note(f"Manifest catalog cleanup was also cancelled: {cleanup_cancelled}")
+                except Exception as cleanup_error:
+                    cancelled.add_note(f"Manifest catalog cleanup also failed: {type(cleanup_error).__name__}")
+            raise cancelled
         except Exception as exc:
             self._last_error = _safe_refresh_error(exc)
             self._current_source_states()
@@ -389,36 +428,92 @@ class ManifestCatalogProvider(SQLiteCatalogProvider):
                 operation="catalog",
             )
 
+    @asynccontextmanager
+    async def _read_operation(self) -> AsyncIterator[None]:
+        async with self._lifecycle_lock:
+            self._require_ready()
+            self._active_reads += 1
+            self._reads_drained.clear()
+        try:
+            yield
+        finally:
+            self._active_reads -= 1
+            if self._active_reads == 0:
+                self._reads_drained.set()
+
     async def capabilities(self) -> tuple[SourceCapabilities, ...]:
-        self._require_ready()
-        return await super().capabilities()
+        async with self._read_operation():
+            return await super().capabilities()
 
     async def search(self, request: SearchRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().search(request, context)
+        async with self._read_operation():
+            return await super().search(request, context)
 
     async def list(self, request: ListRequest, context: RequestContext) -> Page[CatalogArtifact]:
-        self._require_ready()
-        return await super().list(request, context)
+        async with self._read_operation():
+            return await super().list(request, context)
 
     async def get(self, reference: ArtifactReference, context: RequestContext) -> CatalogArtifact:
-        self._require_ready()
-        return await super().get(reference, context)
+        async with self._read_operation():
+            return await super().get(reference, context)
 
     async def resolve(self, reference: ArtifactReference, context: RequestContext) -> ResolvedArtifact:
-        self._require_ready()
-        return await super().resolve(reference, context)
+        async with self._read_operation():
+            artifact = await SQLiteCatalogProvider.get(self, reference, context)
+            if artifact.locator is None:
+                raise ArtifactNotFoundError(
+                    "Catalog artifact has no storage locator.",
+                    resource_id=reference.artifact_id,
+                    operation="resolve",
+                )
+            return ResolvedArtifact(reference=artifact.reference, locator=artifact.locator)
+
+    async def _embed_query(self, query: str) -> list[float] | None:
+        provider = self._indexer.embedding_provider
+        if provider is None:
+            return None
+        embeddings = await provider.embed([query])
+        return embeddings[0] if embeddings else None
 
     async def aclose(self) -> None:
-        """Close the private per-reader SQLite cache."""
+        """Close embedding resources and the private per-reader SQLite cache."""
         async with self._lifecycle_lock:
-            self._close_unlocked()
+            await self._reads_drained.wait()
+            await self._aclose_unlocked()
 
-    def _close_unlocked(self) -> None:
-        if not self._closed:
+    async def _aclose_unlocked(self) -> None:
+        if self._embedding_closed and self._db_closed:
+            return
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        if not self._closed and not self._db_closed:
             self._current_source_states()
-            self._closed = True
-            self._db_owned.close()
+        self._closed = True
+        if not self._embedding_closed:
+            try:
+                embedding_provider = vars(self._indexer).get("_embedding_provider")
+                close = getattr(embedding_provider, "aclose", None) or getattr(embedding_provider, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        _ = await result
+                self._embedding_closed = True
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+            except Exception as exc:
+                errors.append(exc)
+        if not self._db_closed:
+            try:
+                self._db_owned.close()
+                self._db_closed = True
+            except Exception as exc:
+                errors.append(exc)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional manifest catalog close failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("Manifest catalog close failed.", errors)
 
     async def __aenter__(self) -> "ManifestCatalogProvider":
         return self

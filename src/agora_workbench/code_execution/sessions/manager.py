@@ -9,16 +9,17 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
-from threading import RLock
-from typing import Any, Callable, Optional, Tuple, TYPE_CHECKING
+from threading import Condition, RLock
+from typing import Any, AsyncContextManager, AsyncIterator, Callable, Optional, Tuple, TYPE_CHECKING, cast
 
 from jupyter_client.manager import AsyncKernelManager
 
-from .session import Session, SessionContext
+from .session import Session, SessionContext, SessionResources
 from .storage import InMemoryStorage, SessionStorageBackend
 
 # Display-data capture: priority of renderable MIME types to extract from
@@ -44,6 +45,13 @@ _ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_SGR_RE.sub("", text)
+
+
+def _current_asyncio_task() -> asyncio.Task[Any] | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:
+        return None
 
 
 def _extract_display(data: dict, metadata: dict) -> Optional[dict]:
@@ -160,7 +168,7 @@ class SessionConfig:
         timeout_minutes: int = 30,
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
-        data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager"]] = None,
+        data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager | SessionResources"]] = None,
     ):
         """
         Initialize session manager configuration.
@@ -177,11 +185,12 @@ class SessionConfig:
                 a custom artifact resolver, extra fetchers, or configuration
                 derived from ``user_identity`` / ``user_token``.
 
-                The factory **must return a fresh instance per call**. The
-                session takes ownership of the manager and calls ``cleanup()``
-                on it when the session ends, so returning a shared singleton
-                would let the first session torn down destroy a manager still
-                in use by the others.
+                The factory **must return a fresh data manager or
+                :class:`SessionResources` bundle per call**. The session takes
+                ownership of the manager and extensions and cleans them up when
+                the session ends, so returning shared resources would let the
+                first session torn down destroy resources still in use by
+                others.
 
                 When omitted, each session builds a default
                 ``DataLakeDataManager()``, matching previous behavior.
@@ -225,6 +234,9 @@ class SessionManager:
         self.storage = self.config.storage_backend
         self._last_cleanup = datetime.now()
         self._session_lifecycle_lock = RLock()
+        self._session_lifecycle_condition = Condition(self._session_lifecycle_lock)
+        self._closing_session_ids: set[str] = set()
+        self._closing_sessions: dict[str, Session] = {}
         timeout_seconds = self.config.timeout.total_seconds()
         self.execution_session_keepalive_seconds = max(0.5, min(timeout_seconds / 10.0, 60.0))
 
@@ -232,10 +244,19 @@ class SessionManager:
         self._kernels: dict[str, Tuple[AsyncKernelManager, "AsyncKernelClient"]] = {}
         self._kernel_last_used: dict[str, float] = {}  # session_id -> timestamp
         self._kernel_tokens: dict[str, Optional[str]] = {}  # session_id -> last injected user token
+        self._kernel_session_generations: dict[str, int | None] = {}
         # Per-session lock that serializes execute_code_for_session calls so the
         # shared Jupyter kernel client (single iopub queue) cannot be raced by
         # concurrent callers (e.g. four parallel push_object MCP calls).
         self._kernel_execute_locks: dict[str, asyncio.Lock] = {}
+        self._kernel_execute_lock_users: dict[str, int] = {}
+        self._kernel_execute_drained: dict[str, asyncio.Event] = {}
+        self._retired_kernel_execute_locks: set[str] = set()
+        self._session_resource_users: dict[str, int] = {}
+        self._session_resources_drained: dict[str, asyncio.Event] = {}
+        self._pending_session_resource_cleanup: dict[str, Session] = {}
+        self._session_resource_cleanup_tasks: dict[str, asyncio.Task[None]] = {}
+        self._session_owned_cleanup_tasks: dict[str, set[asyncio.Task[None]]] = {}
         self._background_jobs: dict[str, _BackgroundJob] = {}
         self._session_running_jobs: dict[str, str] = {}
         # Artifact pipeline state: the token -> record map used by the HTTP
@@ -260,6 +281,13 @@ class SessionManager:
         # strongly referenced for its lifetime (an unreferenced task may be
         # garbage-collected mid-flight).
         self._kernel_shutdown_tasks: dict[str, "asyncio.Task[None]"] = {}
+        self._kernel_start_tasks: dict[str, dict[asyncio.Task[Any], int]] = {}
+        self._resource_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._background_lease_release_tasks: set[asyncio.Task[None]] = set()
+        self._resource_cleanup_errors: list[Exception] = []
+        self._resource_cleanup_cancellations: list[asyncio.CancelledError] = []
+        self._session_generation_seq = 0
+        self._session_generations: dict[str, int] = {}
 
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
@@ -305,19 +333,30 @@ class SessionManager:
         self._maybe_cleanup()
 
         with self._session_lifecycle_lock:
-            # Enforce max sessions limit
-            self._enforce_max_sessions()
-
             # Generate session ID
             if session_id is None:
                 session_id = str(uuid.uuid4())
+            else:
+                while session_id in self._closing_session_ids:
+                    try:
+                        asyncio.get_running_loop()
+                    except RuntimeError:
+                        self._session_lifecycle_condition.wait()
+                    else:
+                        raise ValueError(f"Session {session_id} is still closing; retry after cleanup completes.")
+                if self.storage.retrieve(session_id) is not None:
+                    raise ValueError(f"Session {session_id} already exists.")
+
+            # Enforce max sessions limit
+            self._enforce_max_sessions()
 
             # Build a customized data manager when a factory is configured, so
             # the Session never constructs (and immediately discards) a default
             # one — DataLakeDataManager allocates a temp cache dir eagerly.
             data_manager = None
+            extensions: dict[str, Any] = {}
             if self.config.data_manager_factory is not None:
-                data_manager = self.config.data_manager_factory(
+                factory_result = self.config.data_manager_factory(
                     SessionContext(
                         session_id=session_id,
                         user_identity=user_identity,
@@ -327,33 +366,61 @@ class SessionManager:
                         metadata=metadata or {},
                     )
                 )
+                if isinstance(factory_result, SessionResources):
+                    data_manager = factory_result.data_manager
+                    extensions = dict(factory_result.extensions)
+                else:
+                    data_manager = factory_result
                 # Validate eagerly. A factory returning None is the dangerous
                 # case: Session would fall back to building a default manager,
                 # silently discarding the customization, so the mistake would
                 # surface later as unexplained default behaviour instead of an
                 # error at the point of the bug.
                 if data_manager is None or not callable(getattr(data_manager, "cleanup", None)):
-                    raise TypeError(
+                    error = TypeError(
                         "SessionConfig.data_manager_factory must return a data manager instance with a "
                         f"cleanup() method, but it returned {type(data_manager).__name__}. Returning None "
                         "would silently fall back to a default DataLakeDataManager and discard the "
                         "customization the factory exists to provide."
                     )
+                    cleanup_error = self._cleanup_unclaimed_session_resources(data_manager, extensions)
+                    if cleanup_error is not None:
+                        error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                    raise error
 
             # Create session
-            session = Session(
-                session_id=session_id,
-                data=data,
-                session_type="default",
-                user_identity=user_identity,
-                user_token=user_token,
-                token_claims=token_claims,
-                metadata=metadata,
-                data_manager=data_manager,
-            )
+            session = None
+            try:
+                session = Session(
+                    session_id=session_id,
+                    data=data,
+                    session_type="default",
+                    user_identity=user_identity,
+                    user_token=user_token,
+                    token_claims=token_claims,
+                    metadata=metadata,
+                    data_manager=data_manager,
+                    extensions=extensions if self.config.data_manager_factory is not None else None,
+                )
 
-            # Store
-            self.storage.store(session_id, session)
+                # Store
+                self.storage.store(session_id, session)
+            except BaseException as creation_error:
+                if session is None:
+                    cleanup_error = self._cleanup_unclaimed_session_resources(data_manager, extensions)
+                else:
+                    try:
+                        self._start_session_cleanup(session)
+                    except BaseException as exc:
+                        cleanup_error = exc
+                    else:
+                        cleanup_error = None
+                if cleanup_error is not None:
+                    creation_error.add_note(f"Factory resource rollback also failed: {cleanup_error!r}")
+                raise
+            self._session_generation_seq += 1
+            self._session_generations[session_id] = self._session_generation_seq
+            self._retired_kernel_execute_locks.discard(session_id)
 
             # Create the per-session outputs directory.  Done eagerly so the
             # kernel can write to it on the very first execute.  Failure to
@@ -386,33 +453,36 @@ class SessionManager:
         """
         self._maybe_cleanup()
 
-        session = self.storage.retrieve(session_id)
+        with self._session_lifecycle_lock:
+            session = self.storage.retrieve(session_id)
 
-        if session is None:
-            raise ValueError(
-                f"Session {session_id} not found. It may have expired or been "
-                f"cleaned up. Active sessions: {self.storage.count()}"
-            )
+            if session is None:
+                raise ValueError(
+                    f"Session {session_id} not found. It may have expired or been "
+                    f"cleaned up. Active sessions: {self.storage.count()}"
+                )
 
-        # Update access time
-        session.touch()
-        self.storage.store(session_id, session)
+            # Update access time
+            session.touch()
+            self.storage.store(session_id, session)
 
         return session
 
     def update_session(self, session_id: str, session: Session) -> None:
         """Update an existing session."""
-        if self.storage.retrieve(session_id) is None:
-            raise ValueError(f"Session {session_id} not found")
+        with self._session_lifecycle_lock:
+            if self.storage.retrieve(session_id) is None:
+                raise ValueError(f"Session {session_id} not found")
 
-        session.touch()
-        self.storage.store(session_id, session)
+            session.touch()
+            self.storage.store(session_id, session)
 
     def update_status(self, session_id: str, status: str) -> None:
         """Update the status of a session."""
-        session = self.get_session(session_id)
-        session.update_status(status)
-        self.storage.store(session_id, session)
+        with self._session_lifecycle_lock:
+            session = self.get_session(session_id)
+            session.update_status(status)
+            self.storage.store(session_id, session)
 
     def close_session(self, session_id: str) -> "Optional[asyncio.Task[None]]":
         """
@@ -435,34 +505,39 @@ class SessionManager:
             The teardown task, or ``None`` when there was no kernel to tear
             down or no running event loop to schedule it on.
         """
-        running_job_id = self._get_running_job_for_session(session_id)
-        if running_job_id:
-            job = self._background_jobs.get(running_job_id)
-            if job:
-                job.success = False
-                job.error = f"Session {session_id} was closed while job {running_job_id} was running"
-                job.status = "failed"
-                if job.task and not job.task.done():
-                    job.task.cancel()
+        return self._close_session_sync(session_id, caller="close_session()")
 
-        shutdown_task = self._schedule_kernel_shutdown(session_id, caller="close_session()")
-
-        session = self.storage.retrieve(session_id)
-
+    def _close_session_sync(
+        self,
+        session_id: str,
+        *,
+        caller: str,
+        expected_generation: int | None = None,
+    ) -> "Optional[asyncio.Task[None]]":
+        """Shared synchronous close path with caller-specific diagnostics."""
+        shutdown_task, session = self._claim_session_close(
+            session_id,
+            caller=caller,
+            expected_generation=expected_generation,
+        )
         if session:
-            # Run cleanup
             cleanup_failed = False
             try:
-                session.cleanup()
+                self._start_session_cleanup(session)
+            except asyncio.CancelledError:
+                cleanup_failed = True
+                LOGGER.warning(
+                    "Cleanup of session %s was cancelled; retained cleanup tasks will be drained later.",
+                    session_id,
+                )
             except Exception as e:
                 cleanup_failed = True
                 LOGGER.error(
                     f"Error during cleanup of session {session_id}: {e}. "
-                    f"Session will still be removed, but resources may be leaked."
+                    f"Session was removed, but resources may be leaked."
                 )
-
-            # Remove from storage
-            self.storage.delete(session_id)
+            finally:
+                self._finalize_closed_session(session_id)
             if cleanup_failed:
                 LOGGER.warning(f"Closed session {session_id} with failed cleanup (remaining={self.storage.count()})")
             else:
@@ -470,7 +545,304 @@ class SessionManager:
 
         return shutdown_task
 
-    async def aclose_session(self, session_id: str) -> None:
+    def _cleanup_unclaimed_session_resources(
+        self,
+        data_manager: object | None,
+        extensions: dict[str, Any],
+    ) -> BaseException | None:
+        """Transfer factory-created resources into normal tracked cleanup."""
+
+        class _NoopDataManager:
+            def cleanup(self) -> None:
+                return None
+
+        cleanup_session = Session(
+            session_id=f"unclaimed-{uuid.uuid4()}",
+            data={},
+            session_type="cleanup",
+            user_identity="",
+            user_token="",
+            token_claims={},
+            data_manager=cast(
+                Any,
+                (
+                    data_manager
+                    if data_manager is not None
+                    and any(callable(getattr(data_manager, method, None)) for method in ("aclose", "cleanup", "close"))
+                    else _NoopDataManager()
+                ),
+            ),
+            extensions=extensions,
+        )
+        try:
+            self._start_session_cleanup(cleanup_session)
+        except asyncio.CancelledError as exc:
+            return exc
+        except Exception as exc:
+            return exc
+        return None
+
+    def rollback_factory_resources(
+        self,
+        data_manager: object | None,
+        extensions: dict[str, Any],
+    ) -> BaseException | None:
+        """Roll back resources from a factory result that cannot be retained."""
+        return self._cleanup_unclaimed_session_resources(data_manager, extensions)
+
+    def _start_session_cleanup(self, session: Session) -> None:
+        """Start all sync-path cleanup and retain any asynchronous work."""
+        with self._session_lifecycle_lock:
+            if self._session_resource_users.get(session.session_id, 0) or self._kernel_execute_lock_users.get(
+                session.session_id, 0
+            ):
+                self._pending_session_resource_cleanup[session.session_id] = session
+                return
+        try:
+            session.cleanup()
+        finally:
+            self._track_session_cleanup_tasks(session)
+
+    def _schedule_session_cleanup_after_operations(self, session: Session) -> asyncio.Task[None]:
+        existing = self._session_resource_cleanup_tasks.get(session.session_id)
+        if existing is not None and not existing.done():
+            return existing
+        self._pending_session_resource_cleanup.pop(session.session_id, None)
+        task = asyncio.get_running_loop().create_task(self._cleanup_session_after_operations(session))
+        self._session_resource_cleanup_tasks[session.session_id] = task
+        self._resource_cleanup_tasks.add(task)
+        task.add_done_callback(partial(self._on_session_resource_cleanup_done, session.session_id, session))
+        return task
+
+    def _on_session_resource_cleanup_done(
+        self,
+        session_id: str,
+        session: Session,
+        task: asyncio.Task[None],
+    ) -> None:
+        if self._session_resource_cleanup_tasks.get(session_id) is task:
+            self._session_resource_cleanup_tasks.pop(session_id, None)
+        self._on_resource_cleanup_done(task)
+        self._finalize_closed_session(session_id)
+
+    async def _cleanup_session_after_operations(self, session: Session) -> None:
+        execute_event = self._kernel_execute_drained.get(session.session_id)
+        if execute_event is not None:
+            await execute_event.wait()
+        event = self._session_resources_drained.get(session.session_id)
+        if event is not None:
+            await event.wait()
+        try:
+            await session.aclose()
+        finally:
+            self._track_session_cleanup_tasks(session)
+
+    def _track_session_cleanup_tasks(self, session: Session) -> tuple[asyncio.Task[None], ...]:
+        """Transfer session-owned cleanup tasks into the manager's strong-reference set."""
+        tasks = session.take_cleanup_tasks()
+        for task in tasks:
+            self._session_owned_cleanup_tasks.setdefault(session.session_id, set()).add(task)
+            self._resource_cleanup_tasks.add(task)
+            task.add_done_callback(partial(self._on_session_owned_cleanup_done, session.session_id, session))
+        return tasks
+
+    def _on_session_owned_cleanup_done(
+        self,
+        session_id: str,
+        session: Session | None,
+        task: asyncio.Task[None],
+    ) -> None:
+        session_tasks = self._session_owned_cleanup_tasks.get(session_id)
+        if session_tasks is not None:
+            session_tasks.discard(task)
+            if not session_tasks:
+                self._session_owned_cleanup_tasks.pop(session_id, None)
+        self._on_resource_cleanup_done(task)
+        if session is not None:
+            self._finalize_closed_session(session_id)
+
+    async def _await_session_owned_cleanup(self, session_id: str) -> None:
+        """Wait for every asynchronous cleanup task owned by one session."""
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        while tasks := tuple(self._session_owned_cleanup_tasks.get(session_id, ())):
+            results = await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+            for task, result in zip(tasks, results):
+                self._on_session_owned_cleanup_done(session_id, self._closing_sessions.get(session_id), task)
+                if isinstance(result, asyncio.CancelledError):
+                    cancelled = cancelled or result
+                elif isinstance(result, Exception):
+                    errors.append(result)
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup(f"Session {session_id} resource cleanup failed.", errors)
+
+    def _on_resource_cleanup_done(self, task: asyncio.Task[None]) -> None:
+        if task not in self._resource_cleanup_tasks:
+            return
+        self._resource_cleanup_tasks.discard(task)
+        if task.cancelled():
+            self._resource_cleanup_cancellations.append(asyncio.CancelledError())
+            return
+        error = task.exception()
+        if isinstance(error, Exception):
+            self._resource_cleanup_errors.append(error)
+
+    async def await_resource_cleanup(self) -> None:
+        """Wait for all async cleanup started by synchronous session closure."""
+        errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
+        while self._resource_cleanup_tasks:
+            tasks = tuple(self._resource_cleanup_tasks)
+            try:
+                await asyncio.gather(
+                    *(asyncio.shield(task) for task in tasks),
+                    return_exceptions=True,
+                )
+            except asyncio.CancelledError:
+                # Cleanup continues under shield. Do not drop strong references:
+                # the next drain must still observe and await these tasks.
+                raise
+            for task in tasks:
+                self._on_resource_cleanup_done(task)
+        for session_id, tasks in tuple(self._session_owned_cleanup_tasks.items()):
+            tasks.difference_update(task for task in tuple(tasks) if task.done())
+            if not tasks:
+                self._session_owned_cleanup_tasks.pop(session_id, None)
+                self._finalize_closed_session(session_id)
+        errors.extend(self._resource_cleanup_errors)
+        self._resource_cleanup_errors.clear()
+        if self._resource_cleanup_cancellations:
+            cancelled = self._resource_cleanup_cancellations[0]
+            self._resource_cleanup_cancellations.clear()
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional resource cleanup failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("Session resource cleanup failed.", errors)
+
+    def _claim_session_close(
+        self,
+        session_id: str,
+        *,
+        caller: str,
+        expected_generation: int | None = None,
+        expected_closing_session: Session | None = None,
+    ) -> tuple["Optional[asyncio.Task[None]]", "Optional[Session]"]:
+        """Cancel work, schedule kernel teardown, and remove session ownership."""
+        with self._session_lifecycle_lock:
+            closing_generation = self._session_generations.get(session_id)
+            if expected_closing_session is not None:
+                if self._closing_sessions.get(session_id) is expected_closing_session:
+                    shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+                    if shutdown_task is None or shutdown_task.done():
+                        shutdown_task = self._schedule_kernel_shutdown(
+                            session_id,
+                            caller=caller,
+                            cleanup_artifacts=False,
+                            wait_for_executions=True,
+                        )
+                    return shutdown_task, None
+                return None, None
+            if expected_generation is not None and self._session_generations.get(session_id) != expected_generation:
+                return None, None
+            session = self.storage.retrieve(session_id)
+            if session is not None:
+                self._closing_session_ids.add(session_id)
+                self._closing_sessions[session_id] = session
+                try:
+                    self.storage.delete(session_id)
+                except BaseException:
+                    self._closing_session_ids.discard(session_id)
+                    self._closing_sessions.pop(session_id, None)
+                    self._session_lifecycle_condition.notify_all()
+                    raise
+                self._session_generations.pop(session_id, None)
+                self._retire_kernel_execute_lock(session_id)
+            running_job_id = self._get_running_job_for_session(session_id)
+            if running_job_id:
+                job = self._background_jobs.get(running_job_id)
+                if job:
+                    job.success = False
+                    job.error = f"Session {session_id} was closed while job {running_job_id} was running"
+                    job.status = "failed"
+                    if job.task and not job.task.done():
+                        job.task.cancel()
+
+            shutdown_task = self._schedule_kernel_shutdown(
+                session_id,
+                caller=caller,
+                cleanup_artifacts=False,
+                wait_for_executions=True,
+                expected_session_generation=closing_generation,
+            )
+        return shutdown_task, session
+
+    def _finalize_closed_session(self, session_id: str) -> None:
+        with self._session_lifecycle_lock:
+            session = self._closing_sessions.get(session_id)
+            shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+            shutdown_in_progress_elsewhere = (
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not _current_asyncio_task()
+            )
+            if (
+                session is None
+                or session_id in self._kernels
+                or any(not task.done() for task in self._kernel_start_tasks.get(session_id, ()))
+                or shutdown_in_progress_elsewhere
+                or self._kernel_execute_lock_users.get(session_id, 0)
+                or self._session_resource_users.get(session_id, 0)
+                or session_id in self._pending_session_resource_cleanup
+                or (
+                    (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
+                    and not resource_cleanup.done()
+                )
+                or any(not task.done() for task in self._session_owned_cleanup_tasks.get(session_id, ()))
+            ):
+                return
+        session.claim_session_file_cleanup()
+        self._cleanup_session_artifacts(session_id)
+        self._release_closing_session_id_if_safe(session_id, session)
+
+    def _release_closing_session_id_if_safe(self, session_id: str, session: Session) -> None:
+        if not session.session_file_cleanup_claimed():
+            session.claim_session_file_cleanup()
+        if not session.session_file_cleanup_claimed():
+            return
+        with self._session_lifecycle_condition:
+            shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+            shutdown_in_progress_elsewhere = (
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not _current_asyncio_task()
+            )
+            if (
+                session_id in self._kernels
+                or shutdown_in_progress_elsewhere
+                or self._kernel_execute_lock_users.get(session_id, 0)
+                or self._session_resource_users.get(session_id, 0)
+                or session_id in self._pending_session_resource_cleanup
+                or (
+                    (resource_cleanup := self._session_resource_cleanup_tasks.get(session_id)) is not None
+                    and not resource_cleanup.done()
+                )
+                or any(not task.done() for task in self._session_owned_cleanup_tasks.get(session_id, ()))
+            ):
+                return
+            self._closing_session_ids.discard(session_id)
+            if self._closing_sessions.get(session_id) is session:
+                self._closing_sessions.pop(session_id, None)
+            self._session_lifecycle_condition.notify_all()
+
+    async def aclose_session(
+        self,
+        session_id: str,
+        *,
+        expected_generation: int | None = None,
+        expected_closing_session: Session | None = None,
+    ) -> None:
         """Close a session and wait for its kernel to actually shut down.
 
         The awaitable counterpart to :meth:`close_session`. Prefer this
@@ -478,8 +850,181 @@ class SessionManager:
         freeing GPU memory, tearing down a batch's child sessions, or
         reclaiming capacity before starting new work.
         """
-        self.close_session(session_id)
-        await self.await_kernel_shutdown(session_id)
+        shutdown_task, session = self._claim_session_close(
+            session_id,
+            caller="aclose_session()",
+            expected_generation=expected_generation,
+            expected_closing_session=expected_closing_session,
+        )
+        cleanup_task: asyncio.Task[None] | None = None
+        if session is not None:
+            cleanup_task = self._schedule_session_cleanup_after_operations(session)
+        elif expected_generation is None or expected_closing_session is not None:
+            with self._session_lifecycle_lock:
+                cleanup_task = self._session_resource_cleanup_tasks.get(session_id)
+                pending_session = self._pending_session_resource_cleanup.get(session_id)
+                closing_session = self._closing_sessions.get(session_id)
+            if cleanup_task is None and pending_session is not None:
+                session = pending_session
+                cleanup_task = self._schedule_session_cleanup_after_operations(session)
+            elif cleanup_task is not None or self._session_owned_cleanup_tasks.get(session_id):
+                session = closing_session
+
+        async def finish_cleanup() -> None:
+            cleanup_error: BaseException | None = None
+            try:
+                if cleanup_task is not None:
+                    _ = await cleanup_task
+                await self._await_session_owned_cleanup(session_id)
+            except asyncio.CancelledError as exc:
+                cleanup_error = exc
+            except Exception as exc:
+                cleanup_error = exc
+            finally:
+                if session is not None:
+                    self._track_session_cleanup_tasks(session)
+                    self._finalize_closed_session(session_id)
+            if shutdown_task is not None:
+                _ = await shutdown_task
+            else:
+                await self.await_kernel_shutdown(session_id)
+            if cleanup_error is not None:
+                raise cleanup_error
+
+        completion = asyncio.create_task(finish_cleanup())
+        cancelled: asyncio.CancelledError | None = None
+        try:
+            while True:
+                try:
+                    await asyncio.shield(completion)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancelled = cancelled or exc
+                    if completion.done():
+                        break
+        finally:
+            if cancelled is not None:
+                if completion.done() and not completion.cancelled():
+                    try:
+                        completion.result()
+                    except BaseException as cleanup_error:
+                        cancelled.add_note(f"Session cleanup also failed: {cleanup_error!r}")
+                raise cancelled
+
+    async def aclose_all_sessions(self) -> None:
+        """Close every active session and wait for all kernel/resource teardown."""
+        with self._session_lifecycle_lock:
+            sessions: list[tuple[str, int | None, Session | None]] = [
+                (session_id, self._adopt_session_generation_locked(session_id), None)
+                for session_id in self.storage.list_all()
+            ]
+            active_session_ids = {session_id for session_id, _, _ in sessions}
+            sessions.extend(
+                (session_id, None, session)
+                for session_id, session in self._closing_sessions.items()
+                if session_id not in active_session_ids
+            )
+        tasks = []
+        for session_id, generation, closing_session in sessions:
+            kwargs: dict[str, Any] = {"expected_generation": generation}
+            if closing_session is not None:
+                kwargs["expected_closing_session"] = closing_session
+            tasks.append(asyncio.create_task(self.aclose_session(session_id, **kwargs)))
+        outer_cancellation: asyncio.CancelledError | None = None
+        results: list[BaseException | None] = []
+        if tasks:
+            completion = asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                while True:
+                    try:
+                        results = list(await asyncio.shield(completion))
+                        break
+                    except asyncio.CancelledError as exc:
+                        outer_cancellation = outer_cancellation or exc
+                        if completion.done():
+                            results = list(completion.result())
+                            break
+            finally:
+                for (session_id, _, _), task in zip(sessions, tasks):
+                    if task.done() and not task.cancelled() and task.exception() is not None:
+                        LOGGER.error("Failed to close session %s: %s", session_id, task.exception())
+        errors: list[Exception] = [
+            RuntimeError(f"Failed to close session {session_id}: {result}")
+            for (session_id, _, _), result in zip(sessions, results)
+            if isinstance(result, Exception)
+        ]
+        failed_session_ids = {
+            session_id for (session_id, _, _), result in zip(sessions, results) if isinstance(result, Exception)
+        }
+        cancelled = next(
+            (result for result in results if isinstance(result, asyncio.CancelledError)),
+            outer_cancellation,
+        )
+        while self._kernel_shutdown_tasks:
+            shutdowns = tuple(self._kernel_shutdown_tasks.values())
+            try:
+                await asyncio.gather(*(asyncio.shield(task) for task in shutdowns), return_exceptions=True)
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+        resource_cleanup = asyncio.create_task(self.await_resource_cleanup())
+        while True:
+            try:
+                await asyncio.shield(resource_cleanup)
+                break
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
+                if resource_cleanup.done():
+                    break
+            except Exception as exc:
+                errors.append(exc)
+                break
+        with self._session_lifecycle_lock:
+            remaining_session_ids = sorted(self._closing_sessions)
+        for _ in range(3):
+            if not remaining_session_ids:
+                break
+            retry_sessions = []
+            with self._session_lifecycle_lock:
+                retry_sessions = [
+                    (session_id, self._closing_sessions[session_id])
+                    for session_id in remaining_session_ids
+                    if session_id in self._closing_sessions
+                ]
+            retry_tasks = [
+                asyncio.create_task(self.aclose_session(session_id, expected_closing_session=closing_session))
+                for session_id, closing_session in retry_sessions
+            ]
+            retry_results: list[BaseException | None] = []
+            if retry_tasks:
+                completion = asyncio.gather(*retry_tasks, return_exceptions=True)
+                while True:
+                    try:
+                        retry_results = list(await asyncio.shield(completion))
+                        break
+                    except asyncio.CancelledError as exc:
+                        cancelled = cancelled or exc
+                        if completion.done():
+                            retry_results = list(completion.result())
+                            break
+            for (session_id, _), result in zip(retry_sessions, retry_results):
+                if isinstance(result, asyncio.CancelledError):
+                    cancelled = cancelled or result
+                elif isinstance(result, Exception) and session_id not in failed_session_ids:
+                    errors.append(RuntimeError(f"Failed to close session {session_id}: {result}"))
+                    failed_session_ids.add(session_id)
+            with self._session_lifecycle_lock:
+                remaining_session_ids = sorted(self._closing_sessions)
+        unreported_session_ids = [
+            session_id for session_id in remaining_session_ids if session_id not in failed_session_ids
+        ]
+        if unreported_session_ids:
+            errors.append(RuntimeError(f"Session teardown did not complete for: {', '.join(unreported_session_ids)}"))
+        if cancelled is not None:
+            if errors:
+                cancelled.add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
+            raise cancelled
+        if errors:
+            raise ExceptionGroup("One or more sessions failed to close.", errors)
 
     # ========================================================================
     # Jupyter Kernel Management
@@ -507,12 +1052,55 @@ class SessionManager:
         # still hold an entry here if no teardown has started. Waiting for one
         # already in flight avoids building a replacement alongside a kernel
         # that is still releasing its resources.
+        with self._session_lifecycle_lock:
+            session_generation = self._session_generations.get(session_id)
+            if session_generation is None:
+                if session_id in self._closing_session_ids or self.storage.retrieve(session_id) is None:
+                    raise ValueError(f"Session {session_id} does not exist.")
+                # Pluggable storage may be pre-populated before this manager
+                # starts. Adopt such sessions lazily under the lifecycle lock.
+                session_generation = self._adopt_session_generation_locked(session_id)
         await self.await_kernel_shutdown(session_id)
 
-        if session_id in self._kernels:
-            LOGGER.debug(f"Reusing kernel for session {session_id}")
-            self._kernel_last_used[session_id] = time.time()
-            return self._kernels[session_id]
+        with self._session_lifecycle_lock:
+            if self._session_generations.get(session_id) != session_generation:
+                raise ValueError(f"Session {session_id} was closed before its kernel could start.")
+            existing_kernel = self._kernels.get(session_id)
+            kernel_session_generation = self._kernel_session_generations.get(session_id)
+            if existing_kernel is not None and (
+                session_generation is None
+                or kernel_session_generation is None
+                or kernel_session_generation == session_generation
+            ):
+                LOGGER.debug(f"Reusing kernel for session {session_id}")
+                self._kernel_last_used[session_id] = time.time()
+                return existing_kernel
+            stale_shutdown = (
+                self._schedule_kernel_shutdown(
+                    session_id,
+                    caller="_get_or_create_kernel()",
+                    cleanup_artifacts=False,
+                )
+                if existing_kernel is not None
+                else None
+            )
+        if stale_shutdown is not None:
+            # Drain the captured teardown under a shield so a cancelled
+            # kernel-start request cannot cancel the shared task and leave the
+            # old kernel running after its registry entry was already claimed.
+            # Repeated cancellation must not return before it finishes, mirroring
+            # the shielded drain loops used for session and rollback cleanup.
+            stale_cancelled: asyncio.CancelledError | None = None
+            while True:
+                try:
+                    _ = await asyncio.shield(stale_shutdown)
+                    break
+                except asyncio.CancelledError as exc:
+                    stale_cancelled = stale_cancelled or exc
+                    if stale_shutdown.done():
+                        break
+            if stale_cancelled is not None:
+                raise stale_cancelled
 
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
@@ -553,16 +1141,69 @@ class SessionManager:
         else:
             env.pop("USER_IDENTITY", None)
 
-        await kernel_manager.start_kernel(env=env, cwd=working_dir)
-        kernel_client = kernel_manager.client()
-        kernel_client.start_channels()
-        await kernel_client.wait_for_ready()
+        kernel_client = None
+        kernel_start_attempted = False
+        registered = False
+        current_task = asyncio.current_task()
+        if current_task is None:
+            raise RuntimeError("Kernel startup requires an asyncio task.")
+        with self._session_lifecycle_lock:
+            if self._session_generations.get(session_id) != session_generation:
+                raise ValueError(f"Session {session_id} was closed before its kernel could start.")
+            self._kernel_start_tasks.setdefault(session_id, {})[current_task] = session_generation
+        try:
+            kernel_start_attempted = True
+            await kernel_manager.start_kernel(env=env, cwd=working_dir)
+            kernel_client = kernel_manager.client()
+            kernel_client.start_channels()
+            await kernel_client.wait_for_ready()
 
-        # Store in registry
-        self._kernels[session_id] = (kernel_manager, kernel_client)
-        self._kernel_last_used[session_id] = time.time()
-        self._kernel_tokens[session_id] = user_token
-        self._assign_kernel_generation(session_id)
+            # Store in registry
+            with self._session_lifecycle_lock:
+                session_is_current = self._session_generations.get(session_id) == session_generation
+                if session_is_current:
+                    self._kernels[session_id] = (kernel_manager, kernel_client)
+                    self._kernel_last_used[session_id] = time.time()
+                    self._kernel_tokens[session_id] = user_token
+                    self._assign_kernel_generation(session_id)
+                    self._kernel_session_generations[session_id] = session_generation
+                    registered = True
+            if not session_is_current:
+                raise ValueError(f"Session {session_id} was closed while its kernel was starting.")
+        except BaseException:
+            if kernel_start_attempted and not registered:
+
+                async def rollback_kernel_start() -> None:
+                    try:
+                        if kernel_client is not None:
+                            kernel_client.stop_channels()
+                    finally:
+                        try:
+                            await kernel_manager.shutdown_kernel(now=True)
+                        finally:
+                            await kernel_manager.cleanup_resources()
+
+                cleanup = asyncio.create_task(rollback_kernel_start())
+                while True:
+                    try:
+                        _ = await asyncio.shield(cleanup)
+                        break
+                    except asyncio.CancelledError:
+                        if cleanup.done():
+                            break
+                        continue
+                    except Exception:
+                        LOGGER.error("Failed to clean up kernel startup for session %s", session_id, exc_info=True)
+                        break
+            raise
+        finally:
+            with self._session_lifecycle_lock:
+                starts = self._kernel_start_tasks.get(session_id)
+                if starts is not None:
+                    starts.pop(current_task, None)
+                    if not starts:
+                        self._kernel_start_tasks.pop(session_id, None)
+                self._finalize_closed_session(session_id)
 
         LOGGER.info(f"Kernel started for session {session_id}")
         return kernel_manager, kernel_client
@@ -978,10 +1619,57 @@ class SessionManager:
             self._finalize_background_artifacts(job)
             self._mark_job_finished(job)
 
+    async def _collect_background_job_with_resources(
+        self,
+        job: _BackgroundJob,
+        km: AsyncKernelManager,
+        kc: "AsyncKernelClient",
+        resource_operation: Any,
+    ) -> None:
+        try:
+            await self._collect_background_job(job, km, kc)
+        finally:
+            await resource_operation.__aexit__(None, None, None)
+
+    def _start_background_job_collector(
+        self,
+        job: _BackgroundJob,
+        km: AsyncKernelManager,
+        kc: "AsyncKernelClient",
+        resource_operation: Any,
+    ) -> asyncio.Task[None]:
+        """Start a collector and release its lease even if cancelled before first execution."""
+        started = False
+
+        async def collect() -> None:
+            nonlocal started
+            started = True
+            await self._collect_background_job_with_resources(job, km, kc, resource_operation)
+
+        task = asyncio.create_task(collect())
+
+        def release_unstarted_collector(_completed: asyncio.Task[None]) -> None:
+            if not started:
+                release_task = asyncio.create_task(resource_operation.__aexit__(None, None, None))
+                self._background_lease_release_tasks.add(release_task)
+                self._session_owned_cleanup_tasks.setdefault(job.session_id, set()).add(release_task)
+                self._resource_cleanup_tasks.add(release_task)
+                release_task.add_done_callback(partial(self._on_session_owned_cleanup_done, job.session_id, None))
+                release_task.add_done_callback(self._background_lease_release_tasks.discard)
+
+        task.add_done_callback(release_unstarted_collector)
+        return task
+
     async def start_background_execution_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
     ) -> dict[str, str]:
         """Start execution and return immediately with a background job id."""
+        async with self.session_resource_operation(session_id):
+            return await self._start_background_execution_for_session(session_id, code, timeout, working_dir)
+
+    async def _start_background_execution_for_session(
+        self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
+    ) -> dict[str, str]:
         try:
             session = self.get_session(session_id)
             user_token = session.user_token
@@ -1020,7 +1708,13 @@ class SessionManager:
             user_identity=user_identity,
             outputs_before=outputs_before,
         )
-        job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
+        resource_operation = self.session_resource_operation(session_id)
+        await resource_operation.__aenter__()
+        try:
+            job.task = self._start_background_job_collector(job, km, kc, resource_operation)
+        except BaseException:
+            await resource_operation.__aexit__(None, None, None)
+            raise
         self._background_jobs[job_id] = job
         self._session_running_jobs[session_id] = job_id
 
@@ -1061,7 +1755,23 @@ class SessionManager:
             raise ValueError(
                 f"timeout ({timeout}s) must be greater than promotion_threshold_s ({promotion_threshold_s}s)"
             )
+        async with self.session_resource_operation(session_id):
+            return await self._start_promoted_execution_for_session(
+                session_id,
+                code,
+                timeout,
+                promotion_threshold_s,
+                working_dir,
+            )
 
+    async def _start_promoted_execution_for_session(
+        self,
+        session_id: str,
+        code: str,
+        timeout: float,
+        promotion_threshold_s: float,
+        working_dir: Optional[str] = None,
+    ) -> "Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]":
         try:
             session = self.get_session(session_id)
             user_token = session.user_token
@@ -1082,7 +1792,7 @@ class SessionManager:
         if running_job_id:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
-        async with self._get_kernel_execute_lock(session_id):
+        async with self._kernel_execution_lock(session_id):
             km, kc = await self._get_or_create_kernel(
                 session_id, working_dir, user_token=user_token, user_identity=user_identity
             )
@@ -1219,7 +1929,13 @@ class SessionManager:
                 success=success,
                 outputs_before=outputs_before,
             )
-            job.task = asyncio.create_task(self._collect_background_job(job, km, kc))
+            resource_operation = self.session_resource_operation(session_id)
+            await resource_operation.__aenter__()
+            try:
+                job.task = self._start_background_job_collector(job, km, kc, resource_operation)
+            except BaseException:
+                await resource_operation.__aexit__(None, None, None)
+                raise
             self._background_jobs[job_id] = job
             self._session_running_jobs[session_id] = job_id
 
@@ -1302,11 +2018,114 @@ class SessionManager:
         spinning until its timeout fires.  Serializing here is correct because
         the kernel only processes one execute at a time anyway.
         """
-        lock = self._kernel_execute_locks.get(session_id)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._kernel_execute_locks[session_id] = lock
-        return lock
+        with self._session_lifecycle_lock:
+            lock = self._kernel_execute_locks.get(session_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._kernel_execute_locks[session_id] = lock
+            return lock
+
+    @asynccontextmanager
+    async def _kernel_execution_lock(self, session_id: str) -> AsyncIterator[None]:
+        """Retain a session's execute lock until every captured caller releases it."""
+        with self._session_lifecycle_lock:
+            lock = self._get_kernel_execute_lock(session_id)
+            event = self._kernel_execute_drained.get(session_id)
+            if event is None:
+                event = asyncio.Event()
+                self._kernel_execute_drained[session_id] = event
+            event.clear()
+            self._kernel_execute_lock_users[session_id] = self._kernel_execute_lock_users.get(session_id, 0) + 1
+            if session_id not in self._session_generations:
+                self._retired_kernel_execute_locks.add(session_id)
+        try:
+            async with lock:
+                yield
+        finally:
+            pending_cleanup: Session | None = None
+            with self._session_lifecycle_lock:
+                remaining = self._kernel_execute_lock_users[session_id] - 1
+                if remaining:
+                    self._kernel_execute_lock_users[session_id] = remaining
+                else:
+                    self._kernel_execute_lock_users.pop(session_id, None)
+                    drained = self._kernel_execute_drained.pop(session_id, None)
+                    if drained is not None:
+                        drained.set()
+                    if (
+                        session_id in self._retired_kernel_execute_locks
+                        and self._kernel_execute_locks.get(session_id) is lock
+                    ):
+                        self._kernel_execute_locks.pop(session_id, None)
+                        self._retired_kernel_execute_locks.discard(session_id)
+                    pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
+            if pending_cleanup is not None:
+                self._schedule_session_cleanup_after_operations(pending_cleanup)
+            self._finalize_closed_session(session_id)
+
+    def session_resource_operation(self, session_id: str) -> AsyncContextManager[None]:
+        """Keep session-owned data resources alive for one admitted operation."""
+        with self._session_lifecycle_lock:
+            session_generation = self._session_generations.get(session_id)
+            if (
+                session_generation is None
+                and session_id not in self._closing_session_ids
+                and self.storage.retrieve(session_id) is not None
+            ):
+                session_generation = self._adopt_session_generation_locked(session_id)
+
+        @asynccontextmanager
+        async def operation() -> AsyncIterator[None]:
+            with self._session_lifecycle_lock:
+                if (
+                    session_generation is None
+                    or self._session_generations.get(session_id) != session_generation
+                    or session_id in self._closing_session_ids
+                    or self.storage.retrieve(session_id) is None
+                ):
+                    raise ValueError(f"Session {session_id} not found or is closing")
+                event = self._session_resources_drained.get(session_id)
+                if event is None:
+                    event = asyncio.Event()
+                    self._session_resources_drained[session_id] = event
+                event.clear()
+                self._session_resource_users[session_id] = self._session_resource_users.get(session_id, 0) + 1
+            try:
+                yield
+            finally:
+                pending_cleanup: Session | None = None
+                with self._session_lifecycle_lock:
+                    remaining = self._session_resource_users[session_id] - 1
+                    if remaining:
+                        self._session_resource_users[session_id] = remaining
+                    else:
+                        self._session_resource_users.pop(session_id, None)
+                        drained = self._session_resources_drained.pop(session_id, None)
+                        if drained is not None:
+                            drained.set()
+                        pending_cleanup = self._pending_session_resource_cleanup.get(session_id)
+                if pending_cleanup is not None:
+                    self._schedule_session_cleanup_after_operations(pending_cleanup)
+                self._finalize_closed_session(session_id)
+
+        return operation()
+
+    def _adopt_session_generation_locked(self, session_id: str) -> int:
+        """Return a session lifecycle generation, assigning one while the lifecycle lock is held."""
+        session_generation = self._session_generations.get(session_id)
+        if session_generation is None:
+            self._session_generation_seq += 1
+            session_generation = self._session_generation_seq
+            self._session_generations[session_id] = session_generation
+        return session_generation
+
+    def _retire_kernel_execute_lock(self, session_id: str) -> None:
+        """Reclaim a closed session's lock once callers that captured it drain."""
+        if self._kernel_execute_lock_users.get(session_id, 0):
+            self._retired_kernel_execute_locks.add(session_id)
+        else:
+            self._kernel_execute_locks.pop(session_id, None)
+            self._retired_kernel_execute_locks.discard(session_id)
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
@@ -1332,6 +2151,29 @@ class SessionManager:
             directory, including its name, size, MIME type, modification time,
             and download token.
         """
+        resource_operation = self.session_resource_operation(session_id)
+        try:
+            await resource_operation.__aenter__()
+        except ValueError:
+            return (
+                "",
+                (
+                    f"Session {session_id} is no longer available (expired or cleaned up). "
+                    "Please create a new session and retry."
+                ),
+                False,
+                [],
+                [],
+            )
+        try:
+            return await self._execute_code_for_admitted_session(session_id, code, timeout, working_dir)
+        finally:
+            await resource_operation.__aexit__(None, None, None)
+
+    async def _execute_code_for_admitted_session(
+        self, session_id: str, code: str, timeout: float, working_dir: Optional[str]
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
+        """Execute after admitting a session resource lease."""
         # Look up session to get current user credentials, ensuring session
         # access goes through the manager (cleanup, expiry check, touch).
         try:
@@ -1354,7 +2196,7 @@ class SessionManager:
         if running_job_id:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
-        async with self._get_kernel_execute_lock(session_id):
+        async with self._kernel_execution_lock(session_id):
             return await self._execute_code_locked(
                 session_id=session_id,
                 code=code,
@@ -1546,7 +2388,14 @@ class SessionManager:
 
         return stdout, stderr, success, displays, artifacts
 
-    async def _shutdown_kernel(self, session_id: str):
+    async def _shutdown_kernel(
+        self,
+        session_id: str,
+        *,
+        cleanup_artifacts: bool = True,
+        expected_session_generation: int | None = None,
+        expected_kernel_generation: int | None = None,
+    ):
         """Shut down the session's current kernel and drop its registry state.
 
         The kernel is *claimed* synchronously: the registry entry and every
@@ -1563,20 +2412,52 @@ class SessionManager:
 
         Idempotent: calling it for a session with no kernel is a no-op.
         """
-        entry = self._kernels.pop(session_id, None)
-        if entry is None:
-            LOGGER.debug("No kernel to shut down for session %s", session_id)
-            return
+        with self._session_lifecycle_lock:
+            current_kernel_generation = self._kernel_generations.get(session_id)
+            if expected_kernel_generation is not None and current_kernel_generation != expected_kernel_generation:
+                LOGGER.debug("Skipping stale kernel teardown for session %s", session_id)
+                return
+            entry = self._kernels.pop(session_id, None)
+            if entry is None:
+                LOGGER.debug("No kernel to shut down for session %s", session_id)
+                return
 
-        km, kc = entry
-        # Drop the rest of the per-kernel state in the same synchronous step.
-        # Deferring any of it past an await would risk clobbering the state of
-        # a *replacement* kernel started for this session in the meantime.
-        self._kernel_last_used.pop(session_id, None)
-        self._kernel_tokens.pop(session_id, None)
-        self._kernel_execute_locks.pop(session_id, None)
-        self._discard_kernel_generation(session_id)
-        self._cleanup_session_artifacts(session_id)
+            km, kc = entry
+            claimed_session_generation = self._kernel_session_generations.get(session_id)
+            # Drop the rest of the per-kernel state in the same synchronous step.
+            # Deferring any of it past an await would risk clobbering the state of
+            # a *replacement* kernel started for this session in the meantime.
+            self._kernel_last_used.pop(session_id, None)
+            self._kernel_tokens.pop(session_id, None)
+            self._kernel_session_generations.pop(session_id, None)
+            self._discard_kernel_generation(session_id)
+        artifacts_dir_to_remove: Path | None = None
+        if cleanup_artifacts:
+            with self._session_lifecycle_lock:
+                current_session_generation = self._session_generations.get(session_id)
+                cleanup_session_generation = (
+                    expected_session_generation
+                    if expected_session_generation is not None
+                    else claimed_session_generation
+                )
+                if current_session_generation is None or (
+                    cleanup_session_generation is not None and current_session_generation == cleanup_session_generation
+                ):
+                    self._session_artifacts.pop(session_id, None)
+                    outputs_dir = self._get_outputs_dir(session_id)
+                    if outputs_dir.exists():
+                        claimed_dir = outputs_dir.with_name(f".{outputs_dir.name}.cleanup-{uuid.uuid4().hex}")
+                        try:
+                            outputs_dir.rename(claimed_dir)
+                        except OSError:
+                            LOGGER.warning("Failed to claim outputs dir for session %s", session_id, exc_info=True)
+                        else:
+                            artifacts_dir_to_remove = claimed_dir
+        if artifacts_dir_to_remove is not None:
+            try:
+                shutil.rmtree(artifacts_dir_to_remove, ignore_errors=True)
+            except OSError:
+                LOGGER.warning("Failed to remove outputs dir for session %s", session_id, exc_info=True)
 
         running_job_id = self._get_running_job_for_session(session_id)
         if running_job_id:
@@ -1604,7 +2485,13 @@ class SessionManager:
             LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
 
     def _schedule_kernel_shutdown(
-        self, session_id: str, *, caller: str = "close_session()"
+        self,
+        session_id: str,
+        *,
+        caller: str = "close_session()",
+        cleanup_artifacts: bool = True,
+        wait_for_executions: bool = False,
+        expected_session_generation: int | None = None,
     ) -> "Optional[asyncio.Task[None]]":
         """Start teardown for a session's kernel, or join one already running.
 
@@ -1626,7 +2513,12 @@ class SessionManager:
         if existing is not None and not existing.done():
             return existing
 
-        if session_id not in self._kernels:
+        kernel_starts = tuple(
+            task
+            for task, generation in self._kernel_start_tasks.get(session_id, {}).items()
+            if expected_session_generation is None or generation == expected_session_generation
+        )
+        if session_id not in self._kernels and not kernel_starts:
             return None
 
         try:
@@ -1645,7 +2537,44 @@ class SessionManager:
             )
             return None
 
-        task = loop.create_task(self._shutdown_kernel(session_id))
+        kernel_session_generation = self._kernel_session_generations.get(session_id)
+        expected_kernel_generation = self._kernel_generations.get(session_id)
+
+        async def shutdown_and_finalize() -> None:
+            async def drain_executions_and_shutdown() -> None:
+                if kernel_starts:
+                    await asyncio.gather(
+                        *(asyncio.shield(start) for start in kernel_starts),
+                        return_exceptions=True,
+                    )
+                if wait_for_executions:
+                    execute_drained = self._kernel_execute_drained.get(session_id)
+                    if execute_drained is not None:
+                        await execute_drained.wait()
+                await self._shutdown_kernel(
+                    session_id,
+                    cleanup_artifacts=cleanup_artifacts,
+                    expected_session_generation=kernel_session_generation,
+                    expected_kernel_generation=expected_kernel_generation,
+                )
+
+            teardown = asyncio.create_task(drain_executions_and_shutdown())
+            cancelled: asyncio.CancelledError | None = None
+            try:
+                while True:
+                    try:
+                        await asyncio.shield(teardown)
+                        break
+                    except asyncio.CancelledError as exc:
+                        cancelled = cancelled or exc
+                        if teardown.done():
+                            break
+            finally:
+                self._finalize_closed_session(session_id)
+            if cancelled is not None:
+                raise cancelled
+
+        task = loop.create_task(shutdown_and_finalize())
         self._kernel_shutdown_tasks[session_id] = task
         task.add_done_callback(partial(self._on_kernel_shutdown_done, session_id))
         return task
@@ -1681,11 +2610,47 @@ class SessionManager:
     async def cleanup_idle_kernels(self, max_idle_time: float = 3600.0):
         """Cleanup kernels that have been idle for too long."""
         now = time.time()
-        idle_sessions = [sid for sid, last_used in self._kernel_last_used.items() if now - last_used > max_idle_time]
+        with self._session_lifecycle_lock:
+            idle_sessions = [
+                (
+                    sid,
+                    self._kernel_session_generations.get(sid),
+                    self._kernel_generations.get(sid),
+                )
+                for sid, last_used in self._kernel_last_used.items()
+                if now - last_used > max_idle_time
+            ]
 
-        for session_id in idle_sessions:
+        for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
-            await self._shutdown_kernel(session_id)
+            joined_shutdown: "Optional[asyncio.Task[None]]" = None
+            async with self._kernel_execution_lock(session_id):
+                with self._session_lifecycle_lock:
+                    last_used = self._kernel_last_used.get(session_id)
+                    if (
+                        last_used is None
+                        or time.time() - last_used <= max_idle_time
+                        or self._kernel_session_generations.get(session_id) != session_generation
+                        or self._kernel_generations.get(session_id) != kernel_generation
+                    ):
+                        continue
+                    existing_shutdown = self._kernel_shutdown_tasks.get(session_id)
+                    joined_existing = existing_shutdown is not None and not existing_shutdown.done()
+                    shutdown_task = self._schedule_kernel_shutdown(
+                        session_id,
+                        caller="cleanup_idle_kernels()",
+                    )
+                if shutdown_task is None:
+                    continue
+                if joined_existing:
+                    # A teardown started elsewhere may be waiting for executions to
+                    # drain, and this sweep's own execute-lock lease keeps that drain
+                    # from completing. Join it only after releasing the lease.
+                    joined_shutdown = shutdown_task
+                else:
+                    _ = await asyncio.shield(shutdown_task)
+            if joined_shutdown is not None:
+                _ = await asyncio.shield(joined_shutdown)
 
     # ========================================================================
     # Session Listing and Cleanup
@@ -1718,33 +2683,25 @@ class SessionManager:
     def _cleanup_expired(self):
         """Remove expired sessions and their kernels."""
         now = datetime.now()
-        sessions = self.storage.list_all()
+        with self._session_lifecycle_lock:
+            sessions = self.storage.list_all()
+            expired = []
+            for session_id, session in sessions.items():
+                if now - session.last_accessed <= self.config.timeout:
+                    continue
+                generation = self._session_generations.get(session_id)
+                if generation is None:
+                    self._session_generation_seq += 1
+                    generation = self._session_generation_seq
+                    self._session_generations[session_id] = generation
+                expired.append((session_id, generation))
 
-        expired = [
-            session_id for session_id, session in sessions.items() if now - session.last_accessed > self.config.timeout
-        ]
-
-        for session_id in expired:
-            # Shutdown kernel first
-            self._schedule_kernel_shutdown(session_id, caller="Expired-session cleanup")
-
-            session = self.storage.retrieve(session_id)
-            if session:
-                cleanup_failed = False
-                try:
-                    session.cleanup()
-                except Exception as e:
-                    cleanup_failed = True
-                    LOGGER.error(
-                        f"Error during cleanup of expired session {session_id}: {e}. "
-                        f"Session will still be removed to prevent accumulation, but resources may be leaked."
-                    )
-
-                self.storage.delete(session_id)
-                if cleanup_failed:
-                    LOGGER.warning(f"Removed expired session {session_id} with failed cleanup")
-                else:
-                    LOGGER.info(f"Cleaned up expired session {session_id}")
+        for session_id, generation in expired:
+            self._close_session_sync(
+                session_id,
+                caller="Expired-session cleanup",
+                expected_generation=generation,
+            )
 
     def _enforce_max_sessions(self):
         """

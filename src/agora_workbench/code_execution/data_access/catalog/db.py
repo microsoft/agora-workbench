@@ -302,26 +302,25 @@ class CatalogDB:
     def open(self) -> None:
         """Open the database and migrate known older schemas atomically."""
         connection = sqlite3.connect(self._db_path, timeout=5.0, check_same_thread=False)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 5000")
-        connection.execute("PRAGMA foreign_keys = ON")
-        version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > SCHEMA_VERSION:
-            connection.close()
-            raise RuntimeError(
-                f"Catalog schema version {version} is newer than supported version {SCHEMA_VERSION}; "
-                "the database was not modified."
-            )
-        if self._db_path != ":memory:":
-            try:
-                journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
-                if journal_mode.lower() != "wal":
-                    LOGGER.warning("WAL mode is unavailable for the catalog database")
-            except sqlite3.DatabaseError:
-                LOGGER.warning("WAL mode is unavailable for the catalog database")
-
-        self._conn = connection
         try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA foreign_keys = ON")
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(
+                    f"Catalog schema version {version} is newer than supported version {SCHEMA_VERSION}; "
+                    "the database was not modified."
+                )
+            if self._db_path != ":memory:":
+                try:
+                    journal_mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()[0]
+                    if journal_mode.lower() != "wal":
+                        LOGGER.warning("WAL mode is unavailable for the catalog database")
+                except sqlite3.DatabaseError:
+                    LOGGER.warning("WAL mode is unavailable for the catalog database")
+
+            self._conn = connection
             self._probe_fts5()
             if version < 2 and self._has_legacy_schema():
                 self._migrate_legacy_schema()
@@ -342,7 +341,7 @@ class CatalogDB:
                 except Exception:
                     connection.rollback()
                     raise
-        except Exception:
+        except BaseException:
             connection.close()
             self._conn = None
             raise

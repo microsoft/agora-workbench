@@ -5,7 +5,9 @@ Tests the middleware's ability to detect, resolve, and inject asset references
 before FastMCP/Pydantic validation runs.
 """
 
+import asyncio
 import importlib
+from contextlib import asynccontextmanager
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
@@ -32,6 +34,12 @@ def mock_server():
     server._restore_auth_context_for_mcp_session = MagicMock()
     server._clear_auth_context = MagicMock()
     server._get_or_create_session = AsyncMock()
+
+    @asynccontextmanager
+    async def session_resource_operation(_session_id):
+        yield
+
+    server.session_manager.session_resource_operation = session_resource_operation
     return server
 
 
@@ -58,6 +66,7 @@ def mock_session():
     session.object_store.store = MagicMock()
     session.data_manager = MagicMock()
     session.data_manager.get_cache_path = AsyncMock()
+    session.extensions = {}
     return session
 
 
@@ -176,6 +185,113 @@ class TestAssetResolutionMiddleware:
         # Verify cleanup was called
         mock_server._clear_auth_context.assert_called_once()
 
+    async def test_session_lookup_failure_clears_auth_context(self, mock_server, mock_context):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.side_effect = ValueError("session unavailable")
+
+        with pytest.raises(ValueError, match="session unavailable"):
+            await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock())
+
+        mock_server._clear_auth_context.assert_called_once()
+
+    async def test_cancellation_during_resolution_clears_auth_context(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+        mock_session.data_manager.get_cache_path.side_effect = asyncio.CancelledError()
+
+        with _patch_set_current_session():
+            with pytest.raises(asyncio.CancelledError):
+                await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock())
+
+        mock_server._clear_auth_context.assert_called_once()
+
+    async def test_resource_lease_covers_downstream_tool_execution(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_session.data_manager.get_cache_path.return_value = Path("/cache/test")
+        lease_active = False
+        session_resolved = False
+
+        async def get_session(_tool_name, *, session_id):
+            nonlocal session_resolved
+            assert session_id == "test-session-123"
+            session_resolved = True
+            return mock_session
+
+        @asynccontextmanager
+        async def session_resource_operation(_session_id):
+            nonlocal lease_active
+            assert session_resolved
+            lease_active = True
+            try:
+                yield
+            finally:
+                lease_active = False
+
+        def assert_lease(_context):
+            assert lease_active
+            return "result"
+
+        mock_server._get_or_create_session.side_effect = get_session
+        mock_server.session_manager.session_resource_operation = session_resource_operation
+        call_next = AsyncMock(side_effect=assert_lease)
+        with _patch_set_current_session():
+            assert await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, call_next) == "result"
+        assert not lease_active
+
+    async def test_catalog_request_snapshot_covers_resolution_and_tool_execution(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        mock_context.message.arguments = {"grid_file": "<blob>test</blob>"}
+        mock_server._get_or_create_session.return_value = mock_session
+
+        snapshot_active = False
+
+        class _SnapshotContext:
+            def __enter__(self):
+                nonlocal snapshot_active
+                snapshot_active = True
+
+            def __exit__(self, *_args):
+                nonlocal snapshot_active
+                snapshot_active = False
+                return False
+
+        class _Resolver:
+            def bind_request_snapshot(self):
+                return _SnapshotContext()
+
+        catalog_binding = MagicMock()
+        catalog_binding.resolver = _Resolver()
+        mock_session.extensions = {"catalog": catalog_binding}
+
+        async def _get_cache_path(_asset_id, **_kwargs):
+            assert snapshot_active
+            return Path("/cache/test")
+
+        def _call_next(_context):
+            assert snapshot_active
+            return "result"
+
+        mock_session.data_manager.get_cache_path.side_effect = _get_cache_path
+        call_next = AsyncMock(side_effect=_call_next)
+
+        with _patch_set_current_session():
+            assert await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, call_next) == "result"
+        assert not snapshot_active
+
     @pytest.mark.parametrize(
         "secret_uri",
         [
@@ -292,6 +408,28 @@ class TestAssetResolutionMiddleware:
 
         # Verify session was created with correct session_id
         mock_server._restore_auth_context_for_mcp_session.assert_called_once_with("custom-session-456")
+
+    async def test_missing_context_session_id_falls_back_to_unscoped_session(
+        self,
+        mock_server,
+        mock_context,
+        mock_session,
+    ):
+        class MissingSessionContext:
+            @property
+            def session_id(self):
+                raise AttributeError("session unavailable")
+
+        mock_context.message.arguments = {"asset": "<blob>test</blob>"}
+        mock_context.fastmcp_context = MissingSessionContext()
+        mock_server._get_or_create_session.return_value = mock_session
+        mock_session.data_manager.get_cache_path.return_value = Path("/cache/test")
+
+        with _patch_set_current_session():
+            await AssetResolutionMiddleware(mock_server).on_call_tool(mock_context, AsyncMock(return_value="result"))
+
+        mock_server._restore_auth_context_for_mcp_session.assert_called_once_with(None)
+        mock_server._get_or_create_session.assert_awaited_once_with("test_tool", session_id=None)
 
     async def test_asset_counter_increments(self, mock_server, mock_context, mock_session):
         """Test that asset counter increments for each resolution."""

@@ -39,6 +39,7 @@ from agora_workbench.data_lake.catalog import (
     CatalogDB,
     CatalogIndexer,
     DiscoveryMode,
+    SearchConfig,
     SourceConfig,
     convert_catalog_config,
 )
@@ -1480,7 +1481,7 @@ def test_constructor_rejects_infinite_default_stale_limit(tmp_path):
         ManifestCatalogProvider(_local_config(tmp_path), max_stale_seconds=float("inf"))
 
 
-async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sqlite(tmp_path, monkeypatch):
+async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_resources(tmp_path, monkeypatch):
     missing = ManifestCatalogProvider(_local_config(tmp_path, "missing.json"))
     with pytest.raises(BackendUnavailableError, match="no valid generation"):
         await missing.load()
@@ -1496,6 +1497,8 @@ async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sql
 
     (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "generation": 1, "artifacts": []}))
     cancelled = ManifestCatalogProvider(_local_config(tmp_path))
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+    cancelled._indexer._embedding_provider = embedding_provider
     monkeypatch.setattr(
         cancelled._indexer,
         "index",
@@ -1505,6 +1508,9 @@ async def test_first_load_failure_is_retryable_and_cancellation_closes_owned_sql
         await cancelled.load()
     assert cancelled._closed
     assert cancelled._db_owned._conn is None
+    embedding_provider.close.assert_awaited_once_with()
+    await cancelled.aclose()
+    embedding_provider.close.assert_awaited_once_with()
 
 
 async def test_manifest_provider_async_context_closes_owned_sqlite(tmp_path):
@@ -1668,6 +1674,117 @@ async def test_sqlite_provider_preserves_internal_credential_capable_locator():
         assert resolved.locator.uri == storage_uri
     finally:
         db.close()
+
+
+async def test_manifest_provider_uses_configured_query_embedding_and_hybrid_weight(tmp_path):
+    config = CatalogConfig(
+        sources=_local_config(tmp_path).sources,
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    (tmp_path / "approved").mkdir()
+    (tmp_path / "approved" / "data.csv").write_text("data")
+    (tmp_path / "manifest.json").write_text(json.dumps(_manifest()))
+    provider = ManifestCatalogProvider(config)
+    embedding_provider = MagicMock()
+    embedding_provider.dimensions = 2
+    embedding_provider.embed = AsyncMock(return_value=[[0.25, 0.75]])
+    try:
+        await provider.load()
+        provider._indexer._embedding_provider = embedding_provider
+        provider._db_owned.search = MagicMock(return_value=[])
+
+        await provider.search(SearchRequest(query="approved"), RequestContext())
+
+        embedding_provider.embed.assert_awaited_once_with(["approved"])
+        assert provider._db_owned.search.call_args.kwargs["query_embedding"] == [0.25, 0.75]
+        assert provider._db_owned.search.call_args.kwargs["hybrid_alpha"] == 0.25
+    finally:
+        await provider.aclose()
+
+
+async def test_manifest_provider_closes_cached_embedding_provider(tmp_path):
+    provider = ManifestCatalogProvider(_local_config(tmp_path))
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+    provider._indexer._embedding_provider = embedding_provider
+
+    await provider.aclose()
+    await provider.aclose()
+
+    embedding_provider.close.assert_awaited_once_with()
+
+
+async def test_manifest_provider_close_waits_for_active_embedding_search(tmp_path):
+    config = CatalogConfig(
+        sources=_local_config(tmp_path).sources,
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2),
+    )
+    (tmp_path / "approved").mkdir()
+    (tmp_path / "approved" / "data.csv").write_text("data")
+    (tmp_path / "manifest.json").write_text(json.dumps(_manifest()))
+    provider = ManifestCatalogProvider(config)
+    await provider.load()
+    embed_started = asyncio.Event()
+    release_embed = asyncio.Event()
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+
+    async def blocked_embed(_queries):
+        embed_started.set()
+        await release_embed.wait()
+        return [[0.25, 0.75]]
+
+    embedding_provider.embed = AsyncMock(side_effect=blocked_embed)
+    provider._indexer._embedding_provider = embedding_provider
+    provider._db_owned.search = MagicMock(return_value=[])
+
+    search = asyncio.create_task(provider.search(SearchRequest(query="approved"), RequestContext()))
+    await embed_started.wait()
+    close = asyncio.create_task(provider.aclose())
+    await asyncio.sleep(0)
+
+    assert not close.done()
+    embedding_provider.close.assert_not_awaited()
+
+    release_embed.set()
+    assert (await search).items == ()
+    assert await close is None
+    embedding_provider.close.assert_awaited_once_with()
+
+
+async def test_manifest_provider_slow_embedding_does_not_block_other_reads(tmp_path):
+    config = CatalogConfig(
+        sources=_local_config(tmp_path).sources,
+        search=SearchConfig(embedding_model="none", embedding_dimensions=2, hybrid_alpha=0.25),
+    )
+    (tmp_path / "approved").mkdir()
+    (tmp_path / "approved" / "data.csv").write_text("data")
+    (tmp_path / "manifest.json").write_text(json.dumps(_manifest()))
+    provider = ManifestCatalogProvider(config)
+    await provider.load()
+    embed_started = asyncio.Event()
+    release_embed = asyncio.Event()
+    embedding_provider = SimpleNamespace(dimensions=2, close=AsyncMock())
+
+    async def blocked_embed(_queries):
+        embed_started.set()
+        await release_embed.wait()
+        return [[0.25, 0.75]]
+
+    embedding_provider.embed = AsyncMock(side_effect=blocked_embed)
+    provider._indexer._embedding_provider = embedding_provider
+    provider._db_owned.search = MagicMock(return_value=[])
+
+    try:
+        search = asyncio.create_task(provider.search(SearchRequest(query="approved"), RequestContext()))
+        await embed_started.wait()
+
+        page = await asyncio.wait_for(provider.list(ListRequest(), RequestContext()), timeout=1)
+        assert page.items
+
+        release_embed.set()
+        assert (await search).items == ()
+    finally:
+        release_embed.set()
+        await provider.aclose()
 
 
 async def test_refresh_error_preserves_source_id_with_colon(tmp_path):

@@ -41,7 +41,7 @@ TransferDiagnosticHook = Callable[["TransferDiagnostic"], Awaitable[None] | None
 _TAGGED_REFERENCE_RE = re.compile(r"^(<[^<>]+>)([^<>]+)(</[^<>]+>)?$")
 _REDACTED_URI_RE = re.compile(r"^\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#].*)?$")
 _REDACTED_URI_IN_TEXT_RE = re.compile(r"\*{6}(?P<location>[^/?#\s]+(?:/[^?#\s]*)?)(?:[?#][^\s<>]*)?")
-_URI_IN_TEXT_RE = re.compile(r"[a-z][a-z0-9+.-]*://[^\s'\"<>]+", re.IGNORECASE)
+_URI_IN_TEXT_RE = re.compile(r'[a-z][a-z0-9+.-]*://[^\s"<>]+', re.IGNORECASE)
 
 
 async def _run_blocking_io(
@@ -215,14 +215,27 @@ def safe_transfer_resource(value: str | os.PathLike[str] | None) -> str | None:
     return safe_artifact_reference(os.fspath(value))
 
 
+def contains_artifact_locator(value: str) -> bool:
+    """Return whether a value contains a URI or redacted URI-like locator."""
+    return _URI_IN_TEXT_RE.search(value) is not None or _REDACTED_URI_IN_TEXT_RE.search(value) is not None
+
+
 def safe_artifact_reference(value: str) -> str:
     """Sanitize a URI nested inside a legacy ``<type>value</type>`` reference."""
+
+    def sanitize_uri_match(match: re.Match[str]) -> str:
+        uri = match.group(0)
+        trailing_quote = uri.endswith("'") and match.start() > 0 and match.string[match.start() - 1] == "'"
+        if trailing_quote:
+            uri = uri[:-1]
+        sanitized = sanitize_uri_for_display(uri)
+        return f"{sanitized}'" if trailing_quote else sanitized
 
     def sanitize_reference(reference: str) -> str:
         redacted = _REDACTED_URI_RE.fullmatch(reference)
         if redacted is not None:
             return redacted.group("location")
-        sanitized = _URI_IN_TEXT_RE.sub(lambda match: sanitize_uri_for_display(match.group(0)), reference)
+        sanitized = _URI_IN_TEXT_RE.sub(sanitize_uri_match, reference)
         return _REDACTED_URI_IN_TEXT_RE.sub(
             lambda match: match.group("location"),
             sanitized,
@@ -775,6 +788,7 @@ __all__ = [
     "await_transfer",
     "check_transfer_cancelled",
     "check_transfer_size",
+    "contains_artifact_locator",
     "emit_transfer_diagnostic",
     "hash_file",
     "safe_transfer_resource",

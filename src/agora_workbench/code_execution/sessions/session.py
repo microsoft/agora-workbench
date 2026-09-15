@@ -1,5 +1,8 @@
 """Generic session container with common functionality."""
 
+import asyncio
+import inspect
+import logging
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -12,6 +15,20 @@ if TYPE_CHECKING:
     from ..data_access.manager import DataLakeDataManager
 
 T = TypeVar("T")
+
+LOGGER = logging.getLogger(__name__)
+
+#: Bounded number of session-file removal attempts. After this many failures the
+#: claim is treated as terminal so an undeletable file cannot pin a session ID.
+_MAX_SESSION_FILE_CLEANUP_ATTEMPTS = 2
+
+
+@dataclass(frozen=True)
+class SessionResources:
+    """A data manager plus server-owned per-session extension state."""
+
+    data_manager: "DataLakeDataManager"
+    extensions: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -93,6 +110,7 @@ class Session(Generic[T]):
         token_claims: Dict,
         metadata: Optional[Dict] = None,
         data_manager: Optional["DataLakeDataManager"] = None,
+        extensions: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize a session.
@@ -122,8 +140,13 @@ class Session(Generic[T]):
         self.token_claims = token_claims
         self.status = "created"
         self.session_type = session_type
+        self.extensions = extensions or {}
         self._asset_counter: int = 0
         self._status_history = [("created", datetime.now())]
+        self._scheduled_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._claimed_cleanup_errors: list[Exception] = []
+        self._session_file_cleanup_claimed = False
+        self._session_file_cleanup_attempts = 0
 
         # Initialize data manager for DataLake asset access. Constructing the
         # default lazily matters: DataLakeDataManager.__init__ eagerly allocates
@@ -166,32 +189,237 @@ class Session(Generic[T]):
             "status_history": [{"status": s, "timestamp": t.isoformat()} for s, t in self._status_history],
         }
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """
-        Cleanup session resources including session files.
+        Start cleanup of every session resource, including async-only clients.
 
-        Raises:
-            Exception: If cleanup fails, to allow calling code to handle the failure
+        Async cleanup tasks are retained until the SessionManager claims them;
+        callers that need completion should use :meth:`aclose`.
         """
-        # Clean up data manager cache directory
-        self.data_manager.cleanup()
+        claimed_cleanup_errors = self._take_claimed_cleanup_errors()
+        errors: list[Exception] = []
+        cancellations: list[asyncio.CancelledError] = []
+        self._cleanup_resource_sync(self.data_manager, "data manager", errors, cancellations)
+        for resource in self.extensions.values():
+            self._cleanup_resource_sync(resource, f"extension {type(resource).__name__}", errors, cancellations)
+        self._cleanup_resource_sync(self.data, "session payload", errors, cancellations)
+        try:
+            self._cleanup_session_file()
+        except Exception as exc:
+            errors.extend(claimed_cleanup_errors)
+            errors.append(exc)
+        else:
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                errors.extend(claimed_cleanup_errors)
+        if cancellations:
+            if errors:
+                cancellations[0].add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
+            raise cancellations[0]
+        if errors:
+            raise ExceptionGroup("Session cleanup failed.", errors)
 
-        # Call cleanup on data if it has a cleanup method
-        if hasattr(self.data, "cleanup"):
-            self.data.cleanup()  # pyright: ignore reportAttributeAccessIssue
+    async def aclose(self) -> None:
+        """Attempt all asynchronous cleanup steps, then report aggregated failures."""
+        claimed_cleanup_errors = self._take_claimed_cleanup_errors()
+        errors: list[Exception] = []
+        cancellations: list[asyncio.CancelledError] = []
+        await self._cleanup_resource_async(self.data_manager, "data manager", errors, cancellations)
+        for resource in self.extensions.values():
+            await self._cleanup_resource_async(
+                resource,
+                f"extension {type(resource).__name__}",
+                errors,
+                cancellations,
+            )
+        await self._cleanup_resource_async(self.data, "session payload", errors, cancellations)
+        try:
+            self._cleanup_session_file()
+        except Exception as exc:
+            errors.extend(claimed_cleanup_errors)
+            errors.append(exc)
+        else:
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                errors.extend(claimed_cleanup_errors)
+        retry_tasks = tuple(self._scheduled_cleanup_tasks)
+        if retry_tasks:
+            results = await asyncio.gather(
+                *(asyncio.shield(task) for task in retry_tasks),
+                return_exceptions=True,
+            )
+            for task, result in zip(retry_tasks, results):
+                if task.done():
+                    self._scheduled_cleanup_tasks.discard(task)
+                if isinstance(result, asyncio.CancelledError):
+                    cancellations.append(result)
+                elif isinstance(result, Exception):
+                    errors.append(result)
+        if cancellations:
+            if errors:
+                cancellations[0].add_note(str(ExceptionGroup("Additional session cleanup failures.", errors)))
+            raise cancellations[0]
+        if errors:
+            raise ExceptionGroup("Session cleanup failed.", errors)
 
-        # Clean up session file if it exists
-        if isinstance(self.data, dict) and "session_file" in self.data:
-            session_file = Path(self.data["session_file"])
-            if session_file.exists():
-                # Remove the session file
-                session_file.unlink()
+    def take_cleanup_tasks(self) -> tuple[asyncio.Task[None], ...]:
+        """Transfer ownership of sync-scheduled cleanup tasks to the manager."""
+        tasks = tuple(self._scheduled_cleanup_tasks)
+        self._scheduled_cleanup_tasks.clear()
+        return tasks
 
-                # Try to remove the parent directory if it's a temp directory for this session
-                session_dir = session_file.parent
-                if f"session_{self.session_id}" in str(session_dir):
+    def _cleanup_resource_sync(
+        self,
+        resource: object,
+        label: str,
+        errors: list[Exception],
+        cancellations: list[asyncio.CancelledError],
+    ) -> None:
+        close = (
+            getattr(resource, "aclose", None) or getattr(resource, "cleanup", None) or getattr(resource, "close", None)
+        )
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if not inspect.isawaitable(result):
+                return
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                try:
                     try:
-                        shutil.rmtree(session_dir)
-                    except OSError:
-                        # Directory might not be empty or already deleted, that's ok
-                        pass
+                        loop.run_until_complete(result)
+                    except asyncio.CancelledError as exc:
+                        cancellations.append(exc)
+                        try:
+                            loop.run_until_complete(self._retry_resource_cleanup(resource, label))
+                        except asyncio.CancelledError as retry_error:
+                            exc.add_note(f"{label} cleanup retry was cancelled: {retry_error!r}")
+                        except Exception as retry_error:
+                            exc.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
+                finally:
+                    loop.close()
+            else:
+
+                async def await_cleanup() -> None:
+                    try:
+                        _ = await result
+                    except asyncio.CancelledError as cancelled:
+                        try:
+                            await self._retry_resource_cleanup(resource, label)
+                        except asyncio.CancelledError as retry_error:
+                            cancelled.add_note(f"{label} cleanup retry was cancelled: {retry_error!r}")
+                        except Exception as retry_error:
+                            cancelled.add_note(f"{label} cleanup retry also failed: {retry_error!r}")
+                        raise cancelled
+
+                task = loop.create_task(await_cleanup())
+                self._scheduled_cleanup_tasks.add(task)
+        except asyncio.CancelledError as exc:
+            cancellations.append(exc)
+            self._schedule_cleanup_retry(resource, label)
+        except Exception as exc:
+            self._record_cleanup_error(exc, label, errors)
+
+    async def _cleanup_resource_async(
+        self,
+        resource: object,
+        label: str,
+        errors: list[Exception],
+        cancellations: list[asyncio.CancelledError],
+    ) -> None:
+        close = (
+            getattr(resource, "aclose", None) or getattr(resource, "cleanup", None) or getattr(resource, "close", None)
+        )
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                _ = await result
+        except asyncio.CancelledError as exc:
+            cancellations.append(exc)
+            retry = asyncio.create_task(self._retry_resource_cleanup(resource, label))
+            self._scheduled_cleanup_tasks.add(retry)
+        except Exception as exc:
+            self._record_cleanup_error(exc, label, errors)
+
+    def _schedule_cleanup_retry(self, resource: object, label: str) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        retry = loop.create_task(self._retry_resource_cleanup(resource, label))
+        self._scheduled_cleanup_tasks.add(retry)
+
+    @staticmethod
+    def _record_cleanup_error(exc: Exception, label: str, errors: list[Exception]) -> None:
+        exc.add_note(f"{label} cleanup failed.")
+        errors.append(exc)
+
+    @staticmethod
+    async def _retry_resource_cleanup(resource: object, label: str) -> None:
+        close = (
+            getattr(resource, "aclose", None) or getattr(resource, "cleanup", None) or getattr(resource, "close", None)
+        )
+        if not callable(close):
+            return
+        try:
+            result = close()
+            if inspect.isawaitable(result):
+                _ = await result
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"{label} cleanup retry failed: {exc}") from exc
+
+    def _cleanup_session_file(self) -> None:
+        """Remove the session file and its owned directory, if present."""
+        if self._session_file_cleanup_claimed:
+            return
+        self._remove_session_file()
+        self._session_file_cleanup_claimed = True
+
+    def _remove_session_file(self) -> None:
+        if not isinstance(self.data, dict) or "session_file" not in self.data:
+            return
+        session_file = Path(self.data["session_file"])
+        if not session_file.exists():
+            return
+        session_file.unlink()
+        session_dir = session_file.parent
+        if f"session_{self.session_id}" in str(session_dir):
+            try:
+                shutil.rmtree(session_dir)
+            except OSError:
+                # The file is already gone; removing an empty parent is best-effort.
+                pass
+
+    def claim_session_file_cleanup(self) -> None:
+        """Remove the owned session file before its session ID can be reused."""
+        if self._session_file_cleanup_claimed:
+            return
+        try:
+            self._cleanup_session_file()
+        except Exception as exc:
+            self._claimed_cleanup_errors.append(exc)
+            self._session_file_cleanup_attempts += 1
+            if self._session_file_cleanup_attempts >= _MAX_SESSION_FILE_CLEANUP_ATTEMPTS:
+                # Give up rather than pin the session ID forever. The claim is
+                # terminal, so this session never deletes the path again and a
+                # replacement session reusing the ID keeps its own file.
+                self._session_file_cleanup_claimed = True
+                LOGGER.warning(
+                    "Giving up on removing the session file for session %s after %d attempts: %s",
+                    self.session_id,
+                    self._session_file_cleanup_attempts,
+                    exc,
+                )
+
+    def session_file_cleanup_claimed(self) -> bool:
+        return self._session_file_cleanup_claimed
+
+    def _take_claimed_cleanup_errors(self) -> list[Exception]:
+        errors = self._claimed_cleanup_errors
+        self._claimed_cleanup_errors = []
+        return errors

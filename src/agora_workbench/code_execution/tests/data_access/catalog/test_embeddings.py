@@ -129,3 +129,33 @@ async def test_explicit_dimensions_validate_service_response(monkeypatch):
 
     with pytest.raises(ValueError, match="requested 2, received 3"):
         await provider.embed(["text"])
+
+
+@pytest.mark.asyncio
+async def test_close_releases_owned_credential():
+    credential = SimpleNamespace(close=AsyncMock())
+    provider = embeddings.AzureOpenAIEmbeddingProvider(
+        endpoint="https://example.openai.azure.com",
+        deployment="embedding",
+        credential_provider=credential,  # type: ignore[arg-type]
+        credential_owned=True,
+    )
+
+    await provider.close()
+
+    credential.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_close_supports_owned_sync_credential():
+    credential = SimpleNamespace(close=lambda: None)
+    provider = embeddings.AzureOpenAIEmbeddingProvider(
+        endpoint="https://example.openai.azure.com",
+        deployment="embedding",
+        credential_provider=credential,  # type: ignore[arg-type]
+        credential_owned=True,
+    )
+
+    await provider.close()
+
+    assert not provider._credential_owned

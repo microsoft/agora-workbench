@@ -352,6 +352,7 @@ class TestLocalFilePublisherPublish:
         dest = base_dir / "sess-abc" / "results.csv"
         assert dest.exists()
         assert dest.read_bytes() == b"x,y\n1,2\n"
+        assert dest.stat().st_mode & 0o777 == 0o600
         assert result == str(dest)
 
     @pytest.mark.asyncio

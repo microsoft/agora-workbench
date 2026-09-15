@@ -8,9 +8,12 @@ streams assets directly to disk to avoid high memory usage.
 
 import asyncio
 from pathlib import Path
+from typing import Awaitable, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from agora_workbench.data_lake import ResourceOwnership
 
 from ...data_access.artifact_resolvers import SearchIndexArtifactResolver
 from ...data_access.fetchers import AssetFetcher, BlobFetcher
@@ -222,6 +225,41 @@ class TestGetCachePath:
             cache_path2 = await manager.get_cache_path(qualified_name)
             assert mock_fetch.call_count == 1  # Still only called once
             assert cache_path1 == cache_path2
+
+    @pytest.mark.asyncio
+    async def test_catalog_cache_invalidation_retains_superseded_validated_files(self, tmp_path):
+        source_path = tmp_path / "artifact.bin"
+        source_path.write_bytes(b"payload")
+        artifact_id = "catalog-v1:artifact"
+
+        class InvalidatingResolver(_StubResolver):
+            invalidate_next = False
+            manager: DataLakeDataManager
+
+            async def resolve(self, artifact_id: str) -> str:
+                result = await super().resolve(artifact_id)
+                if self.invalidate_next:
+                    self.invalidate_next = False
+                    self.manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+                return result
+
+        resolver = InvalidatingResolver({artifact_id: str(source_path)})
+        manager = DataLakeDataManager(artifact_resolver=resolver)
+        resolver.manager = manager
+
+        await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
+        unrelated = manager._cache_dir / "unrelated.txt"
+        unrelated.write_text("keep")
+        assert len(tuple(manager._cache_dir.iterdir())) == 2
+
+        for _ in range(3):
+            resolver.invalidate_next = True
+            refreshed = await manager.get_cache_path(f"<blob>{artifact_id}</blob>")
+            assert refreshed.read_bytes() == b"payload"
+            assert unrelated.read_text() == "keep"
+            assert len(tuple(manager._cache_dir.iterdir())) == _ + 3
+
+        await manager.aclose()
 
     @pytest.mark.asyncio
     async def test_fetch_error_propagates(self):
@@ -469,7 +507,10 @@ class TestCleanup:
         assert cache_dir.exists()
 
         # Cleanup
-        manager.cleanup()
+        cleanup = manager.cleanup()
+        if cleanup is not None:
+            cleanup_task = cast(Awaitable[None], cleanup)
+            assert await cleanup_task is None
 
         assert not cache_dir.exists()
         assert manager._cache_index == {}
@@ -487,6 +528,70 @@ class TestCleanup:
         # Cache dir should be cleaned up
         # Note: This test is somewhat non-deterministic due to GC timing
         # but works in practice for testing __del__ implementation
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_cache_dir_without_draining_returned_task(self):
+        """Cache dir removal must not depend on anyone awaiting the deferred task.
+
+        ``cleanup()`` defers the inherently-async resource closes (fetchers,
+        resolver, owned credential) as a background task when called from a
+        running loop, but the cache directory removal itself must complete
+        synchronously before ``cleanup()`` returns — otherwise a caller (like
+        ``__del__``) that discards the returned task would leak the on-disk
+        cache directory whenever the event loop closes before stepping it.
+        """
+        manager = DataLakeDataManager()
+        cache_dir = manager._cache_dir
+        assert cache_dir.exists()
+
+        task = manager.cleanup()
+
+        # The cache directory must already be gone, even though the returned
+        # task (covering async-only resource closes) has not been awaited.
+        assert not cache_dir.exists()
+        assert manager._cache_index == {}
+
+        if task is not None:
+            await task
+
+    def test_cleanup_removes_cache_dir_when_async_close_is_cancelled(self):
+        """Cache cleanup must survive cancellation from a resource close."""
+        fetcher = MagicMock()
+        fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
+        manager = DataLakeDataManager(extra_fetchers=[fetcher])
+        cache_dir = manager._cache_dir
+        assert cache_dir.exists()
+
+        with pytest.raises(asyncio.CancelledError):
+            manager.cleanup()
+
+        assert not cache_dir.exists()
+        assert manager._cache_index == {}
+        fetcher.close.side_effect = None
+
+    @pytest.mark.asyncio
+    async def test_aclose_continues_after_cancelled_resource_close(self):
+        """Async cleanup closes remaining resources before propagating cancellation."""
+        fetcher = MagicMock()
+        fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
+        resolver = _StubResolver()
+        credential = MagicMock()
+        credential.close = AsyncMock()
+        manager = DataLakeDataManager(
+            extra_fetchers=[fetcher],
+            artifact_resolver=resolver,
+            credential=credential,
+            credential_ownership=ResourceOwnership.OWNED,
+        )
+        cache_dir = manager._cache_dir
+
+        with pytest.raises(asyncio.CancelledError):
+            await manager.aclose()
+
+        assert resolver.aclose_calls == 1
+        credential.close.assert_awaited_once()
+        assert not cache_dir.exists()
+        fetcher.close.side_effect = None
 
 
 class TestBlobUrlResolution:
@@ -657,10 +762,21 @@ class TestArtifactResolverInjection:
         resolver = _SyncCloseResolver()
         manager = DataLakeDataManager(artifact_resolver=resolver)
 
-        manager.cleanup()
-        await asyncio.sleep(0)  # let the scheduled close run
+        cleanup = manager.cleanup()
+        assert cleanup is not None
+        cleanup_task = cast(Awaitable[None], cleanup)
+        assert await cleanup_task is None
 
         assert resolver.closed == 1
+
+    def test_invalid_resolver_is_rejected_before_cache_allocation(self, monkeypatch):
+        mkdir = MagicMock(side_effect=AssertionError("cache allocated before validation"))
+        monkeypatch.setattr("agora_workbench.code_execution.data_access.manager.tempfile.mkdtemp", mkdir)
+
+        with pytest.raises(TypeError, match="missing"):
+            DataLakeDataManager(artifact_resolver=object())  # type: ignore[arg-type]
+
+        mkdir.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_aclose_tolerates_a_sync_aclose(self):

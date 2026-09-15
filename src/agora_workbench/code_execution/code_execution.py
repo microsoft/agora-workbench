@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -670,6 +671,12 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                 pass
 
         session = None
+        catalog_resolution = None
+        catalog_resolution_entered = False
+        catalog_resolution_suspension = None
+        catalog_resolution_suspension_entered = False
+        session_resource_operation = None
+        session_resource_operation_entered = False
         try:
             # Restore auth ContextVars using the MCP transport session id
             server._restore_auth_context_for_mcp_session(session_id)
@@ -693,7 +700,16 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                 session = await server._get_existing_session(execution_session_id)
             else:
                 session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
+            session_resource_operation = server.session_manager.session_resource_operation(session.session_id)
+            await session_resource_operation.__aenter__()
+            session_resource_operation_entered = True
             set_current_session(session)
+            catalog_binding = session.extensions.get("catalog")
+            bind_request_snapshot = getattr(getattr(catalog_binding, "resolver", None), "bind_request_snapshot", None)
+            if callable(bind_request_snapshot):
+                catalog_resolution = bind_request_snapshot()
+                catalog_resolution.__enter__()
+                catalog_resolution_entered = True
 
             # Inject tool proxies on first use of this session
             await server._inject_tool_proxies(session.session_id)
@@ -740,6 +756,16 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                     preamble_lines.insert(0, ASSET_PATHLIB_IMPORT)
                 preamble = "\n".join(preamble_lines) + "\n\n"
                 code = preamble + code
+
+            suspend_request_snapshot = getattr(
+                getattr(catalog_binding, "resolver", None),
+                "suspend_request_snapshot",
+                None,
+            )
+            if callable(suspend_request_snapshot):
+                catalog_resolution_suspension = suspend_request_snapshot()
+                catalog_resolution_suspension.__enter__()
+                catalog_resolution_suspension_entered = True
 
             LOGGER.info(f"Auto-extraction: {asset_counter} asset(s)")
 
@@ -909,9 +935,32 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             )
             return json.dumps(error_dict, indent=2)
         finally:
-            if session:
-                set_current_session(None)
-            server._clear_auth_context()
+            exc_type, exc_value, exc_traceback = sys.exc_info()
+            try:
+                try:
+                    if catalog_resolution_suspension_entered:
+                        catalog_resolution_suspension.__exit__(exc_type, exc_value, exc_traceback)
+                except Exception as cleanup_error:
+                    LOGGER.warning(
+                        "Failed to restore catalog request snapshot with %s; execution result is retained.",
+                        type(cleanup_error).__name__,
+                    )
+                try:
+                    if catalog_resolution_entered:
+                        catalog_resolution.__exit__(exc_type, exc_value, exc_traceback)
+                except Exception as cleanup_error:
+                    LOGGER.warning(
+                        "Failed to close catalog request snapshot with %s; execution result is retained.",
+                        type(cleanup_error).__name__,
+                    )
+            finally:
+                if session:
+                    set_current_session(None)
+                try:
+                    if session_resource_operation_entered:
+                        await session_resource_operation.__aexit__(None, None, None)
+                finally:
+                    server._clear_auth_context()
 
     return execute_code_tool
 

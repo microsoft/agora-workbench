@@ -22,7 +22,15 @@ from pathlib import Path
 from typing import Any, BinaryIO, TYPE_CHECKING
 from urllib.parse import urlparse
 
-from agora_workbench.data_lake.errors import TransferTimeoutError, UnsupportedOperationError, UnsafePathError
+from agora_workbench.data_lake import ResourceOwnership
+from agora_workbench.data_lake.errors import (
+    ArtifactNotFoundError,
+    BackendUnavailableError,
+    PermissionDeniedError,
+    TransferTimeoutError,
+    UnsupportedOperationError,
+    UnsafePathError,
+)
 from agora_workbench.data_lake.identity import sanitize_uri_for_display
 from agora_workbench.data_lake.models import RequestContext
 from agora_workbench.data_lake.transfer import (
@@ -205,6 +213,7 @@ class DataLakeDataManager:
         credential: "AsyncTokenCredential | None" = None,
         artifact_resolver: ArtifactResolver | None = None,
         transfer_options: TransferOptions | None = None,
+        credential_ownership: ResourceOwnership = ResourceOwnership.BORROWED,
     ):
         """
         Initialize the data manager.
@@ -236,18 +245,29 @@ class DataLakeDataManager:
                 preserving existing behavior. A supplied resolver is used as-is
                 and is *not* given the manager's credential, so it must arrange
                 its own authentication.
+            transfer_options: Default bounded-transfer policy used when a call
+                does not provide an explicit override.
+            credential_ownership: Whether the manager closes a supplied
+                credential. Existing callers retain borrowed semantics by
+                default; integrations that create one credential per session
+                can explicitly transfer ownership.
 
         Raises:
             TypeError: If ``artifact_resolver`` does not implement the
                 ``ArtifactResolver`` protocol.
         """
+        if artifact_resolver is not None:
+            _validate_artifact_resolver(artifact_resolver)
+
         self._cache_dir = Path(tempfile.mkdtemp(prefix="data_lake_cache_"))
         self._cache_index = {}  # Maps artifact_id -> cache file path
+        self._cache_generation = 0
+        self._full_cache_generation = 0
         self._transfer_options = transfer_options or TransferOptions()
 
         self._credential_init_error: str | None = None
         self._credential: "AsyncTokenCredential | None" = None
-        self._owns_credential = credential is None
+        self._owns_credential = credential is None or credential_ownership is ResourceOwnership.OWNED
 
         # Initialize fetchers — custom fetchers take priority over built-ins
         self._fetchers: list[AssetFetcher] = list(extra_fetchers or [])
@@ -276,7 +296,6 @@ class DataLakeDataManager:
             self._fetchers.append(BlobFetcher(credential=self._credential))
 
         if artifact_resolver is not None:
-            _validate_artifact_resolver(artifact_resolver)
             self._artifact_resolver: ArtifactResolver = artifact_resolver
         else:
             # The deferred credential error is handed over so the resolver can
@@ -353,78 +372,158 @@ class DataLakeDataManager:
 
         artifact_type = artifact_match.group(1)
         artifact_id = artifact_match.group(2)
+        cache_generation = self._cache_generation
+        full_cache_generation = self._full_cache_generation
+        generation_scoped = artifact_type == "blob" and artifact_id.startswith("catalog-v1:")
+
+        def cache_was_invalidated() -> bool:
+            return full_cache_generation != self._full_cache_generation or (
+                generation_scoped and cache_generation != self._cache_generation
+            )
 
         display_id = sanitize_uri_for_display(artifact_id) if "://" in artifact_id else artifact_id
         LOGGER.info("Resolving %s artifact: %s", artifact_type, display_id)
 
-        # Check if already cached (use artifact_id as cache key)
-        if artifact_id in self._cache_index:
-            cache_path = self._cache_index[artifact_id]
-            if cache_path.exists():
-                options = transfer_options or self._transfer_options
+        # Check if already cached (use artifact_id as cache key). A concurrent
+        # authorization refresh invalidates catalog entries; retry once against
+        # the new generation, then fall through to a fresh resolution.
+        for _ in range(2):
+            cache_path = self._cache_index.get(artifact_id)
+            if cache_path is None or not cache_path.exists():
+                break
+            validated_cache_path = cache_path
+            options = transfer_options or self._transfer_options
 
-                async def validate_cached_file() -> None:
-                    check_transfer_cancelled(options, operation="download", resource=str(cache_path))
-                    cache_file = await _run_blocking_io(
-                        lambda: _open_cached_file_no_follow(cache_path),
+            if generation_scoped:
+                try:
+                    await self._get_blob_url_from_artifact_id(artifact_id)
+                except Exception as exc:
+                    if cache_was_invalidated():
+                        cache_generation = self._cache_generation
+                        full_cache_generation = self._full_cache_generation
+                        continue
+                    if not isinstance(exc, (ArtifactNotFoundError, PermissionDeniedError, PermissionError)):
+                        raise
+                    if self._cache_index.get(artifact_id) == validated_cache_path:
+                        self._cache_index.pop(artifact_id, None)
+                    try:
+                        validated_cache_path.unlink(missing_ok=True)
+                    except OSError:
+                        LOGGER.debug(
+                            "Failed to remove unauthorized catalog cache entry %s",
+                            validated_cache_path,
+                            exc_info=True,
+                        )
+                    raise
+
+            async def validate_cached_file() -> tuple[int, int]:
+                check_transfer_cancelled(options, operation="download", resource=str(validated_cache_path))
+                cache_file = await _run_blocking_io(
+                    lambda: _open_cached_file_no_follow(validated_cache_path),
+                    options=options,
+                    operation="download",
+                    resource=str(validated_cache_path),
+                )
+                try:
+                    file_stat = await _run_blocking_io(
+                        lambda: os.fstat(cache_file.fileno()),
                         options=options,
                         operation="download",
-                        resource=str(cache_path),
+                        resource=str(validated_cache_path),
                     )
-                    try:
-                        file_stat = await _run_blocking_io(
-                            lambda: os.fstat(cache_file.fileno()),
+                    check_transfer_size(
+                        file_stat.st_size,
+                        options,
+                        operation="download",
+                        resource=str(validated_cache_path),
+                    )
+                    if options.expected_sha256 is not None:
+                        await hash_file(
+                            cache_file,
                             options=options,
+                            context=context or RequestContext(),
                             operation="download",
-                            resource=str(cache_path),
+                            resource=str(validated_cache_path),
                         )
-                        check_transfer_size(file_stat.st_size, options, operation="download", resource=str(cache_path))
-                        if options.expected_sha256 is not None:
-                            await hash_file(
-                                cache_file,
-                                options=options,
-                                context=context or RequestContext(),
-                                operation="download",
-                                resource=str(cache_path),
-                            )
-                    finally:
-                        await _run_blocking_io(cache_file.close)
+                    return file_stat.st_dev, file_stat.st_ino
+                finally:
+                    await _run_blocking_io(cache_file.close)
 
+            try:
                 await await_transfer(
                     validate_cached_file(),
                     options,
                     operation="download",
-                    resource=str(cache_path),
+                    resource=str(validated_cache_path),
                 )
-                LOGGER.debug(f"Asset already cached: {cache_path}")
-                return cache_path
+            except Exception:
+                if not cache_was_invalidated():
+                    raise
+            else:
+                if not cache_was_invalidated():
+                    LOGGER.debug(f"Asset already cached: {cache_path}")
+                    return cache_path
+            self._remove_validated_cache_entry(artifact_id, validated_cache_path)
+            cache_generation = self._cache_generation
+            full_cache_generation = self._full_cache_generation
 
-        # Route to appropriate resolver based on artifact type
-        if artifact_type == "blob":
-            resource_url = await self._get_blob_url_from_artifact_id(artifact_id)
-        elif artifact_type == "local":
-            # Local artifacts: the artifact_id is the file path itself
-            resource_url = artifact_id
-        else:
-            raise ValueError(f"Unsupported artifact type: {artifact_type}. {self._asset_tag_guidance()}")
+        for fetch_attempt in range(2):
+            # Route to appropriate resolver based on artifact type
+            if artifact_type == "blob":
+                resource_url = await self._get_blob_url_from_artifact_id(artifact_id)
+            elif artifact_type == "local":
+                # Local artifacts: the artifact_id is the file path itself
+                resource_url = artifact_id
+            else:
+                raise ValueError(f"Unsupported artifact type: {artifact_type}. {self._asset_tag_guidance()}")
 
-        # Fetch and cache the asset
-        LOGGER.debug(f"Fetching and caching {artifact_type} asset")
-        cache_path = self._get_cache_file_path(resource_url)
+            # Fetch and cache the asset
+            LOGGER.debug(f"Fetching and caching {artifact_type} asset")
+            cache_path = self._get_cache_file_path(
+                resource_url,
+                cache_salt=(
+                    f"{full_cache_generation}:{cache_generation if generation_scoped else ''}"
+                    if full_cache_generation or generation_scoped
+                    else None
+                ),
+            )
 
-        # Stream asset directly to file to avoid loading into memory
-        bytes_written = await self._fetch_asset_to_file(
-            resource_url,
-            cache_path,
-            context=context,
-            transfer_options=transfer_options,
-        )
+            # Stream asset directly to file to avoid loading into memory
+            bytes_written = await self._fetch_asset_to_file(
+                resource_url,
+                cache_path,
+                context=context,
+                transfer_options=transfer_options,
+            )
 
-        # Update index (use artifact_id as key)
-        self._cache_index[artifact_id] = cache_path
+            if cache_was_invalidated():
+                cache_path.unlink(missing_ok=True)
+                if fetch_attempt == 1:
+                    raise BackendUnavailableError(
+                        "Catalog authorization changed repeatedly during download.",
+                        resource_id=safe_artifact_reference(artifact_id),
+                        operation="download",
+                    )
+                cache_generation = self._cache_generation
+                full_cache_generation = self._full_cache_generation
+                continue
 
-        LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
-        return cache_path
+            # Update index (use artifact_id as key)
+            self._cache_index[artifact_id] = cache_path
+
+            LOGGER.debug(f"Cached asset to disk ({bytes_written} bytes)")
+            return cache_path
+
+        raise AssertionError("bounded cache fetch loop exited unexpectedly")
+
+    def _remove_validated_cache_entry(
+        self,
+        artifact_id: str,
+        path: Path,
+    ) -> None:
+        """Forget an invalidated cache entry without deleting a path in use."""
+        if self._cache_index.get(artifact_id) == path:
+            self._cache_index.pop(artifact_id, None)
 
     async def _fetch_asset_to_file(
         self,
@@ -452,10 +551,14 @@ class DataLakeDataManager:
                     fetcher.__class__.__name__,
                     sanitize_uri_for_display(qualified_name) if "://" in qualified_name else qualified_name,
                 )
-                detailed_overridden = type(fetcher).fetch_to_file_result is not AssetFetcher.fetch_to_file_result
-                legacy_instance_override = "fetch_to_file" in vars(fetcher)
-                if detailed_overridden and not legacy_instance_override:
-                    result = await fetcher.fetch_to_file_result(
+                detailed_fetch = getattr(fetcher, "fetch_to_file_result", None)
+                detailed_implementation = getattr(type(fetcher), "fetch_to_file_result", None)
+                if (
+                    "fetch_to_file" not in getattr(fetcher, "__dict__", {})
+                    and callable(detailed_fetch)
+                    and detailed_implementation is not AssetFetcher.fetch_to_file_result
+                ):
+                    result = await detailed_fetch(
                         qualified_name,
                         dest_path,
                         options=transfer_options or self._transfer_options,
@@ -557,7 +660,7 @@ class DataLakeDataManager:
             operation="download",
         )
 
-    def _get_cache_file_path(self, qualified_name: str) -> Path:
+    def _get_cache_file_path(self, qualified_name: str, *, cache_salt: str | None = None) -> Path:
         """
         Get cache file path for an asset, preserving original extension.
 
@@ -567,7 +670,8 @@ class DataLakeDataManager:
         Returns:
             Path with appropriate extension based on file type
         """
-        name_hash = hashlib.sha256(qualified_name.encode()).hexdigest()
+        cache_key = qualified_name if cache_salt is None else f"{cache_salt}\0{qualified_name}"
+        name_hash = hashlib.sha256(cache_key.encode()).hexdigest()
 
         # Parse URL to extract path component
         parsed = urlparse(qualified_name)
@@ -608,62 +712,76 @@ class DataLakeDataManager:
         """
         return list(self._cache_index.keys())
 
-    def cleanup(self) -> None:
+    def invalidate_cache_entries(self, *, artifact_id_prefix: str | None = None) -> None:
+        """Forget cached artifacts matching a resolver namespace.
+
+        Entries are removed from the index so a subsequent lookup must pass
+        through resolution and authorization again. Their files remain until
+        session cleanup because a kernel may still be opening a previously
+        returned path.
+        """
+        self._cache_generation += 1
+        if artifact_id_prefix is None:
+            self._full_cache_generation += 1
+        keys = [
+            artifact_id
+            for artifact_id in self._cache_index
+            if artifact_id_prefix is None or artifact_id.startswith(artifact_id_prefix)
+        ]
+        for artifact_id in keys:
+            self._cache_index.pop(artifact_id, None)
+
+    def cleanup(self) -> asyncio.Task[None] | None:
         """
         Clean up cache directory, credentials, and resources.
 
         Removes the temporary cache directory if it was created by this manager.
         Call this when the session is ending to free up disk space.
+
+        The cache directory removal (and index clearing) always completes
+        synchronously before this method returns — it does not depend on an
+        event loop draining a deferred task. Only the inherently-async
+        resource closes (fetchers, resolver, owned credential) are deferred
+        as a task when a loop is already running; that task is returned so a
+        caller (e.g. ``__del__``) can retain or await it, but losing it never
+        leaks the on-disk cache directory.
         """
-        # Clear cache index
         self._cache_index.clear()
 
-        # Close the artifact resolver (releases any catalog client it owns)
-        resolver_close = _resolver_aclose(getattr(self, "_artifact_resolver", None))
-        if resolver_close is not None:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(resolver_close())
-            except RuntimeError:
-                try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(resolver_close())
-                    loop.close()
-                except Exception as e:
-                    LOGGER.debug(f"Error closing artifact resolver: {e}")
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
 
-        # Close managed identity credential
-        if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
-            try:
-                loop = asyncio.get_running_loop()
-                # We're inside a running loop — schedule close as a task
-                loop.create_task(self._credential.close())
-            except RuntimeError:
-                # No running loop — safe to create a temporary one
-                try:
-                    loop = asyncio.new_event_loop()
-                    loop.run_until_complete(self._credential.close())
-                    loop.close()
-                except Exception as e:
-                    LOGGER.debug(f"Error closing credential: {e}")
-
-        # Remove temp directory
-        if self._cache_dir and self._cache_dir.exists():
-            try:
-                shutil.rmtree(self._cache_dir)
-                LOGGER.info(f"Cleaned up cache directory: {self._cache_dir}")
-            except Exception as e:
-                LOGGER.warning(f"Failed to clean up cache directory: {e}")
+        task: asyncio.Task[None] | None = None
+        try:
+            if loop is not None:
+                task = loop.create_task(self._aclose_async_resources())
+            else:
+                asyncio.run(self._aclose_async_resources())
+        finally:
+            self._remove_cache_dir()
+        return task
 
     async def aclose(self) -> None:
         """Async cleanup — preferred over sync cleanup() when inside an event loop."""
         self._cache_index.clear()
+        try:
+            await self._aclose_async_resources()
+        finally:
+            self._remove_cache_dir()
+
+    async def _aclose_async_resources(self) -> None:
+        """Close fetchers, resolver, and owned credential (async-only resources)."""
+        cancelled = False
 
         # Close fetchers (releases pooled connections)
         for fetcher in self._fetchers:
             if hasattr(fetcher, "close"):
                 try:
                     await fetcher.close()
+                except asyncio.CancelledError:
+                    cancelled = True
                 except Exception as e:
                     LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
 
@@ -671,15 +789,23 @@ class DataLakeDataManager:
         if resolver_close is not None:
             try:
                 await resolver_close()
+            except asyncio.CancelledError:
+                cancelled = True
             except Exception as e:
                 LOGGER.debug(f"Error closing artifact resolver: {e}")
 
         if hasattr(self, "_credential") and self._credential is not None and self._owns_credential:
             try:
                 await self._credential.close()
+            except asyncio.CancelledError:
+                cancelled = True
             except Exception as e:
                 LOGGER.debug(f"Error closing credential: {e}")
 
+        if cancelled:
+            raise asyncio.CancelledError
+
+    def _remove_cache_dir(self) -> None:
         if self._cache_dir and self._cache_dir.exists():
             try:
                 shutil.rmtree(self._cache_dir)

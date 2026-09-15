@@ -44,6 +44,134 @@ def _as_manager(fake: _FakeDataManager) -> DataLakeDataManager:
 class TestSession:
     """Tests for Session class."""
 
+    def test_session_file_cleanup_claim_retries_after_failure(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("temporary failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+
+        assert attempts == 2
+        assert session._session_file_cleanup_claimed
+
+    def test_session_cleanup_retries_transient_claim_failure_without_reporting_recovered_error(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise OSError("temporary failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.cleanup()
+
+        assert attempts == 2
+        assert session._session_file_cleanup_claimed
+        assert not session._claimed_cleanup_errors
+
+    def test_session_file_cleanup_claim_is_terminal_after_repeated_failures(self, monkeypatch):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+        )
+        attempts = 0
+
+        def remove_session_file():
+            nonlocal attempts
+            attempts += 1
+            raise PermissionError("permanent failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        session.claim_session_file_cleanup()
+        assert not session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+
+        # A permanently undeletable session file must not pin the session ID.
+        assert session._session_file_cleanup_claimed
+        session.claim_session_file_cleanup()
+        assert attempts == 2
+        assert len(session._claimed_cleanup_errors) == 2
+
+    def test_close_session_releases_id_when_session_file_removal_fails(self, monkeypatch):
+        manager = SessionManager()
+        session_id = manager.create_session(
+            data={}, user_identity="u", user_token="t", token_claims={}, session_id="pinned"
+        )
+        session = manager.get_session(session_id)
+        assert session is not None
+
+        def remove_session_file():
+            raise PermissionError("permanent failure")
+
+        monkeypatch.setattr(session, "_remove_session_file", remove_session_file)
+
+        _ = manager.close_session(session_id)
+
+        assert session_id not in manager._closing_session_ids
+        # The ID is reusable instead of being pinned by the failed removal.
+        assert (
+            manager.create_session(data={}, user_identity="u", user_token="t", token_claims={}, session_id=session_id)
+            == session_id
+        )
+
+    def test_cleanup_preserves_original_exception_type(self):
+        session = Session(
+            session_id="test-123",
+            data={},
+            session_type="test",
+            user_identity="test_user",
+            user_token="test-token",
+            token_claims={},
+            data_manager=cast(DataLakeDataManager, _FakeDataManager()),
+        )
+
+        class FailingExtension:
+            def cleanup(self):
+                raise ValueError("extension failed")
+
+        session.extensions["failing"] = FailingExtension()
+
+        with pytest.raises(ExceptionGroup, match="Session cleanup failed") as exc_info:
+            session.cleanup()
+
+        assert len(exc_info.value.exceptions) == 1
+        failure = exc_info.value.exceptions[0]
+        assert isinstance(failure, ValueError)
+        assert "extension failed" in str(failure)
+
     def test_session_creation(self):
         """Test basic session creation."""
         data = {"key": "value"}
@@ -220,6 +348,37 @@ class TestSessionManager:
 
         with pytest.raises(ValueError, match="Session .* not found"):
             manager.get_session("nonexistent")
+
+    def test_get_session_cannot_restore_concurrently_closed_session(self):
+        store_started = threading.Event()
+        store_gate = threading.Event()
+
+        class BlockingStorage(InMemoryStorage):
+            block_store = False
+
+            def store(self, session_id, session):
+                if self.block_store:
+                    store_started.set()
+                    assert store_gate.wait(timeout=5)
+                super().store(session_id, session)
+
+        storage = BlockingStorage()
+        manager = SessionManager(SessionConfig(storage_backend=storage))
+        session_id = manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+        storage.block_store = True
+        getter = threading.Thread(target=manager.get_session, args=(session_id,))
+        getter.start()
+        assert store_started.wait(timeout=5)
+
+        closer = threading.Thread(target=manager.close_session, args=(session_id,))
+        closer.start()
+        store_gate.set()
+        getter.join(timeout=5)
+        closer.join(timeout=5)
+
+        assert not getter.is_alive()
+        assert not closer.is_alive()
+        assert storage.retrieve(session_id) is None
 
     def test_update_status(self):
         """Test status update through manager."""
@@ -1157,7 +1316,7 @@ class TestDataManagerInjection:
         try:
             assert isinstance(session.data_manager, DataLakeDataManager)
         finally:
-            session.cleanup()
+            assert session.cleanup() is None
 
     def test_session_uses_injected_manager(self, monkeypatch):
         """An injected manager is used verbatim, and no default is constructed."""
@@ -1301,6 +1460,28 @@ class TestDataManagerInjection:
         with pytest.raises(TypeError, match="cleanup\\(\\) method"):
             session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
 
+        assert session_manager.storage.count() == 0
+
+    async def test_factory_returning_async_only_manager_is_closed_when_rejected(self):
+        """Invalid async-only managers are still rolled back before rejection."""
+
+        class AsyncOnlyManager:
+            def __init__(self):
+                self.closed = False
+
+            async def aclose(self):
+                self.closed = True
+
+        invalid_manager = AsyncOnlyManager()
+        session_manager = SessionManager(
+            SessionConfig(data_manager_factory=lambda _ctx: invalid_manager)  # type: ignore[arg-type, return-value]
+        )
+
+        with pytest.raises(TypeError, match="cleanup\\(\\) method"):
+            session_manager.create_session({}, user_identity="test_user", user_token="test-token", token_claims={})
+        await session_manager.await_resource_cleanup()
+
+        assert invalid_manager.closed
         assert session_manager.storage.count() == 0
 
 

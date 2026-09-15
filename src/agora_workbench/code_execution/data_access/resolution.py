@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 import logging
 import re
+from contextlib import nullcontext
 from typing import Any, TYPE_CHECKING
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
@@ -133,80 +134,79 @@ class AssetResolutionMiddleware(Middleware):
         if fastmcp_ctx:
             try:
                 session_id = fastmcp_ctx.session_id
-            except RuntimeError:
-                pass
+            except (RuntimeError, AttributeError):
+                LOGGER.debug("FastMCP session ID is unavailable; using an unscoped execution session.")
 
         self.server._restore_auth_context_for_mcp_session(session_id)
         tool_name = context.message.name
-        session = await self.server._get_or_create_session(tool_name, session_id=session_id)
-        set_current_session(session)
-
-        # --- Resolve all tagged assets concurrently ---
         try:
-            LOGGER.info(f"Middleware: resolving {len(assets_to_resolve)} asset(s) for tool '{tool_name}'")
+            session = await self.server._get_or_create_session(tool_name, session_id=session_id)
 
-            async def _fetch(param_name: VarName, qualified_name: AssetId):
-                try:
-                    cache_path = await session.data_manager.get_cache_path(
-                        qualified_name,
-                        context=RequestContext(
-                            request_id=session_id,
-                            caller_id=getattr(session, "user_identity", None),
-                        ),
-                    )
-                    return (param_name, qualified_name, str(cache_path), None)
-                except Exception as e:
-                    return (param_name, qualified_name, None, e)
-
-            results = await asyncio.gather(*[_fetch(pn, pv) for pn, pv in assets_to_resolve.items()])
-
-            # Check for errors
-            for param_name, qualified_name, cache_path, error in results:
-                if error:
-                    safe_reference = safe_artifact_reference(qualified_name)
-                    raise RuntimeError(
-                        f"Failed to resolve DataLake asset '{safe_reference}' for parameter "
-                        f"'{param_name}': {_safe_error_detail(error)}"
-                    ) from error
-
-            # Replace argument values in-place and build injection metadata
-            resolved = []
-            for param_name, qualified_name, cache_path, _ in results:
-                session._asset_counter += 1
-                asset_key = f"_asset_{param_name}_{session._asset_counter}"
-
-                # Store metadata in session object store
-                session.object_store.store(
-                    asset_key,
-                    {
-                        "qualified_name": safe_artifact_reference(qualified_name),
-                        "cache_path": cache_path,
-                    },
+            async with self.server.session_manager.session_resource_operation(session.session_id):
+                set_current_session(session)
+                extensions = getattr(session, "extensions", None)
+                catalog_binding = extensions.get("catalog") if hasattr(extensions, "get") else None
+                bind_request_snapshot = getattr(
+                    getattr(catalog_binding, "resolver", None), "bind_request_snapshot", None
                 )
+                catalog_resolution = bind_request_snapshot() if callable(bind_request_snapshot) else nullcontext()
+                with catalog_resolution:
+                    LOGGER.info(f"Middleware: resolving {len(assets_to_resolve)} asset(s) for tool '{tool_name}'")
 
-                # Replace the tagged reference with the resolved cache path so
-                # that Pydantic can coerce it naturally (e.g. str -> Path).
-                arguments[param_name] = cache_path
-                resolved.append((param_name, asset_key, cache_path))
+                    async def _fetch(param_name: VarName, qualified_name: AssetId):
+                        try:
+                            cache_path = await session.data_manager.get_cache_path(
+                                qualified_name,
+                                context=RequestContext(
+                                    request_id=session_id,
+                                    caller_id=getattr(session, "user_identity", None),
+                                ),
+                            )
+                            return (param_name, qualified_name, str(cache_path), None)
+                        except Exception as e:
+                            return (param_name, qualified_name, None, e)
 
-                safe_reference = safe_artifact_reference(qualified_name)
-                LOGGER.debug("Middleware: resolved '%s': %s -> %s", param_name, safe_reference, cache_path)
+                    results = await asyncio.gather(*[_fetch(pn, pv) for pn, pv in assets_to_resolve.items()])
 
-            # Store resolution metadata for the tool callback
-            _resolved_assets.set(resolved)
+                    # Check for errors
+                    for param_name, qualified_name, cache_path, error in results:
+                        if error:
+                            safe_reference = safe_artifact_reference(qualified_name)
+                            raise RuntimeError(
+                                f"Failed to resolve DataLake asset '{safe_reference}' for parameter "
+                                f"'{param_name}': {_safe_error_detail(error)}"
+                            ) from error
 
-            # Update context with modified arguments for downstream processing
-            context.message.arguments = arguments
+                    # Replace argument values in-place and build injection metadata
+                    resolved = []
+                    for param_name, qualified_name, cache_path, _ in results:
+                        session._asset_counter += 1
+                        asset_key = f"_asset_{param_name}_{session._asset_counter}"
 
-        except Exception:
-            # Clean up on failure
-            set_current_session(None)
-            self.server._clear_auth_context()
-            raise
+                        # Store metadata in session object store
+                        session.object_store.store(
+                            asset_key,
+                            {
+                                "qualified_name": safe_artifact_reference(qualified_name),
+                                "cache_path": cache_path,
+                            },
+                        )
 
-        try:
-            return await call_next(context)
+                        # Replace the tagged reference with the resolved cache path so
+                        # that Pydantic can coerce it naturally (e.g. str -> Path).
+                        arguments[param_name] = cache_path
+                        resolved.append((param_name, asset_key, cache_path))
+
+                        safe_reference = safe_artifact_reference(qualified_name)
+                        LOGGER.debug("Middleware: resolved '%s': %s -> %s", param_name, safe_reference, cache_path)
+
+                    # Store resolution metadata for the tool callback
+                    _resolved_assets.set(resolved)
+
+                    # Update context with modified arguments for downstream processing
+                    context.message.arguments = arguments
+
+                    return await call_next(context)
         finally:
-            # always clean up session and auth context after tool execution
             set_current_session(None)
             self.server._clear_auth_context()
