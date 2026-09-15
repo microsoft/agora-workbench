@@ -133,7 +133,7 @@ class TestAtomicClaim:
         _ = await first
         assert km_first.shutdown_finished
 
-    async def test_replacement_closed_while_old_kernel_stops_cannot_start_orphan(self, manager):
+    async def test_replacement_waits_for_old_kernel_shutdown(self, manager):
         gate = asyncio.Event()
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         register_kernel(manager, session_id, name="OLD", gate=gate)
@@ -142,6 +142,17 @@ class TestAtomicClaim:
         assert old_shutdown is not None
         await let_teardown_start()
 
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={},
+                user_identity="u",
+                user_token="replacement-token",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        gate.set()
+        _ = await old_shutdown
         manager.create_session(
             data={},
             user_identity="u",
@@ -149,18 +160,10 @@ class TestAtomicClaim:
             token_claims={},
             session_id=session_id,
         )
-        replacement_start = asyncio.create_task(manager._get_or_create_kernel(session_id))
-        await asyncio.sleep(0)
-        replacement_close = manager.close_session(session_id)
-        assert replacement_close is old_shutdown
-
-        gate.set()
-        _ = await old_shutdown
-        with pytest.raises(ValueError, match="closed before its kernel could start"):
-            _ = await replacement_start
 
         assert session_id not in manager._kernels
-        assert manager.storage.retrieve(session_id) is None
+        assert manager.storage.retrieve(session_id) is not None
+        manager.close_session(session_id)
 
     async def test_stale_teardown_cannot_evict_a_newer_kernel(self, manager):
         """Regression: the late teardown used to delete whatever occupied the
@@ -317,7 +320,7 @@ class TestAtomicClaim:
         )
 
         release_holder.set()
-        await holder_task
+        assert await holder_task is None
 
         assert manager._kernel_execute_locks[session_id] is execute_lock
         manager.close_session(session_id)
@@ -341,6 +344,18 @@ class TestAtomicClaim:
 
         shutdown = manager.close_session(session_id)
         assert shutdown is not None
+        with pytest.raises(ValueError, match="still closing"):
+            manager.create_session(
+                data={"session_file": str(session_file)},
+                user_identity="new",
+                user_token="replacement-token",
+                token_claims={},
+                session_id=session_id,
+            )
+
+        gate.set()
+        _ = await shutdown
+
         session_dir.mkdir(exist_ok=True)
         session_file.write_text("replacement")
         manager.create_session(
@@ -353,9 +368,6 @@ class TestAtomicClaim:
         outputs = manager._get_outputs_dir(session_id)
         marker = outputs / "replacement.txt"
         marker.write_text("replacement")
-
-        gate.set()
-        _ = await shutdown
 
         assert marker.read_text() == "replacement", "stale teardown deleted a live session's artifacts"
         assert session_file.read_text() == "replacement", "stale cleanup deleted a live session file"

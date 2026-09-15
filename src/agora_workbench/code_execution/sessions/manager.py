@@ -229,6 +229,7 @@ class SessionManager:
         self._session_lifecycle_lock = RLock()
         self._session_lifecycle_condition = Condition(self._session_lifecycle_lock)
         self._closing_session_ids: set[str] = set()
+        self._closing_sessions: dict[str, Session] = {}
         timeout_seconds = self.config.timeout.total_seconds()
         self.execution_session_keepalive_seconds = max(0.5, min(timeout_seconds / 10.0, 60.0))
 
@@ -637,11 +638,13 @@ class SessionManager:
             session = self.storage.retrieve(session_id)
             if session is not None:
                 self._closing_session_ids.add(session_id)
+                self._closing_sessions[session_id] = session
                 cleanup_artifacts = True
                 try:
                     self.storage.delete(session_id)
                 except BaseException:
                     self._closing_session_ids.discard(session_id)
+                    self._closing_sessions.pop(session_id, None)
                     self._session_lifecycle_condition.notify_all()
                     raise
                 self._session_generations.pop(session_id, None)
@@ -663,16 +666,31 @@ class SessionManager:
             )
         if cleanup_artifacts:
             assert session is not None
-            session.claim_session_file_cleanup()
-            self._cleanup_session_artifacts(session_id)
-            self._release_closing_session_id_if_safe(session_id, session)
+            if shutdown_task is None and session_id not in self._kernels:
+                self._finalize_closed_session(session_id)
         return shutdown_task, session
+
+    def _finalize_closed_session(self, session_id: str) -> None:
+        session = self._closing_sessions.get(session_id)
+        if session is None:
+            return
+        session.claim_session_file_cleanup()
+        self._cleanup_session_artifacts(session_id)
+        self._release_closing_session_id_if_safe(session_id, session)
 
     def _release_closing_session_id_if_safe(self, session_id: str, session: Session) -> None:
         if not session.session_file_cleanup_claimed():
             return
         with self._session_lifecycle_condition:
+            shutdown_task = self._kernel_shutdown_tasks.get(session_id)
+            shutdown_in_progress_elsewhere = (
+                shutdown_task is not None and not shutdown_task.done() and shutdown_task is not asyncio.current_task()
+            )
+            if session_id in self._kernels or shutdown_in_progress_elsewhere:
+                return
             self._closing_session_ids.discard(session_id)
+            if self._closing_sessions.get(session_id) is session:
+                self._closing_sessions.pop(session_id, None)
             self._session_lifecycle_condition.notify_all()
 
     async def aclose_session(self, session_id: str, *, expected_generation: int | None = None) -> None:
@@ -2106,14 +2124,17 @@ class SessionManager:
 
         expected_session_generation = self._kernel_session_generations.get(session_id)
         expected_kernel_generation = self._kernel_generations.get(session_id)
-        task = loop.create_task(
-            self._shutdown_kernel(
+
+        async def shutdown_and_finalize() -> None:
+            await self._shutdown_kernel(
                 session_id,
                 cleanup_artifacts=cleanup_artifacts,
                 expected_session_generation=expected_session_generation,
                 expected_kernel_generation=expected_kernel_generation,
             )
-        )
+            self._finalize_closed_session(session_id)
+
+        task = loop.create_task(shutdown_and_finalize())
         self._kernel_shutdown_tasks[session_id] = task
         task.add_done_callback(partial(self._on_kernel_shutdown_done, session_id))
         return task

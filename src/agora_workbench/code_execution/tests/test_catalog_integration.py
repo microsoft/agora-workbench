@@ -444,7 +444,7 @@ async def test_default_data_manager_rollback_tracks_owned_credential_cleanup(tmp
     assert not closed.is_set()
 
     gate.set()
-    await drain
+    assert await drain is None
     assert closed.is_set()
 
 
