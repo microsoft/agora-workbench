@@ -2517,6 +2517,7 @@ class SessionManager:
 
         for session_id, session_generation, kernel_generation in idle_sessions:
             LOGGER.info(f"Cleaning up idle kernel for session {session_id}")
+            joined_shutdown: "Optional[asyncio.Task[None]]" = None
             async with self._kernel_execution_lock(session_id):
                 with self._session_lifecycle_lock:
                     last_used = self._kernel_last_used.get(session_id)
@@ -2527,12 +2528,23 @@ class SessionManager:
                         or self._kernel_generations.get(session_id) != kernel_generation
                     ):
                         continue
+                    existing_shutdown = self._kernel_shutdown_tasks.get(session_id)
+                    joined_existing = existing_shutdown is not None and not existing_shutdown.done()
                     shutdown_task = self._schedule_kernel_shutdown(
                         session_id,
                         caller="cleanup_idle_kernels()",
                     )
-                if shutdown_task is not None:
+                if shutdown_task is None:
+                    continue
+                if joined_existing:
+                    # A teardown started elsewhere may be waiting for executions to
+                    # drain, and this sweep's own execute-lock lease keeps that drain
+                    # from completing. Join it only after releasing the lease.
+                    joined_shutdown = shutdown_task
+                else:
                     _ = await asyncio.shield(shutdown_task)
+            if joined_shutdown is not None:
+                _ = await asyncio.shield(joined_shutdown)
 
     # ========================================================================
     # Session Listing and Cleanup

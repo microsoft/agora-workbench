@@ -414,6 +414,34 @@ class TestAtomicClaim:
         assert marker.read_text() == "replacement"
         assert manager._kernels[session_id] == replacement_kernel
 
+    async def test_idle_cleanup_joins_close_path_teardown_without_deadlock(self, manager):
+        """Joining a close-path teardown must not happen under the sweep's execute lease.
+
+        The close path schedules teardown with ``wait_for_executions=True``, so it
+        waits for the very drain event this sweep's execute-lock lease is holding
+        open. Awaiting the joined task inside the lease would deadlock both.
+        """
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        km, _ = register_kernel(manager, session_id)
+        lock = manager._get_kernel_execute_lock(session_id)
+
+        await lock.acquire()
+        cleanup = asyncio.create_task(manager.cleanup_idle_kernels(max_idle_time=-1))
+        while manager._kernel_execute_lock_users.get(session_id, 0) == 0:
+            await asyncio.sleep(0)
+
+        close_task = manager.close_session(session_id)
+        assert close_task is not None
+        await let_teardown_start()
+        assert km.shutdown_started is False, "close teardown should be waiting for executions to drain"
+
+        lock.release()
+        _ = await asyncio.wait_for(cleanup, timeout=5)
+        _ = await asyncio.wait_for(asyncio.shield(close_task), timeout=5)
+
+        assert km.shutdown_finished
+        assert session_id not in manager._kernels
+
     async def test_idle_cleanup_rechecks_last_used_after_execution_lock(self, manager):
         session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
         km, _ = register_kernel(manager, session_id)
