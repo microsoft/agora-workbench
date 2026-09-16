@@ -47,6 +47,30 @@ The `type` field on `ServerConfig` controls how the Python environment is manage
 - For `type="conda"`, `dependency_file` contains `environment.yml` content
 - For native/compiled dependencies in conda environments (for example `ngspice`, `gdal`, `netcdf4`), use **`conda-forge`** rather than system package managers like `apt-get`
 
+#### UV environment completion marker
+
+A `uv` environment is ready only when both of these exist in `build_dir`:
+
+- `bin/python`
+- `.env_build_complete`
+
+Agora Workbench writes `.env_build_complete` only after dependency installation
+and every `additional_commands` entry succeeds. Its content is not an API; its
+presence records that the complete configured build finished.
+
+If `bin/python` exists without the marker, the directory is treated as a stale
+or interrupted environment. With `auto_build=True`, Agora Workbench removes the
+directory and rebuilds it. With `auto_build=False`, startup reports that the
+environment is missing or incomplete.
+
+For a prebuilt container or an externally prepared `build_dir`, run
+`CodeExecutionServer.warm()` during the image build whenever possible. If the
+environment must be assembled outside Workbench, create
+`.env_build_complete` only after installing all dependencies and successfully
+running the configured additional commands. Do not store unrelated persistent
+files in `build_dir`, because an incomplete directory may be removed during
+automatic recovery.
+
 !!! warning "Heavy models load *per session*"
     Each `execute_{name}_code` session runs in its **own kernel process**, so
     anything a tool loads — including a multi-gigabyte model — is loaded once

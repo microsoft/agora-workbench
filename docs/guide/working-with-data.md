@@ -324,6 +324,32 @@ server = CodeExecutionServer(
 )
 ```
 
+Choose the constructor based on who owns catalog setup and policy:
+
+| Constructor | Use it when | Ownership and lifecycle |
+| --- | --- | --- |
+| `CatalogIntegration.from_config(...)` | The server should build the provider from `CatalogConfig` | The integration loads and closes the provider |
+| `CatalogIntegration.development_from_config(...)` | A local demo needs an explicit allow-all authorizer | Same ownership as `from_config`; never use for production authorization |
+| `CatalogIntegration(ResourceLease(...), ...)` | The application supplies a custom provider | `OWNED` resources are loaded/closed by the integration; `BORROWED` resources remain application-managed |
+
+`from_config()` requires exactly one of `authorizer` or `authorizer_factory`.
+Use `authorizer_factory(SessionContext)` when policy holds caller-specific
+mutable state. `development_from_config()` supplies
+`DevelopmentAllowAllCatalogAuthorizer` only as an explicit local-development
+shortcut.
+
+When `db_path` is omitted, `from_config()` creates a private SQLite cache below
+`~/.cache/agora-workbench/catalogs/` and removes it after the owned provider
+closes. This cache is rebuildable and intentionally does not persist across
+server lifecycles. Pass an explicit `db_path` when the deployment owns the
+location and wants to retain the index between starts.
+
+The default `HOMOGENEOUS_SOURCE` policy assumes every artifact in an authorized
+source has the same caller policy. Select `PER_ARTIFACT` only with a trusted,
+backend-specific `per_artifact_enforcer` that applies authorization before
+ranking, pagination, lookup, and not-found decisions. The policy-aware MCP
+tools conservatively omit executable `load_path` values in per-artifact mode.
+
 The server loads configured scan or manifest sources during startup, fails
 startup if no ready generation is available, and closes its owned catalog on
 startup rollback or shutdown. `search_data`, `get_artifact`, `list_domains`,
@@ -332,7 +358,7 @@ Search/get payloads retain `id`, `source_id`, familiar metadata fields, and
 relevance `score` when supplied by the provider. They do not eagerly resolve or
 expose credential-bearing storage locators. A `load_path` is returned only when
 the session's data manager supports the catalog resolver, either through the
-integration-provided manager or the explicit custom-manager opt-in described
+integration-provided manager or the explicit custom-manager contract described
 below. Paste that opaque, revision-pinned tag into `execute_*_code`, where
 resolution occurs on demand.
 Per-artifact policy sessions conservatively omit `load_path` because source
@@ -405,8 +431,11 @@ The `SessionResources.extensions` key `catalog` is reserved for the binding;
 returning a custom extension under that name rejects session creation and
 cleans the factory-created manager and extensions.
 
-`CatalogAwareDataManager` is the only custom-manager composition contract.
-The data-lake API is still pre-release, so no legacy opt-in hook is retained.
+`CatalogAwareDataManager` is the 0.3 custom-manager composition contract. The
+unreleased preview hook `supports_catalog_references()` is not supported.
+Without `bind_catalog_resolver()`, a custom manager remains discovery-only;
+when `fetcher_factory` requires transferring custom fetchers, session creation
+fails rather than leaking those resources.
 
 To mount an application-managed provider, make ownership explicit:
 

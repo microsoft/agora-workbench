@@ -19,6 +19,28 @@ changes that require action from existing users. Each entry there states who is 
   or install both extras for the previously bundled cloud/hybrid feature set.
   The unused `azure-data-tables` dependency was removed after confirming that
   no package code or deployment template imports it.
+- Existing manually built or image-baked `uv` environments must include
+  `.env_build_complete` in the configured `build_dir`. Version 0.3 treats a
+  Python executable without that marker as an interrupted build. With
+  `auto_build=True`, the incomplete directory is removed and rebuilt; with
+  `auto_build=False`, server startup fails. Rebuild through
+  `CodeExecutionServer.warm()` or create the marker only after dependencies and
+  `additional_commands` have completed successfully.
+
+### Added
+
+- A backend-neutral data-lake API with stable artifact identities, local and
+  Blob catalog providers, authoritative manifests, policy-aware discovery,
+  bounded transfers, managed writes, revision history, reconciliation, and
+  explicit resource ownership.
+- `CatalogIntegration` for mounting caller-authorized catalogs on
+  `CodeExecutionServer`, including fresh session-scoped custom storage
+  fetchers and the `CatalogAwareDataManager` composition contract
+  ([#360](https://github.com/microsoft/agora-workbench/pull/360)).
+- A runnable Energy Systems custom-storage example that resolves catalog
+  artifacts through an `energysystems://` locator and consumes the returned
+  opaque `load_path` inside the PyPSA execution environment
+  ([#361](https://github.com/microsoft/agora-workbench/pull/361)).
 
 ### Changed
 
@@ -32,6 +54,10 @@ changes that require action from existing users. Each entry there states who is 
   default. When explicitly configured, the same dimension must be supplied to
   `CatalogDB`; otherwise dimensions are inferred from the first embedding or
   an existing vector table.
+- The unreleased preview hook `supports_catalog_references()` was replaced by
+  the explicit `CatalogAwareDataManager.bind_catalog_resolver()` protocol.
+  Custom managers that need executable catalog `load_path` values must
+  implement that protocol; managers without it remain discovery-only.
 
 ### Fixed
 

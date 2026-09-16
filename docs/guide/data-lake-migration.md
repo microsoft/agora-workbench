@@ -92,6 +92,33 @@ server. SQLite and manager caches are host-local; use one SQLite writer and a
 per-pod rebuildable database/cache unless the application provides external
 coordination.
 
+### Custom execution managers
+
+Version 0.3 uses `CatalogAwareDataManager` as the only custom-manager contract
+for executable catalog references:
+
+```python
+from agora_workbench.code_execution import CatalogAwareDataManager
+
+class MyDataManager(CatalogAwareDataManager):
+    def bind_catalog_resolver(self, resolver, *, fetchers=()):
+        ...
+
+    def invalidate_cache_entries(self, *, artifact_id_prefix=None):
+        ...
+```
+
+`bind_catalog_resolver()` accepts ownership of factory-created fetchers only
+after it returns successfully. `invalidate_cache_entries()` lets authorization
+refresh remove caller-scoped `catalog-v1:` cache entries before reuse.
+
+The preview-only `supports_catalog_references()` hook was removed before the
+0.3.0 release and has no compatibility fallback. A custom manager without
+`bind_catalog_resolver()` can still participate in catalog discovery, but it
+does not receive executable `load_path` values. If a configured
+`fetcher_factory` requires binding custom fetchers, session creation fails
+explicitly.
+
 ## Rollback and export limits
 
 Before upgrading a production database, retain a filesystem/storage backup and
