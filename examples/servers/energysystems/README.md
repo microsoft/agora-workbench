@@ -64,6 +64,36 @@ add_components(
 opf = run_optimal_power_flow(network=network)
 ```
 
+### Load a catalog dataset through custom storage
+
+The demo exposes its packaged networks through `CatalogIntegration`. Search with
+the `search_data` MCP tool:
+
+```json
+[
+  {
+    "id": "grid-50bus",
+    "source_id": "energysystems-demo",
+    "name": "grid_50bus.nc",
+    "load_path": "<blob>catalog-v1:...</blob>"
+  }
+]
+```
+
+Pass the opaque `load_path` into the execution environment:
+
+```python
+network = pypsa.Network("<blob>catalog-v1:...</blob>")
+print(network)
+```
+
+Before Python executes, Agora Workbench resolves the catalog reference and the
+session-owned `EnergySystemsDatasetFetcher` streams the corresponding
+`energysystems://datasets/...` object into the session cache. The agent never
+sees the storage locator or needs direct filesystem access. See
+`server/custom_storage.py` for the complete provider, fetcher factory, and
+lifecycle wiring.
+
 ### Create a simple 3-bus network
 
 ```python

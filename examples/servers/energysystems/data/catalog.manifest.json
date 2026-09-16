@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "generation": 1,
+  "artifacts": [
+    {
+      "path": "grid_50bus.nc",
+      "artifact_id": "grid-50bus",
+      "name": "grid_50bus.nc",
+      "description": "Synthetic 50-bus regional power grid with 71 transmission lines, 101 generators, and 24 hourly snapshots.",
+      "domain": "energysystems",
+      "media_type": "application/x-netcdf"
+    },
+    {
+      "path": "grid_100bus.nc",
+      "artifact_id": "grid-100bus",
+      "name": "grid_100bus.nc",
+      "description": "Synthetic 100-bus interconnection with 144 transmission lines, 191 generators, and 24 hourly snapshots.",
+      "domain": "energysystems",
+      "media_type": "application/x-netcdf"
+    }
+  ]
+}
