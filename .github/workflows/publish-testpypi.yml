@@ -174,7 +174,7 @@ jobs:
           print(agora_workbench.__file__)
 
           scripts = {entry.name: entry for entry in entry_points(group="console_scripts")}
-          for name in ("mcp-connector-server", "agora-workbench-deploy"):
+          for name in ("mcp-connector-server", "agora-workbench-deploy", "agora-workbench-data-lake"):
               if name not in scripts:
                   raise SystemExit(f"Missing console entry point: {name}")
               if not callable(scripts[name].load()):

@@ -15,10 +15,14 @@ fi
 venv="$PWD/.package-venv"
 rm -rf "$venv"
 scaffold=""
+catalog_workspace=""
 cleanup() {
   rm -rf "$venv"
   if [[ -n "$scaffold" ]]; then
     rm -rf "$scaffold"
+  fi
+  if [[ -n "$catalog_workspace" ]]; then
+    rm -rf "$catalog_workspace"
   fi
 }
 trap cleanup EXIT
@@ -166,7 +170,7 @@ if full_install:
     vector_catalog.close()
 
 scripts = {entry.name: entry for entry in entry_points(group="console_scripts")}
-for name in ("mcp-connector-server", "agora-workbench-deploy"):
+for name in ("mcp-connector-server", "agora-workbench-deploy", "agora-workbench-data-lake"):
     if name not in scripts:
         raise SystemExit(f"Missing console entry point: {name}")
     if not callable(scripts[name].load()):
@@ -178,3 +182,23 @@ scaffold=$(mktemp -d)
 test -f "$scaffold/activity_ui/Dockerfile"
 test -f "$scaffold/activity_ui/server.py"
 test -f "$scaffold/activity_ui/static/index.html"
+
+catalog_workspace=$(mktemp -d)
+mkdir -p "$catalog_workspace/data"
+printf 'day,temperature_c\n2026-01-01,7\n' > "$catalog_workspace/data/weather.csv"
+"$venv/bin/agora-workbench-data-lake" init \
+  --config "$catalog_workspace/catalog.yaml" \
+  --source "$catalog_workspace/data" \
+  --source-id smoke-local \
+  --discovery scan
+"$venv/bin/agora-workbench-data-lake" validate \
+  --config "$catalog_workspace/catalog.yaml"
+"$venv/bin/agora-workbench-data-lake" refresh \
+  --config "$catalog_workspace/catalog.yaml" \
+  --database "$catalog_workspace/catalog.db"
+search_output=$(
+  "$venv/bin/agora-workbench-data-lake" search weather \
+    --config "$catalog_workspace/catalog.yaml" \
+    --database "$catalog_workspace/catalog.db"
+)
+grep -q '"name": "weather.csv"' <<< "$search_output"

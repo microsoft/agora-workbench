@@ -50,6 +50,21 @@ def _server_config(tmp_path: Path) -> ServerConfig:
     )
 
 
+async def _create_container(container) -> None:
+    http_errors = pytest.importorskip("azure.core.exceptions")
+    try:
+        await container.create_container()
+    except http_errors.HttpResponseError as exc:
+        if exc.error_code == "InvalidHeaderValue" and "API version" in str(exc):
+            pytest.fail(
+                "Azurite rejected the Azure SDK service API version. Start the pinned emulator with "
+                "'azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck' as documented in "
+                "docs/guide/data-lake-support.md.",
+                pytrace=False,
+            )
+        raise
+
+
 @pytest.mark.azurite
 @pytest.mark.integration
 async def test_azurite_blob_cas_transfer_interruption_and_reconciliation(tmp_path: Path):
@@ -59,7 +74,7 @@ async def test_azurite_blob_cas_transfer_interruption_and_reconciliation(tmp_pat
         cleanup.push_async_callback(service.close)
         container_name = f"agora-acceptance-{uuid.uuid4().hex}"
         container = service.get_container_client(container_name)
-        await container.create_container()
+        await _create_container(container)
         cleanup.push_async_callback(container.delete_container)
 
         prefix = f"release/{uuid.uuid4().hex}"
@@ -135,7 +150,7 @@ async def test_azurite_public_catalog_mcp_execution_roundtrip(tmp_path: Path, mo
         cleanup.push_async_callback(service.close)
         container_name = f"agora-public-{uuid.uuid4().hex}"
         container = service.get_container_client(container_name)
-        await container.create_container()
+        await _create_container(container)
         cleanup.push_async_callback(container.delete_container)
 
         prefix = f"catalog/{uuid.uuid4().hex}"

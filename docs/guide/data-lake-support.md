@@ -86,6 +86,11 @@ docker run --rm --name agora-azurite \
   azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
 ```
 
+The compatibility flag is required because supported Azure SDK releases may
+default to a service API version newer than the pinned emulator recognizes.
+It disables only Azurite's request-version check; the live-Azure gate below
+still exercises the SDK's current service API against Azure.
+
 In another shell:
 
 ```bash
