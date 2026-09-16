@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-16
+
 ### Breaking
 
 - Azure SDKs and catalog vector dependencies are no longer installed by the
