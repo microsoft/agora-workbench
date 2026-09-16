@@ -2154,6 +2154,10 @@ the public <code>CatalogAwareDataManager</code> protocol and preserves its origi
 resolver for non-catalog blob IDs. See
 <a href="../working-with-data/#mounting-a-catalog-on-codeexecutionserver">Working with data</a>
 for the full lifecycle and compatibility behavior.</p>
+<p>For a complete runnable implementation, see the
+<a href="https://github.com/microsoft/agora-workbench/tree/main/examples/servers/energysystems">Energy Systems custom storage integration</a>.
+It combines a manifest-backed provider, an <code>energysystems://</code> locator scheme,
+a session-scoped <code>AssetFetcher</code>, and an opaque <code>load_path</code> consumed by PyPSA.</p>
 <h2 id="identity-revisions-and-compatibility">Identity, revisions, and compatibility<a class="headerlink" href="#identity-revisions-and-compatibility" title="Permanent link">&para;</a></h2>
 <p>Catalog identity is independent of physical storage. Configure a stable
 <code>source_id</code> and identify artifacts by their normalized source-relative path:</p>
