@@ -172,24 +172,33 @@ def _validate_artifact_resolver(resolver: ArtifactResolver) -> None:
         )
 
 
+def _resource_aclose(
+    resource: object,
+    method_names: tuple[str, ...],
+) -> Callable[[], Coroutine[Any, Any, None]] | None:
+    """Normalize the first supported lifecycle method to an async close."""
+    for method_name in method_names:
+        lifecycle_method = getattr(resource, method_name, None)
+        if not callable(lifecycle_method):
+            continue
+
+        async def close() -> None:
+            result = lifecycle_method()
+            if inspect.isawaitable(result):
+                _ = await result
+
+        return close
+    return None
+
+
 def _resolver_aclose(resolver: object) -> Callable[[], Coroutine[Any, Any, None]] | None:
-    """Return a resolver's optional ``aclose``, mirroring the fetcher ``close`` convention.
+    """Return a resolver's optional ``aclose`` as a coroutine function."""
+    return _resource_aclose(resolver, ("aclose",))
 
-    The result is normalized to a coroutine function. ``cleanup()`` feeds it to
-    ``loop.create_task``, which rejects a non-awaitable, so a third-party
-    resolver defining ``aclose`` synchronously would otherwise raise a
-    ``TypeError`` out of teardown.
-    """
-    aclose = getattr(resolver, "aclose", None)
-    if not callable(aclose):
-        return None
 
-    async def close() -> None:
-        result = aclose()
-        if inspect.isawaitable(result):
-            _ = await result
-
-    return close
+def _fetcher_aclose(fetcher: object) -> Callable[[], Coroutine[Any, Any, None]] | None:
+    """Return a fetcher's supported lifecycle method as a coroutine function."""
+    return _resource_aclose(fetcher, ("aclose", "close", "cleanup"))
 
 
 class DataLakeDataManager:
@@ -830,13 +839,15 @@ class DataLakeDataManager:
 
         # Close fetchers (releases pooled connections)
         for fetcher in self._fetchers:
-            if hasattr(fetcher, "close"):
-                try:
-                    await fetcher.close()
-                except asyncio.CancelledError:
-                    cancelled = True
-                except Exception as e:
-                    LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
+            fetcher_close = _fetcher_aclose(fetcher)
+            if fetcher_close is None:
+                continue
+            try:
+                await fetcher_close()
+            except asyncio.CancelledError:
+                cancelled = True
+            except Exception as e:
+                LOGGER.debug(f"Error closing fetcher {fetcher.__class__.__name__}: {e}")
 
         resolver_close = _resolver_aclose(getattr(self, "_artifact_resolver", None))
         if resolver_close is not None:

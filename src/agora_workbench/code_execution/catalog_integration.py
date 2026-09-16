@@ -104,11 +104,11 @@ class CatalogAwareDataManager(Protocol):
         fetchers: Sequence[AssetFetcher] = (),
     ) -> None:
         """Attach the resolver and accept fetcher ownership on successful return."""
-        ...
+        pass
 
     def invalidate_cache_entries(self, *, artifact_id_prefix: str | None = None) -> None:
         """Invalidate cached references after authorization context changes."""
-        ...
+        pass
 
 
 def _effective_source_id(source: SourceConfig) -> str:

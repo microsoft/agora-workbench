@@ -36,6 +36,7 @@ def _azurite_connection_string() -> str:
     connection_string = os.getenv("AGORA_AZURITE_CONNECTION_STRING")
     if not connection_string:
         pytest.skip("Set AGORA_AZURITE_CONNECTION_STRING to run actual Azurite acceptance.")
+    assert connection_string is not None
     return connection_string
 
 

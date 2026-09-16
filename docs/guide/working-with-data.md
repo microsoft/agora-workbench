@@ -367,13 +367,15 @@ closes the returned fetchers:
 catalog = CatalogIntegration(
     ResourceLease(provider, ResourceOwnership.OWNED),
     authorizer=authorizer,
-    fetcher_factory=lambda context: SQLiteObjectFetcher(database_path),
+    fetcher_factory=lambda context: MyStorageFetcher(storage_client),
 )
 ```
 
 The factory may return one `AssetFetcher`, a list or tuple of fetchers, or
 `None`. It must return fresh instances for every call because fetchers become
-session-owned resources. This path preserves the integration-provided resolver,
+session-owned resources. Fetchers may implement `aclose()`, `close()`, or
+`cleanup()`; synchronous and asynchronous lifecycle methods are both
+supported. This path preserves the integration-provided resolver,
 authorization refresh, cache invalidation, and cleanup without requiring a
 custom `SessionManager`.
 
@@ -402,6 +404,9 @@ class MyDataManager(CatalogAwareDataManager):
 The `SessionResources.extensions` key `catalog` is reserved for the binding;
 returning a custom extension under that name rejects session creation and
 cleans the factory-created manager and extensions.
+
+`CatalogAwareDataManager` is the only custom-manager composition contract.
+The data-lake API is still pre-release, so no legacy opt-in hook is retained.
 
 To mount an application-managed provider, make ownership explicit:
 
