@@ -1,7 +1,7 @@
 # Data catalog for the energysystems domain.
 #
 # The energysystems server loads this manifest at startup and exposes the
-# policy-aware search_data / get_artifact / list_data tools to the agent.
+# policy-aware search_data / get_artifact / list_domains / get_catalog_capabilities tools to the agent.
 # Paths are relative to this file (the energysystems domain directory).
 
 sources:

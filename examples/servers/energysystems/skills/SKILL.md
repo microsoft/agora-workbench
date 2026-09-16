@@ -38,7 +38,8 @@ the `search_data` MCP tool instead of building a network from scratch. Pass
 the returned opaque `load_path` unchanged into the execution environment:
 
 ```python
-network = pypsa.Network(load_path)
+# Paste the exact load_path string returned by search_data into this literal.
+network = pypsa.Network("<blob>catalog-v1:...</blob>")
 ```
 
 Agora Workbench resolves and fetches the underlying NetCDF object before the
