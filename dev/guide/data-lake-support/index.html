@@ -1762,6 +1762,10 @@ failure, shutdown cleanup, and the measured budgets above.</p>
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>mcr.microsoft.com/azure-storage/azurite:3.35.0<span class="w"> </span><span class="se">\</span>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>azurite-blob<span class="w"> </span>--blobHost<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--skipApiVersionCheck
 </code></pre></div>
+<p>The compatibility flag is required because supported Azure SDK releases may
+default to a service API version newer than the pinned emulator recognizes.
+It disables only Azurite's request-version check; the live-Azure gate below
+still exercises the SDK's current service API against Azure.</p>
 <p>In another shell:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">AGORA_AZURITE_CONNECTION_STRING</span><span class="o">=</span><span class="s1">&#39;UseDevelopmentStorage=true&#39;</span>
 <a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>src/agora_workbench/data_lake/tests/test_azurite_acceptance.py<span class="w"> </span><span class="se">\</span>
