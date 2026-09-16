@@ -1700,6 +1700,12 @@ assemble from private implementation details.</p>
 <td>Offline default CI</td>
 </tr>
 <tr>
+<td>Custom storage locators</td>
+<td>Provider-specific locators resolved through fresh session-owned <code>AssetFetcher</code> instances</td>
+<td>Base package plus the storage client's dependency and application authorization</td>
+<td>Energy Systems custom-storage flow in offline default CI</td>
+</tr>
+<tr>
 <td>Administrative SQL</td>
 <td><code>query_catalog</code> only on a separately authorized administrative MCP surface; SQLite enforces query-only execution</td>
 <td>Base package; independent administrative access control</td>
@@ -1754,7 +1760,9 @@ policy-aware MCP discovery, alias resolution, session resolution/transfer,
 two-principal metadata/content/write isolation, concurrent manifest writers,
 interrupted-operation reconciliation, two-reader generation convergence,
 0.2.x fixture migration/export, optional dependency boundaries, startup
-failure, shutdown cleanup, and the measured budgets above.</p>
+failure, shutdown cleanup, the Energy Systems
+<code>search_data</code> → opaque <code>load_path</code> → custom fetcher flow, and the measured
+budgets above.</p>
 <h3 id="actual-azurite">Actual Azurite<a class="headerlink" href="#actual-azurite" title="Permanent link">&para;</a></h3>
 <p>Azurite is opt-in and separately marked. Start a pinned Blob emulator:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span>--name<span class="w"> </span>agora-azurite<span class="w"> </span><span class="se">\</span>

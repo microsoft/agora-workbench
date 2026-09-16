@@ -2279,6 +2279,48 @@ reopen, from the existing vector table:</p>
 <a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">catalog</span><span class="p">,</span>
 <a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="p">)</span>
 </code></pre></div>
+<p>Choose the constructor based on who owns catalog setup and policy:</p>
+<table>
+<thead>
+<tr>
+<th>Constructor</th>
+<th>Use it when</th>
+<th>Ownership and lifecycle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CatalogIntegration.from_config(...)</code></td>
+<td>The server should build the provider from <code>CatalogConfig</code></td>
+<td>The integration loads and closes the provider</td>
+</tr>
+<tr>
+<td><code>CatalogIntegration.development_from_config(...)</code></td>
+<td>A local demo needs an explicit allow-all authorizer</td>
+<td>Same ownership as <code>from_config</code>; never use for production authorization</td>
+</tr>
+<tr>
+<td><code>CatalogIntegration(ResourceLease(...), ...)</code></td>
+<td>The application supplies a custom provider</td>
+<td><code>OWNED</code> resources are loaded/closed by the integration; <code>BORROWED</code> resources remain application-managed</td>
+</tr>
+</tbody>
+</table>
+<p><code>from_config()</code> requires exactly one of <code>authorizer</code> or <code>authorizer_factory</code>.
+Use <code>authorizer_factory(SessionContext)</code> when policy holds caller-specific
+mutable state. <code>development_from_config()</code> supplies
+<code>DevelopmentAllowAllCatalogAuthorizer</code> only as an explicit local-development
+shortcut.</p>
+<p>When <code>db_path</code> is omitted, <code>from_config()</code> creates a private SQLite cache below
+<code>~/.cache/agora-workbench/catalogs/</code> and removes it after the owned provider
+closes. This cache is rebuildable and intentionally does not persist across
+server lifecycles. Pass an explicit <code>db_path</code> when the deployment owns the
+location and wants to retain the index between starts.</p>
+<p>The default <code>HOMOGENEOUS_SOURCE</code> policy assumes every artifact in an authorized
+source has the same caller policy. Select <code>PER_ARTIFACT</code> only with a trusted,
+backend-specific <code>per_artifact_enforcer</code> that applies authorization before
+ranking, pagination, lookup, and not-found decisions. The policy-aware MCP
+tools conservatively omit executable <code>load_path</code> values in per-artifact mode.</p>
 <p>The server loads configured scan or manifest sources during startup, fails
 startup if no ready generation is available, and closes its owned catalog on
 startup rollback or shutdown. <code>search_data</code>, <code>get_artifact</code>, <code>list_domains</code>,
@@ -2287,7 +2329,7 @@ Search/get payloads retain <code>id</code>, <code>source_id</code>, familiar met
 relevance <code>score</code> when supplied by the provider. They do not eagerly resolve or
 expose credential-bearing storage locators. A <code>load_path</code> is returned only when
 the session's data manager supports the catalog resolver, either through the
-integration-provided manager or the explicit custom-manager opt-in described
+integration-provided manager or the explicit custom-manager contract described
 below. Paste that opaque, revision-pinned tag into <code>execute_*_code</code>, where
 resolution occurs on demand.
 Per-artifact policy sessions conservatively omit <code>load_path</code> because source
@@ -2348,8 +2390,11 @@ catalog-derived cache entries before reuse.</p>
 <p>The <code>SessionResources.extensions</code> key <code>catalog</code> is reserved for the binding;
 returning a custom extension under that name rejects session creation and
 cleans the factory-created manager and extensions.</p>
-<p><code>CatalogAwareDataManager</code> is the only custom-manager composition contract.
-The data-lake API is still pre-release, so no legacy opt-in hook is retained.</p>
+<p><code>CatalogAwareDataManager</code> is the 0.3 custom-manager composition contract. The
+unreleased preview hook <code>supports_catalog_references()</code> is not supported.
+Without <code>bind_catalog_resolver()</code>, a custom manager remains discovery-only;
+when <code>fetcher_factory</code> requires transferring custom fetchers, session creation
+fails rather than leaking those resources.</p>
 <p>To mount an application-managed provider, make ownership explicit:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>

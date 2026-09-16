@@ -476,6 +476,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Environment model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#uv-environment-completion-marker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UV environment completion marker
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1656,6 +1673,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Environment model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#uv-environment-completion-marker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UV environment completion marker
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1890,6 +1924,26 @@
 <li>For <code>type="conda"</code>, <code>dependency_file</code> contains <code>environment.yml</code> content</li>
 <li>For native/compiled dependencies in conda environments (for example <code>ngspice</code>, <code>gdal</code>, <code>netcdf4</code>), use <strong><code>conda-forge</code></strong> rather than system package managers like <code>apt-get</code></li>
 </ul>
+<h4 id="uv-environment-completion-marker">UV environment completion marker<a class="headerlink" href="#uv-environment-completion-marker" title="Permanent link">&para;</a></h4>
+<p>A <code>uv</code> environment is ready only when both of these exist in <code>build_dir</code>:</p>
+<ul>
+<li><code>bin/python</code></li>
+<li><code>.env_build_complete</code></li>
+</ul>
+<p>Agora Workbench writes <code>.env_build_complete</code> only after dependency installation
+and every <code>additional_commands</code> entry succeeds. Its content is not an API; its
+presence records that the complete configured build finished.</p>
+<p>If <code>bin/python</code> exists without the marker, the directory is treated as a stale
+or interrupted environment. With <code>auto_build=True</code>, Agora Workbench removes the
+directory and rebuilds it. With <code>auto_build=False</code>, startup reports that the
+environment is missing or incomplete.</p>
+<p>For a prebuilt container or an externally prepared <code>build_dir</code>, run
+<code>CodeExecutionServer.warm()</code> during the image build whenever possible. If the
+environment must be assembled outside Workbench, create
+<code>.env_build_complete</code> only after installing all dependencies and successfully
+running the configured additional commands. Do not store unrelated persistent
+files in <code>build_dir</code>, because an incomplete directory may be removed during
+automatic recovery.</p>
 <div class="admonition warning">
 <p class="admonition-title">Heavy models load <em>per session</em></p>
 <p>Each <code>execute_{name}_code</code> session runs in its <strong>own kernel process</strong>, so

@@ -788,6 +788,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Authorization and hosting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-execution-managers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom execution managers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1511,6 +1528,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Authorization and hosting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-execution-managers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom execution managers
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1637,18 +1671,39 @@ Do not register the legacy and policy-aware catalog tool sets on the same MCP
 server. SQLite and manager caches are host-local; use one SQLite writer and a
 per-pod rebuildable database/cache unless the application provides external
 coordination.</p>
+<h3 id="custom-execution-managers">Custom execution managers<a class="headerlink" href="#custom-execution-managers" title="Permanent link">&para;</a></h3>
+<p>Version 0.3 uses <code>CatalogAwareDataManager</code> as the only custom-manager contract
+for executable catalog references:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogAwareDataManager</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyDataManager</span><span class="p">(</span><span class="n">CatalogAwareDataManager</span><span class="p">):</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">bind_catalog_resolver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">fetchers</span><span class="o">=</span><span class="p">()):</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>        <span class="o">...</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">invalidate_cache_entries</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">artifact_id_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>        <span class="o">...</span>
+</code></pre></div>
+<p><code>bind_catalog_resolver()</code> accepts ownership of factory-created fetchers only
+after it returns successfully. <code>invalidate_cache_entries()</code> lets authorization
+refresh remove caller-scoped <code>catalog-v1:</code> cache entries before reuse.</p>
+<p>The preview-only <code>supports_catalog_references()</code> hook was removed before the
+0.3.0 release and has no compatibility fallback. A custom manager without
+<code>bind_catalog_resolver()</code> can still participate in catalog discovery, but it
+does not receive executable <code>load_path</code> values. If a configured
+<code>fetcher_factory</code> requires binding custom fetchers, session creation fails
+explicitly.</p>
 <h2 id="rollback-and-export-limits">Rollback and export limits<a class="headerlink" href="#rollback-and-export-limits" title="Permanent link">&para;</a></h2>
 <p>Before upgrading a production database, retain a filesystem/storage backup and
 the old application configuration. For catalog metadata inspection or a
 0.2-style recovery import:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogDB</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">db</span> <span class="o">=</span> <span class="n">CatalogDB</span><span class="p">(</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">db</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">db</span><span class="o">.</span><span class="n">export_v0_json</span><span class="p">(</span><span class="s2">&quot;catalog-v0.json&quot;</span><span class="p">)</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">db</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogDB</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">db</span> <span class="o">=</span> <span class="n">CatalogDB</span><span class="p">(</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">db</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">db</span><span class="o">.</span><span class="n">export_v0_json</span><span class="p">(</span><span class="s2">&quot;catalog-v0.json&quot;</span><span class="p">)</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>    <span class="n">db</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div>
 <p>The v0 export includes current, non-deleted artifacts only. It cannot represent
 revision history, tombstones, manifest generations, commit fences, managed

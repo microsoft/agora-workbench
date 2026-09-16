@@ -1659,28 +1659,25 @@ selective disclosure, use an
 <h2 id="add-the-catalog-to-a-server">Add the catalog to a server<a class="headerlink" href="#add-the-catalog-to-a-server" title="Permanent link">&para;</a></h2>
 <p>Add <code>CatalogIntegration</code> to an existing <code>CodeExecutionServer</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogIntegration</span><span class="p">,</span> <span class="n">CodeExecutionServer</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">CatalogPolicyMode</span><span class="p">,</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">DevelopmentAllowAllCatalogAuthorizer</span><span class="p">,</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">),</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">DevelopmentAllowAllCatalogAuthorizer</span><span class="p">(),</span>  <span class="c1"># local development only</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">policy_mode</span><span class="o">=</span><span class="n">CatalogPolicyMode</span><span class="o">.</span><span class="n">HOMOGENEOUS_SOURCE</span><span class="p">,</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">db_path</span><span class="o">=</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">development_from_config</span><span class="p">(</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">),</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">db_path</span><span class="o">=</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="p">)</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">auth</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">catalog</span><span class="p">,</span>
 <a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="p">)</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">auth</span><span class="p">,</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">catalog</span><span class="p">,</span>
-<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="p">)</span>
 </code></pre></div>
 <p>The <code>db_path</code> points the server at the SQLite index refreshed in the preceding
-CLI steps. Here, <code>config</code> and <code>auth</code> are the server configuration and
-authentication objects from your existing server. If you do not have one yet, build
+CLI steps. <code>development_from_config()</code> is an explicit allow-all shortcut for
+local examples. Production servers should use <code>from_config()</code> with an
+application <code>authorizer</code> or <code>authorizer_factory</code>.</p>
+<p>Here, <code>config</code> and <code>auth</code> are the server configuration and authentication
+objects from your existing server. If you do not have one yet, build
 <a href="../../tutorials/first_server/">your first server</a> before adding the
 catalog.</p>
 <p>The integration adds these MCP tools:</p>

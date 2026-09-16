@@ -1861,11 +1861,11 @@ directly.</p>
 <td><code>agora_workbench.data_lake.resolvers</code></td>
 </tr>
 <tr>
-<td>Configure fetchers, publishers, credentials, or <code>DataLakeDataManager</code></td>
+<td>Implement or configure fetchers, publishers, credentials, or <code>DataLakeDataManager</code></td>
 <td><code>agora_workbench.data_lake.execution</code></td>
 </tr>
 <tr>
-<td>Compose custom storage fetchers or a custom session manager</td>
+<td>Mount a catalog or implement <code>CatalogAwareDataManager</code></td>
 <td><code>agora_workbench.code_execution</code></td>
 </tr>
 </tbody>
@@ -2584,6 +2584,20 @@ An owned provider must expose <code>aclose()</code>, <code>close()</code>, or <c
 Startup failure and cancellation close owned providers and remove their private
 cache. Shutdown closes execution sessions before the shared provider, so one
 session cannot invalidate another session's resolver.</p>
+<p><code>from_config()</code> requires exactly one application <code>authorizer</code> or
+<code>authorizer_factory</code>. <code>development_from_config()</code> is the explicit local-only
+shortcut that supplies an allow-all authorizer. Both constructors create an
+owned provider. When <code>db_path</code> is omitted, the integration creates a unique
+private SQLite cache below <code>~/.cache/agora-workbench/catalogs/</code>; it removes that
+directory after provider shutdown or startup rollback. Supply <code>db_path</code> to use
+an application-selected location that remains after the provider closes.</p>
+<p><code>CatalogPolicyMode.HOMOGENEOUS_SOURCE</code> is the default supported profile for the
+built-in SQLite provider. <code>CatalogPolicyMode.PER_ARTIFACT</code> requires a trusted
+<code>CatalogPolicyEnforcer</code>; supplying the mode without <code>per_artifact_enforcer</code>
+fails explicitly. The enforcer must apply authorization before ranking,
+pagination, aggregation, alias resolution, and not-found decisions. The MCP
+surface currently omits executable <code>load_path</code> values in per-artifact mode
+even when an enforcer is configured.</p>
 <p>Discovery tools use <code>AuthorizedCatalogProvider</code> and a session-specific
 <code>RequestContext</code>; they never expose the legacy raw <code>query_catalog</code> SQL surface.
 Use <code>authorizer_factory(SessionContext)</code> when policy objects hold mutable
@@ -2610,7 +2624,16 @@ authorized and cleaned up.</p>
 <li><code>agora_workbench.data_lake.resolvers</code>: <code>SearchIndexArtifactResolver</code></li>
 <li><code>agora_workbench.data_lake.execution</code>: fetchers, publishers, storage
   credentials, and <code>DataLakeDataManager</code></li>
+<li><code>agora_workbench.code_execution</code>: <code>CatalogIntegration</code>,
+  <code>CatalogFetcherFactory</code>, and <code>CatalogAwareDataManager</code></li>
 </ul>
+<p>For example, a custom-storage server normally imports from each responsibility
+once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogAwareDataManager</span><span class="p">,</span> <span class="n">CatalogIntegration</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssetFetcher</span><span class="p">,</span> <span class="n">DataLakeDataManager</span>
+</code></pre></div>
 <p>Use these paths for new code. Imports under
 <code>agora_workbench.code_execution.data_access</code> are also supported for applications
 that already use them.</p>
