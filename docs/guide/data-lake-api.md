@@ -335,6 +335,11 @@ resolver for non-catalog blob IDs. See
 [Working with data](working-with-data.md#mounting-a-catalog-on-codeexecutionserver)
 for the full lifecycle and compatibility behavior.
 
+For a complete runnable implementation, see the
+[Energy Systems custom storage integration](https://github.com/microsoft/agora-workbench/tree/main/examples/servers/energysystems).
+It combines a manifest-backed provider, an `energysystems://` locator scheme,
+a session-scoped `AssetFetcher`, and an opaque `load_path` consumed by PyPSA.
+
 ## Identity, revisions, and compatibility
 
 Catalog identity is independent of physical storage. Configure a stable

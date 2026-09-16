@@ -10,7 +10,7 @@ Each server subclasses `CodeExecutionServer`, ships a containerized Python envir
 |--------|--------|--------------|------|
 | [`chemistry/`](chemistry/) | Cheminformatics | RDKit, scikit-learn | 8020 |
 | [`earthscience/`](earthscience/) | Geospatial / remote sensing | rasterio, xarray, pystac-client, Planetary Computer | 8021 |
-| [`energysystems/`](energysystems/) | Power system modeling | PyPSA, HiGHS, networkx | 8022 |
+| [`energysystems/`](energysystems/) | Power system modeling and custom data-lake storage | PyPSA, HiGHS, networkx | 8022 |
 
 ## Running a Server Locally
 

@@ -19,8 +19,8 @@ from pathlib import Path
 
 from agora_workbench.code_execution import CodeExecutionServer, ServerConfig, Skill, ToolRegistry
 from agora_workbench.code_execution.auth import create_noop_auth_config
+from servers.energysystems.server.custom_storage import create_catalog_integration
 from servers.energysystems.tools import ENERGYSYSTEMS_TOOLS
-from servers.energysystems.server.catalog_setup import setup_catalog
 from servers.peers import peer_registry_for
 
 # Path to the energysystems_tools package (relative to this file so it works
@@ -145,15 +145,13 @@ server = EnergySystemsServer(
     tool_registry=tool_registry,
     auth_config=create_noop_auth_config(),
     skills=ENERGYSYSTEMS_SKILLS,
+    catalog=create_catalog_integration(_ENERGYSYSTEMS_DIR),
 )
 
 if __name__ == "__main__":
     if "--warm" in sys.argv:
         asyncio.run(server.warm())
     else:
-        # Index the public local data catalog and register the legacy unscoped
-        # search_data / query_catalog / get_artifact / list_domains tools.
-        setup_catalog(server, _ENERGYSYSTEMS_DIR)
         host = os.getenv("HOST", "0.0.0.0")
         port = int(os.getenv("PORT", "8000"))
         asyncio.run(server.run_http(host=host, port=port))

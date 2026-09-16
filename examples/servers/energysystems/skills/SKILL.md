@@ -34,7 +34,15 @@ the other tools in the same session.
 ## Local Data Catalog
 
 This server ships ready-made power-grid datasets. Search for one with
-`search_data` instead of building a network from scratch.
+the `search_data` MCP tool instead of building a network from scratch. Pass
+the returned opaque `load_path` unchanged into the execution environment:
+
+```python
+network = pypsa.Network(load_path)
+```
+
+Agora Workbench resolves and fetches the underlying NetCDF object before the
+code runs. Do not attempt to inspect or reconstruct the `catalog-v1:` reference.
 
 ## Auto-Imported Modules
 
