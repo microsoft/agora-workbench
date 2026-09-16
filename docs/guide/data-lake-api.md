@@ -20,8 +20,8 @@ Choose the import path that matches your task:
 | Use manifest-backed provider/resolver adapters | `agora_workbench.data_lake.catalog` / `agora_workbench.data_lake.resolvers` |
 | Register, upload, remove, or promote durable artifacts | `agora_workbench.data_lake` / `agora_workbench.data_lake.catalog` |
 | Use the Azure AI Search resolver | `agora_workbench.data_lake.resolvers` |
-| Configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
-| Compose custom storage fetchers or a custom session manager | `agora_workbench.code_execution` |
+| Implement or configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
+| Mount a catalog or implement `CatalogAwareDataManager` | `agora_workbench.code_execution` |
 
 Importing `agora_workbench.data_lake` does not start a server, create an
 execution session, or load cloud SDK modules.
@@ -835,6 +835,22 @@ Startup failure and cancellation close owned providers and remove their private
 cache. Shutdown closes execution sessions before the shared provider, so one
 session cannot invalidate another session's resolver.
 
+`from_config()` requires exactly one application `authorizer` or
+`authorizer_factory`. `development_from_config()` is the explicit local-only
+shortcut that supplies an allow-all authorizer. Both constructors create an
+owned provider. When `db_path` is omitted, the integration creates a unique
+private SQLite cache below `~/.cache/agora-workbench/catalogs/`; it removes that
+directory after provider shutdown or startup rollback. Supply `db_path` to use
+an application-selected location that remains after the provider closes.
+
+`CatalogPolicyMode.HOMOGENEOUS_SOURCE` is the default supported profile for the
+built-in SQLite provider. `CatalogPolicyMode.PER_ARTIFACT` requires a trusted
+`CatalogPolicyEnforcer`; supplying the mode without `per_artifact_enforcer`
+fails explicitly. The enforcer must apply authorization before ranking,
+pagination, aggregation, alias resolution, and not-found decisions. The MCP
+surface currently omits executable `load_path` values in per-artifact mode
+even when an enforcer is configured.
+
 Discovery tools use `AuthorizedCatalogProvider` and a session-specific
 `RequestContext`; they never expose the legacy raw `query_catalog` SQL surface.
 Use `authorizer_factory(SessionContext)` when policy objects hold mutable
@@ -863,6 +879,18 @@ The public modules are organized by responsibility:
 - `agora_workbench.data_lake.resolvers`: `SearchIndexArtifactResolver`
 - `agora_workbench.data_lake.execution`: fetchers, publishers, storage
   credentials, and `DataLakeDataManager`
+- `agora_workbench.code_execution`: `CatalogIntegration`,
+  `CatalogFetcherFactory`, and `CatalogAwareDataManager`
+
+For example, a custom-storage server normally imports from each responsibility
+once:
+
+```python
+from agora_workbench.code_execution import CatalogAwareDataManager, CatalogIntegration
+from agora_workbench.data_lake import ResourceLease, ResourceOwnership
+from agora_workbench.data_lake.catalog import CatalogConfig
+from agora_workbench.data_lake.execution import AssetFetcher, DataLakeDataManager
+```
 
 Use these paths for new code. Imports under
 `agora_workbench.code_execution.data_access` are also supported for applications

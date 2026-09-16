@@ -89,16 +89,10 @@ Add `CatalogIntegration` to an existing `CodeExecutionServer`:
 
 ```python
 from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServer
-from agora_workbench.data_lake import (
-    CatalogPolicyMode,
-    DevelopmentAllowAllCatalogAuthorizer,
-)
 from agora_workbench.data_lake.catalog import CatalogConfig
 
-catalog = CatalogIntegration.from_config(
+catalog = CatalogIntegration.development_from_config(
     CatalogConfig.from_yaml("catalog.yaml"),
-    authorizer=DevelopmentAllowAllCatalogAuthorizer(),  # local development only
-    policy_mode=CatalogPolicyMode.HOMOGENEOUS_SOURCE,
     db_path="catalog.db",
 )
 
@@ -110,8 +104,12 @@ server = CodeExecutionServer(
 ```
 
 The `db_path` points the server at the SQLite index refreshed in the preceding
-CLI steps. Here, `config` and `auth` are the server configuration and
-authentication objects from your existing server. If you do not have one yet, build
+CLI steps. `development_from_config()` is an explicit allow-all shortcut for
+local examples. Production servers should use `from_config()` with an
+application `authorizer` or `authorizer_factory`.
+
+Here, `config` and `auth` are the server configuration and authentication
+objects from your existing server. If you do not have one yet, build
 [your first server](../tutorials/first_server/README.md) before adding the
 catalog.
 

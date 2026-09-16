@@ -19,6 +19,7 @@ assemble from private implementation details.
 | Keyword search | SQLite FTS5, top-k, `domain` and `source_type` filters | Base package only; no vector or cloud SDK | Offline default CI with optional imports blocked |
 | Vector search | SQLite vector/hybrid search and Azure OpenAI query embeddings | `catalog-vector`; add `azure` for Azure identity/storage | Unit/integration gates; deployment-specific live validation |
 | MCP discovery | Policy-aware `search_data`, `get_artifact`, `list_domains`, and `get_catalog_capabilities` | `CatalogIntegration` and application authorization | Offline default CI |
+| Custom storage locators | Provider-specific locators resolved through fresh session-owned `AssetFetcher` instances | Base package plus the storage client's dependency and application authorization | Energy Systems custom-storage flow in offline default CI |
 | Administrative SQL | `query_catalog` only on a separately authorized administrative MCP surface; SQLite enforces query-only execution | Base package; independent administrative access control | Offline default CI |
 | No catalog configured | Existing execution/session behavior and tool surface remain unchanged | Base package | Offline default CI |
 
@@ -73,7 +74,9 @@ policy-aware MCP discovery, alias resolution, session resolution/transfer,
 two-principal metadata/content/write isolation, concurrent manifest writers,
 interrupted-operation reconciliation, two-reader generation convergence,
 0.2.x fixture migration/export, optional dependency boundaries, startup
-failure, shutdown cleanup, and the measured budgets above.
+failure, shutdown cleanup, the Energy Systems
+`search_data` → opaque `load_path` → custom fetcher flow, and the measured
+budgets above.
 
 ### Actual Azurite
 
