@@ -358,16 +358,55 @@ for cleanup at session shutdown, and invalidates catalog-derived cache entries
 so the next load is reauthorized. An authorizer passed directly is borrowed
 and continues to evaluate each immutable per-request context.
 
+Custom catalog storage usually needs only a fetcher that understands the
+provider's locator scheme. Supply a factory to `CatalogIntegration`; it is
+called once per execution session and the standard data manager owns and
+closes the returned fetchers:
+
+```python
+catalog = CatalogIntegration(
+    ResourceLease(provider, ResourceOwnership.OWNED),
+    authorizer=authorizer,
+    fetcher_factory=lambda context: MyStorageFetcher(storage_client),
+)
+```
+
+The factory may return one `AssetFetcher`, a list or tuple of fetchers, or
+`None`. It must return fresh instances for every call because fetchers become
+session-owned resources. Fetchers may implement `aclose()`, `close()`, or
+`cleanup()`; synchronous and asynchronous lifecycle methods are both
+supported. This path preserves the integration-provided resolver,
+authorization refresh, cache invalidation, and cleanup without requiring a
+custom `SessionManager`.
+
 If the supplied `SessionManager` already has a `data_manager_factory`, the
-server preserves that manager and its resolver. Discovery remains available,
-but catalog results omit `load_path` because the server cannot assume a custom
-resolver understands its opaque references. A custom manager that deliberately
-composes the session catalog resolver can opt in by implementing
-`supports_catalog_references(resolver) -> bool`; returning `True` enables
-opaque `load_path` values for that session without replacing the manager's
-resolver. The `SessionResources.extensions` key `catalog` is reserved for this
-binding; returning a custom extension under that name rejects session creation
-and cleans the factory-created manager and extensions.
+server preserves that manager and its existing resolver. `DataLakeDataManager`
+implements the public `CatalogAwareDataManager` protocol, so the server
+automatically calls
+`bind_catalog_resolver(resolver, fetchers=...)`: `catalog-v1:` references route
+through the caller-scoped catalog while legacy blob IDs continue to use the
+manager's original resolver. Authorization-context refresh invalidates
+catalog-derived cache entries before reuse.
+
+Other custom managers can implement the same protocol:
+
+```python
+from agora_workbench.code_execution import CatalogAwareDataManager
+
+class MyDataManager(CatalogAwareDataManager):
+    def bind_catalog_resolver(self, resolver, *, fetchers=()):
+        ...
+
+    def invalidate_cache_entries(self, *, artifact_id_prefix=None):
+        ...
+```
+
+The `SessionResources.extensions` key `catalog` is reserved for the binding;
+returning a custom extension under that name rejects session creation and
+cleans the factory-created manager and extensions.
+
+`CatalogAwareDataManager` is the only custom-manager composition contract.
+The data-lake API is still pre-release, so no legacy opt-in hook is retained.
 
 To mount an application-managed provider, make ownership explicit:
 

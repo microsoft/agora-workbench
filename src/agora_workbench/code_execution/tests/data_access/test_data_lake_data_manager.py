@@ -490,6 +490,46 @@ class TestCleanup:
     """Test cleanup operations."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method_name", "is_async"),
+        [
+            ("aclose", True),
+            ("close", True),
+            ("close", False),
+            ("cleanup", True),
+            ("cleanup", False),
+        ],
+    )
+    async def test_aclose_supports_fetcher_lifecycle_methods(self, method_name: str, is_async: bool):
+        """Session-owned fetchers may expose any supported lifecycle method."""
+        fetcher = MagicMock(spec=AssetFetcher)
+        lifecycle_method = AsyncMock() if is_async else MagicMock()
+        setattr(fetcher, method_name, lifecycle_method)
+        manager = DataLakeDataManager(extra_fetchers=[fetcher])
+
+        await manager.aclose()
+
+        if is_async:
+            lifecycle_method.assert_awaited_once()
+        else:
+            lifecycle_method.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_aclose_prefers_fetcher_aclose(self):
+        """Fetcher lifecycle precedence matches catalog rollback cleanup."""
+        fetcher = MagicMock(spec=AssetFetcher)
+        fetcher.aclose = AsyncMock()
+        fetcher.close = AsyncMock()
+        fetcher.cleanup = AsyncMock()
+        manager = DataLakeDataManager(extra_fetchers=[fetcher])
+
+        await manager.aclose()
+
+        fetcher.aclose.assert_awaited_once()
+        fetcher.close.assert_not_called()
+        fetcher.cleanup.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_cleanup_removes_cache_dir(self):
         """Test cleanup removes the cache directory."""
         manager = DataLakeDataManager()
@@ -556,7 +596,7 @@ class TestCleanup:
 
     def test_cleanup_removes_cache_dir_when_async_close_is_cancelled(self):
         """Cache cleanup must survive cancellation from a resource close."""
-        fetcher = MagicMock()
+        fetcher = MagicMock(spec=AssetFetcher)
         fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
         manager = DataLakeDataManager(extra_fetchers=[fetcher])
         cache_dir = manager._cache_dir
@@ -572,7 +612,7 @@ class TestCleanup:
     @pytest.mark.asyncio
     async def test_aclose_continues_after_cancelled_resource_close(self):
         """Async cleanup closes remaining resources before propagating cancellation."""
-        fetcher = MagicMock()
+        fetcher = MagicMock(spec=AssetFetcher)
         fetcher.close = AsyncMock(side_effect=asyncio.CancelledError)
         resolver = _StubResolver()
         credential = MagicMock()
@@ -718,6 +758,29 @@ class TestArtifactResolverInjection:
         url = await manager._get_blob_url_from_artifact_id("artifact_id_1")
 
         assert url == "https://acct.blob.core.windows.net/c/f.csv"
+
+    @pytest.mark.asyncio
+    async def test_catalog_binding_routes_only_catalog_references_and_preserves_ownership(self):
+        fallback = _StubResolver({"legacy": "file:///legacy.csv"})
+        catalog = _StubResolver({"catalog-v1:encoded": "custom://catalog.csv"})
+        fetcher = RecordingFetcher()
+        manager = DataLakeDataManager(artifact_resolver=fallback)
+
+        manager.bind_catalog_resolver(catalog, fetchers=(fetcher,))
+
+        assert await manager._get_blob_url_from_artifact_id("legacy") == "file:///legacy.csv"
+        assert await manager._get_blob_url_from_artifact_id("catalog-v1:encoded") == "custom://catalog.csv"
+        assert manager._fetchers[0] is fetcher
+        await manager.aclose()
+        assert fallback.aclose_calls == 1
+        assert catalog.aclose_calls == 0
+
+    def test_catalog_binding_rejects_duplicate_fetchers(self):
+        manager = DataLakeDataManager(artifact_resolver=_StubResolver())
+        fetcher = RecordingFetcher()
+
+        with pytest.raises(ValueError, match="distinct"):
+            manager.bind_catalog_resolver(_StubResolver(), fetchers=(fetcher, fetcher))
 
     @pytest.mark.parametrize(
         "resolver, missing",

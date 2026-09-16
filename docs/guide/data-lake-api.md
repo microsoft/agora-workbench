@@ -21,6 +21,7 @@ Choose the import path that matches your task:
 | Register, upload, remove, or promote durable artifacts | `agora_workbench.data_lake` / `agora_workbench.data_lake.catalog` |
 | Use the Azure AI Search resolver | `agora_workbench.data_lake.resolvers` |
 | Configure fetchers, publishers, credentials, or `DataLakeDataManager` | `agora_workbench.data_lake.execution` |
+| Compose custom storage fetchers or a custom session manager | `agora_workbench.code_execution` |
 
 Importing `agora_workbench.data_lake` does not start a server, create an
 execution session, or load cloud SDK modules.
@@ -310,6 +311,29 @@ artifact = CatalogArtifact(
 )
 catalog: CatalogProvider = MemoryCatalog((artifact,))
 ```
+
+When a custom provider returns a locator that the built-in local and Blob
+fetchers do not understand, attach a per-session fetcher factory to the server
+integration:
+
+```python
+from agora_workbench.code_execution import CatalogIntegration
+from agora_workbench.data_lake import ResourceLease, ResourceOwnership
+
+integration = CatalogIntegration(
+    ResourceLease(catalog, ResourceOwnership.OWNED),
+    authorizer=authorizer,
+    fetcher_factory=lambda context: MyStorageFetcher(...),
+)
+```
+
+The integration-provided `DataLakeDataManager` receives the caller-scoped
+catalog resolver and owns the factory-created fetcher. If an application
+already supplies a custom session manager, `DataLakeDataManager` implements
+the public `CatalogAwareDataManager` protocol and preserves its original
+resolver for non-catalog blob IDs. See
+[Working with data](working-with-data.md#mounting-a-catalog-on-codeexecutionserver)
+for the full lifecycle and compatibility behavior.
 
 ## Identity, revisions, and compatibility
 

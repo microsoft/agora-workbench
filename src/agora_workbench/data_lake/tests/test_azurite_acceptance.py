@@ -36,6 +36,7 @@ def _azurite_connection_string() -> str:
     connection_string = os.getenv("AGORA_AZURITE_CONNECTION_STRING")
     if not connection_string:
         pytest.skip("Set AGORA_AZURITE_CONNECTION_STRING to run actual Azurite acceptance.")
+    assert connection_string is not None
     return connection_string
 
 
@@ -192,13 +193,8 @@ async def test_azurite_public_catalog_mcp_execution_roundtrip(tmp_path: Path, mo
 
         monkeypatch.setattr(manager_module.tempfile, "mkdtemp", isolated_cache)
 
-        class AzuriteCatalogManager(DataLakeDataManager):
-            def supports_catalog_references(self, resolver) -> bool:
-                self._artifact_resolver = resolver
-                return True
-
         def manager_factory(_context):
-            return AzuriteCatalogManager(
+            return DataLakeDataManager(
                 extra_fetchers=[
                     BlobFetcher(
                         credential=cast(Any, credential),

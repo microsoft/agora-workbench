@@ -14,7 +14,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agora_workbench.code_execution import CatalogIntegration, CodeExecutionServer, ServerConfig
+from agora_workbench.code_execution import (
+    CatalogAwareDataManager,
+    CatalogIntegration,
+    CodeExecutionServer,
+    ServerConfig,
+)
 from agora_workbench.code_execution.auth import create_noop_auth_config
 from agora_workbench.code_execution.catalog_integration import (
     SessionCredential,
@@ -2758,12 +2763,12 @@ async def test_concurrent_catalog_binding_close_coalesces_resource_cleanup():
     assert close_calls == 1
 
 
-async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
+async def test_custom_data_lake_manager_composes_catalog_resolver_and_preserves_existing_resolver(tmp_path):
     class CustomResolver:
         unavailable_reason = None
 
         async def resolve(self, artifact_id: str) -> str:
-            return artifact_id
+            return f"legacy:{artifact_id}"
 
     resolver = CustomResolver()
     managers: list[DataLakeDataManager] = []
@@ -2786,31 +2791,56 @@ async def test_custom_manager_factory_and_resolver_are_preserved(tmp_path):
     session_id = session_manager.create_session({}, "user", "token", {})
     session = session_manager.get_session(session_id)
     assert session.data_manager is managers[0]
+    assert isinstance(session.data_manager, CatalogAwareDataManager)
     assert session.data_manager._artifact_resolver is resolver
-    assert not session.extensions["catalog"].execution_references
+    assert session.data_manager._catalog_artifact_resolver is session.extensions["catalog"].resolver
+    assert session.extensions["catalog"].execution_references
+    assert await session.data_manager._get_blob_url_from_artifact_id("legacy-id") == "legacy:legacy-id"
+    session.data_manager._cache_index = {
+        "catalog-v1:stale": tmp_path / "stale.txt",
+        "legacy": tmp_path / "legacy.txt",
+    }
+    session.extensions["catalog"].refresh_context(SessionContext(session_id, "user", "new-token"))
+    assert session.data_manager._cache_index == {"legacy": tmp_path / "legacy.txt"}
     await session_manager.aclose_all_sessions()
     await integration.shutdown()
 
 
-async def test_custom_manager_can_opt_in_to_catalog_execution_references(tmp_path):
-    accepted_resolvers = []
+async def test_fetcher_factory_composes_with_custom_data_lake_manager(tmp_path):
+    created_fetchers = []
+
+    class Fetcher(AssetFetcher):
+        async def fetch(self, qualified_name):
+            del qualified_name
+            return b"payload"
+
+        async def fetch_to_file(self, qualified_name, dest_path, *, options=None, context=None):
+            del qualified_name, options, context
+            dest_path.write_bytes(b"payload")
+            return 7
+
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("custom://")
+
+    def fetcher_factory(_context):
+        fetcher = Fetcher()
+        created_fetchers.append(fetcher)
+        return fetcher
 
     class CustomResolver:
         unavailable_reason = None
 
-        async def resolve(self, artifact_id: str) -> str:
+        async def resolve(self, artifact_id):
             return artifact_id
 
-    class ComposedManager(DataLakeDataManager):
-        def supports_catalog_references(self, resolver):
-            accepted_resolvers.append(resolver)
-            return True
-
-    custom_resolver = CustomResolver()
     source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
-    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[source]))
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[source]),
+        fetcher_factory=fetcher_factory,
+    )
+    custom_resolver = CustomResolver()
     session_manager = SessionManager(
-        SessionConfig(data_manager_factory=lambda _context: ComposedManager(artifact_resolver=custom_resolver))
+        SessionConfig(data_manager_factory=lambda _context: DataLakeDataManager(artifact_resolver=custom_resolver))
     )
     CodeExecutionServer(
         _server_config(tmp_path),
@@ -2822,11 +2852,211 @@ async def test_custom_manager_can_opt_in_to_catalog_execution_references(tmp_pat
     session_id = session_manager.create_session({}, "user", "token", {})
     session = session_manager.get_session(session_id)
 
-    assert accepted_resolvers == [session.extensions["catalog"].resolver]
-    assert session.data_manager._artifact_resolver is custom_resolver
-    assert not session.data_manager._catalog_managed_revision_access
+    assert created_fetchers == [session.data_manager._fetchers[0]]
+    assert session.data_manager._catalog_artifact_resolver is session.extensions["catalog"].resolver
     assert session.extensions["catalog"].execution_references
     await session_manager.aclose_all_sessions()
+    await integration.shutdown()
+
+
+async def test_fetcher_factory_creates_session_owned_fetchers_for_default_manager(tmp_path):
+    created_fetchers = []
+
+    class Fetcher(AssetFetcher):
+        def __init__(self):
+            super().__init__()
+            self.close_calls = 0
+
+        async def fetch(self, qualified_name):
+            del qualified_name
+            return b"payload"
+
+        async def fetch_to_file(self, qualified_name, dest_path, *, options=None, context=None):
+            del qualified_name, options, context
+            dest_path.write_bytes(b"payload")
+            return 7
+
+        def can_handle(self, qualified_name):
+            return qualified_name.startswith("custom://")
+
+        async def close(self):
+            self.close_calls += 1
+
+    def fetcher_factory(_context):
+        fetcher = Fetcher()
+        created_fetchers.append(fetcher)
+        return fetcher
+
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[source]),
+        fetcher_factory=fetcher_factory,
+    )
+    session_manager = SessionManager(SessionConfig())
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    first_id = session_manager.create_session({}, "first", "token", {})
+    second_id = session_manager.create_session({}, "second", "token", {})
+
+    assert len(created_fetchers) == 2
+    assert created_fetchers[0] is session_manager.get_session(first_id).data_manager._fetchers[0]
+    assert created_fetchers[1] is session_manager.get_session(second_id).data_manager._fetchers[0]
+    assert created_fetchers[0] is not created_fetchers[1]
+
+    await session_manager.aclose_all_sessions()
+    assert [fetcher.close_calls for fetcher in created_fetchers] == [1, 1]
+    await integration.shutdown()
+
+
+def test_fetcher_factory_rejects_non_fetcher_result():
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        fetcher_factory=cast(Any, lambda _context: object()),
+    )
+
+    with pytest.raises(TypeError, match="AssetFetcher"):
+        integration.create_fetchers(SessionContext("session", "user", "token"))
+
+    asyncio.run(integration.shutdown())
+
+
+def test_fetcher_factory_rejects_duplicate_instance_and_closes_it_once():
+    class Fetcher(AssetFetcher):
+        def __init__(self):
+            super().__init__()
+            self.close_calls = 0
+
+        async def fetch(self, qualified_name):
+            del qualified_name
+            return b""
+
+        async def fetch_to_file(self, qualified_name, dest_path, *, options=None, context=None):
+            del qualified_name, dest_path, options, context
+            return 0
+
+        def can_handle(self, qualified_name):
+            del qualified_name
+            return False
+
+        async def close(self):
+            self.close_calls += 1
+
+    fetcher = Fetcher()
+    integration = CatalogIntegration(
+        ResourceLease(_LifecycleProvider()),
+        authorizer=_PerUserAuthorizer("source"),
+        fetcher_factory=lambda _context: [fetcher, fetcher],
+    )
+
+    with pytest.raises(ValueError, match="distinct"):
+        integration.create_fetchers(SessionContext("session", "user", "token"))
+
+    assert fetcher.close_calls == 1
+    asyncio.run(integration.shutdown())
+
+
+async def test_fetcher_factory_resource_is_closed_when_custom_manager_cannot_accept_it(tmp_path):
+    created_fetchers = []
+
+    class Fetcher(AssetFetcher):
+        def __init__(self):
+            super().__init__()
+            self.close_calls = 0
+
+        async def fetch(self, qualified_name):
+            del qualified_name
+            return b""
+
+        async def fetch_to_file(self, qualified_name, dest_path, *, options=None, context=None):
+            del qualified_name, dest_path, options, context
+            return 0
+
+        def can_handle(self, qualified_name):
+            del qualified_name
+            return False
+
+        async def close(self):
+            self.close_calls += 1
+
+    class CustomManager:
+        def cleanup(self):
+            return None
+
+    def fetcher_factory(_context):
+        fetcher = Fetcher()
+        created_fetchers.append(fetcher)
+        return fetcher
+
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(
+        CatalogConfig(sources=[source]),
+        fetcher_factory=fetcher_factory,
+    )
+    session_manager = SessionManager(SessionConfig(data_manager_factory=cast(Any, lambda _context: CustomManager())))
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    with pytest.raises(TypeError, match="bind_catalog_resolver"):
+        session_manager.create_session({}, "user", "token", {})
+
+    await integration._cleanup_tracker.drain()
+    assert created_fetchers[0].close_calls == 1
+    await integration.shutdown()
+
+
+async def test_custom_manager_without_catalog_protocol_is_discovery_only(tmp_path):
+    class CustomManager:
+        def cleanup(self):
+            return None
+
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[source]))
+    session_manager = SessionManager(SessionConfig(data_manager_factory=cast(Any, lambda _context: CustomManager())))
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    session_id = session_manager.create_session({}, "user", "token", {})
+
+    assert not session_manager.get_session(session_id).extensions["catalog"].execution_references
+    await session_manager.aclose_all_sessions()
+    await integration.shutdown()
+
+
+async def test_custom_manager_opt_in_requires_catalog_cache_invalidation(tmp_path):
+    class Manager:
+        def cleanup(self):
+            return None
+
+        def bind_catalog_resolver(self, _resolver, *, fetchers=()):
+            del fetchers
+
+    source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
+    integration = CatalogIntegration.development_from_config(CatalogConfig(sources=[source]))
+    session_manager = SessionManager(SessionConfig(data_manager_factory=cast(Any, lambda _context: Manager())))
+    CodeExecutionServer(
+        _server_config(tmp_path),
+        auth_config=create_noop_auth_config(),
+        session_manager=session_manager,
+        catalog=integration,
+    )
+
+    with pytest.raises(TypeError, match=r"must define invalidate_cache_entries\(\)"):
+        session_manager.create_session({}, "user", "token", {})
+
     await integration.shutdown()
 
 
@@ -2842,7 +3072,8 @@ async def test_custom_manager_opt_in_failure_rolls_back_factory_resources(tmp_pa
             close_calls.append("manager")
             super().cleanup()
 
-        def supports_catalog_references(self, _resolver):
+        def bind_catalog_resolver(self, _resolver, *, fetchers=()):
+            del fetchers
             raise ValueError("invalid resolver composition")
 
     source = _write_manifest(tmp_path / "source", "source", "data.txt", "artifact")
