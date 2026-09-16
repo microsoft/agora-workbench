@@ -2310,23 +2310,53 @@ rebinds its token-scoped downstream credential while retaining prior providers
 for cleanup at session shutdown, and invalidates catalog-derived cache entries
 so the next load is reauthorized. An authorizer passed directly is borrowed
 and continues to evaluate each immutable per-request context.</p>
+<p>Custom catalog storage usually needs only a fetcher that understands the
+provider's locator scheme. Supply a factory to <code>CatalogIntegration</code>; it is
+called once per execution session and the standard data manager owns and
+closes the returned fetchers:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">OWNED</span><span class="p">),</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">authorizer</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">fetcher_factory</span><span class="o">=</span><span class="k">lambda</span> <span class="n">context</span><span class="p">:</span> <span class="n">MyStorageFetcher</span><span class="p">(</span><span class="n">storage_client</span><span class="p">),</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="p">)</span>
+</code></pre></div>
+<p>The factory may return one <code>AssetFetcher</code>, a list or tuple of fetchers, or
+<code>None</code>. It must return fresh instances for every call because fetchers become
+session-owned resources. Fetchers may implement <code>aclose()</code>, <code>close()</code>, or
+<code>cleanup()</code>; synchronous and asynchronous lifecycle methods are both
+supported. This path preserves the integration-provided resolver,
+authorization refresh, cache invalidation, and cleanup without requiring a
+custom <code>SessionManager</code>.</p>
 <p>If the supplied <code>SessionManager</code> already has a <code>data_manager_factory</code>, the
-server preserves that manager and its resolver. Discovery remains available,
-but catalog results omit <code>load_path</code> because the server cannot assume a custom
-resolver understands its opaque references. A custom manager that deliberately
-composes the session catalog resolver can opt in by implementing
-<code>supports_catalog_references(resolver) -&gt; bool</code>; returning <code>True</code> enables
-opaque <code>load_path</code> values for that session without replacing the manager's
-resolver. The <code>SessionResources.extensions</code> key <code>catalog</code> is reserved for this
-binding; returning a custom extension under that name rejects session creation
-and cleans the factory-created manager and extensions.</p>
+server preserves that manager and its existing resolver. <code>DataLakeDataManager</code>
+implements the public <code>CatalogAwareDataManager</code> protocol, so the server
+automatically calls
+<code>bind_catalog_resolver(resolver, fetchers=...)</code>: <code>catalog-v1:</code> references route
+through the caller-scoped catalog while legacy blob IDs continue to use the
+manager's original resolver. Authorization-context refresh invalidates
+catalog-derived cache entries before reuse.</p>
+<p>Other custom managers can implement the same protocol:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogAwareDataManager</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyDataManager</span><span class="p">(</span><span class="n">CatalogAwareDataManager</span><span class="p">):</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">bind_catalog_resolver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">fetchers</span><span class="o">=</span><span class="p">()):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="o">...</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">invalidate_cache_entries</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">artifact_id_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="o">...</span>
+</code></pre></div>
+<p>The <code>SessionResources.extensions</code> key <code>catalog</code> is reserved for the binding;
+returning a custom extension under that name rejects session creation and
+cleans the factory-created manager and extensions.</p>
+<p><code>CatalogAwareDataManager</code> is the only custom-manager composition contract.
+The data-lake API is still pre-release, so no legacy opt-in hook is retained.</p>
 <p>To mount an application-managed provider, make ownership explicit:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">BORROWED</span><span class="p">),</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">authorizer_factory</span><span class="o">=</span><span class="n">make_authorizer</span><span class="p">,</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">BORROWED</span><span class="p">),</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">authorizer_factory</span><span class="o">=</span><span class="n">make_authorizer</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
 </code></pre></div>
 <p>Borrowed providers are neither loaded nor closed by the server by default.
 Owned providers are loaded at startup, so they must expose <code>load()</code> when
@@ -2337,13 +2367,13 @@ reindex or filesystem-watcher tool is registered.</p>
 <p><code>capability_extension_factory</code> adds separately authorized, session-scoped
 capabilities to the catalog integration. To expose a managed writer through the
 same session policy, use the public adapter:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">managed_writer_extension_factory</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">catalog_config</span><span class="p">,</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">application_authorizer</span><span class="p">,</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">capability_extension_factory</span><span class="o">=</span><span class="n">managed_writer_extension_factory</span><span class="p">(</span><span class="n">backend_writer</span><span class="p">),</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">managed_writer_extension_factory</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">catalog_config</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">application_authorizer</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">capability_extension_factory</span><span class="o">=</span><span class="n">managed_writer_extension_factory</span><span class="p">(</span><span class="n">backend_writer</span><span class="p">),</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
 </code></pre></div>
 <p>The factory receives the session context, authorized read catalog, and
 immutable request context. The managed-writer adapter reuses that catalog's
@@ -2422,25 +2452,25 @@ comes only from the manifest; a <code>files</code> entry can override metadata f
 registered path but cannot register an otherwise absent file.</p>
 <h3 id="authoritative-manifests">Authoritative manifests<a class="headerlink" href="#authoritative-manifests" title="Permanent link">&para;</a></h3>
 <p>Manifest files use strict JSON with this versioned shape:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">&quot;generation&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">&quot;artifacts&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="p">{</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved/data.csv&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">      </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved-data&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.csv&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">      </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Approved experiment input&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">      </span><span class="nt">&quot;domain&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;science&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">      </span><span class="nt">&quot;media_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text/csv&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">      </span><span class="nt">&quot;size_bytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1204</span><span class="p">,</span>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">      </span><span class="nt">&quot;content_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sha256:4f...&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">      </span><span class="nt">&quot;metadata_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;metadata-7&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">      </span><span class="nt">&quot;checksum_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4f...&quot;</span><span class="p">,</span>
-<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="w">      </span><span class="nt">&quot;aliases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;external:experiment-input&quot;</span><span class="p">]</span>
-<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="w">    </span><span class="p">}</span>
-<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="w">  </span><span class="p">]</span>
-<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">&quot;generation&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">&quot;artifacts&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved/data.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">      </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved-data&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">      </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Approved experiment input&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">      </span><span class="nt">&quot;domain&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;science&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">      </span><span class="nt">&quot;media_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text/csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">      </span><span class="nt">&quot;size_bytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1204</span><span class="p">,</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">      </span><span class="nt">&quot;content_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sha256:4f...&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">      </span><span class="nt">&quot;metadata_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;metadata-7&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">      </span><span class="nt">&quot;checksum_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4f...&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">      </span><span class="nt">&quot;aliases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;external:experiment-input&quot;</span><span class="p">]</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="p">}</span>
 </code></pre></div>
 <p><code>generation</code> is a positive, monotonically non-decreasing integer. Reusing a
 generation with different manifest bytes is rejected, as is rolling back to an
@@ -2471,11 +2501,11 @@ the existing explicit optional-dependency error.</p>
 <p>Existing unversioned <code>catalog.yaml</code> files remain valid and are interpreted as
 version 1 with <code>discovery: scan</code>. Convert one to an explicit representation
 without touching storage:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">convert_catalog_config</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">report</span> <span class="o">=</span> <span class="n">convert_catalog_config</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>  <span class="c1"># dry-run by default</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">rendered_yaml</span><span class="p">)</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">convert_catalog_config</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">report</span> <span class="o">=</span> <span class="n">convert_catalog_config</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>  <span class="c1"># dry-run by default</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">rendered_yaml</span><span class="p">)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">)</span>
 </code></pre></div>
 <p>Pass a separate destination and <code>dry_run=False</code> to write the converted file.
 The conversion report distinguishes <code>configuration_valid</code>,
@@ -2594,13 +2624,13 @@ These tool names are <strong>not</strong> prefixed with the server name:</p>
 </table>
 <h3 id="example-agent-using-search_data">Example: agent using search_data<a class="headerlink" href="#example-agent-using-search_data" title="Permanent link">&para;</a></h3>
 <p>The agent calls <code>search_data</code> to find relevant files, then uses the returned metadata to access them:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Agent finds relevant data</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">results</span> <span class="o">=</span> <span class="n">search_data</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;wind speed measurements&quot;</span><span class="p">,</span> <span class="n">domain</span><span class="o">=</span><span class="s2">&quot;earthscience&quot;</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># Returns: [{&quot;id&quot;: &quot;abc123&quot;, &quot;name&quot;: &quot;hourly_wind.parquet&quot;, &quot;storage_uri&quot;: &quot;/data/weather/hourly_wind.parquet&quot;, ...}]</span>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="c1"># Agent then reads the file in code execution</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;/data/weather/hourly_wind.parquet&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Agent finds relevant data</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">results</span> <span class="o">=</span> <span class="n">search_data</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;wind speed measurements&quot;</span><span class="p">,</span> <span class="n">domain</span><span class="o">=</span><span class="s2">&quot;earthscience&quot;</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># Returns: [{&quot;id&quot;: &quot;abc123&quot;, &quot;name&quot;: &quot;hourly_wind.parquet&quot;, &quot;storage_uri&quot;: &quot;/data/weather/hourly_wind.parquet&quot;, ...}]</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="c1"># Agent then reads the file in code execution</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;/data/weather/hourly_wind.parquet&quot;</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="privileged-sql-administration">Privileged SQL administration<a class="headerlink" href="#privileged-sql-administration" title="Permanent link">&para;</a></h3>
 <p>For v0.2.x compatibility, <code>query_catalog</code> remains part of
@@ -2611,31 +2641,31 @@ caller.</p>
 <p>New applications may instead register SQL separately with
 <code>register_catalog_admin_tools</code> on a separately authenticated and authorized
 administrative MCP surface:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.catalog_tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_catalog_admin_tools</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">register_catalog_admin_tools</span><span class="p">(</span><span class="n">admin_mcp</span><span class="p">,</span> <span class="n">catalog_context</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.catalog_tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_catalog_admin_tools</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">register_catalog_admin_tools</span><span class="p">(</span><span class="n">admin_mcp</span><span class="p">,</span> <span class="n">catalog_context</span><span class="p">)</span>
 </code></pre></div>
 <p>The administrative helper is an exposure seam, not an authorization mechanism;
 the host remains responsible for protecting that surface.</p>
 <h3 id="catalog-database-schema">Catalog database schema<a class="headerlink" href="#catalog-database-schema" title="Permanent link">&para;</a></h3>
 <p>The underlying SQLite database has this structure:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1">-- Main table</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts</span><span class="w"> </span><span class="p">(</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w">         </span><span class="c1">-- Deterministic hash of storage_uri</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="w">    </span><span class="n">name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">          </span><span class="c1">-- Filename</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="w">    </span><span class="n">storage_uri</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">   </span><span class="c1">-- Full path or blob URI</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="w">    </span><span class="n">description</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- Human-readable description</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="w">    </span><span class="k">domain</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">                 </span><span class="c1">-- Domain label</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="w">    </span><span class="n">source_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- &#39;local&#39; or &#39;blob&#39;</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="w">    </span><span class="n">content_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">           </span><span class="c1">-- MIME type (inferred from extension)</span>
-<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="w">    </span><span class="n">size_bytes</span><span class="w"> </span><span class="nb">INTEGER</span><span class="p">,</span><span class="w">          </span><span class="c1">-- File size</span>
-<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="w">    </span><span class="n">indexed_at</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w">     </span><span class="c1">-- ISO timestamp</span>
-<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="p">);</span>
-<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>
-<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a><span class="c1">-- FTS5 virtual table (keyword search)</span>
-<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a><span class="k">CREATE</span><span class="w"> </span><span class="n">VIRTUAL</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts_fts</span><span class="w"> </span><span class="k">USING</span><span class="w"> </span><span class="n">fts5</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">description</span><span class="p">,</span><span class="w"> </span><span class="k">domain</span><span class="p">);</span>
-<a id="__codelineno-14-16" name="__codelineno-14-16" href="#__codelineno-14-16"></a>
-<a id="__codelineno-14-17" name="__codelineno-14-17" href="#__codelineno-14-17"></a><span class="c1">-- sqlite-vec virtual table (created lazily only when vectors are indexed/searched)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1">-- Main table</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w">         </span><span class="c1">-- Deterministic hash of storage_uri</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="n">name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">          </span><span class="c1">-- Filename</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="n">storage_uri</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">   </span><span class="c1">-- Full path or blob URI</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="n">description</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- Human-readable description</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="k">domain</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">                 </span><span class="c1">-- Domain label</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="n">source_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- &#39;local&#39; or &#39;blob&#39;</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">    </span><span class="n">content_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">           </span><span class="c1">-- MIME type (inferred from extension)</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="n">size_bytes</span><span class="w"> </span><span class="nb">INTEGER</span><span class="p">,</span><span class="w">          </span><span class="c1">-- File size</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="n">indexed_at</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w">     </span><span class="c1">-- ISO timestamp</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="p">);</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="c1">-- FTS5 virtual table (keyword search)</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="k">CREATE</span><span class="w"> </span><span class="n">VIRTUAL</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts_fts</span><span class="w"> </span><span class="k">USING</span><span class="w"> </span><span class="n">fts5</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">description</span><span class="p">,</span><span class="w"> </span><span class="k">domain</span><span class="p">);</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="c1">-- sqlite-vec virtual table (created lazily only when vectors are indexed/searched)</span>
 </code></pre></div>
 
 

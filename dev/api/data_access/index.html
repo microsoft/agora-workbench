@@ -5072,6 +5072,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#agora_workbench.data_lake.execution.DataLakeDataManager.bind_catalog_resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind_catalog_resolver
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agora_workbench.data_lake.execution.DataLakeDataManager.get_cache_path" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -9359,6 +9370,17 @@
   
     <nav class="md-nav" aria-label="DataLakeDataManager">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#agora_workbench.data_lake.execution.DataLakeDataManager.bind_catalog_resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        bind_catalog_resolver
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#agora_workbench.data_lake.execution.DataLakeDataManager.get_cache_path" class="md-nav__link">
@@ -29466,16 +29488,7 @@ can explicitly transfer ownership.</p>
 
                   <details class="mkdocstrings-source">
                     <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-                    <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-216">216</a></span>
-<span class="normal"><a href="#__codelineno-0-217">217</a></span>
-<span class="normal"><a href="#__codelineno-0-218">218</a></span>
-<span class="normal"><a href="#__codelineno-0-219">219</a></span>
-<span class="normal"><a href="#__codelineno-0-220">220</a></span>
-<span class="normal"><a href="#__codelineno-0-221">221</a></span>
-<span class="normal"><a href="#__codelineno-0-222">222</a></span>
-<span class="normal"><a href="#__codelineno-0-223">223</a></span>
-<span class="normal"><a href="#__codelineno-0-224">224</a></span>
-<span class="normal"><a href="#__codelineno-0-225">225</a></span>
+                    <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-225">225</a></span>
 <span class="normal"><a href="#__codelineno-0-226">226</a></span>
 <span class="normal"><a href="#__codelineno-0-227">227</a></span>
 <span class="normal"><a href="#__codelineno-0-228">228</a></span>
@@ -29565,106 +29578,117 @@ can explicitly transfer ownership.</p>
 <span class="normal"><a href="#__codelineno-0-312">312</a></span>
 <span class="normal"><a href="#__codelineno-0-313">313</a></span>
 <span class="normal"><a href="#__codelineno-0-314">314</a></span>
-<span class="normal"><a href="#__codelineno-0-315">315</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-216" name="__codelineno-0-216"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
-<a id="__codelineno-0-217" name="__codelineno-0-217"></a>    <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-218" name="__codelineno-0-218"></a>    <span class="n">allowed_local_roots</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-219" name="__codelineno-0-219"></a>    <span class="n">extra_fetchers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">AssetFetcher</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-220" name="__codelineno-0-220"></a>    <span class="n">credential</span><span class="p">:</span> <span class="s2">&quot;AsyncTokenCredential | None&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-221" name="__codelineno-0-221"></a>    <span class="n">artifact_resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-222" name="__codelineno-0-222"></a>    <span class="n">transfer_options</span><span class="p">:</span> <span class="n">TransferOptions</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-223" name="__codelineno-0-223"></a>    <span class="n">credential_ownership</span><span class="p">:</span> <span class="n">ResourceOwnership</span> <span class="o">=</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">BORROWED</span><span class="p">,</span>
-<a id="__codelineno-0-224" name="__codelineno-0-224"></a>    <span class="n">_catalog_integration_token</span><span class="p">:</span> <span class="nb">object</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-225" name="__codelineno-0-225"></a><span class="p">):</span>
-<a id="__codelineno-0-226" name="__codelineno-0-226"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-227" name="__codelineno-0-227"></a><span class="sd">    Initialize the data manager.</span>
-<a id="__codelineno-0-228" name="__codelineno-0-228"></a>
-<a id="__codelineno-0-229" name="__codelineno-0-229"></a><span class="sd">    Uses a credential chain (``az login`` MSAL cache locally, managed</span>
-<a id="__codelineno-0-230" name="__codelineno-0-230"></a><span class="sd">    identity in production) for Azure Blob access unless a credential is</span>
-<a id="__codelineno-0-231" name="__codelineno-0-231"></a><span class="sd">    provided. Blob URL fetching is available whenever a credential can be</span>
-<a id="__codelineno-0-232" name="__codelineno-0-232"></a><span class="sd">    initialized. Blob artifact ID resolution is delegated to an</span>
-<a id="__codelineno-0-233" name="__codelineno-0-233"></a><span class="sd">    ``ArtifactResolver``; the default one queries Azure AI Search and so</span>
-<a id="__codelineno-0-234" name="__codelineno-0-234"></a><span class="sd">    additionally requires ``DATA_LAKE_SEARCH_ENDPOINT``.</span>
-<a id="__codelineno-0-235" name="__codelineno-0-235"></a>
-<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-237" name="__codelineno-0-237"></a><span class="sd">        allowed_local_roots: Optional list of directory paths the local</span>
-<a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">            file fetcher is allowed to read from. If ``None`` or empty,</span>
-<a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">            all paths are permitted (suitable for sandboxed containers).</span>
-<a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">        extra_fetchers: Optional list of additional ``AssetFetcher``</span>
-<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">            instances to register. These are checked *before* the</span>
-<a id="__codelineno-0-242" name="__codelineno-0-242"></a><span class="sd">            built-in fetchers (local file, blob), allowing custom</span>
-<a id="__codelineno-0-243" name="__codelineno-0-243"></a><span class="sd">            fetchers to override default handling for specific URL</span>
-<a id="__codelineno-0-244" name="__codelineno-0-244"></a><span class="sd">            schemes or patterns.</span>
-<a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="sd">        credential: Optional async token credential to use for Azure Blob</span>
-<a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="sd">            Storage and Azure AI Search access. When omitted, the manager</span>
-<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">            creates the same storage credential chain as before, resolving</span>
-<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="sd">            ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.</span>
-<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">        artifact_resolver: Optional resolver turning ``&lt;blob&gt;id&lt;/blob&gt;``</span>
-<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">            identifiers into fetchable URLs, for deployments whose catalog</span>
-<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">            is not an Azure AI Search index. When omitted, a</span>
-<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">            ``SearchIndexArtifactResolver`` is built from the environment,</span>
-<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">            preserving existing behavior. A supplied resolver is used as-is</span>
-<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">            and is *not* given the manager&#39;s credential, so it must arrange</span>
-<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">            its own authentication.</span>
-<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">        transfer_options: Default bounded-transfer policy used when a call</span>
-<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">            does not provide an explicit override.</span>
-<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        credential_ownership: Whether the manager closes a supplied</span>
-<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">            credential. Existing callers retain borrowed semantics by</span>
-<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">            default; integrations that create one credential per session</span>
-<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">            can explicitly transfer ownership.</span>
-<a id="__codelineno-0-262" name="__codelineno-0-262"></a>
-<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">    Raises:</span>
-<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">        TypeError: If ``artifact_resolver`` does not implement the</span>
-<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">            ``ArtifactResolver`` protocol.</span>
-<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-267" name="__codelineno-0-267"></a>    <span class="k">if</span> <span class="n">artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-268" name="__codelineno-0-268"></a>        <span class="n">_validate_artifact_resolver</span><span class="p">(</span><span class="n">artifact_resolver</span><span class="p">)</span>
-<a id="__codelineno-0-269" name="__codelineno-0-269"></a>
-<a id="__codelineno-0-270" name="__codelineno-0-270"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tempfile</span><span class="o">.</span><span class="n">mkdtemp</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;data_lake_cache_&quot;</span><span class="p">))</span>
-<a id="__codelineno-0-271" name="__codelineno-0-271"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># Maps artifact_id -&gt; cache file path</span>
-<a id="__codelineno-0-272" name="__codelineno-0-272"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span> <span class="o">=</span> <span class="mi">0</span>
-<a id="__codelineno-0-273" name="__codelineno-0-273"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="o">=</span> <span class="mi">0</span>
-<a id="__codelineno-0-274" name="__codelineno-0-274"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_transfer_options</span> <span class="o">=</span> <span class="n">transfer_options</span> <span class="ow">or</span> <span class="n">TransferOptions</span><span class="p">()</span>
-<a id="__codelineno-0-275" name="__codelineno-0-275"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_managed_revision_access</span> <span class="o">=</span> <span class="n">_catalog_integration_token</span> <span class="ow">is</span> <span class="n">_CATALOG_INTEGRATION_MANAGER_TOKEN</span>
-<a id="__codelineno-0-276" name="__codelineno-0-276"></a>
-<a id="__codelineno-0-277" name="__codelineno-0-277"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-278" name="__codelineno-0-278"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">:</span> <span class="s2">&quot;AsyncTokenCredential | None&quot;</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_owns_credential</span> <span class="o">=</span> <span class="n">credential</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">credential_ownership</span> <span class="ow">is</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">OWNED</span>
-<a id="__codelineno-0-280" name="__codelineno-0-280"></a>
-<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="c1"># Initialize fetchers — custom fetchers take priority over built-ins</span>
-<a id="__codelineno-0-282" name="__codelineno-0-282"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">AssetFetcher</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">extra_fetchers</span> <span class="ow">or</span> <span class="p">[])</span>
-<a id="__codelineno-0-283" name="__codelineno-0-283"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">LocalFileFetcher</span><span class="p">(</span><span class="n">allowed_roots</span><span class="o">=</span><span class="n">allowed_local_roots</span><span class="p">))</span>
-<a id="__codelineno-0-284" name="__codelineno-0-284"></a>
-<a id="__codelineno-0-285" name="__codelineno-0-285"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-286" name="__codelineno-0-286"></a>        <span class="k">if</span> <span class="n">credential</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-287" name="__codelineno-0-287"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="o">=</span> <span class="n">credential</span>
-<a id="__codelineno-0-288" name="__codelineno-0-288"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-289" name="__codelineno-0-289"></a>            <span class="n">mi_client_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;AZURE_CLIENT_ID&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
-<a id="__codelineno-0-290" name="__codelineno-0-290"></a>            <span class="c1"># MSAL cache (mounted az login) locally, managed identity in</span>
-<a id="__codelineno-0-291" name="__codelineno-0-291"></a>            <span class="c1"># production. Pass the AZURE_CLIENT_ID-resolved id through so</span>
-<a id="__codelineno-0-292" name="__codelineno-0-292"></a>            <span class="c1"># prod keeps binding to the same user-assigned identity.</span>
-<a id="__codelineno-0-293" name="__codelineno-0-293"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="o">=</span> <span class="n">create_storage_credential</span><span class="p">(</span><span class="n">client_id</span><span class="o">=</span><span class="n">mi_client_id</span><span class="p">)</span>
-<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-295" name="__codelineno-0-295"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-296" name="__codelineno-0-296"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
-<a id="__codelineno-0-297" name="__codelineno-0-297"></a>            <span class="s2">&quot;Azure SDK is not installed; cloud data access is disabled. &quot;</span>
-<a id="__codelineno-0-298" name="__codelineno-0-298"></a>            <span class="s2">&quot;Install the &#39;agora-workbench[azure]&#39; extra to enable it.&quot;</span>
-<a id="__codelineno-0-299" name="__codelineno-0-299"></a>        <span class="p">)</span>
-<a id="__codelineno-0-300" name="__codelineno-0-300"></a>    <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-301" name="__codelineno-0-301"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-302" name="__codelineno-0-302"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to initialize Azure storage credential: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-303" name="__codelineno-0-303"></a>
-<a id="__codelineno-0-304" name="__codelineno-0-304"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-305" name="__codelineno-0-305"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BlobFetcher</span><span class="p">(</span><span class="n">credential</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">))</span>
-<a id="__codelineno-0-306" name="__codelineno-0-306"></a>
-<a id="__codelineno-0-307" name="__codelineno-0-307"></a>    <span class="k">if</span> <span class="n">artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-308" name="__codelineno-0-308"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_artifact_resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">=</span> <span class="n">artifact_resolver</span>
-<a id="__codelineno-0-309" name="__codelineno-0-309"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-310" name="__codelineno-0-310"></a>        <span class="c1"># The deferred credential error is handed over so the resolver can</span>
-<a id="__codelineno-0-311" name="__codelineno-0-311"></a>        <span class="c1"># explain *why* it is unavailable rather than blaming configuration.</span>
-<a id="__codelineno-0-312" name="__codelineno-0-312"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_artifact_resolver</span> <span class="o">=</span> <span class="n">SearchIndexArtifactResolver</span><span class="o">.</span><span class="n">from_env</span><span class="p">(</span>
-<a id="__codelineno-0-313" name="__codelineno-0-313"></a>            <span class="n">credential</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">,</span>
-<a id="__codelineno-0-314" name="__codelineno-0-314"></a>            <span class="n">credential_init_error</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span><span class="p">,</span>
-<a id="__codelineno-0-315" name="__codelineno-0-315"></a>        <span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-315">315</a></span>
+<span class="normal"><a href="#__codelineno-0-316">316</a></span>
+<span class="normal"><a href="#__codelineno-0-317">317</a></span>
+<span class="normal"><a href="#__codelineno-0-318">318</a></span>
+<span class="normal"><a href="#__codelineno-0-319">319</a></span>
+<span class="normal"><a href="#__codelineno-0-320">320</a></span>
+<span class="normal"><a href="#__codelineno-0-321">321</a></span>
+<span class="normal"><a href="#__codelineno-0-322">322</a></span>
+<span class="normal"><a href="#__codelineno-0-323">323</a></span>
+<span class="normal"><a href="#__codelineno-0-324">324</a></span>
+<span class="normal"><a href="#__codelineno-0-325">325</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-225" name="__codelineno-0-225"></a><span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+<a id="__codelineno-0-226" name="__codelineno-0-226"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-227" name="__codelineno-0-227"></a>    <span class="n">allowed_local_roots</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-228" name="__codelineno-0-228"></a>    <span class="n">extra_fetchers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">AssetFetcher</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-229" name="__codelineno-0-229"></a>    <span class="n">credential</span><span class="p">:</span> <span class="s2">&quot;AsyncTokenCredential | None&quot;</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-230" name="__codelineno-0-230"></a>    <span class="n">artifact_resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-231" name="__codelineno-0-231"></a>    <span class="n">transfer_options</span><span class="p">:</span> <span class="n">TransferOptions</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-232" name="__codelineno-0-232"></a>    <span class="n">credential_ownership</span><span class="p">:</span> <span class="n">ResourceOwnership</span> <span class="o">=</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">BORROWED</span><span class="p">,</span>
+<a id="__codelineno-0-233" name="__codelineno-0-233"></a>    <span class="n">_catalog_integration_token</span><span class="p">:</span> <span class="nb">object</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-234" name="__codelineno-0-234"></a><span class="p">):</span>
+<a id="__codelineno-0-235" name="__codelineno-0-235"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-236" name="__codelineno-0-236"></a><span class="sd">    Initialize the data manager.</span>
+<a id="__codelineno-0-237" name="__codelineno-0-237"></a>
+<a id="__codelineno-0-238" name="__codelineno-0-238"></a><span class="sd">    Uses a credential chain (``az login`` MSAL cache locally, managed</span>
+<a id="__codelineno-0-239" name="__codelineno-0-239"></a><span class="sd">    identity in production) for Azure Blob access unless a credential is</span>
+<a id="__codelineno-0-240" name="__codelineno-0-240"></a><span class="sd">    provided. Blob URL fetching is available whenever a credential can be</span>
+<a id="__codelineno-0-241" name="__codelineno-0-241"></a><span class="sd">    initialized. Blob artifact ID resolution is delegated to an</span>
+<a id="__codelineno-0-242" name="__codelineno-0-242"></a><span class="sd">    ``ArtifactResolver``; the default one queries Azure AI Search and so</span>
+<a id="__codelineno-0-243" name="__codelineno-0-243"></a><span class="sd">    additionally requires ``DATA_LAKE_SEARCH_ENDPOINT``.</span>
+<a id="__codelineno-0-244" name="__codelineno-0-244"></a>
+<a id="__codelineno-0-245" name="__codelineno-0-245"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-246" name="__codelineno-0-246"></a><span class="sd">        allowed_local_roots: Optional list of directory paths the local</span>
+<a id="__codelineno-0-247" name="__codelineno-0-247"></a><span class="sd">            file fetcher is allowed to read from. If ``None`` or empty,</span>
+<a id="__codelineno-0-248" name="__codelineno-0-248"></a><span class="sd">            all paths are permitted (suitable for sandboxed containers).</span>
+<a id="__codelineno-0-249" name="__codelineno-0-249"></a><span class="sd">        extra_fetchers: Optional list of additional ``AssetFetcher``</span>
+<a id="__codelineno-0-250" name="__codelineno-0-250"></a><span class="sd">            instances to register. These are checked *before* the</span>
+<a id="__codelineno-0-251" name="__codelineno-0-251"></a><span class="sd">            built-in fetchers (local file, blob), allowing custom</span>
+<a id="__codelineno-0-252" name="__codelineno-0-252"></a><span class="sd">            fetchers to override default handling for specific URL</span>
+<a id="__codelineno-0-253" name="__codelineno-0-253"></a><span class="sd">            schemes or patterns.</span>
+<a id="__codelineno-0-254" name="__codelineno-0-254"></a><span class="sd">        credential: Optional async token credential to use for Azure Blob</span>
+<a id="__codelineno-0-255" name="__codelineno-0-255"></a><span class="sd">            Storage and Azure AI Search access. When omitted, the manager</span>
+<a id="__codelineno-0-256" name="__codelineno-0-256"></a><span class="sd">            creates the same storage credential chain as before, resolving</span>
+<a id="__codelineno-0-257" name="__codelineno-0-257"></a><span class="sd">            ``AZURE_CLIENT_ID`` for user-assigned managed identity binding.</span>
+<a id="__codelineno-0-258" name="__codelineno-0-258"></a><span class="sd">        artifact_resolver: Optional resolver turning ``&lt;blob&gt;id&lt;/blob&gt;``</span>
+<a id="__codelineno-0-259" name="__codelineno-0-259"></a><span class="sd">            identifiers into fetchable URLs, for deployments whose catalog</span>
+<a id="__codelineno-0-260" name="__codelineno-0-260"></a><span class="sd">            is not an Azure AI Search index. When omitted, a</span>
+<a id="__codelineno-0-261" name="__codelineno-0-261"></a><span class="sd">            ``SearchIndexArtifactResolver`` is built from the environment,</span>
+<a id="__codelineno-0-262" name="__codelineno-0-262"></a><span class="sd">            preserving existing behavior. A supplied resolver is used as-is</span>
+<a id="__codelineno-0-263" name="__codelineno-0-263"></a><span class="sd">            and is *not* given the manager&#39;s credential, so it must arrange</span>
+<a id="__codelineno-0-264" name="__codelineno-0-264"></a><span class="sd">            its own authentication.</span>
+<a id="__codelineno-0-265" name="__codelineno-0-265"></a><span class="sd">        transfer_options: Default bounded-transfer policy used when a call</span>
+<a id="__codelineno-0-266" name="__codelineno-0-266"></a><span class="sd">            does not provide an explicit override.</span>
+<a id="__codelineno-0-267" name="__codelineno-0-267"></a><span class="sd">        credential_ownership: Whether the manager closes a supplied</span>
+<a id="__codelineno-0-268" name="__codelineno-0-268"></a><span class="sd">            credential. Existing callers retain borrowed semantics by</span>
+<a id="__codelineno-0-269" name="__codelineno-0-269"></a><span class="sd">            default; integrations that create one credential per session</span>
+<a id="__codelineno-0-270" name="__codelineno-0-270"></a><span class="sd">            can explicitly transfer ownership.</span>
+<a id="__codelineno-0-271" name="__codelineno-0-271"></a>
+<a id="__codelineno-0-272" name="__codelineno-0-272"></a><span class="sd">    Raises:</span>
+<a id="__codelineno-0-273" name="__codelineno-0-273"></a><span class="sd">        TypeError: If ``artifact_resolver`` does not implement the</span>
+<a id="__codelineno-0-274" name="__codelineno-0-274"></a><span class="sd">            ``ArtifactResolver`` protocol.</span>
+<a id="__codelineno-0-275" name="__codelineno-0-275"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-276" name="__codelineno-0-276"></a>    <span class="k">if</span> <span class="n">artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-277" name="__codelineno-0-277"></a>        <span class="n">_validate_artifact_resolver</span><span class="p">(</span><span class="n">artifact_resolver</span><span class="p">)</span>
+<a id="__codelineno-0-278" name="__codelineno-0-278"></a>
+<a id="__codelineno-0-279" name="__codelineno-0-279"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_dir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">tempfile</span><span class="o">.</span><span class="n">mkdtemp</span><span class="p">(</span><span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;data_lake_cache_&quot;</span><span class="p">))</span>
+<a id="__codelineno-0-280" name="__codelineno-0-280"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span> <span class="o">=</span> <span class="p">{}</span>  <span class="c1"># Maps artifact_id -&gt; cache file path</span>
+<a id="__codelineno-0-281" name="__codelineno-0-281"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span> <span class="o">=</span> <span class="mi">0</span>
+<a id="__codelineno-0-282" name="__codelineno-0-282"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="o">=</span> <span class="mi">0</span>
+<a id="__codelineno-0-283" name="__codelineno-0-283"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_transfer_options</span> <span class="o">=</span> <span class="n">transfer_options</span> <span class="ow">or</span> <span class="n">TransferOptions</span><span class="p">()</span>
+<a id="__codelineno-0-284" name="__codelineno-0-284"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_managed_revision_access</span> <span class="o">=</span> <span class="n">_catalog_integration_token</span> <span class="ow">is</span> <span class="n">_CATALOG_INTEGRATION_MANAGER_TOKEN</span>
+<a id="__codelineno-0-285" name="__codelineno-0-285"></a>
+<a id="__codelineno-0-286" name="__codelineno-0-286"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-287" name="__codelineno-0-287"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">:</span> <span class="s2">&quot;AsyncTokenCredential | None&quot;</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-288" name="__codelineno-0-288"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_owns_credential</span> <span class="o">=</span> <span class="n">credential</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">credential_ownership</span> <span class="ow">is</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">OWNED</span>
+<a id="__codelineno-0-289" name="__codelineno-0-289"></a>
+<a id="__codelineno-0-290" name="__codelineno-0-290"></a>    <span class="c1"># Initialize fetchers — custom fetchers take priority over built-ins</span>
+<a id="__codelineno-0-291" name="__codelineno-0-291"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">AssetFetcher</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">extra_fetchers</span> <span class="ow">or</span> <span class="p">[])</span>
+<a id="__codelineno-0-292" name="__codelineno-0-292"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">LocalFileFetcher</span><span class="p">(</span><span class="n">allowed_roots</span><span class="o">=</span><span class="n">allowed_local_roots</span><span class="p">))</span>
+<a id="__codelineno-0-293" name="__codelineno-0-293"></a>
+<a id="__codelineno-0-294" name="__codelineno-0-294"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-295" name="__codelineno-0-295"></a>        <span class="k">if</span> <span class="n">credential</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-296" name="__codelineno-0-296"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="o">=</span> <span class="n">credential</span>
+<a id="__codelineno-0-297" name="__codelineno-0-297"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-298" name="__codelineno-0-298"></a>            <span class="n">mi_client_id</span> <span class="o">=</span> <span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">&quot;AZURE_CLIENT_ID&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="ow">or</span> <span class="kc">None</span>
+<a id="__codelineno-0-299" name="__codelineno-0-299"></a>            <span class="c1"># MSAL cache (mounted az login) locally, managed identity in</span>
+<a id="__codelineno-0-300" name="__codelineno-0-300"></a>            <span class="c1"># production. Pass the AZURE_CLIENT_ID-resolved id through so</span>
+<a id="__codelineno-0-301" name="__codelineno-0-301"></a>            <span class="c1"># prod keeps binding to the same user-assigned identity.</span>
+<a id="__codelineno-0-302" name="__codelineno-0-302"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="o">=</span> <span class="n">create_storage_credential</span><span class="p">(</span><span class="n">client_id</span><span class="o">=</span><span class="n">mi_client_id</span><span class="p">)</span>
+<a id="__codelineno-0-303" name="__codelineno-0-303"></a>    <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-304" name="__codelineno-0-304"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-305" name="__codelineno-0-305"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span>
+<a id="__codelineno-0-306" name="__codelineno-0-306"></a>            <span class="s2">&quot;Azure SDK is not installed; cloud data access is disabled. &quot;</span>
+<a id="__codelineno-0-307" name="__codelineno-0-307"></a>            <span class="s2">&quot;Install the &#39;agora-workbench[azure]&#39; extra to enable it.&quot;</span>
+<a id="__codelineno-0-308" name="__codelineno-0-308"></a>        <span class="p">)</span>
+<a id="__codelineno-0-309" name="__codelineno-0-309"></a>    <span class="k">except</span> <span class="p">(</span><span class="ne">RuntimeError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-310" name="__codelineno-0-310"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="nb">type</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="vm">__name__</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-311" name="__codelineno-0-311"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Failed to initialize Azure storage credential: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-312" name="__codelineno-0-312"></a>
+<a id="__codelineno-0-313" name="__codelineno-0-313"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_credential</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-314" name="__codelineno-0-314"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">BlobFetcher</span><span class="p">(</span><span class="n">credential</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">))</span>
+<a id="__codelineno-0-315" name="__codelineno-0-315"></a>
+<a id="__codelineno-0-316" name="__codelineno-0-316"></a>    <span class="k">if</span> <span class="n">artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-317" name="__codelineno-0-317"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_artifact_resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">=</span> <span class="n">artifact_resolver</span>
+<a id="__codelineno-0-318" name="__codelineno-0-318"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-319" name="__codelineno-0-319"></a>        <span class="c1"># The deferred credential error is handed over so the resolver can</span>
+<a id="__codelineno-0-320" name="__codelineno-0-320"></a>        <span class="c1"># explain *why* it is unavailable rather than blaming configuration.</span>
+<a id="__codelineno-0-321" name="__codelineno-0-321"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_artifact_resolver</span> <span class="o">=</span> <span class="n">SearchIndexArtifactResolver</span><span class="o">.</span><span class="n">from_env</span><span class="p">(</span>
+<a id="__codelineno-0-322" name="__codelineno-0-322"></a>            <span class="n">credential</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential</span><span class="p">,</span>
+<a id="__codelineno-0-323" name="__codelineno-0-323"></a>            <span class="n">credential_init_error</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_credential_init_error</span><span class="p">,</span>
+<a id="__codelineno-0-324" name="__codelineno-0-324"></a>        <span class="p">)</span>
+<a id="__codelineno-0-325" name="__codelineno-0-325"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_artifact_resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
                   </details>
 
@@ -29680,6 +29704,80 @@ can explicitly transfer ownership.</p>
 
 
 
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="agora_workbench.data_lake.execution.DataLakeDataManager.bind_catalog_resolver" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">bind_catalog_resolver</span><span class="p">(</span><span class="n">resolver</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">fetchers</span><span class="o">=</span><span class="p">())</span></code>
+
+<a href="#agora_workbench.data_lake.execution.DataLakeDataManager.bind_catalog_resolver" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Attach a caller-scoped catalog resolver and its backend fetchers.</p>
+<p>Catalog references are routed to <em>resolver</em> while legacy blob artifact
+IDs continue to use the manager's existing resolver. Supplied fetchers
+become session-owned and take priority over previously configured
+fetchers. Ownership transfers only after this method returns
+successfully.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-327">327</a></span>
+<span class="normal"><a href="#__codelineno-0-328">328</a></span>
+<span class="normal"><a href="#__codelineno-0-329">329</a></span>
+<span class="normal"><a href="#__codelineno-0-330">330</a></span>
+<span class="normal"><a href="#__codelineno-0-331">331</a></span>
+<span class="normal"><a href="#__codelineno-0-332">332</a></span>
+<span class="normal"><a href="#__codelineno-0-333">333</a></span>
+<span class="normal"><a href="#__codelineno-0-334">334</a></span>
+<span class="normal"><a href="#__codelineno-0-335">335</a></span>
+<span class="normal"><a href="#__codelineno-0-336">336</a></span>
+<span class="normal"><a href="#__codelineno-0-337">337</a></span>
+<span class="normal"><a href="#__codelineno-0-338">338</a></span>
+<span class="normal"><a href="#__codelineno-0-339">339</a></span>
+<span class="normal"><a href="#__codelineno-0-340">340</a></span>
+<span class="normal"><a href="#__codelineno-0-341">341</a></span>
+<span class="normal"><a href="#__codelineno-0-342">342</a></span>
+<span class="normal"><a href="#__codelineno-0-343">343</a></span>
+<span class="normal"><a href="#__codelineno-0-344">344</a></span>
+<span class="normal"><a href="#__codelineno-0-345">345</a></span>
+<span class="normal"><a href="#__codelineno-0-346">346</a></span>
+<span class="normal"><a href="#__codelineno-0-347">347</a></span>
+<span class="normal"><a href="#__codelineno-0-348">348</a></span>
+<span class="normal"><a href="#__codelineno-0-349">349</a></span>
+<span class="normal"><a href="#__codelineno-0-350">350</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-327" name="__codelineno-0-327"></a><span class="k">def</span><span class="w"> </span><span class="nf">bind_catalog_resolver</span><span class="p">(</span>
+<a id="__codelineno-0-328" name="__codelineno-0-328"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-329" name="__codelineno-0-329"></a>    <span class="n">resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span><span class="p">,</span>
+<a id="__codelineno-0-330" name="__codelineno-0-330"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-331" name="__codelineno-0-331"></a>    <span class="n">fetchers</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">AssetFetcher</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+<a id="__codelineno-0-332" name="__codelineno-0-332"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-333" name="__codelineno-0-333"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Attach a caller-scoped catalog resolver and its backend fetchers.</span>
+<a id="__codelineno-0-334" name="__codelineno-0-334"></a>
+<a id="__codelineno-0-335" name="__codelineno-0-335"></a><span class="sd">    Catalog references are routed to *resolver* while legacy blob artifact</span>
+<a id="__codelineno-0-336" name="__codelineno-0-336"></a><span class="sd">    IDs continue to use the manager&#39;s existing resolver. Supplied fetchers</span>
+<a id="__codelineno-0-337" name="__codelineno-0-337"></a><span class="sd">    become session-owned and take priority over previously configured</span>
+<a id="__codelineno-0-338" name="__codelineno-0-338"></a><span class="sd">    fetchers. Ownership transfers only after this method returns</span>
+<a id="__codelineno-0-339" name="__codelineno-0-339"></a><span class="sd">    successfully.</span>
+<a id="__codelineno-0-340" name="__codelineno-0-340"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-341" name="__codelineno-0-341"></a>    <span class="n">_validate_artifact_resolver</span><span class="p">(</span><span class="n">resolver</span><span class="p">)</span>
+<a id="__codelineno-0-342" name="__codelineno-0-342"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_artifact_resolver</span> <span class="ow">is</span> <span class="ow">not</span> <span class="n">resolver</span><span class="p">:</span>
+<a id="__codelineno-0-343" name="__codelineno-0-343"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;A catalog resolver is already bound to this data manager.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-344" name="__codelineno-0-344"></a>    <span class="n">existing_fetchers</span> <span class="o">=</span> <span class="p">{</span><span class="nb">id</span><span class="p">(</span><span class="n">fetcher</span><span class="p">)</span> <span class="k">for</span> <span class="n">fetcher</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="p">}</span>
+<a id="__codelineno-0-345" name="__codelineno-0-345"></a>    <span class="k">if</span> <span class="nb">len</span><span class="p">({</span><span class="nb">id</span><span class="p">(</span><span class="n">fetcher</span><span class="p">)</span> <span class="k">for</span> <span class="n">fetcher</span> <span class="ow">in</span> <span class="n">fetchers</span><span class="p">})</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="n">fetchers</span><span class="p">):</span>
+<a id="__codelineno-0-346" name="__codelineno-0-346"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Catalog fetchers must be distinct instances.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-347" name="__codelineno-0-347"></a>    <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="nb">id</span><span class="p">(</span><span class="n">fetcher</span><span class="p">)</span> <span class="ow">in</span> <span class="n">existing_fetchers</span> <span class="k">for</span> <span class="n">fetcher</span> <span class="ow">in</span> <span class="n">fetchers</span><span class="p">):</span>
+<a id="__codelineno-0-348" name="__codelineno-0-348"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Catalog fetchers are already registered with this data manager.&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-349" name="__codelineno-0-349"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_catalog_artifact_resolver</span> <span class="o">=</span> <span class="n">resolver</span>
+<a id="__codelineno-0-350" name="__codelineno-0-350"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_fetchers</span><span class="p">[</span><span class="mi">0</span><span class="p">:</span><span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">fetchers</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
 
 <div class="doc doc-object doc-function">
 
@@ -29782,48 +29880,7 @@ asset directly.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-347">347</a></span>
-<span class="normal"><a href="#__codelineno-0-348">348</a></span>
-<span class="normal"><a href="#__codelineno-0-349">349</a></span>
-<span class="normal"><a href="#__codelineno-0-350">350</a></span>
-<span class="normal"><a href="#__codelineno-0-351">351</a></span>
-<span class="normal"><a href="#__codelineno-0-352">352</a></span>
-<span class="normal"><a href="#__codelineno-0-353">353</a></span>
-<span class="normal"><a href="#__codelineno-0-354">354</a></span>
-<span class="normal"><a href="#__codelineno-0-355">355</a></span>
-<span class="normal"><a href="#__codelineno-0-356">356</a></span>
-<span class="normal"><a href="#__codelineno-0-357">357</a></span>
-<span class="normal"><a href="#__codelineno-0-358">358</a></span>
-<span class="normal"><a href="#__codelineno-0-359">359</a></span>
-<span class="normal"><a href="#__codelineno-0-360">360</a></span>
-<span class="normal"><a href="#__codelineno-0-361">361</a></span>
-<span class="normal"><a href="#__codelineno-0-362">362</a></span>
-<span class="normal"><a href="#__codelineno-0-363">363</a></span>
-<span class="normal"><a href="#__codelineno-0-364">364</a></span>
-<span class="normal"><a href="#__codelineno-0-365">365</a></span>
-<span class="normal"><a href="#__codelineno-0-366">366</a></span>
-<span class="normal"><a href="#__codelineno-0-367">367</a></span>
-<span class="normal"><a href="#__codelineno-0-368">368</a></span>
-<span class="normal"><a href="#__codelineno-0-369">369</a></span>
-<span class="normal"><a href="#__codelineno-0-370">370</a></span>
-<span class="normal"><a href="#__codelineno-0-371">371</a></span>
-<span class="normal"><a href="#__codelineno-0-372">372</a></span>
-<span class="normal"><a href="#__codelineno-0-373">373</a></span>
-<span class="normal"><a href="#__codelineno-0-374">374</a></span>
-<span class="normal"><a href="#__codelineno-0-375">375</a></span>
-<span class="normal"><a href="#__codelineno-0-376">376</a></span>
-<span class="normal"><a href="#__codelineno-0-377">377</a></span>
-<span class="normal"><a href="#__codelineno-0-378">378</a></span>
-<span class="normal"><a href="#__codelineno-0-379">379</a></span>
-<span class="normal"><a href="#__codelineno-0-380">380</a></span>
-<span class="normal"><a href="#__codelineno-0-381">381</a></span>
-<span class="normal"><a href="#__codelineno-0-382">382</a></span>
-<span class="normal"><a href="#__codelineno-0-383">383</a></span>
-<span class="normal"><a href="#__codelineno-0-384">384</a></span>
-<span class="normal"><a href="#__codelineno-0-385">385</a></span>
-<span class="normal"><a href="#__codelineno-0-386">386</a></span>
-<span class="normal"><a href="#__codelineno-0-387">387</a></span>
-<span class="normal"><a href="#__codelineno-0-388">388</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-388">388</a></span>
 <span class="normal"><a href="#__codelineno-0-389">389</a></span>
 <span class="normal"><a href="#__codelineno-0-390">390</a></span>
 <span class="normal"><a href="#__codelineno-0-391">391</a></span>
@@ -29962,187 +30019,228 @@ asset directly.</p>
 <span class="normal"><a href="#__codelineno-0-524">524</a></span>
 <span class="normal"><a href="#__codelineno-0-525">525</a></span>
 <span class="normal"><a href="#__codelineno-0-526">526</a></span>
-<span class="normal"><a href="#__codelineno-0-527">527</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-347" name="__codelineno-0-347"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_cache_path</span><span class="p">(</span>
-<a id="__codelineno-0-348" name="__codelineno-0-348"></a>    <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-349" name="__codelineno-0-349"></a>    <span class="n">qualified_name</span><span class="p">:</span> <span class="s2">&quot;AssetId&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-350" name="__codelineno-0-350"></a>    <span class="o">*</span><span class="p">,</span>
-<a id="__codelineno-0-351" name="__codelineno-0-351"></a>    <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-352" name="__codelineno-0-352"></a>    <span class="n">transfer_options</span><span class="p">:</span> <span class="n">TransferOptions</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-353" name="__codelineno-0-353"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
-<a id="__codelineno-0-354" name="__codelineno-0-354"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-355" name="__codelineno-0-355"></a><span class="sd">    Get the filesystem path where the asset is cached.</span>
-<a id="__codelineno-0-356" name="__codelineno-0-356"></a>
-<a id="__codelineno-0-357" name="__codelineno-0-357"></a><span class="sd">    Ensures the asset is fetched and cached to disk in its original format,</span>
-<a id="__codelineno-0-358" name="__codelineno-0-358"></a><span class="sd">    then returns the path. This allows kernel subprocesses to load the</span>
-<a id="__codelineno-0-359" name="__codelineno-0-359"></a><span class="sd">    asset directly.</span>
-<a id="__codelineno-0-360" name="__codelineno-0-360"></a>
-<a id="__codelineno-0-361" name="__codelineno-0-361"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-362" name="__codelineno-0-362"></a><span class="sd">        qualified_name: Type-tagged artifact format &lt;type&gt;base64_id&lt;/type&gt;</span>
-<a id="__codelineno-0-363" name="__codelineno-0-363"></a><span class="sd">                      Examples: &lt;blob&gt;id&lt;/blob&gt;, &lt;sql&gt;id&lt;/sql&gt;</span>
-<a id="__codelineno-0-364" name="__codelineno-0-364"></a>
-<a id="__codelineno-0-365" name="__codelineno-0-365"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-366" name="__codelineno-0-366"></a><span class="sd">        Path to the cached file</span>
-<a id="__codelineno-0-367" name="__codelineno-0-367"></a>
-<a id="__codelineno-0-368" name="__codelineno-0-368"></a><span class="sd">    Raises:</span>
-<a id="__codelineno-0-369" name="__codelineno-0-369"></a><span class="sd">        ValueError: If not in tagged format, unsupported type, or artifact not found</span>
-<a id="__codelineno-0-370" name="__codelineno-0-370"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-371" name="__codelineno-0-371"></a>    <span class="c1"># Extract artifact type and ID from tagged format</span>
-<a id="__codelineno-0-372" name="__codelineno-0-372"></a>    <span class="n">artifact_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^&lt;(\w+)&gt;([^&lt;&gt;]+)&lt;/\1&gt;$&quot;</span><span class="p">,</span> <span class="n">qualified_name</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
-<a id="__codelineno-0-373" name="__codelineno-0-373"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">artifact_match</span><span class="p">:</span>
-<a id="__codelineno-0-374" name="__codelineno-0-374"></a>        <span class="c1"># Fallback: accept unclosed tags like &quot;&lt;blob&gt;id&quot; (LLM sometimes omits closing tag)</span>
-<a id="__codelineno-0-375" name="__codelineno-0-375"></a>        <span class="n">artifact_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^&lt;(\w+)&gt;([^&lt;&gt;]+)$&quot;</span><span class="p">,</span> <span class="n">qualified_name</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
-<a id="__codelineno-0-376" name="__codelineno-0-376"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">artifact_match</span><span class="p">:</span>
-<a id="__codelineno-0-377" name="__codelineno-0-377"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-<a id="__codelineno-0-378" name="__codelineno-0-378"></a>            <span class="s2">&quot;Invalid artifact format - expected &lt;type&gt;id&lt;/type&gt;. &quot;</span>
-<a id="__codelineno-0-379" name="__codelineno-0-379"></a>            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_asset_tag_guidance</span><span class="p">()</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">agent_guidance</span><span class="o">.</span><span class="n">DISCOVER_DATA</span><span class="si">}</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-380" name="__codelineno-0-380"></a>        <span class="p">)</span>
-<a id="__codelineno-0-381" name="__codelineno-0-381"></a>
-<a id="__codelineno-0-382" name="__codelineno-0-382"></a>    <span class="n">artifact_type</span> <span class="o">=</span> <span class="n">artifact_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a>    <span class="n">artifact_id</span> <span class="o">=</span> <span class="n">artifact_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
-<a id="__codelineno-0-384" name="__codelineno-0-384"></a>    <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a>    <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a>    <span class="n">generation_scoped</span> <span class="o">=</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;blob&quot;</span> <span class="ow">and</span> <span class="n">artifact_id</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;catalog-v1:&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-387" name="__codelineno-0-387"></a>
-<a id="__codelineno-0-388" name="__codelineno-0-388"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">cache_was_invalidated</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<a id="__codelineno-0-389" name="__codelineno-0-389"></a>        <span class="k">return</span> <span class="n">full_cache_generation</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="ow">or</span> <span class="p">(</span>
-<a id="__codelineno-0-390" name="__codelineno-0-390"></a>            <span class="n">generation_scoped</span> <span class="ow">and</span> <span class="n">cache_generation</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
-<a id="__codelineno-0-391" name="__codelineno-0-391"></a>        <span class="p">)</span>
-<a id="__codelineno-0-392" name="__codelineno-0-392"></a>
-<a id="__codelineno-0-393" name="__codelineno-0-393"></a>    <span class="n">display_id</span> <span class="o">=</span> <span class="n">sanitize_uri_for_display</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span> <span class="k">if</span> <span class="s2">&quot;://&quot;</span> <span class="ow">in</span> <span class="n">artifact_id</span> <span class="k">else</span> <span class="n">artifact_id</span>
-<a id="__codelineno-0-394" name="__codelineno-0-394"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Resolving </span><span class="si">%s</span><span class="s2"> artifact: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">artifact_type</span><span class="p">,</span> <span class="n">display_id</span><span class="p">)</span>
-<a id="__codelineno-0-395" name="__codelineno-0-395"></a>
-<a id="__codelineno-0-396" name="__codelineno-0-396"></a>    <span class="c1"># Check if already cached (use artifact_id as cache key). A concurrent</span>
-<a id="__codelineno-0-397" name="__codelineno-0-397"></a>    <span class="c1"># authorization refresh invalidates catalog entries; retry once against</span>
-<a id="__codelineno-0-398" name="__codelineno-0-398"></a>    <span class="c1"># the new generation, then fall through to a fresh resolution.</span>
-<a id="__codelineno-0-399" name="__codelineno-0-399"></a>    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
-<a id="__codelineno-0-400" name="__codelineno-0-400"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
-<a id="__codelineno-0-401" name="__codelineno-0-401"></a>        <span class="k">if</span> <span class="n">cache_path</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
-<a id="__codelineno-0-402" name="__codelineno-0-402"></a>            <span class="k">break</span>
-<a id="__codelineno-0-403" name="__codelineno-0-403"></a>        <span class="n">validated_cache_path</span> <span class="o">=</span> <span class="n">cache_path</span>
-<a id="__codelineno-0-404" name="__codelineno-0-404"></a>        <span class="n">options</span> <span class="o">=</span> <span class="n">transfer_options</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_transfer_options</span>
+<span class="normal"><a href="#__codelineno-0-527">527</a></span>
+<span class="normal"><a href="#__codelineno-0-528">528</a></span>
+<span class="normal"><a href="#__codelineno-0-529">529</a></span>
+<span class="normal"><a href="#__codelineno-0-530">530</a></span>
+<span class="normal"><a href="#__codelineno-0-531">531</a></span>
+<span class="normal"><a href="#__codelineno-0-532">532</a></span>
+<span class="normal"><a href="#__codelineno-0-533">533</a></span>
+<span class="normal"><a href="#__codelineno-0-534">534</a></span>
+<span class="normal"><a href="#__codelineno-0-535">535</a></span>
+<span class="normal"><a href="#__codelineno-0-536">536</a></span>
+<span class="normal"><a href="#__codelineno-0-537">537</a></span>
+<span class="normal"><a href="#__codelineno-0-538">538</a></span>
+<span class="normal"><a href="#__codelineno-0-539">539</a></span>
+<span class="normal"><a href="#__codelineno-0-540">540</a></span>
+<span class="normal"><a href="#__codelineno-0-541">541</a></span>
+<span class="normal"><a href="#__codelineno-0-542">542</a></span>
+<span class="normal"><a href="#__codelineno-0-543">543</a></span>
+<span class="normal"><a href="#__codelineno-0-544">544</a></span>
+<span class="normal"><a href="#__codelineno-0-545">545</a></span>
+<span class="normal"><a href="#__codelineno-0-546">546</a></span>
+<span class="normal"><a href="#__codelineno-0-547">547</a></span>
+<span class="normal"><a href="#__codelineno-0-548">548</a></span>
+<span class="normal"><a href="#__codelineno-0-549">549</a></span>
+<span class="normal"><a href="#__codelineno-0-550">550</a></span>
+<span class="normal"><a href="#__codelineno-0-551">551</a></span>
+<span class="normal"><a href="#__codelineno-0-552">552</a></span>
+<span class="normal"><a href="#__codelineno-0-553">553</a></span>
+<span class="normal"><a href="#__codelineno-0-554">554</a></span>
+<span class="normal"><a href="#__codelineno-0-555">555</a></span>
+<span class="normal"><a href="#__codelineno-0-556">556</a></span>
+<span class="normal"><a href="#__codelineno-0-557">557</a></span>
+<span class="normal"><a href="#__codelineno-0-558">558</a></span>
+<span class="normal"><a href="#__codelineno-0-559">559</a></span>
+<span class="normal"><a href="#__codelineno-0-560">560</a></span>
+<span class="normal"><a href="#__codelineno-0-561">561</a></span>
+<span class="normal"><a href="#__codelineno-0-562">562</a></span>
+<span class="normal"><a href="#__codelineno-0-563">563</a></span>
+<span class="normal"><a href="#__codelineno-0-564">564</a></span>
+<span class="normal"><a href="#__codelineno-0-565">565</a></span>
+<span class="normal"><a href="#__codelineno-0-566">566</a></span>
+<span class="normal"><a href="#__codelineno-0-567">567</a></span>
+<span class="normal"><a href="#__codelineno-0-568">568</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-388" name="__codelineno-0-388"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_cache_path</span><span class="p">(</span>
+<a id="__codelineno-0-389" name="__codelineno-0-389"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-390" name="__codelineno-0-390"></a>    <span class="n">qualified_name</span><span class="p">:</span> <span class="s2">&quot;AssetId&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-391" name="__codelineno-0-391"></a>    <span class="o">*</span><span class="p">,</span>
+<a id="__codelineno-0-392" name="__codelineno-0-392"></a>    <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-393" name="__codelineno-0-393"></a>    <span class="n">transfer_options</span><span class="p">:</span> <span class="n">TransferOptions</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-394" name="__codelineno-0-394"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<a id="__codelineno-0-395" name="__codelineno-0-395"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-396" name="__codelineno-0-396"></a><span class="sd">    Get the filesystem path where the asset is cached.</span>
+<a id="__codelineno-0-397" name="__codelineno-0-397"></a>
+<a id="__codelineno-0-398" name="__codelineno-0-398"></a><span class="sd">    Ensures the asset is fetched and cached to disk in its original format,</span>
+<a id="__codelineno-0-399" name="__codelineno-0-399"></a><span class="sd">    then returns the path. This allows kernel subprocesses to load the</span>
+<a id="__codelineno-0-400" name="__codelineno-0-400"></a><span class="sd">    asset directly.</span>
+<a id="__codelineno-0-401" name="__codelineno-0-401"></a>
+<a id="__codelineno-0-402" name="__codelineno-0-402"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-403" name="__codelineno-0-403"></a><span class="sd">        qualified_name: Type-tagged artifact format &lt;type&gt;base64_id&lt;/type&gt;</span>
+<a id="__codelineno-0-404" name="__codelineno-0-404"></a><span class="sd">                      Examples: &lt;blob&gt;id&lt;/blob&gt;, &lt;sql&gt;id&lt;/sql&gt;</span>
 <a id="__codelineno-0-405" name="__codelineno-0-405"></a>
-<a id="__codelineno-0-406" name="__codelineno-0-406"></a>        <span class="k">if</span> <span class="n">generation_scoped</span><span class="p">:</span>
-<a id="__codelineno-0-407" name="__codelineno-0-407"></a>            <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-408" name="__codelineno-0-408"></a>                <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_blob_url_from_artifact_id</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
-<a id="__codelineno-0-409" name="__codelineno-0-409"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
-<a id="__codelineno-0-410" name="__codelineno-0-410"></a>                <span class="k">if</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
-<a id="__codelineno-0-411" name="__codelineno-0-411"></a>                    <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
-<a id="__codelineno-0-412" name="__codelineno-0-412"></a>                    <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
-<a id="__codelineno-0-413" name="__codelineno-0-413"></a>                    <span class="k">continue</span>
-<a id="__codelineno-0-414" name="__codelineno-0-414"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="p">(</span><span class="n">ArtifactNotFoundError</span><span class="p">,</span> <span class="n">PermissionDeniedError</span><span class="p">,</span> <span class="ne">PermissionError</span><span class="p">)):</span>
-<a id="__codelineno-0-415" name="__codelineno-0-415"></a>                    <span class="k">raise</span>
-<a id="__codelineno-0-416" name="__codelineno-0-416"></a>                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span> <span class="o">==</span> <span class="n">validated_cache_path</span><span class="p">:</span>
-<a id="__codelineno-0-417" name="__codelineno-0-417"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-<a id="__codelineno-0-418" name="__codelineno-0-418"></a>                <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-419" name="__codelineno-0-419"></a>                    <span class="n">validated_cache_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-0-420" name="__codelineno-0-420"></a>                <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
-<a id="__codelineno-0-421" name="__codelineno-0-421"></a>                    <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
-<a id="__codelineno-0-422" name="__codelineno-0-422"></a>                        <span class="s2">&quot;Failed to remove unauthorized catalog cache entry </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-423" name="__codelineno-0-423"></a>                        <span class="n">validated_cache_path</span><span class="p">,</span>
-<a id="__codelineno-0-424" name="__codelineno-0-424"></a>                        <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-<a id="__codelineno-0-425" name="__codelineno-0-425"></a>                    <span class="p">)</span>
-<a id="__codelineno-0-426" name="__codelineno-0-426"></a>                <span class="k">raise</span>
-<a id="__codelineno-0-427" name="__codelineno-0-427"></a>
-<a id="__codelineno-0-428" name="__codelineno-0-428"></a>        <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">validate_cached_file</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
-<a id="__codelineno-0-429" name="__codelineno-0-429"></a>            <span class="n">check_transfer_cancelled</span><span class="p">(</span><span class="n">options</span><span class="p">,</span> <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span> <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">))</span>
-<a id="__codelineno-0-430" name="__codelineno-0-430"></a>            <span class="n">cache_file</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span>
-<a id="__codelineno-0-431" name="__codelineno-0-431"></a>                <span class="k">lambda</span><span class="p">:</span> <span class="n">_open_cached_file_no_follow</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-432" name="__codelineno-0-432"></a>                <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
-<a id="__codelineno-0-433" name="__codelineno-0-433"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-434" name="__codelineno-0-434"></a>                <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-435" name="__codelineno-0-435"></a>            <span class="p">)</span>
-<a id="__codelineno-0-436" name="__codelineno-0-436"></a>            <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-437" name="__codelineno-0-437"></a>                <span class="n">file_stat</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span>
-<a id="__codelineno-0-438" name="__codelineno-0-438"></a>                    <span class="k">lambda</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">fstat</span><span class="p">(</span><span class="n">cache_file</span><span class="o">.</span><span class="n">fileno</span><span class="p">()),</span>
-<a id="__codelineno-0-439" name="__codelineno-0-439"></a>                    <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
-<a id="__codelineno-0-440" name="__codelineno-0-440"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-441" name="__codelineno-0-441"></a>                    <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-442" name="__codelineno-0-442"></a>                <span class="p">)</span>
-<a id="__codelineno-0-443" name="__codelineno-0-443"></a>                <span class="n">check_transfer_size</span><span class="p">(</span>
-<a id="__codelineno-0-444" name="__codelineno-0-444"></a>                    <span class="n">file_stat</span><span class="o">.</span><span class="n">st_size</span><span class="p">,</span>
-<a id="__codelineno-0-445" name="__codelineno-0-445"></a>                    <span class="n">options</span><span class="p">,</span>
-<a id="__codelineno-0-446" name="__codelineno-0-446"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-447" name="__codelineno-0-447"></a>                    <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-448" name="__codelineno-0-448"></a>                <span class="p">)</span>
-<a id="__codelineno-0-449" name="__codelineno-0-449"></a>                <span class="k">if</span> <span class="n">options</span><span class="o">.</span><span class="n">expected_sha256</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-450" name="__codelineno-0-450"></a>                    <span class="k">await</span> <span class="n">hash_file</span><span class="p">(</span>
-<a id="__codelineno-0-451" name="__codelineno-0-451"></a>                        <span class="n">cache_file</span><span class="p">,</span>
-<a id="__codelineno-0-452" name="__codelineno-0-452"></a>                        <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
-<a id="__codelineno-0-453" name="__codelineno-0-453"></a>                        <span class="n">context</span><span class="o">=</span><span class="n">context</span> <span class="ow">or</span> <span class="n">RequestContext</span><span class="p">(),</span>
-<a id="__codelineno-0-454" name="__codelineno-0-454"></a>                        <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-455" name="__codelineno-0-455"></a>                        <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-456" name="__codelineno-0-456"></a>                    <span class="p">)</span>
-<a id="__codelineno-0-457" name="__codelineno-0-457"></a>                <span class="k">return</span> <span class="n">file_stat</span><span class="o">.</span><span class="n">st_dev</span><span class="p">,</span> <span class="n">file_stat</span><span class="o">.</span><span class="n">st_ino</span>
-<a id="__codelineno-0-458" name="__codelineno-0-458"></a>            <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-459" name="__codelineno-0-459"></a>                <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span><span class="n">cache_file</span><span class="o">.</span><span class="n">close</span><span class="p">)</span>
-<a id="__codelineno-0-460" name="__codelineno-0-460"></a>
-<a id="__codelineno-0-461" name="__codelineno-0-461"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-462" name="__codelineno-0-462"></a>            <span class="k">await</span> <span class="n">await_transfer</span><span class="p">(</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a>                <span class="n">validate_cached_file</span><span class="p">(),</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a>                <span class="n">options</span><span class="p">,</span>
-<a id="__codelineno-0-465" name="__codelineno-0-465"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-466" name="__codelineno-0-466"></a>                <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
-<a id="__codelineno-0-467" name="__codelineno-0-467"></a>            <span class="p">)</span>
-<a id="__codelineno-0-468" name="__codelineno-0-468"></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-<a id="__codelineno-0-469" name="__codelineno-0-469"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
-<a id="__codelineno-0-470" name="__codelineno-0-470"></a>                <span class="k">raise</span>
-<a id="__codelineno-0-471" name="__codelineno-0-471"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-472" name="__codelineno-0-472"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
-<a id="__codelineno-0-473" name="__codelineno-0-473"></a>                <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Asset already cached: </span><span class="si">{</span><span class="n">cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-474" name="__codelineno-0-474"></a>                <span class="k">return</span> <span class="n">cache_path</span>
-<a id="__codelineno-0-475" name="__codelineno-0-475"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_validated_cache_entry</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">validated_cache_path</span><span class="p">)</span>
-<a id="__codelineno-0-476" name="__codelineno-0-476"></a>        <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
-<a id="__codelineno-0-477" name="__codelineno-0-477"></a>        <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
-<a id="__codelineno-0-478" name="__codelineno-0-478"></a>
-<a id="__codelineno-0-479" name="__codelineno-0-479"></a>    <span class="k">for</span> <span class="n">fetch_attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
-<a id="__codelineno-0-480" name="__codelineno-0-480"></a>        <span class="c1"># Route to appropriate resolver based on artifact type</span>
-<a id="__codelineno-0-481" name="__codelineno-0-481"></a>        <span class="k">if</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;blob&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-482" name="__codelineno-0-482"></a>            <span class="n">resource_url</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_blob_url_from_artifact_id</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
-<a id="__codelineno-0-483" name="__codelineno-0-483"></a>        <span class="k">elif</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;local&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-484" name="__codelineno-0-484"></a>            <span class="c1"># Local artifacts: the artifact_id is the file path itself</span>
-<a id="__codelineno-0-485" name="__codelineno-0-485"></a>            <span class="n">resource_url</span> <span class="o">=</span> <span class="n">artifact_id</span>
-<a id="__codelineno-0-486" name="__codelineno-0-486"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-487" name="__codelineno-0-487"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported artifact type: </span><span class="si">{</span><span class="n">artifact_type</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_asset_tag_guidance</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-488" name="__codelineno-0-488"></a>
-<a id="__codelineno-0-489" name="__codelineno-0-489"></a>        <span class="c1"># Fetch and cache the asset</span>
-<a id="__codelineno-0-490" name="__codelineno-0-490"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Fetching and caching </span><span class="si">{</span><span class="n">artifact_type</span><span class="si">}</span><span class="s2"> asset&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-491" name="__codelineno-0-491"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cache_file_path</span><span class="p">(</span>
-<a id="__codelineno-0-492" name="__codelineno-0-492"></a>            <span class="n">resource_url</span><span class="p">,</span>
-<a id="__codelineno-0-493" name="__codelineno-0-493"></a>            <span class="n">cache_salt</span><span class="o">=</span><span class="p">(</span>
-<a id="__codelineno-0-494" name="__codelineno-0-494"></a>                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">full_cache_generation</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">cache_generation</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">generation_scoped</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
-<a id="__codelineno-0-495" name="__codelineno-0-495"></a>                <span class="k">if</span> <span class="n">full_cache_generation</span> <span class="ow">or</span> <span class="n">generation_scoped</span>
-<a id="__codelineno-0-496" name="__codelineno-0-496"></a>                <span class="k">else</span> <span class="kc">None</span>
-<a id="__codelineno-0-497" name="__codelineno-0-497"></a>            <span class="p">),</span>
-<a id="__codelineno-0-498" name="__codelineno-0-498"></a>        <span class="p">)</span>
-<a id="__codelineno-0-499" name="__codelineno-0-499"></a>
-<a id="__codelineno-0-500" name="__codelineno-0-500"></a>        <span class="c1"># Stream asset directly to file to avoid loading into memory</span>
-<a id="__codelineno-0-501" name="__codelineno-0-501"></a>        <span class="n">bytes_written</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fetch_asset_to_file</span><span class="p">(</span>
-<a id="__codelineno-0-502" name="__codelineno-0-502"></a>            <span class="n">resource_url</span><span class="p">,</span>
-<a id="__codelineno-0-503" name="__codelineno-0-503"></a>            <span class="n">cache_path</span><span class="p">,</span>
-<a id="__codelineno-0-504" name="__codelineno-0-504"></a>            <span class="n">context</span><span class="o">=</span><span class="n">context</span><span class="p">,</span>
-<a id="__codelineno-0-505" name="__codelineno-0-505"></a>            <span class="n">transfer_options</span><span class="o">=</span><span class="n">transfer_options</span><span class="p">,</span>
-<a id="__codelineno-0-506" name="__codelineno-0-506"></a>            <span class="n">trusted_catalog_reference</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_catalog_managed_revision_access</span> <span class="ow">and</span> <span class="n">generation_scoped</span><span class="p">,</span>
-<a id="__codelineno-0-507" name="__codelineno-0-507"></a>        <span class="p">)</span>
-<a id="__codelineno-0-508" name="__codelineno-0-508"></a>
-<a id="__codelineno-0-509" name="__codelineno-0-509"></a>        <span class="k">if</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
-<a id="__codelineno-0-510" name="__codelineno-0-510"></a>            <span class="n">cache_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-<a id="__codelineno-0-511" name="__codelineno-0-511"></a>            <span class="k">if</span> <span class="n">fetch_attempt</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
-<a id="__codelineno-0-512" name="__codelineno-0-512"></a>                <span class="k">raise</span> <span class="n">BackendUnavailableError</span><span class="p">(</span>
-<a id="__codelineno-0-513" name="__codelineno-0-513"></a>                    <span class="s2">&quot;Catalog authorization changed repeatedly during download.&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-514" name="__codelineno-0-514"></a>                    <span class="n">resource_id</span><span class="o">=</span><span class="n">safe_artifact_reference</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">),</span>
-<a id="__codelineno-0-515" name="__codelineno-0-515"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-516" name="__codelineno-0-516"></a>                <span class="p">)</span>
-<a id="__codelineno-0-517" name="__codelineno-0-517"></a>            <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
-<a id="__codelineno-0-518" name="__codelineno-0-518"></a>            <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
-<a id="__codelineno-0-519" name="__codelineno-0-519"></a>            <span class="k">continue</span>
-<a id="__codelineno-0-520" name="__codelineno-0-520"></a>
-<a id="__codelineno-0-521" name="__codelineno-0-521"></a>        <span class="c1"># Update index (use artifact_id as key)</span>
-<a id="__codelineno-0-522" name="__codelineno-0-522"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">[</span><span class="n">artifact_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache_path</span>
-<a id="__codelineno-0-523" name="__codelineno-0-523"></a>
-<a id="__codelineno-0-524" name="__codelineno-0-524"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cached asset to disk (</span><span class="si">{</span><span class="n">bytes_written</span><span class="si">}</span><span class="s2"> bytes)&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-525" name="__codelineno-0-525"></a>        <span class="k">return</span> <span class="n">cache_path</span>
-<a id="__codelineno-0-526" name="__codelineno-0-526"></a>
-<a id="__codelineno-0-527" name="__codelineno-0-527"></a>    <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span><span class="s2">&quot;bounded cache fetch loop exited unexpectedly&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-406" name="__codelineno-0-406"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-407" name="__codelineno-0-407"></a><span class="sd">        Path to the cached file</span>
+<a id="__codelineno-0-408" name="__codelineno-0-408"></a>
+<a id="__codelineno-0-409" name="__codelineno-0-409"></a><span class="sd">    Raises:</span>
+<a id="__codelineno-0-410" name="__codelineno-0-410"></a><span class="sd">        ValueError: If not in tagged format, unsupported type, or artifact not found</span>
+<a id="__codelineno-0-411" name="__codelineno-0-411"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-412" name="__codelineno-0-412"></a>    <span class="c1"># Extract artifact type and ID from tagged format</span>
+<a id="__codelineno-0-413" name="__codelineno-0-413"></a>    <span class="n">artifact_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^&lt;(\w+)&gt;([^&lt;&gt;]+)&lt;/\1&gt;$&quot;</span><span class="p">,</span> <span class="n">qualified_name</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+<a id="__codelineno-0-414" name="__codelineno-0-414"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">artifact_match</span><span class="p">:</span>
+<a id="__codelineno-0-415" name="__codelineno-0-415"></a>        <span class="c1"># Fallback: accept unclosed tags like &quot;&lt;blob&gt;id&quot; (LLM sometimes omits closing tag)</span>
+<a id="__codelineno-0-416" name="__codelineno-0-416"></a>        <span class="n">artifact_match</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">match</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;^&lt;(\w+)&gt;([^&lt;&gt;]+)$&quot;</span><span class="p">,</span> <span class="n">qualified_name</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+<a id="__codelineno-0-417" name="__codelineno-0-417"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">artifact_match</span><span class="p">:</span>
+<a id="__codelineno-0-418" name="__codelineno-0-418"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-419" name="__codelineno-0-419"></a>            <span class="s2">&quot;Invalid artifact format - expected &lt;type&gt;id&lt;/type&gt;. &quot;</span>
+<a id="__codelineno-0-420" name="__codelineno-0-420"></a>            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_asset_tag_guidance</span><span class="p">()</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">agent_guidance</span><span class="o">.</span><span class="n">DISCOVER_DATA</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-421" name="__codelineno-0-421"></a>        <span class="p">)</span>
+<a id="__codelineno-0-422" name="__codelineno-0-422"></a>
+<a id="__codelineno-0-423" name="__codelineno-0-423"></a>    <span class="n">artifact_type</span> <span class="o">=</span> <span class="n">artifact_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-0-424" name="__codelineno-0-424"></a>    <span class="n">artifact_id</span> <span class="o">=</span> <span class="n">artifact_match</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+<a id="__codelineno-0-425" name="__codelineno-0-425"></a>    <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
+<a id="__codelineno-0-426" name="__codelineno-0-426"></a>    <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
+<a id="__codelineno-0-427" name="__codelineno-0-427"></a>    <span class="n">generation_scoped</span> <span class="o">=</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;blob&quot;</span> <span class="ow">and</span> <span class="n">artifact_id</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;catalog-v1:&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-428" name="__codelineno-0-428"></a>
+<a id="__codelineno-0-429" name="__codelineno-0-429"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">cache_was_invalidated</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-0-430" name="__codelineno-0-430"></a>        <span class="k">return</span> <span class="n">full_cache_generation</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="ow">or</span> <span class="p">(</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a>            <span class="n">generation_scoped</span> <span class="ow">and</span> <span class="n">cache_generation</span> <span class="o">!=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a>        <span class="p">)</span>
+<a id="__codelineno-0-433" name="__codelineno-0-433"></a>
+<a id="__codelineno-0-434" name="__codelineno-0-434"></a>    <span class="n">display_id</span> <span class="o">=</span> <span class="n">sanitize_uri_for_display</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span> <span class="k">if</span> <span class="s2">&quot;://&quot;</span> <span class="ow">in</span> <span class="n">artifact_id</span> <span class="k">else</span> <span class="n">artifact_id</span>
+<a id="__codelineno-0-435" name="__codelineno-0-435"></a>    <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Resolving </span><span class="si">%s</span><span class="s2"> artifact: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">artifact_type</span><span class="p">,</span> <span class="n">display_id</span><span class="p">)</span>
+<a id="__codelineno-0-436" name="__codelineno-0-436"></a>
+<a id="__codelineno-0-437" name="__codelineno-0-437"></a>    <span class="c1"># Check if already cached (use artifact_id as cache key). A concurrent</span>
+<a id="__codelineno-0-438" name="__codelineno-0-438"></a>    <span class="c1"># authorization refresh invalidates catalog entries; retry once against</span>
+<a id="__codelineno-0-439" name="__codelineno-0-439"></a>    <span class="c1"># the new generation, then fall through to a fresh resolution.</span>
+<a id="__codelineno-0-440" name="__codelineno-0-440"></a>    <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
+<a id="__codelineno-0-441" name="__codelineno-0-441"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
+<a id="__codelineno-0-442" name="__codelineno-0-442"></a>        <span class="k">if</span> <span class="n">cache_path</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+<a id="__codelineno-0-443" name="__codelineno-0-443"></a>            <span class="k">break</span>
+<a id="__codelineno-0-444" name="__codelineno-0-444"></a>        <span class="n">validated_cache_path</span> <span class="o">=</span> <span class="n">cache_path</span>
+<a id="__codelineno-0-445" name="__codelineno-0-445"></a>        <span class="n">options</span> <span class="o">=</span> <span class="n">transfer_options</span> <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_transfer_options</span>
+<a id="__codelineno-0-446" name="__codelineno-0-446"></a>
+<a id="__codelineno-0-447" name="__codelineno-0-447"></a>        <span class="k">if</span> <span class="n">generation_scoped</span><span class="p">:</span>
+<a id="__codelineno-0-448" name="__codelineno-0-448"></a>            <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-449" name="__codelineno-0-449"></a>                <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_blob_url_from_artifact_id</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
+<a id="__codelineno-0-450" name="__codelineno-0-450"></a>            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+<a id="__codelineno-0-451" name="__codelineno-0-451"></a>                <span class="k">if</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
+<a id="__codelineno-0-452" name="__codelineno-0-452"></a>                    <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
+<a id="__codelineno-0-453" name="__codelineno-0-453"></a>                    <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
+<a id="__codelineno-0-454" name="__codelineno-0-454"></a>                    <span class="k">continue</span>
+<a id="__codelineno-0-455" name="__codelineno-0-455"></a>                <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="p">(</span><span class="n">ArtifactNotFoundError</span><span class="p">,</span> <span class="n">PermissionDeniedError</span><span class="p">,</span> <span class="ne">PermissionError</span><span class="p">)):</span>
+<a id="__codelineno-0-456" name="__codelineno-0-456"></a>                    <span class="k">raise</span>
+<a id="__codelineno-0-457" name="__codelineno-0-457"></a>                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span> <span class="o">==</span> <span class="n">validated_cache_path</span><span class="p">:</span>
+<a id="__codelineno-0-458" name="__codelineno-0-458"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-459" name="__codelineno-0-459"></a>                <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-460" name="__codelineno-0-460"></a>                    <span class="n">validated_cache_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-461" name="__codelineno-0-461"></a>                <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+<a id="__codelineno-0-462" name="__codelineno-0-462"></a>                    <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span>
+<a id="__codelineno-0-463" name="__codelineno-0-463"></a>                        <span class="s2">&quot;Failed to remove unauthorized catalog cache entry </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-464" name="__codelineno-0-464"></a>                        <span class="n">validated_cache_path</span><span class="p">,</span>
+<a id="__codelineno-0-465" name="__codelineno-0-465"></a>                        <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-466" name="__codelineno-0-466"></a>                    <span class="p">)</span>
+<a id="__codelineno-0-467" name="__codelineno-0-467"></a>                <span class="k">raise</span>
+<a id="__codelineno-0-468" name="__codelineno-0-468"></a>
+<a id="__codelineno-0-469" name="__codelineno-0-469"></a>        <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">validate_cached_file</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">]:</span>
+<a id="__codelineno-0-470" name="__codelineno-0-470"></a>            <span class="n">check_transfer_cancelled</span><span class="p">(</span><span class="n">options</span><span class="p">,</span> <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span> <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">))</span>
+<a id="__codelineno-0-471" name="__codelineno-0-471"></a>            <span class="n">cache_file</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span>
+<a id="__codelineno-0-472" name="__codelineno-0-472"></a>                <span class="k">lambda</span><span class="p">:</span> <span class="n">_open_cached_file_no_follow</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-473" name="__codelineno-0-473"></a>                <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
+<a id="__codelineno-0-474" name="__codelineno-0-474"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-475" name="__codelineno-0-475"></a>                <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-476" name="__codelineno-0-476"></a>            <span class="p">)</span>
+<a id="__codelineno-0-477" name="__codelineno-0-477"></a>            <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-478" name="__codelineno-0-478"></a>                <span class="n">file_stat</span> <span class="o">=</span> <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span>
+<a id="__codelineno-0-479" name="__codelineno-0-479"></a>                    <span class="k">lambda</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">fstat</span><span class="p">(</span><span class="n">cache_file</span><span class="o">.</span><span class="n">fileno</span><span class="p">()),</span>
+<a id="__codelineno-0-480" name="__codelineno-0-480"></a>                    <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
+<a id="__codelineno-0-481" name="__codelineno-0-481"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-482" name="__codelineno-0-482"></a>                    <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-483" name="__codelineno-0-483"></a>                <span class="p">)</span>
+<a id="__codelineno-0-484" name="__codelineno-0-484"></a>                <span class="n">check_transfer_size</span><span class="p">(</span>
+<a id="__codelineno-0-485" name="__codelineno-0-485"></a>                    <span class="n">file_stat</span><span class="o">.</span><span class="n">st_size</span><span class="p">,</span>
+<a id="__codelineno-0-486" name="__codelineno-0-486"></a>                    <span class="n">options</span><span class="p">,</span>
+<a id="__codelineno-0-487" name="__codelineno-0-487"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-488" name="__codelineno-0-488"></a>                    <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-489" name="__codelineno-0-489"></a>                <span class="p">)</span>
+<a id="__codelineno-0-490" name="__codelineno-0-490"></a>                <span class="k">if</span> <span class="n">options</span><span class="o">.</span><span class="n">expected_sha256</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-491" name="__codelineno-0-491"></a>                    <span class="k">await</span> <span class="n">hash_file</span><span class="p">(</span>
+<a id="__codelineno-0-492" name="__codelineno-0-492"></a>                        <span class="n">cache_file</span><span class="p">,</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a>                        <span class="n">options</span><span class="o">=</span><span class="n">options</span><span class="p">,</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a>                        <span class="n">context</span><span class="o">=</span><span class="n">context</span> <span class="ow">or</span> <span class="n">RequestContext</span><span class="p">(),</span>
+<a id="__codelineno-0-495" name="__codelineno-0-495"></a>                        <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-496" name="__codelineno-0-496"></a>                        <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-497" name="__codelineno-0-497"></a>                    <span class="p">)</span>
+<a id="__codelineno-0-498" name="__codelineno-0-498"></a>                <span class="k">return</span> <span class="n">file_stat</span><span class="o">.</span><span class="n">st_dev</span><span class="p">,</span> <span class="n">file_stat</span><span class="o">.</span><span class="n">st_ino</span>
+<a id="__codelineno-0-499" name="__codelineno-0-499"></a>            <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-500" name="__codelineno-0-500"></a>                <span class="k">await</span> <span class="n">_run_blocking_io</span><span class="p">(</span><span class="n">cache_file</span><span class="o">.</span><span class="n">close</span><span class="p">)</span>
+<a id="__codelineno-0-501" name="__codelineno-0-501"></a>
+<a id="__codelineno-0-502" name="__codelineno-0-502"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-503" name="__codelineno-0-503"></a>            <span class="k">await</span> <span class="n">await_transfer</span><span class="p">(</span>
+<a id="__codelineno-0-504" name="__codelineno-0-504"></a>                <span class="n">validate_cached_file</span><span class="p">(),</span>
+<a id="__codelineno-0-505" name="__codelineno-0-505"></a>                <span class="n">options</span><span class="p">,</span>
+<a id="__codelineno-0-506" name="__codelineno-0-506"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-507" name="__codelineno-0-507"></a>                <span class="n">resource</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">validated_cache_path</span><span class="p">),</span>
+<a id="__codelineno-0-508" name="__codelineno-0-508"></a>            <span class="p">)</span>
+<a id="__codelineno-0-509" name="__codelineno-0-509"></a>        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+<a id="__codelineno-0-510" name="__codelineno-0-510"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
+<a id="__codelineno-0-511" name="__codelineno-0-511"></a>                <span class="k">raise</span>
+<a id="__codelineno-0-512" name="__codelineno-0-512"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-513" name="__codelineno-0-513"></a>            <span class="k">if</span> <span class="ow">not</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
+<a id="__codelineno-0-514" name="__codelineno-0-514"></a>                <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Asset already cached: </span><span class="si">{</span><span class="n">cache_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-515" name="__codelineno-0-515"></a>                <span class="k">return</span> <span class="n">cache_path</span>
+<a id="__codelineno-0-516" name="__codelineno-0-516"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_validated_cache_entry</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="n">validated_cache_path</span><span class="p">)</span>
+<a id="__codelineno-0-517" name="__codelineno-0-517"></a>        <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
+<a id="__codelineno-0-518" name="__codelineno-0-518"></a>        <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
+<a id="__codelineno-0-519" name="__codelineno-0-519"></a>
+<a id="__codelineno-0-520" name="__codelineno-0-520"></a>    <span class="k">for</span> <span class="n">fetch_attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">2</span><span class="p">):</span>
+<a id="__codelineno-0-521" name="__codelineno-0-521"></a>        <span class="c1"># Route to appropriate resolver based on artifact type</span>
+<a id="__codelineno-0-522" name="__codelineno-0-522"></a>        <span class="k">if</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;blob&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-523" name="__codelineno-0-523"></a>            <span class="n">resource_url</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_blob_url_from_artifact_id</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">)</span>
+<a id="__codelineno-0-524" name="__codelineno-0-524"></a>        <span class="k">elif</span> <span class="n">artifact_type</span> <span class="o">==</span> <span class="s2">&quot;local&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-525" name="__codelineno-0-525"></a>            <span class="c1"># Local artifacts: the artifact_id is the file path itself</span>
+<a id="__codelineno-0-526" name="__codelineno-0-526"></a>            <span class="n">resource_url</span> <span class="o">=</span> <span class="n">artifact_id</span>
+<a id="__codelineno-0-527" name="__codelineno-0-527"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-528" name="__codelineno-0-528"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported artifact type: </span><span class="si">{</span><span class="n">artifact_type</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">_asset_tag_guidance</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-529" name="__codelineno-0-529"></a>
+<a id="__codelineno-0-530" name="__codelineno-0-530"></a>        <span class="c1"># Fetch and cache the asset</span>
+<a id="__codelineno-0-531" name="__codelineno-0-531"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Fetching and caching </span><span class="si">{</span><span class="n">artifact_type</span><span class="si">}</span><span class="s2"> asset&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-532" name="__codelineno-0-532"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_cache_file_path</span><span class="p">(</span>
+<a id="__codelineno-0-533" name="__codelineno-0-533"></a>            <span class="n">resource_url</span><span class="p">,</span>
+<a id="__codelineno-0-534" name="__codelineno-0-534"></a>            <span class="n">cache_salt</span><span class="o">=</span><span class="p">(</span>
+<a id="__codelineno-0-535" name="__codelineno-0-535"></a>                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">full_cache_generation</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">cache_generation</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">generation_scoped</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-0-536" name="__codelineno-0-536"></a>                <span class="k">if</span> <span class="n">full_cache_generation</span> <span class="ow">or</span> <span class="n">generation_scoped</span>
+<a id="__codelineno-0-537" name="__codelineno-0-537"></a>                <span class="k">else</span> <span class="kc">None</span>
+<a id="__codelineno-0-538" name="__codelineno-0-538"></a>            <span class="p">),</span>
+<a id="__codelineno-0-539" name="__codelineno-0-539"></a>        <span class="p">)</span>
+<a id="__codelineno-0-540" name="__codelineno-0-540"></a>
+<a id="__codelineno-0-541" name="__codelineno-0-541"></a>        <span class="c1"># Stream asset directly to file to avoid loading into memory</span>
+<a id="__codelineno-0-542" name="__codelineno-0-542"></a>        <span class="n">bytes_written</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fetch_asset_to_file</span><span class="p">(</span>
+<a id="__codelineno-0-543" name="__codelineno-0-543"></a>            <span class="n">resource_url</span><span class="p">,</span>
+<a id="__codelineno-0-544" name="__codelineno-0-544"></a>            <span class="n">cache_path</span><span class="p">,</span>
+<a id="__codelineno-0-545" name="__codelineno-0-545"></a>            <span class="n">context</span><span class="o">=</span><span class="n">context</span><span class="p">,</span>
+<a id="__codelineno-0-546" name="__codelineno-0-546"></a>            <span class="n">transfer_options</span><span class="o">=</span><span class="n">transfer_options</span><span class="p">,</span>
+<a id="__codelineno-0-547" name="__codelineno-0-547"></a>            <span class="n">trusted_catalog_reference</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_catalog_managed_revision_access</span> <span class="ow">and</span> <span class="n">generation_scoped</span><span class="p">,</span>
+<a id="__codelineno-0-548" name="__codelineno-0-548"></a>        <span class="p">)</span>
+<a id="__codelineno-0-549" name="__codelineno-0-549"></a>
+<a id="__codelineno-0-550" name="__codelineno-0-550"></a>        <span class="k">if</span> <span class="n">cache_was_invalidated</span><span class="p">():</span>
+<a id="__codelineno-0-551" name="__codelineno-0-551"></a>            <span class="n">cache_path</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">missing_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<a id="__codelineno-0-552" name="__codelineno-0-552"></a>            <span class="k">if</span> <span class="n">fetch_attempt</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+<a id="__codelineno-0-553" name="__codelineno-0-553"></a>                <span class="k">raise</span> <span class="n">BackendUnavailableError</span><span class="p">(</span>
+<a id="__codelineno-0-554" name="__codelineno-0-554"></a>                    <span class="s2">&quot;Catalog authorization changed repeatedly during download.&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-555" name="__codelineno-0-555"></a>                    <span class="n">resource_id</span><span class="o">=</span><span class="n">safe_artifact_reference</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">),</span>
+<a id="__codelineno-0-556" name="__codelineno-0-556"></a>                    <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;download&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-557" name="__codelineno-0-557"></a>                <span class="p">)</span>
+<a id="__codelineno-0-558" name="__codelineno-0-558"></a>            <span class="n">cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span>
+<a id="__codelineno-0-559" name="__codelineno-0-559"></a>            <span class="n">full_cache_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span>
+<a id="__codelineno-0-560" name="__codelineno-0-560"></a>            <span class="k">continue</span>
+<a id="__codelineno-0-561" name="__codelineno-0-561"></a>
+<a id="__codelineno-0-562" name="__codelineno-0-562"></a>        <span class="c1"># Update index (use artifact_id as key)</span>
+<a id="__codelineno-0-563" name="__codelineno-0-563"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">[</span><span class="n">artifact_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache_path</span>
+<a id="__codelineno-0-564" name="__codelineno-0-564"></a>
+<a id="__codelineno-0-565" name="__codelineno-0-565"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cached asset to disk (</span><span class="si">{</span><span class="n">bytes_written</span><span class="si">}</span><span class="s2"> bytes)&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-566" name="__codelineno-0-566"></a>        <span class="k">return</span> <span class="n">cache_path</span>
+<a id="__codelineno-0-567" name="__codelineno-0-567"></a>
+<a id="__codelineno-0-568" name="__codelineno-0-568"></a>    <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span><span class="s2">&quot;bounded cache fetch loop exited unexpectedly&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30219,49 +30317,49 @@ asset directly.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-704">704</a></span>
-<span class="normal"><a href="#__codelineno-0-705">705</a></span>
-<span class="normal"><a href="#__codelineno-0-706">706</a></span>
-<span class="normal"><a href="#__codelineno-0-707">707</a></span>
-<span class="normal"><a href="#__codelineno-0-708">708</a></span>
-<span class="normal"><a href="#__codelineno-0-709">709</a></span>
-<span class="normal"><a href="#__codelineno-0-710">710</a></span>
-<span class="normal"><a href="#__codelineno-0-711">711</a></span>
-<span class="normal"><a href="#__codelineno-0-712">712</a></span>
-<span class="normal"><a href="#__codelineno-0-713">713</a></span>
-<span class="normal"><a href="#__codelineno-0-714">714</a></span>
-<span class="normal"><a href="#__codelineno-0-715">715</a></span>
-<span class="normal"><a href="#__codelineno-0-716">716</a></span>
-<span class="normal"><a href="#__codelineno-0-717">717</a></span>
-<span class="normal"><a href="#__codelineno-0-718">718</a></span>
-<span class="normal"><a href="#__codelineno-0-719">719</a></span>
-<span class="normal"><a href="#__codelineno-0-720">720</a></span>
-<span class="normal"><a href="#__codelineno-0-721">721</a></span>
-<span class="normal"><a href="#__codelineno-0-722">722</a></span>
-<span class="normal"><a href="#__codelineno-0-723">723</a></span>
-<span class="normal"><a href="#__codelineno-0-724">724</a></span>
-<span class="normal"><a href="#__codelineno-0-725">725</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-704" name="__codelineno-0-704"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_asset_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qualified_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
-<a id="__codelineno-0-705" name="__codelineno-0-705"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-706" name="__codelineno-0-706"></a><span class="sd">    Get information about a cached asset.</span>
-<a id="__codelineno-0-707" name="__codelineno-0-707"></a>
-<a id="__codelineno-0-708" name="__codelineno-0-708"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-709" name="__codelineno-0-709"></a><span class="sd">        qualified_name: Asset identifier</span>
-<a id="__codelineno-0-710" name="__codelineno-0-710"></a>
-<a id="__codelineno-0-711" name="__codelineno-0-711"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-712" name="__codelineno-0-712"></a><span class="sd">        Dict with asset metadata</span>
-<a id="__codelineno-0-713" name="__codelineno-0-713"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-714" name="__codelineno-0-714"></a>    <span class="n">info</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-0-715" name="__codelineno-0-715"></a>        <span class="s2">&quot;qualified_name&quot;</span><span class="p">:</span> <span class="n">safe_artifact_reference</span><span class="p">(</span><span class="n">qualified_name</span><span class="p">),</span>
-<a id="__codelineno-0-716" name="__codelineno-0-716"></a>        <span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="n">qualified_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">,</span>
-<a id="__codelineno-0-717" name="__codelineno-0-717"></a>    <span class="p">}</span>
-<a id="__codelineno-0-718" name="__codelineno-0-718"></a>
-<a id="__codelineno-0-719" name="__codelineno-0-719"></a>    <span class="k">if</span> <span class="n">qualified_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">:</span>
-<a id="__codelineno-0-720" name="__codelineno-0-720"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">[</span><span class="n">qualified_name</span><span class="p">]</span>
-<a id="__codelineno-0-721" name="__codelineno-0-721"></a>        <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
-<a id="__codelineno-0-722" name="__codelineno-0-722"></a>            <span class="n">info</span><span class="p">[</span><span class="s2">&quot;size_bytes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
-<a id="__codelineno-0-723" name="__codelineno-0-723"></a>            <span class="n">info</span><span class="p">[</span><span class="s2">&quot;cache_location&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
-<a id="__codelineno-0-724" name="__codelineno-0-724"></a>
-<a id="__codelineno-0-725" name="__codelineno-0-725"></a>    <span class="k">return</span> <span class="n">info</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-745">745</a></span>
+<span class="normal"><a href="#__codelineno-0-746">746</a></span>
+<span class="normal"><a href="#__codelineno-0-747">747</a></span>
+<span class="normal"><a href="#__codelineno-0-748">748</a></span>
+<span class="normal"><a href="#__codelineno-0-749">749</a></span>
+<span class="normal"><a href="#__codelineno-0-750">750</a></span>
+<span class="normal"><a href="#__codelineno-0-751">751</a></span>
+<span class="normal"><a href="#__codelineno-0-752">752</a></span>
+<span class="normal"><a href="#__codelineno-0-753">753</a></span>
+<span class="normal"><a href="#__codelineno-0-754">754</a></span>
+<span class="normal"><a href="#__codelineno-0-755">755</a></span>
+<span class="normal"><a href="#__codelineno-0-756">756</a></span>
+<span class="normal"><a href="#__codelineno-0-757">757</a></span>
+<span class="normal"><a href="#__codelineno-0-758">758</a></span>
+<span class="normal"><a href="#__codelineno-0-759">759</a></span>
+<span class="normal"><a href="#__codelineno-0-760">760</a></span>
+<span class="normal"><a href="#__codelineno-0-761">761</a></span>
+<span class="normal"><a href="#__codelineno-0-762">762</a></span>
+<span class="normal"><a href="#__codelineno-0-763">763</a></span>
+<span class="normal"><a href="#__codelineno-0-764">764</a></span>
+<span class="normal"><a href="#__codelineno-0-765">765</a></span>
+<span class="normal"><a href="#__codelineno-0-766">766</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-745" name="__codelineno-0-745"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_asset_info</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">qualified_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+<a id="__codelineno-0-746" name="__codelineno-0-746"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-747" name="__codelineno-0-747"></a><span class="sd">    Get information about a cached asset.</span>
+<a id="__codelineno-0-748" name="__codelineno-0-748"></a>
+<a id="__codelineno-0-749" name="__codelineno-0-749"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-750" name="__codelineno-0-750"></a><span class="sd">        qualified_name: Asset identifier</span>
+<a id="__codelineno-0-751" name="__codelineno-0-751"></a>
+<a id="__codelineno-0-752" name="__codelineno-0-752"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-753" name="__codelineno-0-753"></a><span class="sd">        Dict with asset metadata</span>
+<a id="__codelineno-0-754" name="__codelineno-0-754"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-755" name="__codelineno-0-755"></a>    <span class="n">info</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-0-756" name="__codelineno-0-756"></a>        <span class="s2">&quot;qualified_name&quot;</span><span class="p">:</span> <span class="n">safe_artifact_reference</span><span class="p">(</span><span class="n">qualified_name</span><span class="p">),</span>
+<a id="__codelineno-0-757" name="__codelineno-0-757"></a>        <span class="s2">&quot;cached&quot;</span><span class="p">:</span> <span class="n">qualified_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">,</span>
+<a id="__codelineno-0-758" name="__codelineno-0-758"></a>    <span class="p">}</span>
+<a id="__codelineno-0-759" name="__codelineno-0-759"></a>
+<a id="__codelineno-0-760" name="__codelineno-0-760"></a>    <span class="k">if</span> <span class="n">qualified_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">:</span>
+<a id="__codelineno-0-761" name="__codelineno-0-761"></a>        <span class="n">cache_path</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="p">[</span><span class="n">qualified_name</span><span class="p">]</span>
+<a id="__codelineno-0-762" name="__codelineno-0-762"></a>        <span class="k">if</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+<a id="__codelineno-0-763" name="__codelineno-0-763"></a>            <span class="n">info</span><span class="p">[</span><span class="s2">&quot;size_bytes&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">cache_path</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span><span class="o">.</span><span class="n">st_size</span>
+<a id="__codelineno-0-764" name="__codelineno-0-764"></a>            <span class="n">info</span><span class="p">[</span><span class="s2">&quot;cache_location&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">cache_path</span><span class="p">)</span>
+<a id="__codelineno-0-765" name="__codelineno-0-765"></a>
+<a id="__codelineno-0-766" name="__codelineno-0-766"></a>    <span class="k">return</span> <span class="n">info</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30307,21 +30405,21 @@ asset directly.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-727">727</a></span>
-<span class="normal"><a href="#__codelineno-0-728">728</a></span>
-<span class="normal"><a href="#__codelineno-0-729">729</a></span>
-<span class="normal"><a href="#__codelineno-0-730">730</a></span>
-<span class="normal"><a href="#__codelineno-0-731">731</a></span>
-<span class="normal"><a href="#__codelineno-0-732">732</a></span>
-<span class="normal"><a href="#__codelineno-0-733">733</a></span>
-<span class="normal"><a href="#__codelineno-0-734">734</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-727" name="__codelineno-0-727"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_available</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
-<a id="__codelineno-0-728" name="__codelineno-0-728"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-729" name="__codelineno-0-729"></a><span class="sd">    List assets available in this session&#39;s cache.</span>
-<a id="__codelineno-0-730" name="__codelineno-0-730"></a>
-<a id="__codelineno-0-731" name="__codelineno-0-731"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-732" name="__codelineno-0-732"></a><span class="sd">        List of qualified names currently cached</span>
-<a id="__codelineno-0-733" name="__codelineno-0-733"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-734" name="__codelineno-0-734"></a>    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-768">768</a></span>
+<span class="normal"><a href="#__codelineno-0-769">769</a></span>
+<span class="normal"><a href="#__codelineno-0-770">770</a></span>
+<span class="normal"><a href="#__codelineno-0-771">771</a></span>
+<span class="normal"><a href="#__codelineno-0-772">772</a></span>
+<span class="normal"><a href="#__codelineno-0-773">773</a></span>
+<span class="normal"><a href="#__codelineno-0-774">774</a></span>
+<span class="normal"><a href="#__codelineno-0-775">775</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-768" name="__codelineno-0-768"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_available</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<a id="__codelineno-0-769" name="__codelineno-0-769"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-770" name="__codelineno-0-770"></a><span class="sd">    List assets available in this session&#39;s cache.</span>
+<a id="__codelineno-0-771" name="__codelineno-0-771"></a>
+<a id="__codelineno-0-772" name="__codelineno-0-772"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-773" name="__codelineno-0-773"></a><span class="sd">        List of qualified names currently cached</span>
+<a id="__codelineno-0-774" name="__codelineno-0-774"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-775" name="__codelineno-0-775"></a>    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30348,41 +30446,41 @@ returned path.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-736">736</a></span>
-<span class="normal"><a href="#__codelineno-0-737">737</a></span>
-<span class="normal"><a href="#__codelineno-0-738">738</a></span>
-<span class="normal"><a href="#__codelineno-0-739">739</a></span>
-<span class="normal"><a href="#__codelineno-0-740">740</a></span>
-<span class="normal"><a href="#__codelineno-0-741">741</a></span>
-<span class="normal"><a href="#__codelineno-0-742">742</a></span>
-<span class="normal"><a href="#__codelineno-0-743">743</a></span>
-<span class="normal"><a href="#__codelineno-0-744">744</a></span>
-<span class="normal"><a href="#__codelineno-0-745">745</a></span>
-<span class="normal"><a href="#__codelineno-0-746">746</a></span>
-<span class="normal"><a href="#__codelineno-0-747">747</a></span>
-<span class="normal"><a href="#__codelineno-0-748">748</a></span>
-<span class="normal"><a href="#__codelineno-0-749">749</a></span>
-<span class="normal"><a href="#__codelineno-0-750">750</a></span>
-<span class="normal"><a href="#__codelineno-0-751">751</a></span>
-<span class="normal"><a href="#__codelineno-0-752">752</a></span>
-<span class="normal"><a href="#__codelineno-0-753">753</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-736" name="__codelineno-0-736"></a><span class="k">def</span><span class="w"> </span><span class="nf">invalidate_cache_entries</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">artifact_id_prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-737" name="__codelineno-0-737"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Forget cached artifacts matching a resolver namespace.</span>
-<a id="__codelineno-0-738" name="__codelineno-0-738"></a>
-<a id="__codelineno-0-739" name="__codelineno-0-739"></a><span class="sd">    Entries are removed from the index so a subsequent lookup must pass</span>
-<a id="__codelineno-0-740" name="__codelineno-0-740"></a><span class="sd">    through resolution and authorization again. Their files remain until</span>
-<a id="__codelineno-0-741" name="__codelineno-0-741"></a><span class="sd">    session cleanup because a kernel may still be opening a previously</span>
-<a id="__codelineno-0-742" name="__codelineno-0-742"></a><span class="sd">    returned path.</span>
-<a id="__codelineno-0-743" name="__codelineno-0-743"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-744" name="__codelineno-0-744"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span> <span class="o">+=</span> <span class="mi">1</span>
-<a id="__codelineno-0-745" name="__codelineno-0-745"></a>    <span class="k">if</span> <span class="n">artifact_id_prefix</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-746" name="__codelineno-0-746"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="o">+=</span> <span class="mi">1</span>
-<a id="__codelineno-0-747" name="__codelineno-0-747"></a>    <span class="n">keys</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-748" name="__codelineno-0-748"></a>        <span class="n">artifact_id</span>
-<a id="__codelineno-0-749" name="__codelineno-0-749"></a>        <span class="k">for</span> <span class="n">artifact_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span>
-<a id="__codelineno-0-750" name="__codelineno-0-750"></a>        <span class="k">if</span> <span class="n">artifact_id_prefix</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">artifact_id</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">artifact_id_prefix</span><span class="p">)</span>
-<a id="__codelineno-0-751" name="__codelineno-0-751"></a>    <span class="p">]</span>
-<a id="__codelineno-0-752" name="__codelineno-0-752"></a>    <span class="k">for</span> <span class="n">artifact_id</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
-<a id="__codelineno-0-753" name="__codelineno-0-753"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-777">777</a></span>
+<span class="normal"><a href="#__codelineno-0-778">778</a></span>
+<span class="normal"><a href="#__codelineno-0-779">779</a></span>
+<span class="normal"><a href="#__codelineno-0-780">780</a></span>
+<span class="normal"><a href="#__codelineno-0-781">781</a></span>
+<span class="normal"><a href="#__codelineno-0-782">782</a></span>
+<span class="normal"><a href="#__codelineno-0-783">783</a></span>
+<span class="normal"><a href="#__codelineno-0-784">784</a></span>
+<span class="normal"><a href="#__codelineno-0-785">785</a></span>
+<span class="normal"><a href="#__codelineno-0-786">786</a></span>
+<span class="normal"><a href="#__codelineno-0-787">787</a></span>
+<span class="normal"><a href="#__codelineno-0-788">788</a></span>
+<span class="normal"><a href="#__codelineno-0-789">789</a></span>
+<span class="normal"><a href="#__codelineno-0-790">790</a></span>
+<span class="normal"><a href="#__codelineno-0-791">791</a></span>
+<span class="normal"><a href="#__codelineno-0-792">792</a></span>
+<span class="normal"><a href="#__codelineno-0-793">793</a></span>
+<span class="normal"><a href="#__codelineno-0-794">794</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-777" name="__codelineno-0-777"></a><span class="k">def</span><span class="w"> </span><span class="nf">invalidate_cache_entries</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">artifact_id_prefix</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-778" name="__codelineno-0-778"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Forget cached artifacts matching a resolver namespace.</span>
+<a id="__codelineno-0-779" name="__codelineno-0-779"></a>
+<a id="__codelineno-0-780" name="__codelineno-0-780"></a><span class="sd">    Entries are removed from the index so a subsequent lookup must pass</span>
+<a id="__codelineno-0-781" name="__codelineno-0-781"></a><span class="sd">    through resolution and authorization again. Their files remain until</span>
+<a id="__codelineno-0-782" name="__codelineno-0-782"></a><span class="sd">    session cleanup because a kernel may still be opening a previously</span>
+<a id="__codelineno-0-783" name="__codelineno-0-783"></a><span class="sd">    returned path.</span>
+<a id="__codelineno-0-784" name="__codelineno-0-784"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-785" name="__codelineno-0-785"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_generation</span> <span class="o">+=</span> <span class="mi">1</span>
+<a id="__codelineno-0-786" name="__codelineno-0-786"></a>    <span class="k">if</span> <span class="n">artifact_id_prefix</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-787" name="__codelineno-0-787"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_full_cache_generation</span> <span class="o">+=</span> <span class="mi">1</span>
+<a id="__codelineno-0-788" name="__codelineno-0-788"></a>    <span class="n">keys</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-789" name="__codelineno-0-789"></a>        <span class="n">artifact_id</span>
+<a id="__codelineno-0-790" name="__codelineno-0-790"></a>        <span class="k">for</span> <span class="n">artifact_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span>
+<a id="__codelineno-0-791" name="__codelineno-0-791"></a>        <span class="k">if</span> <span class="n">artifact_id_prefix</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">artifact_id</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">artifact_id_prefix</span><span class="p">)</span>
+<a id="__codelineno-0-792" name="__codelineno-0-792"></a>    <span class="p">]</span>
+<a id="__codelineno-0-793" name="__codelineno-0-793"></a>    <span class="k">for</span> <span class="n">artifact_id</span> <span class="ow">in</span> <span class="n">keys</span><span class="p">:</span>
+<a id="__codelineno-0-794" name="__codelineno-0-794"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">artifact_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30414,67 +30512,67 @@ leaks the on-disk cache directory.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-755">755</a></span>
-<span class="normal"><a href="#__codelineno-0-756">756</a></span>
-<span class="normal"><a href="#__codelineno-0-757">757</a></span>
-<span class="normal"><a href="#__codelineno-0-758">758</a></span>
-<span class="normal"><a href="#__codelineno-0-759">759</a></span>
-<span class="normal"><a href="#__codelineno-0-760">760</a></span>
-<span class="normal"><a href="#__codelineno-0-761">761</a></span>
-<span class="normal"><a href="#__codelineno-0-762">762</a></span>
-<span class="normal"><a href="#__codelineno-0-763">763</a></span>
-<span class="normal"><a href="#__codelineno-0-764">764</a></span>
-<span class="normal"><a href="#__codelineno-0-765">765</a></span>
-<span class="normal"><a href="#__codelineno-0-766">766</a></span>
-<span class="normal"><a href="#__codelineno-0-767">767</a></span>
-<span class="normal"><a href="#__codelineno-0-768">768</a></span>
-<span class="normal"><a href="#__codelineno-0-769">769</a></span>
-<span class="normal"><a href="#__codelineno-0-770">770</a></span>
-<span class="normal"><a href="#__codelineno-0-771">771</a></span>
-<span class="normal"><a href="#__codelineno-0-772">772</a></span>
-<span class="normal"><a href="#__codelineno-0-773">773</a></span>
-<span class="normal"><a href="#__codelineno-0-774">774</a></span>
-<span class="normal"><a href="#__codelineno-0-775">775</a></span>
-<span class="normal"><a href="#__codelineno-0-776">776</a></span>
-<span class="normal"><a href="#__codelineno-0-777">777</a></span>
-<span class="normal"><a href="#__codelineno-0-778">778</a></span>
-<span class="normal"><a href="#__codelineno-0-779">779</a></span>
-<span class="normal"><a href="#__codelineno-0-780">780</a></span>
-<span class="normal"><a href="#__codelineno-0-781">781</a></span>
-<span class="normal"><a href="#__codelineno-0-782">782</a></span>
-<span class="normal"><a href="#__codelineno-0-783">783</a></span>
-<span class="normal"><a href="#__codelineno-0-784">784</a></span>
-<span class="normal"><a href="#__codelineno-0-785">785</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-755" name="__codelineno-0-755"></a><span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-756" name="__codelineno-0-756"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-757" name="__codelineno-0-757"></a><span class="sd">    Clean up cache directory, credentials, and resources.</span>
-<a id="__codelineno-0-758" name="__codelineno-0-758"></a>
-<a id="__codelineno-0-759" name="__codelineno-0-759"></a><span class="sd">    Removes the temporary cache directory if it was created by this manager.</span>
-<a id="__codelineno-0-760" name="__codelineno-0-760"></a><span class="sd">    Call this when the session is ending to free up disk space.</span>
-<a id="__codelineno-0-761" name="__codelineno-0-761"></a>
-<a id="__codelineno-0-762" name="__codelineno-0-762"></a><span class="sd">    The cache directory removal (and index clearing) always completes</span>
-<a id="__codelineno-0-763" name="__codelineno-0-763"></a><span class="sd">    synchronously before this method returns — it does not depend on an</span>
-<a id="__codelineno-0-764" name="__codelineno-0-764"></a><span class="sd">    event loop draining a deferred task. Only the inherently-async</span>
-<a id="__codelineno-0-765" name="__codelineno-0-765"></a><span class="sd">    resource closes (fetchers, resolver, owned credential) are deferred</span>
-<a id="__codelineno-0-766" name="__codelineno-0-766"></a><span class="sd">    as a task when a loop is already running; that task is returned so a</span>
-<a id="__codelineno-0-767" name="__codelineno-0-767"></a><span class="sd">    caller (e.g. ``__del__``) can retain or await it, but losing it never</span>
-<a id="__codelineno-0-768" name="__codelineno-0-768"></a><span class="sd">    leaks the on-disk cache directory.</span>
-<a id="__codelineno-0-769" name="__codelineno-0-769"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-770" name="__codelineno-0-770"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
-<a id="__codelineno-0-771" name="__codelineno-0-771"></a>
-<a id="__codelineno-0-772" name="__codelineno-0-772"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-773" name="__codelineno-0-773"></a>        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
-<a id="__codelineno-0-774" name="__codelineno-0-774"></a>    <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
-<a id="__codelineno-0-775" name="__codelineno-0-775"></a>        <span class="n">loop</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-776" name="__codelineno-0-776"></a>
-<a id="__codelineno-0-777" name="__codelineno-0-777"></a>    <span class="n">task</span><span class="p">:</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-778" name="__codelineno-0-778"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-779" name="__codelineno-0-779"></a>        <span class="k">if</span> <span class="n">loop</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-780" name="__codelineno-0-780"></a>            <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">())</span>
-<a id="__codelineno-0-781" name="__codelineno-0-781"></a>        <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-782" name="__codelineno-0-782"></a>            <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">())</span>
-<a id="__codelineno-0-783" name="__codelineno-0-783"></a>    <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-784" name="__codelineno-0-784"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_cache_dir</span><span class="p">()</span>
-<a id="__codelineno-0-785" name="__codelineno-0-785"></a>    <span class="k">return</span> <span class="n">task</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-796">796</a></span>
+<span class="normal"><a href="#__codelineno-0-797">797</a></span>
+<span class="normal"><a href="#__codelineno-0-798">798</a></span>
+<span class="normal"><a href="#__codelineno-0-799">799</a></span>
+<span class="normal"><a href="#__codelineno-0-800">800</a></span>
+<span class="normal"><a href="#__codelineno-0-801">801</a></span>
+<span class="normal"><a href="#__codelineno-0-802">802</a></span>
+<span class="normal"><a href="#__codelineno-0-803">803</a></span>
+<span class="normal"><a href="#__codelineno-0-804">804</a></span>
+<span class="normal"><a href="#__codelineno-0-805">805</a></span>
+<span class="normal"><a href="#__codelineno-0-806">806</a></span>
+<span class="normal"><a href="#__codelineno-0-807">807</a></span>
+<span class="normal"><a href="#__codelineno-0-808">808</a></span>
+<span class="normal"><a href="#__codelineno-0-809">809</a></span>
+<span class="normal"><a href="#__codelineno-0-810">810</a></span>
+<span class="normal"><a href="#__codelineno-0-811">811</a></span>
+<span class="normal"><a href="#__codelineno-0-812">812</a></span>
+<span class="normal"><a href="#__codelineno-0-813">813</a></span>
+<span class="normal"><a href="#__codelineno-0-814">814</a></span>
+<span class="normal"><a href="#__codelineno-0-815">815</a></span>
+<span class="normal"><a href="#__codelineno-0-816">816</a></span>
+<span class="normal"><a href="#__codelineno-0-817">817</a></span>
+<span class="normal"><a href="#__codelineno-0-818">818</a></span>
+<span class="normal"><a href="#__codelineno-0-819">819</a></span>
+<span class="normal"><a href="#__codelineno-0-820">820</a></span>
+<span class="normal"><a href="#__codelineno-0-821">821</a></span>
+<span class="normal"><a href="#__codelineno-0-822">822</a></span>
+<span class="normal"><a href="#__codelineno-0-823">823</a></span>
+<span class="normal"><a href="#__codelineno-0-824">824</a></span>
+<span class="normal"><a href="#__codelineno-0-825">825</a></span>
+<span class="normal"><a href="#__codelineno-0-826">826</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-796" name="__codelineno-0-796"></a><span class="k">def</span><span class="w"> </span><span class="nf">cleanup</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-797" name="__codelineno-0-797"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-798" name="__codelineno-0-798"></a><span class="sd">    Clean up cache directory, credentials, and resources.</span>
+<a id="__codelineno-0-799" name="__codelineno-0-799"></a>
+<a id="__codelineno-0-800" name="__codelineno-0-800"></a><span class="sd">    Removes the temporary cache directory if it was created by this manager.</span>
+<a id="__codelineno-0-801" name="__codelineno-0-801"></a><span class="sd">    Call this when the session is ending to free up disk space.</span>
+<a id="__codelineno-0-802" name="__codelineno-0-802"></a>
+<a id="__codelineno-0-803" name="__codelineno-0-803"></a><span class="sd">    The cache directory removal (and index clearing) always completes</span>
+<a id="__codelineno-0-804" name="__codelineno-0-804"></a><span class="sd">    synchronously before this method returns — it does not depend on an</span>
+<a id="__codelineno-0-805" name="__codelineno-0-805"></a><span class="sd">    event loop draining a deferred task. Only the inherently-async</span>
+<a id="__codelineno-0-806" name="__codelineno-0-806"></a><span class="sd">    resource closes (fetchers, resolver, owned credential) are deferred</span>
+<a id="__codelineno-0-807" name="__codelineno-0-807"></a><span class="sd">    as a task when a loop is already running; that task is returned so a</span>
+<a id="__codelineno-0-808" name="__codelineno-0-808"></a><span class="sd">    caller (e.g. ``__del__``) can retain or await it, but losing it never</span>
+<a id="__codelineno-0-809" name="__codelineno-0-809"></a><span class="sd">    leaks the on-disk cache directory.</span>
+<a id="__codelineno-0-810" name="__codelineno-0-810"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-811" name="__codelineno-0-811"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+<a id="__codelineno-0-812" name="__codelineno-0-812"></a>
+<a id="__codelineno-0-813" name="__codelineno-0-813"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-814" name="__codelineno-0-814"></a>        <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+<a id="__codelineno-0-815" name="__codelineno-0-815"></a>    <span class="k">except</span> <span class="ne">RuntimeError</span><span class="p">:</span>
+<a id="__codelineno-0-816" name="__codelineno-0-816"></a>        <span class="n">loop</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-817" name="__codelineno-0-817"></a>
+<a id="__codelineno-0-818" name="__codelineno-0-818"></a>    <span class="n">task</span><span class="p">:</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Task</span><span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-819" name="__codelineno-0-819"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-820" name="__codelineno-0-820"></a>        <span class="k">if</span> <span class="n">loop</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-821" name="__codelineno-0-821"></a>            <span class="n">task</span> <span class="o">=</span> <span class="n">loop</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">())</span>
+<a id="__codelineno-0-822" name="__codelineno-0-822"></a>        <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-823" name="__codelineno-0-823"></a>            <span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">())</span>
+<a id="__codelineno-0-824" name="__codelineno-0-824"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-825" name="__codelineno-0-825"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_cache_dir</span><span class="p">()</span>
+<a id="__codelineno-0-826" name="__codelineno-0-826"></a>    <span class="k">return</span> <span class="n">task</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30501,19 +30599,19 @@ leaks the on-disk cache directory.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-787">787</a></span>
-<span class="normal"><a href="#__codelineno-0-788">788</a></span>
-<span class="normal"><a href="#__codelineno-0-789">789</a></span>
-<span class="normal"><a href="#__codelineno-0-790">790</a></span>
-<span class="normal"><a href="#__codelineno-0-791">791</a></span>
-<span class="normal"><a href="#__codelineno-0-792">792</a></span>
-<span class="normal"><a href="#__codelineno-0-793">793</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-787" name="__codelineno-0-787"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">aclose</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-788" name="__codelineno-0-788"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Async cleanup — preferred over sync cleanup() when inside an event loop.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-789" name="__codelineno-0-789"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
-<a id="__codelineno-0-790" name="__codelineno-0-790"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-791" name="__codelineno-0-791"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">()</span>
-<a id="__codelineno-0-792" name="__codelineno-0-792"></a>    <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-793" name="__codelineno-0-793"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_cache_dir</span><span class="p">()</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-828">828</a></span>
+<span class="normal"><a href="#__codelineno-0-829">829</a></span>
+<span class="normal"><a href="#__codelineno-0-830">830</a></span>
+<span class="normal"><a href="#__codelineno-0-831">831</a></span>
+<span class="normal"><a href="#__codelineno-0-832">832</a></span>
+<span class="normal"><a href="#__codelineno-0-833">833</a></span>
+<span class="normal"><a href="#__codelineno-0-834">834</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-828" name="__codelineno-0-828"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">aclose</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-829" name="__codelineno-0-829"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Async cleanup — preferred over sync cleanup() when inside an event loop.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-830" name="__codelineno-0-830"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_cache_index</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+<a id="__codelineno-0-831" name="__codelineno-0-831"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-832" name="__codelineno-0-832"></a>        <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_aclose_async_resources</span><span class="p">()</span>
+<a id="__codelineno-0-833" name="__codelineno-0-833"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-834" name="__codelineno-0-834"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_remove_cache_dir</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -30536,17 +30634,17 @@ leaks the on-disk cache directory.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/data_access/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-837">837</a></span>
-<span class="normal"><a href="#__codelineno-0-838">838</a></span>
-<span class="normal"><a href="#__codelineno-0-839">839</a></span>
-<span class="normal"><a href="#__codelineno-0-840">840</a></span>
-<span class="normal"><a href="#__codelineno-0-841">841</a></span>
-<span class="normal"><a href="#__codelineno-0-842">842</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-837" name="__codelineno-0-837"></a><span class="k">def</span><span class="w"> </span><span class="fm">__del__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
-<a id="__codelineno-0-838" name="__codelineno-0-838"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Cleanup on garbage collection.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-839" name="__codelineno-0-839"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-840" name="__codelineno-0-840"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>
-<a id="__codelineno-0-841" name="__codelineno-0-841"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-<a id="__codelineno-0-842" name="__codelineno-0-842"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error during DataLakeDataManager cleanup: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-880">880</a></span>
+<span class="normal"><a href="#__codelineno-0-881">881</a></span>
+<span class="normal"><a href="#__codelineno-0-882">882</a></span>
+<span class="normal"><a href="#__codelineno-0-883">883</a></span>
+<span class="normal"><a href="#__codelineno-0-884">884</a></span>
+<span class="normal"><a href="#__codelineno-0-885">885</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-880" name="__codelineno-0-880"></a><span class="k">def</span><span class="w"> </span><span class="fm">__del__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<a id="__codelineno-0-881" name="__codelineno-0-881"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Cleanup on garbage collection.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-882" name="__codelineno-0-882"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-883" name="__codelineno-0-883"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">cleanup</span><span class="p">()</span>
+<a id="__codelineno-0-884" name="__codelineno-0-884"></a>    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+<a id="__codelineno-0-885" name="__codelineno-0-885"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error during DataLakeDataManager cleanup: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
