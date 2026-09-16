@@ -19,12 +19,14 @@ from .tool_registry import (
 )
 
 if TYPE_CHECKING:
-    from .catalog_integration import CatalogIntegration
+    from .catalog_integration import CatalogAwareDataManager, CatalogFetcherFactory, CatalogIntegration
+
+_CATALOG_EXPORTS = {"CatalogAwareDataManager", "CatalogFetcherFactory", "CatalogIntegration"}
 
 
 def __getattr__(name: str) -> object:
     """Load catalog integration lazily to preserve data-lake import boundaries."""
-    if name != "CatalogIntegration":
+    if name not in _CATALOG_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     value = getattr(import_module(f"{__name__}.catalog_integration"), name)
     globals()[name] = value
@@ -32,13 +34,15 @@ def __getattr__(name: str) -> object:
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | {"CatalogIntegration"})
+    return sorted(set(globals()) | _CATALOG_EXPORTS)
 
 
 __all__ = [
     "AssetSpec",
     "CodeExecutionResult",
     "CodeExecutionServer",
+    "CatalogAwareDataManager",
+    "CatalogFetcherFactory",
     "CatalogIntegration",
     "ServerConfig",
     "ServerPublisher",

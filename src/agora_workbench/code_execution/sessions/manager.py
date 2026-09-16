@@ -184,6 +184,9 @@ class SessionConfig:
                 Use it to supply a customized manager — a different credential,
                 a custom artifact resolver, extra fetchers, or configuration
                 derived from ``user_identity`` / ``user_token``.
+                When the server mounts a catalog, ``DataLakeDataManager``
+                instances are automatically bound to its caller-scoped
+                resolver through the ``CatalogAwareDataManager`` protocol.
 
                 The factory **must return a fresh data manager or
                 :class:`SessionResources` bundle per call**. The session takes

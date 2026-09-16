@@ -16,7 +16,7 @@ import shutil
 import stat
 import tempfile
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, BinaryIO, TYPE_CHECKING
@@ -313,11 +313,38 @@ class DataLakeDataManager:
                 credential=self._credential,
                 credential_init_error=self._credential_init_error,
             )
+        self._catalog_artifact_resolver: ArtifactResolver | None = None
+
+    def bind_catalog_resolver(
+        self,
+        resolver: ArtifactResolver,
+        *,
+        fetchers: Sequence[AssetFetcher] = (),
+    ) -> None:
+        """Attach a caller-scoped catalog resolver and its backend fetchers.
+
+        Catalog references are routed to *resolver* while legacy blob artifact
+        IDs continue to use the manager's existing resolver. Supplied fetchers
+        become session-owned and take priority over previously configured
+        fetchers. Ownership transfers only after this method returns
+        successfully.
+        """
+        _validate_artifact_resolver(resolver)
+        if self._catalog_artifact_resolver is not None and self._catalog_artifact_resolver is not resolver:
+            raise RuntimeError("A catalog resolver is already bound to this data manager.")
+        existing_fetchers = {id(fetcher) for fetcher in self._fetchers}
+        if len({id(fetcher) for fetcher in fetchers}) != len(fetchers):
+            raise ValueError("Catalog fetchers must be distinct instances.")
+        if any(id(fetcher) in existing_fetchers for fetcher in fetchers):
+            raise ValueError("Catalog fetchers are already registered with this data manager.")
+        self._catalog_artifact_resolver = resolver
+        self._fetchers[0:0] = list(fetchers)
 
     def _asset_tag_guidance(self) -> str:
         """Asset-tag guidance for the agent, annotated by the resolver's readiness."""
         try:
-            unavailable_reason = self._artifact_resolver.unavailable_reason
+            resolver = self._catalog_artifact_resolver or self._artifact_resolver
+            unavailable_reason = resolver.unavailable_reason
         except Exception as e:
             # This runs while building an error message; a misbehaving
             # third-party resolver must not mask the failure being reported.
@@ -342,7 +369,12 @@ class DataLakeDataManager:
         Raises:
             ValueError: If the artifact cannot be resolved or resolution is unavailable
         """
-        return await self._artifact_resolver.resolve(artifact_id)
+        resolver = (
+            self._catalog_artifact_resolver
+            if artifact_id.startswith("catalog-v1:") and self._catalog_artifact_resolver is not None
+            else self._artifact_resolver
+        )
+        return await resolver.resolve(artifact_id)
 
     async def get_cache_path(
         self,

@@ -719,6 +719,29 @@ class TestArtifactResolverInjection:
 
         assert url == "https://acct.blob.core.windows.net/c/f.csv"
 
+    @pytest.mark.asyncio
+    async def test_catalog_binding_routes_only_catalog_references_and_preserves_ownership(self):
+        fallback = _StubResolver({"legacy": "file:///legacy.csv"})
+        catalog = _StubResolver({"catalog-v1:encoded": "custom://catalog.csv"})
+        fetcher = RecordingFetcher()
+        manager = DataLakeDataManager(artifact_resolver=fallback)
+
+        manager.bind_catalog_resolver(catalog, fetchers=(fetcher,))
+
+        assert await manager._get_blob_url_from_artifact_id("legacy") == "file:///legacy.csv"
+        assert await manager._get_blob_url_from_artifact_id("catalog-v1:encoded") == "custom://catalog.csv"
+        assert manager._fetchers[0] is fetcher
+        await manager.aclose()
+        assert fallback.aclose_calls == 1
+        assert catalog.aclose_calls == 0
+
+    def test_catalog_binding_rejects_duplicate_fetchers(self):
+        manager = DataLakeDataManager(artifact_resolver=_StubResolver())
+        fetcher = RecordingFetcher()
+
+        with pytest.raises(ValueError, match="distinct"):
+            manager.bind_catalog_resolver(_StubResolver(), fetchers=(fetcher, fetcher))
+
     @pytest.mark.parametrize(
         "resolver, missing",
         [

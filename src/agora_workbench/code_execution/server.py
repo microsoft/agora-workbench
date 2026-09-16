@@ -330,9 +330,12 @@ class CodeExecutionServer(BaseMCPServer):
         def catalog_data_manager_factory(context):
             binding = self.catalog.bind_session(context, execution_references=existing_factory is None)
             custom_extensions = {}
+            catalog_fetchers = []
+            fetchers_transferred = False
             credential = None
             manager = None
             try:
+                catalog_fetchers = self.catalog.create_fetchers(context)
                 if existing_factory is None:
                     credential_factory = self.auth_config.credential_provider_factory
                     if credential_factory is not None:
@@ -346,7 +349,9 @@ class CodeExecutionServer(BaseMCPServer):
                         credential=credential,
                         credential_ownership=ResourceOwnership.BORROWED,
                         artifact_resolver=binding.resolver,
+                        extra_fetchers=catalog_fetchers,
                     )
+                    fetchers_transferred = True
 
                     def prepare_cache_invalidation(_context):
                         return lambda: manager.invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
@@ -370,12 +375,35 @@ class CodeExecutionServer(BaseMCPServer):
                             "SessionConfig.data_manager_factory extensions cannot use the reserved 'catalog' key."
                         )
                         raise collision
-                    supports_catalog_references = getattr(manager, "supports_catalog_references", None)
-                    if callable(supports_catalog_references):
-                        binding.execution_references = bool(supports_catalog_references(binding.resolver))
-                    elif getattr(manager, "_artifact_resolver", None) is binding.resolver:
+                    bind_catalog_resolver = getattr(manager, "bind_catalog_resolver", None)
+                    if callable(bind_catalog_resolver):
+                        bind_catalog_resolver(binding.resolver, fetchers=tuple(catalog_fetchers))
+                        fetchers_transferred = True
                         binding.execution_references = True
+                    elif catalog_fetchers:
+                        raise TypeError(
+                            "Catalog fetcher_factory requires a custom data manager that implements "
+                            "bind_catalog_resolver(..., fetchers=...)."
+                        )
+                    if binding.execution_references:
+                        invalidate_cache_entries = getattr(manager, "invalidate_cache_entries", None)
+                        if not callable(invalidate_cache_entries):
+                            raise TypeError(
+                                "Data managers that support catalog execution references must define "
+                                "invalidate_cache_entries()."
+                            )
+
+                        def prepare_custom_cache_invalidation(_context):
+                            def invalidate_catalog_cache() -> None:
+                                invalidate_cache_entries(artifact_id_prefix="catalog-v1:")
+
+                            return invalidate_catalog_cache
+
+                        binding.add_context_refresher(prepare_custom_cache_invalidation)
             except BaseException as exc:
+                if not fetchers_transferred:
+                    for fetcher in catalog_fetchers:
+                        binding.schedule_resource_cleanup(fetcher)
                 if existing_factory is None:
                     if manager is not None:
                         cleanup_error = self.session_manager.rollback_factory_resources(manager, {})
@@ -407,9 +435,10 @@ class CodeExecutionServer(BaseMCPServer):
 
         config = self.server_config
 
-        # Check if environment already exists
         expected_python = config.get_python_path()
-        if expected_python.exists():
+        build_marker = config.get_build_dir() / ".env_build_complete"
+        environment_complete = expected_python.exists() and (config.type != "uv" or build_marker.exists())
+        if environment_complete:
             self._python_executable = expected_python
             self._environment_ready = True
             LOGGER.info(f"Found existing environment: {self._python_executable}")
@@ -422,7 +451,7 @@ class CodeExecutionServer(BaseMCPServer):
             LOGGER.info(f"Environment built successfully: {self._python_executable}")
         else:
             raise RuntimeError(
-                f"Python environment not found at {expected_python} and auto_build is disabled. "
+                f"Python environment not found or incomplete at {expected_python} and auto_build is disabled. "
                 f"Either build the environment manually or set auto_build=True in ServerConfig."
             )
 

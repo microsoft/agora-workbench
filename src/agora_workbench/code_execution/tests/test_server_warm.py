@@ -38,6 +38,32 @@ class TestServerWarm:
         server._register_kernel.assert_awaited_once_with(kernel_name="tools-py-test_warm")
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_incomplete_uv_environment_is_rebuilt(self, tmp_path: Path):
+        build_dir = tmp_path / "uv"
+        python_path = build_dir / "bin" / "python"
+        python_path.parent.mkdir(parents=True)
+        python_path.write_text("")
+        config = ServerConfig(
+            name="incomplete",
+            description="Incomplete environment",
+            type="uv",
+            dependency_file="# empty",
+            build_dir=build_dir,
+            auto_build=True,
+        )
+        server = CodeExecutionServer(
+            server_config=config,
+            auth_config=create_noop_auth_config(),
+        )
+        server._build_environment = AsyncMock()
+
+        await server._ensure_environment()
+
+        server._build_environment.assert_awaited_once_with(config)
+        assert server._python_executable == python_path
+
+    @pytest.mark.unit
     def test_servers_use_distinct_kernel_names(self):
         alpha = _make_server("alpha")
         beta = _make_server("beta")

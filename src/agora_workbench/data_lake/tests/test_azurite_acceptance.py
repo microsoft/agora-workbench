@@ -192,13 +192,8 @@ async def test_azurite_public_catalog_mcp_execution_roundtrip(tmp_path: Path, mo
 
         monkeypatch.setattr(manager_module.tempfile, "mkdtemp", isolated_cache)
 
-        class AzuriteCatalogManager(DataLakeDataManager):
-            def supports_catalog_references(self, resolver) -> bool:
-                self._artifact_resolver = resolver
-                return True
-
         def manager_factory(_context):
-            return AzuriteCatalogManager(
+            return DataLakeDataManager(
                 extra_fetchers=[
                     BlobFetcher(
                         credential=cast(Any, credential),

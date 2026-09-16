@@ -12,7 +12,7 @@ import shutil
 import uuid
 import weakref
 from collections import deque
-from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from copy import deepcopy
 from contextlib import asynccontextmanager, contextmanager, nullcontext
 from contextvars import ContextVar, Token
@@ -20,12 +20,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Annotated, cast
+from typing import Any, Annotated, Protocol, runtime_checkable, cast
 
 from fastmcp import Context
 from pydantic import Field
 
 from agora_workbench.data_lake import (
+    ArtifactResolver,
     ArtifactNotFoundError,
     ArtifactReference,
     BackendUnavailableError,
@@ -55,6 +56,7 @@ from agora_workbench.data_lake.providers import SQLiteCatalogProvider
 from agora_workbench.data_lake.transfer import contains_artifact_locator, safe_artifact_reference
 
 from .data_access.catalog.indexer import ManifestRefreshError
+from .data_access.fetchers import AssetFetcher
 from .sessions.session import SessionContext
 
 LOGGER = logging.getLogger(__name__)
@@ -85,6 +87,28 @@ CapabilityExtensionFactory = Callable[
     [SessionContext, AuthorizedCatalogProvider, RequestContext],
     object | tuple[object, ...] | list[object] | None,
 ]
+CatalogFetcherFactory = Callable[
+    [SessionContext],
+    AssetFetcher | tuple[AssetFetcher, ...] | list[AssetFetcher] | None,
+]
+
+
+@runtime_checkable
+class CatalogAwareDataManager(Protocol):
+    """Custom session manager surface for catalog execution references."""
+
+    def bind_catalog_resolver(
+        self,
+        resolver: ArtifactResolver,
+        *,
+        fetchers: Sequence[AssetFetcher] = (),
+    ) -> None:
+        """Attach the resolver and accept fetcher ownership on successful return."""
+        ...
+
+    def invalidate_cache_entries(self, *, artifact_id_prefix: str | None = None) -> None:
+        """Invalidate cached references after authorization context changes."""
+        ...
 
 
 def _effective_source_id(source: SourceConfig) -> str:
@@ -1319,7 +1343,8 @@ class CatalogIntegration:
     Use :meth:`from_config` when the server should construct, load, and own the
     catalog. Use the constructor with a :class:`ResourceLease` to mount an
     application-created provider; borrowed providers are neither loaded nor
-    closed unless explicitly requested.
+    closed unless explicitly requested. ``fetcher_factory`` may supply fresh
+    session-owned fetchers for provider-specific storage locators.
     """
 
     def __init__(
@@ -1332,6 +1357,7 @@ class CatalogIntegration:
         per_artifact_enforcer: CatalogPolicyEnforcer | None = None,
         load_on_startup: bool | None = None,
         capability_extension_factory: CapabilityExtensionFactory | None = None,
+        fetcher_factory: CatalogFetcherFactory | None = None,
     ) -> None:
         if (authorizer is None) == (authorizer_factory is None):
             raise ValueError("Configure exactly one of authorizer or authorizer_factory.")
@@ -1342,6 +1368,7 @@ class CatalogIntegration:
         self._per_artifact_enforcer = per_artifact_enforcer
         self._load_on_startup = provider.should_close if load_on_startup is None else load_on_startup
         self._capability_extension_factory = capability_extension_factory
+        self._fetcher_factory = fetcher_factory
         self._started = False
         self._private_cache_directory: Path | None = None
         self._cleanup_tracker = _AsyncCleanupTracker()
@@ -1359,6 +1386,7 @@ class CatalogIntegration:
         policy_mode: CatalogPolicyMode = CatalogPolicyMode.HOMOGENEOUS_SOURCE,
         per_artifact_enforcer: CatalogPolicyEnforcer | None = None,
         capability_extension_factory: CapabilityExtensionFactory | None = None,
+        fetcher_factory: CatalogFetcherFactory | None = None,
         db_path: str | Path | None = None,
         credential_provider: Any = None,
     ) -> "CatalogIntegration":
@@ -1385,6 +1413,7 @@ class CatalogIntegration:
             policy_mode=policy_mode,
             per_artifact_enforcer=per_artifact_enforcer,
             capability_extension_factory=capability_extension_factory,
+            fetcher_factory=fetcher_factory,
             load_on_startup=True,
         )
         integration._private_cache_directory = private_cache_directory
@@ -1402,6 +1431,39 @@ class CatalogIntegration:
     @property
     def provider(self) -> CatalogProvider:
         return self._provider_lease.resource
+
+    def create_fetchers(self, context: SessionContext) -> list[AssetFetcher]:
+        """Create fresh session-owned fetchers for catalog storage locators."""
+        if self._fetcher_factory is None:
+            return []
+        created = self._fetcher_factory(context)
+        candidates = list(created) if isinstance(created, (tuple, list)) else ([] if created is None else [created])
+        try:
+            if not all(isinstance(fetcher, AssetFetcher) for fetcher in candidates):
+                raise TypeError("Catalog fetcher_factory must return AssetFetcher instances.")
+            if len({id(fetcher) for fetcher in candidates}) != len(candidates):
+                raise ValueError("Catalog fetcher_factory must return distinct fetcher instances.")
+            return candidates
+        except BaseException:
+            pending: list[object] = []
+            seen: set[int] = set()
+            for fetcher in candidates:
+                if id(fetcher) in seen:
+                    continue
+                if (
+                    callable(getattr(fetcher, "aclose", None))
+                    or callable(getattr(fetcher, "close", None))
+                    or callable(getattr(fetcher, "cleanup", None))
+                ):
+                    seen.add(id(fetcher))
+                    pending.append(fetcher)
+            if pending:
+
+                def cleanup() -> Any:
+                    return _close_resources(pending)
+
+                self._cleanup_tracker.schedule(cleanup(), retry=cleanup)
+            raise
 
     async def startup(self) -> None:
         """Load owned catalog state and fail atomically on error or cancellation."""
@@ -1974,6 +2036,8 @@ def register_catalog_discovery_tools(server: Any, integration: CatalogIntegratio
 
 
 __all__ = [
+    "CatalogAwareDataManager",
+    "CatalogFetcherFactory",
     "CatalogIntegration",
     "CatalogSessionBinding",
     "CatalogSessionResolver",
