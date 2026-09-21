@@ -50,7 +50,7 @@ config = RouterConfig(
 server = RouterServer(config)
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=9000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=9000))
 ```
 
 The agent sees:
@@ -163,7 +163,7 @@ config = DispatcherConfig(
 server = DispatcherServer(config)
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=9000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=9000))
 ```
 
 The agent sees a single `execute_code` tool — the dispatcher routes each call to a healthy worker transparently.

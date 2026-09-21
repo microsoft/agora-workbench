@@ -47,12 +47,19 @@ config = ServerConfig(
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=8000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=8000))
 ```
 
 This already gives the agent an `execute_myserver_code` MCP tool. The agent can
 run Python in a fresh `uv` environment and use standard-library modules without
 listing them as dependencies.
+
+!!! warning "Keep no-op authentication on loopback"
+    `create_noop_auth_config()` accepts every request without validating the caller.
+    Because this server exposes arbitrary Python execution, keep it bound to
+    `127.0.0.1` or `::1`. For remote access, configure real authentication instead.
+    Agora Workbench refuses a non-loopback bind in no-op mode unless you explicitly
+    acknowledge an external network boundary.
 
 **File layout so far:**
 
@@ -262,7 +269,7 @@ if __name__ == "__main__":
         # Pre-build the kernel environment (useful in Docker)
         asyncio.run(server.warm())
     else:
-        asyncio.run(server.run_http(host="0.0.0.0", port=8000))
+        asyncio.run(server.run_http(host="127.0.0.1", port=8000))
 ```
 
 **Final file layout:**

@@ -53,7 +53,11 @@ class TestDnsRebindingProtectionBypass:
                 mock_app.routes = []
                 mock_http_app.return_value = mock_app
 
-                await server.run_http(host="0.0.0.0", port=9999)
+                await server.run_http(
+                    host="0.0.0.0",
+                    port=9999,
+                    allow_unauthenticated_remote=True,
+                )
 
             # After run_http, settings.host should no longer be localhost
             assert _fastmcp.settings.host == "0.0.0.0"
@@ -106,7 +110,11 @@ class TestDnsRebindingProtectionBypass:
                 mock_app.routes = []
                 mock_http_app.return_value = mock_app
 
-                await server.run_http(host="0.0.0.0", port=9999)
+                await server.run_http(
+                    host="0.0.0.0",
+                    port=9999,
+                    allow_unauthenticated_remote=True,
+                )
 
             # Should not be overwritten — operator's choice is respected
             assert _fastmcp.settings.host == "10.0.0.5"

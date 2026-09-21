@@ -56,6 +56,9 @@ class TokenValidator(ABC):
         use ``AuthConfig.protected_resource_metadata``.
     """
 
+    accepts_unvalidated_tokens: bool = False
+    """Whether this validator deliberately accepts tokens without authentication."""
+
     @abstractmethod
     async def validate(self, token: str, *, request_path: str = "/mcp", request_method: str = "POST") -> dict:
         """

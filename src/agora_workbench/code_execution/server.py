@@ -517,7 +517,7 @@ class CodeExecutionServer(BaseMCPServer):
         await self._register_kernel(kernel_name=self.kernel_name)
         LOGGER.info(f"✓ Environment '{self.server_config.name}' is warm and ready.")
 
-    def main(self, *, default_host: str = "0.0.0.0", default_port: int = 8000) -> None:
+    def main(self, *, default_host: str = "127.0.0.1", default_port: int = 8000) -> None:
         """CLI entrypoint that handles ``--warm``, ``--host``, and ``--port``.
 
         Call this from your server's ``if __name__ == "__main__"`` block to get
@@ -530,8 +530,12 @@ class CodeExecutionServer(BaseMCPServer):
             --warm          Pre-initialize the environment and exit (no HTTP server).
             --host HOST     Bind address (default: default_host, or HOST env var).
             --port PORT     Bind port (default: default_port, or PORT env var).
+            --allow-unauthenticated-remote
+                            Permit open/no-op auth on a non-loopback bind.
         """
         import argparse
+
+        from agora_workbench.base import ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR
 
         parser = argparse.ArgumentParser(
             description=f"{self.server_config.name} — CodeExecutionServer",
@@ -547,6 +551,17 @@ class CodeExecutionServer(BaseMCPServer):
             port_default = int(env_port) if env_port else default_port
         except ValueError:
             parser.error(f"Invalid PORT env var: {env_port!r} (must be an integer).")
+        allow_remote_raw = os.getenv(ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR, "")
+        normalized_allow_remote = allow_remote_raw.strip().lower()
+        if normalized_allow_remote in {"", "0", "false", "no", "off"}:
+            allow_remote_default = False
+        elif normalized_allow_remote in {"1", "true", "yes", "on"}:
+            allow_remote_default = True
+        else:
+            parser.error(
+                f"Invalid {ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR}={allow_remote_raw!r} "
+                "(expected one of: 1, true, yes, on, 0, false, no, off)."
+            )
 
         parser.add_argument(
             "--host",
@@ -559,12 +574,27 @@ class CodeExecutionServer(BaseMCPServer):
             default=port_default,
             help=f"Bind port (default: {default_port}, or PORT env var).",
         )
+        parser.add_argument(
+            "--allow-unauthenticated-remote",
+            action="store_true",
+            default=allow_remote_default,
+            help=(
+                "Allow no-op/open authentication on a non-loopback bind. "
+                f"Equivalent environment variable: {ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR}=1."
+            ),
+        )
         args = parser.parse_args()
 
         if args.warm:
             asyncio.run(self.warm())
         else:
-            asyncio.run(self.run_http(host=args.host, port=args.port))
+            asyncio.run(
+                self.run_http(
+                    host=args.host,
+                    port=args.port,
+                    allow_unauthenticated_remote=args.allow_unauthenticated_remote,
+                )
+            )
 
     # ========================================================================
     # Optional hooks - can be overridden by subclasses

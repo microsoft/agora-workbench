@@ -132,8 +132,9 @@ ENV PYTHONPATH="/app"
 ENV HOME=/home/appuser
 
 # Authentication: pass ENTRA_CLIENT_ID and ENTRA_TENANT_ID at runtime
-# for production (Entra ID). For local development, configure your server
-# with create_noop_auth_config() and no env vars are needed.
+# for production (Entra ID). For local development with no-op auth, keep the
+# published host port on loopback and set AGORA_ALLOW_UNAUTHENTICATED_REMOTE=1
+# only for the container's internal 0.0.0.0 bind.
 
 # Switch to non-root user for runtime
 USER appuser

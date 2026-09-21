@@ -24,10 +24,16 @@ config = ServerConfig(
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=8000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=8000))
 ```
 
 This gives you an MCP server with an `execute_myserver_code` tool that runs Python in an isolated environment with numpy and pandas available.
+
+!!! warning "No-op authentication is local-only"
+    `create_noop_auth_config()` accepts requests without validating the caller.
+    Keep code-execution servers on loopback. Use production authentication for
+    remote access; a non-loopback bind in no-op mode is rejected unless an
+    explicit external-network-boundary acknowledgement is provided.
 
 ## Environment types
 
@@ -249,7 +255,7 @@ server = CodeExecutionServer(
 import asyncio
 
 # HTTP mode (standard deployment)
-asyncio.run(server.run_http(host="0.0.0.0", port=8000))
+asyncio.run(server.run_http(host="127.0.0.1", port=8000))
 
 # Warm up environment without serving (useful in Docker builds)
 asyncio.run(server.warm())

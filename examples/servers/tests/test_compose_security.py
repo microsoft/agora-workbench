@@ -67,3 +67,28 @@ def test_domain_compose_publishes_to_loopback_only(compose_path: Path) -> None:
         f"while the server uses noop auth — this exposes unauthenticated remote code execution. "
         f"Offending entries: {offenders}"
     )
+
+
+@pytest.mark.parametrize(
+    "compose_path",
+    _discover_compose_files(),
+    ids=lambda p: p.parent.name,
+)
+def test_domain_compose_acknowledges_internal_non_loopback_bind(compose_path: Path) -> None:
+    """No-op containers must explicitly acknowledge their isolated 0.0.0.0 bind."""
+    spec = yaml.safe_load(compose_path.read_text())
+    services = spec.get("services") or {}
+
+    offenders: list[str] = []
+    for service_name, service in services.items():
+        environment = service.get("environment") or {}
+        if environment.get("HOST") != "0.0.0.0":
+            continue
+        if str(environment.get("AGORA_ALLOW_UNAUTHENTICATED_REMOTE", "")).lower() not in {"1", "true", "yes", "on"}:
+            offenders.append(service_name)
+
+    assert not offenders, (
+        f"{compose_path.relative_to(DOMAIN_EXAMPLES_ROOT.parent)} binds no-op-auth containers to 0.0.0.0 "
+        "without AGORA_ALLOW_UNAUTHENTICATED_REMOTE=1. "
+        f"Offending services: {offenders}"
+    )
