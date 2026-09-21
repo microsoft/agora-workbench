@@ -33,7 +33,7 @@ docker build -f deployment/docker/base.Dockerfile -t mcp-server-base:local .
 
 The base image installs `agora-workbench` from PyPI, so it builds from your own
 project root — nothing is read from the build context. Pin a specific release
-with `--build-arg AGORA_WORKBENCH_VERSION=0.3.0`.
+with `--build-arg AGORA_WORKBENCH_VERSION=0.3.1`.
 
 !!! note "Building against a workbench checkout"
 

@@ -92,7 +92,7 @@ class TestScaffoldInit:
         content = (tmp_path / "out" / "docker" / "base.Dockerfile").read_text()
 
         assert "ARG AGORA_WORKBENCH_SOURCE=pypi" in content
-        assert "ARG AGORA_WORKBENCH_VERSION=0.3.0" in content
+        assert "ARG AGORA_WORKBENCH_VERSION=0.3.1" in content
         assert 'pip install --no-input "agora-workbench[azure,catalog-vector]==${AGORA_WORKBENCH_VERSION}"' in content
 
         # Anything read from the build context must be confined to the opt-in
