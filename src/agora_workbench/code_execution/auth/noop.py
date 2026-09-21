@@ -37,6 +37,8 @@ class NoOpTokenValidator(TokenValidator):
     provided, a synthetic claims dict is returned with a default identity.
     """
 
+    accepts_unvalidated_tokens = True
+
     def __init__(self, default_user_id: str = "dev-user", default_tenant_id: str = "dev-tenant"):
         self._default_user_id = default_user_id
         self._default_tenant_id = default_tenant_id

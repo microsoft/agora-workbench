@@ -361,7 +361,14 @@ class TestMain:
         router_config = RouterConfig(name="connector", upstreams=[UpstreamConfig(name="x", url="http://x:8000")])
 
         with (
-            patch.dict(os.environ, {}, clear=True),
+            patch.dict(
+                os.environ,
+                {
+                    "CONNECTOR_HOST": "0.0.0.0",
+                    "AGORA_ALLOW_UNAUTHENTICATED_REMOTE": "1",
+                },
+                clear=True,
+            ),
             patch("agora_workbench.connector.cli.build_config", return_value=(router_config, None)),
             patch("agora_workbench.connector.router.RouterServer") as router_server,
             patch("asyncio.run"),
@@ -370,6 +377,11 @@ class TestMain:
 
         _, kwargs = router_server.call_args
         assert kwargs["auth_config"] is _SENTINEL_AUTH_CONFIG
+        router_server.return_value.run_http.assert_called_once_with(
+            host="0.0.0.0",
+            port=8000,
+            allow_unauthenticated_remote=True,
+        )
 
 
 class TestParseWorkersFromEnv:

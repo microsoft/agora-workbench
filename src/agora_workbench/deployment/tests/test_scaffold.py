@@ -29,6 +29,9 @@ class TestScaffoldInit:
         assert (tmp_path / "out" / "docker" / "base.Dockerfile").exists()
         assert (tmp_path / "out" / "docker" / "Dockerfile").exists()
         assert (tmp_path / "out" / "docker" / "docker-compose.yml").exists()
+        compose = (tmp_path / "out" / "docker" / "docker-compose.yml").read_text()
+        assert '"127.0.0.1:8000:8000"' in compose
+        assert 'AGORA_ALLOW_UNAUTHENTICATED_REMOTE: "1"' in compose
         assert (tmp_path / "out" / "docker" / ".env.server.example").exists()
 
     @pytest.mark.unit

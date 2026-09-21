@@ -39,6 +39,10 @@ server = CodeExecutionServer(
 
 !!! warning
     Never use no-op auth in production. It accepts any request without validation.
+    Servers using it default to loopback and refuse non-loopback binds. If a
+    loopback-only container port mapping or authenticated reverse proxy provides
+    the external security boundary, set `AGORA_ALLOW_UNAUTHENTICATED_REMOTE=1`
+    (or pass `allow_unauthenticated_remote=True`) to acknowledge that responsibility.
 
 ### Azure Entra ID
 

@@ -37,8 +37,11 @@ config = ServerConfig(
 server = CodeExecutionServer(server_config=config, auth_config=create_noop_auth_config())
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=8000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=8000))
 ```
+
+`create_noop_auth_config()` is for loopback-only local development. Configure
+real authentication before binding a code-execution server to a remote interface.
 
 See `examples/servers/` for complete reference implementations.
 

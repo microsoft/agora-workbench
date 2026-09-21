@@ -85,6 +85,11 @@ services:
       - PORT=8000
 ```
 
+This non-loopback container bind requires production authentication. If a local
+development container deliberately uses no-op authentication behind a
+loopback-only port mapping, it must also set
+`AGORA_ALLOW_UNAUTHENTICATED_REMOTE=1`.
+
 ```bash
 docker compose up
 ```
@@ -144,7 +149,7 @@ az deployment group create \
 
 | Variable | Description |
 |----------|-------------|
-| `HOST` | Bind address (default: `0.0.0.0`) |
+| `HOST` | Bind address (default: `127.0.0.1`) |
 | `PORT` | Listen port (default: `8000`) |
 | `ENTRA_CLIENT_ID` | Entra ID app registration client ID |
 | `ENTRA_TENANT_ID` | Azure AD tenant ID |

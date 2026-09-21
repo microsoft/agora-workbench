@@ -33,6 +33,9 @@ Connectors provide full parity with direct upstream access. All of the following
 
 A `RouterServer` aggregates tools from multiple upstreams into a single MCP endpoint. Each upstream gets its own `execute_{name}_code` tool plus session management proxies:
 
+This same-host development example assumes the three upstream servers listen on
+distinct loopback ports:
+
 ```python
 import asyncio
 from agora_workbench.connector import RouterServer
@@ -41,16 +44,16 @@ from agora_workbench.connector.models import RouterConfig, UpstreamConfig
 config = RouterConfig(
     name="science-hub",
     upstreams=[
-        UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
-        UpstreamConfig(name="gis", url="http://gis:8000"),
-        UpstreamConfig(name="energy", url="http://energy:8000"),
+        UpstreamConfig(name="chemistry", url="http://127.0.0.1:8020"),
+        UpstreamConfig(name="gis", url="http://127.0.0.1:8021"),
+        UpstreamConfig(name="energy", url="http://127.0.0.1:8022"),
     ],
 )
 
 server = RouterServer(config)
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=9000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=9000))
 ```
 
 The agent sees:
@@ -143,6 +146,8 @@ server = GatewayServer(config)
 
 A `DispatcherServer` fans out a single tool interface to a **pool of identical workers**. Use it when you need horizontal scaling — multiple replicas of the same `CodeExecutionServer` behind a load-balancing proxy that understands MCP sessions.
 
+For a same-host development setup, assign each worker a distinct loopback port:
+
 ```python
 from agora_workbench.connector import DispatcherServer
 from agora_workbench.connector.models import DispatcherConfig, WorkerConfig
@@ -150,9 +155,9 @@ from agora_workbench.connector.models import DispatcherConfig, WorkerConfig
 config = DispatcherConfig(
     name="chem-dispatcher",
     workers=[
-        WorkerConfig(name="chem-worker-1", url="http://chemistry-1:8000"),
-        WorkerConfig(name="chem-worker-2", url="http://chemistry-2:8000"),
-        WorkerConfig(name="chem-worker-3", url="http://chemistry-3:8000", weight=2),
+        WorkerConfig(name="chem-worker-1", url="http://127.0.0.1:8031"),
+        WorkerConfig(name="chem-worker-2", url="http://127.0.0.1:8032"),
+        WorkerConfig(name="chem-worker-3", url="http://127.0.0.1:8033", weight=2),
     ],
     strategy="round_robin",
     session_affinity=True,
@@ -163,7 +168,7 @@ config = DispatcherConfig(
 server = DispatcherServer(config)
 
 if __name__ == "__main__":
-    asyncio.run(server.run_http(host="0.0.0.0", port=9000))
+    asyncio.run(server.run_http(host="127.0.0.1", port=9000))
 ```
 
 The agent sees a single `execute_code` tool — the dispatcher routes each call to a healthy worker transparently.

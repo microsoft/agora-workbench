@@ -40,7 +40,11 @@ class TestServerMain:
         with patch("sys.argv", ["server"]), patch.dict("os.environ", {"HOST": "", "PORT": ""}, clear=False):
             server.main()
 
-        server.run_http.assert_awaited_once_with(host="0.0.0.0", port=8000)
+        server.run_http.assert_awaited_once_with(
+            host="127.0.0.1",
+            port=8000,
+            allow_unauthenticated_remote=False,
+        )
 
     @pytest.mark.unit
     def test_host_and_port_flags(self):
@@ -50,7 +54,11 @@ class TestServerMain:
         with patch("sys.argv", ["server", "--host", "127.0.0.1", "--port", "9000"]):
             server.main()
 
-        server.run_http.assert_awaited_once_with(host="127.0.0.1", port=9000)
+        server.run_http.assert_awaited_once_with(
+            host="127.0.0.1",
+            port=9000,
+            allow_unauthenticated_remote=False,
+        )
 
     @pytest.mark.unit
     def test_env_vars_override_defaults(self):
@@ -61,7 +69,11 @@ class TestServerMain:
         with patch("sys.argv", ["server"]), patch.dict("os.environ", env):
             server.main()
 
-        server.run_http.assert_awaited_once_with(host="10.0.0.1", port=3000)
+        server.run_http.assert_awaited_once_with(
+            host="10.0.0.1",
+            port=3000,
+            allow_unauthenticated_remote=False,
+        )
 
     @pytest.mark.unit
     def test_explicit_flags_override_env_vars(self):
@@ -72,7 +84,11 @@ class TestServerMain:
         with patch("sys.argv", ["server", "--host", "localhost", "--port", "5000"]), patch.dict("os.environ", env):
             server.main()
 
-        server.run_http.assert_awaited_once_with(host="localhost", port=5000)
+        server.run_http.assert_awaited_once_with(
+            host="localhost",
+            port=5000,
+            allow_unauthenticated_remote=False,
+        )
 
     @pytest.mark.unit
     def test_custom_defaults(self):
@@ -82,4 +98,75 @@ class TestServerMain:
         with patch("sys.argv", ["server"]), patch.dict("os.environ", {"HOST": "", "PORT": ""}, clear=False):
             server.main(default_host="127.0.0.1", default_port=4000)
 
-        server.run_http.assert_awaited_once_with(host="127.0.0.1", port=4000)
+        server.run_http.assert_awaited_once_with(
+            host="127.0.0.1",
+            port=4000,
+            allow_unauthenticated_remote=False,
+        )
+
+    @pytest.mark.unit
+    def test_unauthenticated_remote_flag_is_forwarded(self):
+        server = _make_server()
+        server.run_http = AsyncMock()
+
+        with patch(
+            "sys.argv",
+            ["server", "--host", "0.0.0.0", "--allow-unauthenticated-remote"],
+        ):
+            server.main()
+
+        server.run_http.assert_awaited_once_with(
+            host="0.0.0.0",
+            port=8000,
+            allow_unauthenticated_remote=True,
+        )
+
+    @pytest.mark.unit
+    def test_unauthenticated_remote_env_is_forwarded(self):
+        server = _make_server()
+        server.run_http = AsyncMock()
+
+        env = {
+            "HOST": "0.0.0.0",
+            "AGORA_ALLOW_UNAUTHENTICATED_REMOTE": "1",
+        }
+        with patch("sys.argv", ["server"]), patch.dict("os.environ", env):
+            server.main()
+
+        server.run_http.assert_awaited_once_with(
+            host="0.0.0.0",
+            port=8000,
+            allow_unauthenticated_remote=True,
+        )
+
+    @pytest.mark.unit
+    def test_cli_can_disable_unauthenticated_remote_env(self):
+        server = _make_server()
+        server.run_http = AsyncMock()
+
+        env = {
+            "HOST": "0.0.0.0",
+            "AGORA_ALLOW_UNAUTHENTICATED_REMOTE": "1",
+        }
+        with (
+            patch("sys.argv", ["server", "--no-allow-unauthenticated-remote"]),
+            patch.dict("os.environ", env),
+        ):
+            server.main()
+
+        server.run_http.assert_awaited_once_with(
+            host="0.0.0.0",
+            port=8000,
+            allow_unauthenticated_remote=False,
+        )
+
+    @pytest.mark.unit
+    def test_invalid_unauthenticated_remote_env_exits(self):
+        server = _make_server()
+
+        with (
+            patch("sys.argv", ["server"]),
+            patch.dict("os.environ", {"AGORA_ALLOW_UNAUTHENTICATED_REMOTE": "maybe"}),
+            pytest.raises(SystemExit),
+        ):
+            server.main()

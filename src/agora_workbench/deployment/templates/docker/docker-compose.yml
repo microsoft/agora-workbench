@@ -26,7 +26,7 @@ services:
     ports:
       # Maps host port 8000 → container port 8000 (the default server port).
       # Change the left side if you need a different host port.
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       # Loads ENTRA_CLIENT_ID, ENTRA_TENANT_ID, and other config.
       # Copy .env.server.example and fill in your values.
@@ -35,6 +35,9 @@ services:
       # PORT/HOST tell the CodeExecutionServer where to bind inside the container.
       PORT: "8000"
       HOST: "0.0.0.0"
+      # The published host port is loopback-only above. This acknowledges the
+      # container's internal non-loopback bind if the server uses no-op auth.
+      AGORA_ALLOW_UNAUTHENTICATED_REMOTE: "1"
       # [activity-ui] uncomment to publish events to the shared Activity UI:
       # ACTIVITY_UI_URL: "http://activity-ui:8030"
     volumes:

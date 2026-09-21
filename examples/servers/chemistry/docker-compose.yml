@@ -45,6 +45,9 @@ services:
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"
+      # The host port is loopback-only above; acknowledge the container's internal
+      # non-loopback bind while no-op auth is enabled.
+      AGORA_ALLOW_UNAUTHENTICATED_REMOTE: "1"
       # Directory where LocalFilePublisher writes artifacts (must match the volume mount).
       PUBLISH_DIR: "/tmp/published_artifacts"
       # BlobPublisher configuration — set BLOB_PUBLISH_ACCOUNT_URL to enable.

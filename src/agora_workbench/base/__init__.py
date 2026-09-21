@@ -9,6 +9,7 @@ inherit from this to avoid divergence in their transport/auth layers.
 import logging
 import os
 from abc import ABC, abstractmethod
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any, Optional
 
 import uvicorn
@@ -22,6 +23,35 @@ if TYPE_CHECKING:
     from agora_workbench.code_execution.auth.base import AuthConfig
 
 LOGGER = logging.getLogger(__name__)
+ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR = "AGORA_ALLOW_UNAUTHENTICATED_REMOTE"
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    normalized = host.strip()
+    if normalized.lower() == "localhost":
+        return True
+    if normalized.startswith("[") and normalized.endswith("]"):
+        normalized = normalized[1:-1]
+    try:
+        address = ip_address(normalized)
+    except ValueError:
+        return False
+    if getattr(address, "ipv4_mapped", None) is not None:
+        address = address.ipv4_mapped
+    return address.is_loopback
+
+
+def _allow_unauthenticated_remote_from_env() -> bool:
+    raw_value = os.getenv(ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR, "")
+    normalized = raw_value.strip().lower()
+    if normalized in {"", "0", "false", "no", "off"}:
+        return False
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    raise ValueError(
+        f"Invalid {ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR}={raw_value!r} "
+        "(expected one of: 1, true, yes, on, 0, false, no, off)."
+    )
 
 
 class BaseMCPServer(ABC):
@@ -47,7 +77,7 @@ class BaseMCPServer(ABC):
     entra_tenant_id: Optional[str]
 
     def __init__(self) -> None:
-        self._bind_host: str = "0.0.0.0"
+        self._bind_host: str = "127.0.0.1"
         self._bind_port: int = 8000
 
     def _warn_if_oauth_metadata_unresolvable(self) -> None:
@@ -132,8 +162,40 @@ class BaseMCPServer(ABC):
     # HTTP hosting
     # ========================================================================
 
-    async def run_http(self, host: str = "0.0.0.0", port: int = 8000) -> None:
+    def _allows_unauthenticated_access(self) -> bool:
+        return not self.auth_config.require_authorization_header or bool(
+            getattr(self.auth_config.token_validator, "accepts_unvalidated_tokens", False)
+        )
+
+    def _validate_http_bind(self, host: str, allow_unauthenticated_remote: bool) -> None:
+        if not self._allows_unauthenticated_access() or _is_loopback_bind_host(host):
+            return
+        if not allow_unauthenticated_remote:
+            allow_unauthenticated_remote = _allow_unauthenticated_remote_from_env()
+        if not allow_unauthenticated_remote:
+            raise ValueError(
+                f"Refusing to bind an unauthenticated MCP server to non-loopback host {host!r}. "
+                "No-op/open authentication accepts requests without validating their identity, and this server "
+                "may expose code execution. Bind to 127.0.0.1/::1, configure real authentication, or pass "
+                "allow_unauthenticated_remote=True only after confirming an external network boundary prevents "
+                "untrusted access."
+            )
+        LOGGER.warning(
+            "Binding an unauthenticated MCP server to non-loopback host %r because an explicit insecure-network "
+            "acknowledgement was provided. Ensure a firewall, loopback-only port mapping, or authenticated reverse "
+            "proxy prevents untrusted access.",
+            host,
+        )
+
+    async def run_http(
+        self,
+        host: str = "127.0.0.1",
+        port: int = 8000,
+        *,
+        allow_unauthenticated_remote: bool = False,
+    ) -> None:
         """Run the MCP server with StreamableHTTP transport."""
+        self._validate_http_bind(host, allow_unauthenticated_remote)
         self._bind_host = host
         self._bind_port = port
 
@@ -147,8 +209,7 @@ class BaseMCPServer(ABC):
         # trigger protection and the actual bind host is non-localhost.
         import fastmcp as _fastmcp
 
-        _LOCALHOST_VARIANTS = ("127.0.0.1", "localhost", "::1")
-        if _fastmcp.settings.host in _LOCALHOST_VARIANTS and host not in _LOCALHOST_VARIANTS:
+        if _is_loopback_bind_host(_fastmcp.settings.host) and not _is_loopback_bind_host(host):
             _fastmcp.settings.host = host
 
         # Build the Streamable HTTP app

@@ -24,6 +24,9 @@ services:
     environment:
       PORT: "8000"
       HOST: "0.0.0.0"
+      # The host port is loopback-only above; acknowledge the container's internal
+      # non-loopback bind while no-op auth is enabled.
+      AGORA_ALLOW_UNAUTHENTICATED_REMOTE: "1"
       # Reach the shared activity-ui by its service name on the agora-activity network.
       # If activity-ui isn't up, the publisher fails open (no impact on tool execution).
       ACTIVITY_UI_URL: "http://activity-ui:8030"

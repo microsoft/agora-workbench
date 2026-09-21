@@ -16,7 +16,10 @@ Environment variables:
         other backend is configured. Local development only; without it an unconfigured
         connector refuses to start rather than running unprotected.
     CONNECTOR_NAME: (Optional) Server name (defaults to "connector")
+    CONNECTOR_HOST: (Optional) Bind address (defaults to 127.0.0.1)
     CONNECTOR_PORT: (Optional) HTTP port (defaults to 8000)
+    AGORA_ALLOW_UNAUTHENTICATED_REMOTE: (Optional) Explicitly acknowledge a non-loopback bind while
+        authentication is disabled. Requires CONNECTOR_ALLOW_NOOP_AUTH as well.
     GATEWAY_BLOCKED_TOOLS: (Optional) Comma-separated blocked tool names
     GATEWAY_MAX_CALLS_PER_MINUTE: (Optional) Rate limit for gateway mode
     DISPATCHER_STRATEGY: (Optional) Routing strategy: "round_robin" (default), "least_loaded", "sticky_session"
@@ -31,6 +34,8 @@ import re
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
+
+from agora_workbench.base import ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR
 
 if TYPE_CHECKING:
     from agora_workbench.code_execution.auth import AuthConfig
@@ -398,12 +403,14 @@ def main(auth_config_factory: Callable[[], "AuthConfig"] | None = None) -> None:
 
     try:
         config_a, config_b = build_config()
+        host = os.getenv("CONNECTOR_HOST", os.getenv("MCP_SERVER_HOST", os.getenv("HOST", "127.0.0.1")))
         port_raw = os.getenv("CONNECTOR_PORT", os.getenv("MCP_SERVER_PORT", "8000"))
         try:
             port = int(port_raw)
         except ValueError as exc:
             raise ConfigError(f"Invalid CONNECTOR_PORT/MCP_SERVER_PORT='{port_raw}'. Must be an integer.") from exc
         auth_config = build_auth_config(auth_config_factory)
+        allow_unauthenticated_remote = _env_flag(ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR)
     except ConfigError as exc:
         LOGGER.error("Configuration error: %s", exc)
         sys.exit(1)
@@ -416,34 +423,55 @@ def main(auth_config_factory: Callable[[], "AuthConfig"] | None = None) -> None:
         from .dispatcher import DispatcherServer
 
         LOGGER.info(
-            "Starting DispatcherServer '%s' with %d worker(s), strategy=%s on port %d",
+            "Starting DispatcherServer '%s' with %d worker(s), strategy=%s on %s:%d",
             config_a.name,
             len(config_a.workers),
             config_a.strategy,
+            host,
             port,
         )
         server = DispatcherServer(config_a, auth_config=auth_config)
-        asyncio.run(server.run_http(port=port))
+        asyncio.run(
+            server.run_http(
+                host=host,
+                port=port,
+                allow_unauthenticated_remote=allow_unauthenticated_remote,
+            )
+        )
     elif isinstance(config_a, RouterConfig):
         from .router import RouterServer
 
         LOGGER.info(
-            "Starting RouterServer '%s' with %d upstream(s) on port %d",
+            "Starting RouterServer '%s' with %d upstream(s) on %s:%d",
             config_a.name,
             len(config_a.upstreams),
+            host,
             port,
         )
         server = RouterServer(config_a, auth_config=auth_config)
-        asyncio.run(server.run_http(port=port))
+        asyncio.run(
+            server.run_http(
+                host=host,
+                port=port,
+                allow_unauthenticated_remote=allow_unauthenticated_remote,
+            )
+        )
     else:
         from .gateway import GatewayServer
 
         assert config_b is not None
         LOGGER.info(
-            "Starting GatewayServer '%s' proxying '%s' on port %d",
+            "Starting GatewayServer '%s' proxying '%s' on %s:%d",
             config_b.name,
             config_b.upstream.name,
+            host,
             port,
         )
         server = GatewayServer(config_b, auth_config=auth_config)
-        asyncio.run(server.run_http(port=port))
+        asyncio.run(
+            server.run_http(
+                host=host,
+                port=port,
+                allow_unauthenticated_remote=allow_unauthenticated_remote,
+            )
+        )
