@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-21
+
 ### Breaking
 
 - MCP HTTP servers now bind to `127.0.0.1` by default, and no-op/open
