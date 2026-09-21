@@ -532,6 +532,8 @@ class CodeExecutionServer(BaseMCPServer):
             --port PORT     Bind port (default: default_port, or PORT env var).
             --allow-unauthenticated-remote
                             Permit open/no-op auth on a non-loopback bind.
+            --no-allow-unauthenticated-remote
+                            Disable an acknowledgement inherited from the environment.
         """
         import argparse
 
@@ -576,11 +578,11 @@ class CodeExecutionServer(BaseMCPServer):
         )
         parser.add_argument(
             "--allow-unauthenticated-remote",
-            action="store_true",
+            action=argparse.BooleanOptionalAction,
             default=allow_remote_default,
             help=(
                 "Allow no-op/open authentication on a non-loopback bind. "
-                f"Equivalent environment variable: {ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR}=1."
+                f"Defaults from {ALLOW_UNAUTHENTICATED_REMOTE_ENV_VAR}; use the --no- form to override it."
             ),
         )
         args = parser.parse_args()

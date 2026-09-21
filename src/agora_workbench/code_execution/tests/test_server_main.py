@@ -140,6 +140,27 @@ class TestServerMain:
         )
 
     @pytest.mark.unit
+    def test_cli_can_disable_unauthenticated_remote_env(self):
+        server = _make_server()
+        server.run_http = AsyncMock()
+
+        env = {
+            "HOST": "0.0.0.0",
+            "AGORA_ALLOW_UNAUTHENTICATED_REMOTE": "1",
+        }
+        with (
+            patch("sys.argv", ["server", "--no-allow-unauthenticated-remote"]),
+            patch.dict("os.environ", env),
+        ):
+            server.main()
+
+        server.run_http.assert_awaited_once_with(
+            host="0.0.0.0",
+            port=8000,
+            allow_unauthenticated_remote=False,
+        )
+
+    @pytest.mark.unit
     def test_invalid_unauthenticated_remote_env_exits(self):
         server = _make_server()
 
