@@ -10,6 +10,25 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Breaking
+
+- MCP HTTP servers now bind to `127.0.0.1` by default, and no-op/open
+  authentication refuses non-loopback binds unless the operator explicitly
+  acknowledges an external network boundary. This prevents tutorials and
+  default entrypoints from exposing unauthenticated code execution to adjacent
+  hosts ([#366](https://github.com/microsoft/agora-workbench/pull/366)).
+
+  **Who is affected:** deployments that relied on the previous implicit
+  `0.0.0.0` default, plus no-op-auth containers or reverse-proxy deployments
+  that intentionally bind to a non-loopback interface.
+
+  **To migrate:** authenticated deployments should set `HOST=0.0.0.0` (or pass
+  `host="0.0.0.0"`) explicitly. No-op/open-auth deployments must remain
+  loopback-only or set `AGORA_ALLOW_UNAUTHENTICATED_REMOTE=1` (or pass
+  `allow_unauthenticated_remote=True`) only when a loopback-only port mapping,
+  authenticated reverse proxy, firewall, or equivalent boundary prevents
+  untrusted access.
+
 ## [0.3.0] - 2026-09-16
 
 ### Breaking
