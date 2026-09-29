@@ -146,3 +146,75 @@ def test_load_skill_content_does_not_expand_markdown_images(tmp_path):
     (references_dir / "diagram.md").write_text("NOT AN IMAGE\n", encoding="utf-8")
 
     assert load_skill_content(skill_path) == "![diagram](references/diagram.md)\n"
+
+
+@pytest.mark.unit
+def test_load_skill_content_does_not_expand_links_inside_inline_code(tmp_path):
+    skill_dir = tmp_path / "skill"
+    skill_path = _write_skill(
+        skill_dir,
+        (
+            "Literal `[private](references/private.md)` and "
+            "``[also private](references/private.md)``.\n\n"
+            "Read [public](references/public.md).\n"
+        ),
+    )
+    references_dir = skill_dir / "references"
+    references_dir.mkdir()
+    (references_dir / "private.md").write_text("PRIVATE BODY\n", encoding="utf-8")
+    (references_dir / "public.md").write_text("PUBLIC BODY\n", encoding="utf-8")
+
+    content = load_skill_content(skill_path)
+
+    assert "`[private](references/private.md)`" in content
+    assert "``[also private](references/private.md)``" in content
+    assert "PRIVATE BODY" not in content
+    assert "[public](#skill-reference-references-public)" in content
+    assert "PUBLIC BODY" in content
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fence", ["```", "~~~"])
+def test_load_skill_content_does_not_expand_links_inside_fenced_code(tmp_path, fence):
+    skill_dir = tmp_path / "skill"
+    skill_path = _write_skill(
+        skill_dir,
+        (f"{fence}markdown\n[private](references/private.md)\n{fence}\n\nRead [public](references/public.md).\n"),
+    )
+    references_dir = skill_dir / "references"
+    references_dir.mkdir()
+    (references_dir / "private.md").write_text("PRIVATE BODY\n", encoding="utf-8")
+    (references_dir / "public.md").write_text("PUBLIC BODY\n", encoding="utf-8")
+
+    content = load_skill_content(skill_path)
+
+    assert "[private](references/private.md)" in content
+    assert "PRIVATE BODY" not in content
+    assert "[public](#skill-reference-references-public)" in content
+    assert "PUBLIC BODY" in content
+
+
+@pytest.mark.unit
+def test_load_skill_content_leaves_non_utf8_reference_unchanged(tmp_path, caplog):
+    skill_dir = tmp_path / "skill"
+    _write_skill(
+        skill_dir,
+        (
+            "---\n"
+            "name: invalid-reference\n"
+            "description: Test invalid UTF-8.\n"
+            "---\n\n"
+            "Read [invalid](references/invalid.md).\n"
+        ),
+    )
+    references_dir = skill_dir / "references"
+    references_dir.mkdir()
+    (references_dir / "invalid.md").write_bytes(b"\xff")
+
+    with caplog.at_level(logging.WARNING):
+        skills = discover_skills(tmp_path)
+
+    assert len(skills) == 1
+    assert "[invalid](references/invalid.md)" in skills[0].content
+    assert "Included references" not in skills[0].content
+    assert "Failed to read skill reference references/invalid.md" in caplog.text

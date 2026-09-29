@@ -14,11 +14,12 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
 LOGGER = logging.getLogger(__name__)
+_FENCE_START_PATTERN = re.compile(r"(?m)^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})[^\n]*(?:\n|$)")
 _REFERENCE_LINK_PATTERN = re.compile(
     r"(?P<prefix>(?<!\!)\[[^\]\n]+\]\()"
     r"(?P<target>references/[^)\s]+\.md)"
@@ -56,7 +57,7 @@ def _parse_skill_frontmatter(path: Path) -> dict[str, Any]:
     """Extract YAML frontmatter from a skill markdown file."""
     try:
         text = path.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return {}
     match = re.match(r"^---\s*\n(.*?)\n---", text, re.DOTALL)
     if not match:
@@ -70,6 +71,92 @@ def _parse_skill_frontmatter(path: Path) -> dict[str, Any]:
 def _reference_anchor(reference_path: PurePosixPath) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", reference_path.with_suffix("").as_posix().lower()).strip("-")
     return f"skill-reference-{slug}"
+
+
+def _is_escaped(text: str, position: int) -> bool:
+    backslashes = 0
+    position -= 1
+    while position >= 0 and text[position] == "\\":
+        backslashes += 1
+        position -= 1
+    return backslashes % 2 == 1
+
+
+def _inline_code_ranges(content: str, start: int, end: int) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    cursor = start
+    while cursor < end:
+        opening_start = content.find("`", cursor, end)
+        if opening_start < 0:
+            break
+        opening_end = opening_start + 1
+        while opening_end < end and content[opening_end] == "`":
+            opening_end += 1
+        if _is_escaped(content, opening_start):
+            cursor = opening_end
+            continue
+
+        delimiter_length = opening_end - opening_start
+        closing_cursor = opening_end
+        while closing_cursor < end:
+            closing_start = content.find("`", closing_cursor, end)
+            if closing_start < 0:
+                cursor = opening_end
+                break
+            closing_end = closing_start + 1
+            while closing_end < end and content[closing_end] == "`":
+                closing_end += 1
+            if closing_end - closing_start == delimiter_length and not _is_escaped(content, closing_start):
+                ranges.append((opening_start, closing_end))
+                cursor = closing_end
+                break
+            closing_cursor = closing_end
+        else:
+            cursor = opening_end
+    return ranges
+
+
+def _markdown_code_ranges(content: str) -> list[tuple[int, int]]:
+    fenced_ranges: list[tuple[int, int]] = []
+    cursor = 0
+    while match := _FENCE_START_PATTERN.search(content, cursor):
+        fence = match.group("fence")
+        opening_suffix = content[match.start("fence") + len(fence) : match.end()]
+        if fence.startswith("`") and "`" in opening_suffix:
+            cursor = match.end()
+            continue
+
+        closing_pattern = re.compile(rf"(?m)^ {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*(?:\n|$)")
+        closing_match = closing_pattern.search(content, match.end())
+        range_end = closing_match.end() if closing_match else len(content)
+        fenced_ranges.append((match.start(), range_end))
+        cursor = range_end
+
+    ranges = list(fenced_ranges)
+    gap_start = 0
+    for range_start, range_end in fenced_ranges:
+        ranges.extend(_inline_code_ranges(content, gap_start, range_start))
+        gap_start = range_end
+    ranges.extend(_inline_code_ranges(content, gap_start, len(content)))
+    return sorted(ranges)
+
+
+def _replace_reference_links(
+    content: str,
+    replace: Callable[[re.Match[str]], str],
+) -> str:
+    protected_ranges = _markdown_code_ranges(content)
+    if not protected_ranges:
+        return _REFERENCE_LINK_PATTERN.sub(replace, content)
+
+    parts: list[str] = []
+    cursor = 0
+    for range_start, range_end in protected_ranges:
+        parts.append(_REFERENCE_LINK_PATTERN.sub(replace, content[cursor:range_start]))
+        parts.append(content[range_start:range_end])
+        cursor = range_end
+    parts.append(_REFERENCE_LINK_PATTERN.sub(replace, content[cursor:]))
+    return "".join(parts)
 
 
 def load_skill_content(skill_path: Path) -> str:
@@ -103,7 +190,7 @@ def load_skill_content(skill_path: Path) -> str:
         else:
             try:
                 reference_content = reference_path.read_text(encoding="utf-8")
-            except OSError as exc:
+            except (OSError, UnicodeDecodeError) as exc:
                 LOGGER.warning("Failed to read skill reference %s from %s: %s", target, skill_path, exc)
                 return match.group(0)
             anchor = _reference_anchor(relative_path)
@@ -116,7 +203,7 @@ def load_skill_content(skill_path: Path) -> str:
 
         return f"{match.group('prefix')}#{anchor}{match.group('suffix')}"
 
-    expanded_content = _REFERENCE_LINK_PATTERN.sub(replace_reference_link, content)
+    expanded_content = _replace_reference_links(content, replace_reference_link)
     if not references:
         return content
 
