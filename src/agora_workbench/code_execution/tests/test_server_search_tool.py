@@ -9,6 +9,7 @@ import agora_workbench.code_execution.tools as code_execution_tools
 
 from .. import CodeExecutionServer, ServerConfig
 from ..auth import create_noop_auth_config
+from ..skills import Skill, discover_skills
 from ..tool_registry import ToolDefinition, ToolRegistry, StateTransition
 
 
@@ -17,7 +18,10 @@ from ..tool_registry import ToolDefinition, ToolRegistry, StateTransition
 # ---------------------------------------------------------------------------
 
 
-def _make_server(tools: list[ToolDefinition] | None = None) -> CodeExecutionServer:
+def _make_server(
+    tools: list[ToolDefinition] | None = None,
+    skills: list[Skill] | None = None,
+) -> CodeExecutionServer:
     """Create a minimal CodeExecutionServer for unit tests."""
     config = ServerConfig(
         name="testdomain",
@@ -33,6 +37,7 @@ def _make_server(tools: list[ToolDefinition] | None = None) -> CodeExecutionServ
     return CodeExecutionServer(
         server_config=config,
         tool_registry=registry,
+        skills=skills,
         auth_config=create_noop_auth_config(),
     )
 
@@ -319,6 +324,35 @@ class TestSetupWorkflowPlanningTools:
         tool_names = {t.name for t in await server.mcp.list_tools()}
         # No domains_dir configured → no skills → load_skill not registered
         assert "load_testdomain_skill" not in tool_names
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_load_skill_returns_linked_references(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "data-loading"
+        references_dir = skill_dir / "references"
+        references_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            (
+                "---\n"
+                "name: data-loading\n"
+                "description: Load data.\n"
+                "---\n\n"
+                "See [supported formats](references/supported-formats.md).\n"
+            ),
+            encoding="utf-8",
+        )
+        (references_dir / "supported-formats.md").write_text(
+            "# Supported formats\n\nGeoParquet is supported.\n",
+            encoding="utf-8",
+        )
+        server = _make_server(tools=[], skills=discover_skills(tmp_path / "skills", domain="testdomain"))
+
+        mcp_tool = await server.mcp.get_tool("load_testdomain_skill")
+        result = await mcp_tool.run({"skill_name": "data-loading"})
+        content = result.content[0].text
+
+        assert "[supported formats](#skill-reference-references-supported-formats)" in content
+        assert "GeoParquet is supported." in content
 
     @pytest.mark.unit
     @pytest.mark.asyncio

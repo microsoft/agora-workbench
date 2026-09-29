@@ -205,3 +205,28 @@ class TestLoadSkillDescriptor:
             raw = await descriptor.func(skill_name="test-skill")
             assert "# Test Skill" in raw
             assert "Do the thing." in raw
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_successful_read_expands_linked_references(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "test-skill"
+        references_dir = skill_dir / "references"
+        references_dir.mkdir(parents=True)
+        skill_file = skill_dir / "SKILL.md"
+        skill_file.write_text(
+            "# Test Skill\nSee [details](references/details.md).\n",
+            encoding="utf-8",
+        )
+        (references_dir / "details.md").write_text("REFERENCE BODY\n", encoding="utf-8")
+
+        def _discover(*_args, **_kwargs):
+            return [{"name": "test-skill", "abs_path": str(skill_file)}]
+
+        with patch(
+            "agora_workbench.code_execution.tools.search.state_graph_tools._discover_skills",
+            side_effect=_discover,
+        ):
+            descriptor = create_load_skill_descriptor(server_name=_TEST_SERVER)
+            raw = await descriptor.func(skill_name="test-skill")
+            assert "[details](#skill-reference-references-details)" in raw
+            assert "REFERENCE BODY" in raw

@@ -21,9 +21,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ...skills import load_skill_content
+from ..tool_descriptor import ToolDescriptor
 from ..tool_search import ToolInfo
 from .state_graph import StateGraph, _discover_skills
-from ..tool_descriptor import ToolDescriptor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -239,7 +240,7 @@ def create_load_skill_descriptor(
                 }
             )
         try:
-            content = Path(abs_path).read_text(encoding="utf-8")
+            content = load_skill_content(Path(abs_path))
             return content
         except OSError as exc:
             LOGGER.error("load_%s_skill failed to read %s: %s", server_name, abs_path, exc)
