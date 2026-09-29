@@ -10,11 +10,14 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-29
+
 ### Fixed
 
 - `load_{server}_skill` now returns Markdown references linked from a skill's
   local `references/` directory as part of the same self-contained response,
-  while leaving missing or unsafe links unresolved.
+  while leaving code examples and missing, unreadable, or unsafe links
+  unresolved ([#368](https://github.com/microsoft/agora-workbench/pull/368)).
 
 ## [0.3.1] - 2026-09-21
 
