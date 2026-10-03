@@ -88,6 +88,14 @@ def test_server_config_accepts_sidecars():
     assert config.sidecars[0].name == "model"
 
 
+def test_isolated_kernel_network_rejects_loopback_sidecars():
+    with pytest.raises(ValidationError, match="cannot be combined with loopback HTTP sidecars"):
+        _server_config(
+            kernel_network_mode="isolated",
+            sidecars=[SidecarConfig(name="model", command=["-m", "svc"], url_env_var="SVC_URL", port=9100)],
+        )
+
+
 # --------------------------------------------------------------------------- #
 # SidecarManager lifecycle
 # --------------------------------------------------------------------------- #

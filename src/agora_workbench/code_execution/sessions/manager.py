@@ -15,11 +15,16 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from threading import Condition, RLock
-from typing import Any, AsyncContextManager, AsyncIterator, Callable, Optional, Tuple, TYPE_CHECKING, cast
+from typing import Any, AsyncContextManager, AsyncIterator, Callable, Literal, Optional, Tuple, TYPE_CHECKING, cast
 
 from jupyter_client.manager import AsyncKernelManager
 
 from .session import Session, SessionContext, SessionResources
+from .network_isolation import (
+    cleanup_isolated_kernel,
+    configure_isolated_kernel,
+    validate_network_isolation_support,
+)
 from .storage import InMemoryStorage, SessionStorageBackend
 
 # Display-data capture: priority of renderable MIME types to extract from
@@ -169,6 +174,7 @@ class SessionConfig:
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
         data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager | SessionResources"]] = None,
+        kernel_network_mode: Literal["inherit", "isolated"] = "inherit",
     ):
         """
         Initialize session manager configuration.
@@ -202,12 +208,18 @@ class SessionConfig:
                 ``cleanup()`` method — raises ``TypeError`` from
                 ``create_session``, rather than silently falling back to the
                 default manager.
+            kernel_network_mode: ``"inherit"`` lets kernels use the host network.
+                ``"isolated"`` launches each kernel in an empty Linux network
+                namespace and uses Unix IPC sockets for Jupyter communication.
         """
         self.max_sessions = max_sessions
         self.timeout = timedelta(minutes=timeout_minutes)
         self.cleanup_interval = timedelta(seconds=cleanup_interval_seconds)
         self.storage_backend = storage_backend or InMemoryStorage()
         self.data_manager_factory = data_manager_factory
+        if kernel_network_mode not in ("inherit", "isolated"):
+            raise ValueError("kernel_network_mode must be 'inherit' or 'isolated'")
+        self.kernel_network_mode = kernel_network_mode
 
 
 class SessionManager:
@@ -248,6 +260,10 @@ class SessionManager:
         self._kernel_last_used: dict[str, float] = {}  # session_id -> timestamp
         self._kernel_tokens: dict[str, Optional[str]] = {}  # session_id -> last injected user token
         self._kernel_session_generations: dict[str, int | None] = {}
+        self._kernel_network_isolation_validated = False
+        self._kernel_network_isolation_error: str | None = None
+        self._kernel_network_isolation_lock = asyncio.Lock()
+        self._kernel_ipc_dirs: dict[AsyncKernelManager, Path] = {}
         # Per-session lock that serializes execute_code_for_session calls so the
         # shared Jupyter kernel client (single iopub queue) cannot be raced by
         # concurrent callers (e.g. four parallel push_object MCP calls).
@@ -294,8 +310,29 @@ class SessionManager:
 
         LOGGER.info(
             f"Initialized SessionManager: max_sessions={self.config.max_sessions}, "
-            f"timeout={self.config.timeout.total_seconds() / 60}min"
+            f"timeout={self.config.timeout.total_seconds() / 60}min, "
+            f"kernel_network_mode={self.config.kernel_network_mode}"
         )
+
+    def set_kernel_network_mode(self, kernel_network_mode: Literal["inherit", "isolated"]) -> None:
+        """Change the launch policy only when no kernel can retain the old policy."""
+        if kernel_network_mode not in ("inherit", "isolated"):
+            raise ValueError("kernel_network_mode must be 'inherit' or 'isolated'")
+
+        with self._session_lifecycle_lock:
+            if self.config.kernel_network_mode == kernel_network_mode:
+                return
+            active_session_ids = sorted(
+                set(self._kernels) | {session_id for session_id, starts in self._kernel_start_tasks.items() if starts}
+            )
+            if active_session_ids:
+                raise RuntimeError(
+                    "cannot change kernel_network_mode while kernels are running or starting: "
+                    f"{', '.join(active_session_ids)}"
+                )
+            self.config.kernel_network_mode = kernel_network_mode
+            self._kernel_network_isolation_validated = False
+            self._kernel_network_isolation_error = None
 
     def create_session(
         self,
@@ -1033,6 +1070,24 @@ class SessionManager:
     # Jupyter Kernel Management
     # ========================================================================
 
+    async def _ensure_kernel_network_isolation_support(self) -> None:
+        if self._kernel_network_isolation_validated:
+            return
+        if self._kernel_network_isolation_error is not None:
+            raise RuntimeError(self._kernel_network_isolation_error)
+
+        async with self._kernel_network_isolation_lock:
+            if self._kernel_network_isolation_validated:
+                return
+            if self._kernel_network_isolation_error is not None:
+                raise RuntimeError(self._kernel_network_isolation_error)
+            try:
+                await asyncio.to_thread(validate_network_isolation_support)
+            except RuntimeError as exc:
+                self._kernel_network_isolation_error = str(exc)
+                raise
+            self._kernel_network_isolation_validated = True
+
     async def _get_or_create_kernel(
         self,
         session_id: str,
@@ -1108,6 +1163,7 @@ class SessionManager:
         # Start new kernel
         LOGGER.info(f"Starting new Jupyter kernel for session {session_id}")
         kernel_manager = AsyncKernelManager(kernel_name=self.kernel_name)
+        ipc_dir: Path | None = None
 
         # Ensure executables from the selected Python environment are on PATH.
         # The kernelspec argv points at the environment's python, but PATH is
@@ -1155,6 +1211,11 @@ class SessionManager:
                 raise ValueError(f"Session {session_id} was closed before its kernel could start.")
             self._kernel_start_tasks.setdefault(session_id, {})[current_task] = session_generation
         try:
+            if self.config.kernel_network_mode == "isolated":
+                await self._ensure_kernel_network_isolation_support()
+                ipc_dir = configure_isolated_kernel(kernel_manager)
+                self._kernel_ipc_dirs[kernel_manager] = ipc_dir
+
             kernel_start_attempted = True
             await kernel_manager.start_kernel(env=env, cwd=working_dir)
             kernel_client = kernel_manager.client()
@@ -1174,7 +1235,7 @@ class SessionManager:
             if not session_is_current:
                 raise ValueError(f"Session {session_id} was closed while its kernel was starting.")
         except BaseException:
-            if kernel_start_attempted and not registered:
+            if not registered:
 
                 async def rollback_kernel_start() -> None:
                     try:
@@ -1182,9 +1243,13 @@ class SessionManager:
                             kernel_client.stop_channels()
                     finally:
                         try:
-                            await kernel_manager.shutdown_kernel(now=True)
+                            if kernel_start_attempted:
+                                try:
+                                    await kernel_manager.shutdown_kernel(now=True)
+                                finally:
+                                    await kernel_manager.cleanup_resources()
                         finally:
-                            await kernel_manager.cleanup_resources()
+                            cleanup_isolated_kernel(self._kernel_ipc_dirs.pop(kernel_manager, ipc_dir))
 
                 cleanup = asyncio.create_task(rollback_kernel_start())
                 while True:
@@ -2486,6 +2551,8 @@ class SessionManager:
             await km.cleanup_resources()
         except Exception as e:
             LOGGER.error(f"Error shutting down kernel for {session_id}: {e}")
+        finally:
+            cleanup_isolated_kernel(self._kernel_ipc_dirs.pop(km, None))
 
     def _schedule_kernel_shutdown(
         self,

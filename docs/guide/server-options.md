@@ -205,6 +205,64 @@ class ChemistryServer(CodeExecutionServer):
 | `default_timeout` | Default timeout (default: 300s) |
 | `output_truncation_threshold` | Max chars in stdout/stderr before truncation |
 | `parallel_max_concurrency` | Max parallel executions (0 = unlimited) |
+| `kernel_network_mode` | `"inherit"` (effective default) or `"isolated"`; isolated kernels cannot route to the server or external IP networks. When omitted with a custom `SessionManager`, its `SessionConfig` setting is preserved. |
+
+### Isolating kernels from the network
+
+Set `kernel_network_mode="isolated"` to launch every Jupyter kernel in an empty
+Linux network namespace:
+
+```python
+config = ServerConfig(
+    name="offline-analysis",
+    description="Analyze operator-provided local data without network access.",
+    type="uv",
+    dependency_file="numpy\npandas\n",
+    kernel_network_mode="isolated",
+)
+```
+
+Workbench switches the Jupyter control channels from TCP to Unix IPC sockets, so
+the server can still execute code while the kernel and its subprocesses have no
+route to the server network or external IP networks. The launcher also creates a
+subordinate user namespace and enables `no_new_privs`; kernel code does not
+receive namespace capabilities in the server's user namespace.
+
+This option is Linux-only and requires the `unshare` and `setpriv` commands from
+util-linux, the `ip` command from iproute2, and runtime permission to create
+unprivileged user and network namespaces. Workbench fails the kernel launch
+rather than falling back to the inherited network when the boundary is
+unavailable.
+
+Network-isolated kernels cannot use:
+
+- public or private HTTP services;
+- host TCP loopback services, including Workbench `SidecarConfig` sidecars;
+- server-to-server transfers initiated inside the kernel;
+- domain tools that open IP sockets.
+
+Private loopback remains available within each kernel namespace, so a kernel and
+its own subprocesses can communicate over `127.0.0.1`. They cannot use that
+address to reach services running in the Workbench server namespace.
+
+Environment construction, asset provisioning, catalog materialization, and
+artifact publishing run in the server process and are not affected. Files
+materialized before execution remain available to the kernel.
+
+!!! warning "Network boundary, not a complete process sandbox"
+    This setting isolates IP networking only. It does not remove inherited
+    environment variables or assign a different operating-system user to the
+    kernel. Creating the user namespace drops supplementary group memberships,
+    so paths accessible only through a supplementary group may become
+    unreadable. `no_new_privs` also prevents setuid helpers from gaining
+    privileges.
+
+    All kernels still run with the same host UID by default. Network isolation
+    therefore does not prevent one kernel from accessing another kernel's files
+    or Unix IPC endpoints when host filesystem permissions allow it. Do not
+    expose host-control or network-proxy Unix sockets (for example, a container
+    runtime socket) to kernel code. Hostile multi-user workloads additionally
+    require per-kernel OS identities or separate worker isolation.
 
 ### Features
 
