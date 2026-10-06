@@ -10,13 +10,24 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-06
+
 ### Added
 
 - `ServerConfig.kernel_network_mode="isolated"` launches Jupyter kernels and
   their subprocesses in an empty Linux network namespace while preserving
   host-to-kernel communication over Unix IPC sockets and private in-kernel
   loopback. The opt-in boundary drops kernel namespace capabilities and fails
-  closed when the runtime lacks its user/network namespace prerequisites.
+  closed when the runtime lacks its user/network namespace prerequisites
+  ([#376](https://github.com/microsoft/agora-workbench/pull/376)).
+
+### Fixed
+
+- Direct `execute_{server}_code` tools no longer duplicate their serialized
+  JSON result in both MCP text and structured content. Their plain-text return
+  is now registered without FastMCP's redundant scalar output schema, matching
+  connector tool behavior
+  ([#379](https://github.com/microsoft/agora-workbench/pull/379)).
 
 ## [0.3.2] - 2026-09-29
 
