@@ -844,7 +844,11 @@ class CodeExecutionServer(BaseMCPServer):
                 "the session-scoped resolver fetches it before execution. If load_path is absent, "
                 "the current session's custom data manager or policy does not support catalog resolution."
             )
-        self.mcp.tool(name=self.get_tool_name(), description=tool_description)(execute_code_tool)
+        self.mcp.tool(
+            name=self.get_tool_name(),
+            description=tool_description,
+            output_schema=None,
+        )(execute_code_tool)
 
         check_job_tool = execution_defaults.build_check_job_tool(self)
         self.mcp.tool(
