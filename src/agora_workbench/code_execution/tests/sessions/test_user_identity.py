@@ -2,6 +2,9 @@
 
 import asyncio
 import queue
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -104,6 +107,7 @@ class TestUserTokenKernelPropagation:
         """Create a mock kernel manager and client pair."""
         km = MagicMock()
         km.kernel_spec.argv = ["/usr/bin/python"]
+        km.kernel_spec.metadata = {}
         km.start_kernel = AsyncMock()
         km.interrupt_kernel = MagicMock()
         km.shutdown_kernel = AsyncMock()
@@ -205,6 +209,236 @@ class TestUserTokenKernelPropagation:
         call_kwargs = km.start_kernel.call_args.kwargs
         env = call_kwargs.get("env", {})
         assert "USER_ASSERTION_TOKEN" not in env
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_uses_network_namespace_and_ipc(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        assert km.transport == "ipc"
+        assert km.ip.endswith("/kernel")
+        assert km.kernel_spec.argv[:5] == [
+            "/usr/bin/unshare",
+            "--user",
+            "--map-current-user",
+            "--net",
+            "--",
+        ]
+        assert km.kernel_spec.argv[5] == sys.executable
+        assert km.kernel_spec.argv[6].endswith("/sessions/network_isolation.py")
+        assert km.kernel_spec.argv[7:] == [
+            "--ip",
+            "/usr/bin/ip",
+            "--setpriv",
+            "/usr/bin/setpriv",
+            "--",
+            "/usr/bin/python",
+        ]
+
+        ipc_dir = Path(km.ip).parent
+        assert ipc_dir.is_dir()
+        await manager._shutdown_kernel("sess-isolated", cleanup_artifacts=False)
+        assert not ipc_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_fails_closed_when_namespaces_are_unavailable(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 1, "", "unshare failed"),
+            ),
+            pytest.raises(RuntimeError, match="unprivileged user and network namespaces"),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        km.start_kernel.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_caches_failed_namespace_preflight(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated-1")
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated-2")
+        km, _ = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 1, "", "unshare failed"),
+            ) as run,
+        ):
+            with pytest.raises(RuntimeError, match="unprivileged user and network namespaces"):
+                await manager._get_or_create_kernel("sess-isolated-1")
+            with pytest.raises(RuntimeError, match="unprivileged user and network namespaces"):
+                await manager._get_or_create_kernel("sess-isolated-2")
+
+        assert run.call_count == 1
+        km.start_kernel.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_normalizes_relative_python_kernelspec(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+        km.kernel_spec.argv = ["python3", "-m", "ipykernel_launcher", "-f", "{connection_file}"]
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        assert km.kernel_spec.argv[-5:] == [
+            sys.executable,
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
+        ]
+        await manager._shutdown_kernel("sess-isolated", cleanup_artifacts=False)
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_rejects_non_local_provisioner(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+        km.kernel_spec.metadata = {
+            "kernel_provisioner": {
+                "provisioner_name": "remote-provisioner",
+            }
+        }
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            pytest.raises(RuntimeError, match="supports only the Jupyter local-provisioner"),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        km.start_kernel.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_rejects_non_local_default_provisioner(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+        provisioner_factory = MagicMock()
+        provisioner_factory.default_provisioner_name = "remote-provisioner"
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.KernelProvisionerFactory.instance",
+                return_value=provisioner_factory,
+            ),
+            pytest.raises(RuntimeError, match="supports only the Jupyter local-provisioner"),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        km.start_kernel.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_isolated_kernel_removes_ipc_directory_when_startup_fails(self, tmp_path):
+        manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+        manager.create_session({}, "user", "", {}, session_id="sess-isolated")
+        km, _ = self._make_mock_kernel()
+        km.start_kernel.side_effect = RuntimeError("kernel failed")
+        ipc_dir = tmp_path / "kernel-ipc"
+
+        def make_ipc_dir(*_args, **_kwargs):
+            ipc_dir.mkdir()
+            return str(ipc_dir)
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.shutil.which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.tempfile.mkdtemp",
+                side_effect=make_ipc_dir,
+            ),
+            pytest.raises(RuntimeError, match="kernel failed"),
+        ):
+            await manager._get_or_create_kernel("sess-isolated")
+
+        assert not ipc_dir.exists()
+        assert manager._kernel_ipc_dirs == {}
 
     @pytest.mark.asyncio
     async def test_kernel_token_tracked_after_start(self):

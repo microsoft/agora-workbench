@@ -243,7 +243,8 @@ class ServerConfig(BaseModel):
         assets, auto_provision
 
     **Execution** — code execution policy:
-        max_timeout, default_timeout, output_truncation_threshold, parallel_max_concurrency
+        max_timeout, default_timeout, output_truncation_threshold,
+        parallel_max_concurrency, kernel_network_mode
 
     **Features** — optional server capabilities:
         tool_search_backend, peer_registry
@@ -395,6 +396,23 @@ class ServerConfig(BaseModel):
             "PARALLEL_EXECUTE_MAX_CONCURRENCY env var (default: 0)."
         ),
     )
+    kernel_network_mode: Optional[Literal["inherit", "isolated"]] = Field(
+        default=None,
+        description=(
+            "Optional network policy for Jupyter kernels. 'inherit' uses the server "
+            "process network. 'isolated' launches each kernel in an empty Linux "
+            "network namespace and switches Jupyter channels to Unix IPC sockets. "
+            "When omitted, a default SessionManager uses 'inherit' and a caller-"
+            "provided SessionManager keeps its SessionConfig setting."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_isolated_kernel_network(self) -> "ServerConfig":
+        """Loopback HTTP sidecars are unreachable from an isolated netns."""
+        if self.kernel_network_mode == "isolated" and self.sidecars:
+            raise ValueError("kernel_network_mode='isolated' cannot be combined with loopback HTTP sidecars")
+        return self
 
     # --- Features ---
 

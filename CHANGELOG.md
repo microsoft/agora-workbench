@@ -10,6 +10,14 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Added
+
+- `ServerConfig.kernel_network_mode="isolated"` launches Jupyter kernels and
+  their subprocesses in an empty Linux network namespace while preserving
+  host-to-kernel communication over Unix IPC sockets and private in-kernel
+  loopback. The opt-in boundary drops kernel namespace capabilities and fails
+  closed when the runtime lacks its user/network namespace prerequisites.
+
 ## [0.3.2] - 2026-09-29
 
 ### Fixed

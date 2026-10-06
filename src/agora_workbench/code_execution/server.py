@@ -242,10 +242,24 @@ class CodeExecutionServer(BaseMCPServer):
 
         # Auto-create session manager with defaults if not provided
         if session_manager is None:
-            _session_manager = SessionManager(SessionConfig())
+            _session_manager = SessionManager(
+                SessionConfig(kernel_network_mode=server_config.kernel_network_mode or "inherit")
+            )
             LOGGER.info("Created default SessionManager.")
         else:
             _session_manager = session_manager
+            if (
+                server_config.kernel_network_mode is not None
+                and _session_manager.config.kernel_network_mode != server_config.kernel_network_mode
+            ):
+                LOGGER.warning(
+                    "ServerConfig.kernel_network_mode=%s overrides the custom SessionManager setting %s.",
+                    server_config.kernel_network_mode,
+                    _session_manager.config.kernel_network_mode,
+                )
+                _session_manager.set_kernel_network_mode(server_config.kernel_network_mode)
+        if _session_manager.config.kernel_network_mode == "isolated" and server_config.sidecars:
+            raise ValueError("isolated kernel networking cannot be combined with loopback HTTP sidecars")
 
         self.session_manager = _session_manager
         self.session_manager.kernel_name = self.kernel_name
