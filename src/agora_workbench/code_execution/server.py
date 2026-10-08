@@ -695,11 +695,10 @@ class CodeExecutionServer(BaseMCPServer):
             "to examine objects server-side without transferring the full output "
             "through the MCP interface."
         )
-        _TOOL_RESULT_PREVIEW_CHARS = 500
 
         new_stdout = result.stdout
         new_stderr = result.stderr
-        new_tool_calls = result.tool_calls
+        new_tool_calls = self._truncate_tool_call_results(result.tool_calls)
 
         if len(result.stdout) > threshold:
             notice = (
@@ -732,41 +731,6 @@ class CodeExecutionServer(BaseMCPServer):
                 threshold,
             )
 
-        remaining_tool_result_chars = threshold
-        truncated_tool_results = 0
-        updated_tool_calls = []
-        for tool_call in result.tool_calls:
-            serialized_result = json.dumps(tool_call.result, ensure_ascii=False, separators=(",", ":"))
-            result_char_count = len(serialized_result)
-            if result_char_count <= remaining_tool_result_chars:
-                updated_tool_calls.append(tool_call)
-                remaining_tool_result_chars -= result_char_count
-                continue
-
-            updated_tool_calls.append(
-                tool_call.model_copy(
-                    update={
-                        "result": {
-                            "_truncated": True,
-                            "_original_char_count": result_char_count,
-                            "_preview": serialized_result[
-                                : min(remaining_tool_result_chars, _TOOL_RESULT_PREVIEW_CHARS)
-                            ],
-                        }
-                    }
-                )
-            )
-            remaining_tool_result_chars = 0
-            truncated_tool_results += 1
-
-        if truncated_tool_results:
-            new_tool_calls = updated_tool_calls
-            LOGGER.info(
-                "Truncated %d tool-call result(s) at cumulative threshold=%d",
-                truncated_tool_results,
-                threshold,
-            )
-
         if new_stdout is result.stdout and new_stderr is result.stderr and new_tool_calls is result.tool_calls:
             return result
 
@@ -777,6 +741,48 @@ class CodeExecutionServer(BaseMCPServer):
                 "tool_calls": new_tool_calls,
             }
         )
+
+    def _truncate_tool_call_results(self, tool_calls: list[ToolCallRecord]) -> list[ToolCallRecord]:
+        """Limit cumulative serialized tool-call results."""
+        threshold = self.output_truncation_threshold
+        if threshold <= 0:
+            return tool_calls
+
+        preview_limit = 500
+        remaining_chars = threshold
+        truncated_count = 0
+        updated_tool_calls = []
+        for tool_call in tool_calls:
+            serialized_result = json.dumps(tool_call.result, ensure_ascii=False, separators=(",", ":"))
+            result_char_count = len(serialized_result)
+            if result_char_count <= remaining_chars:
+                updated_tool_calls.append(tool_call)
+                remaining_chars -= result_char_count
+                continue
+
+            updated_tool_calls.append(
+                tool_call.model_copy(
+                    update={
+                        "result": {
+                            "_truncated": True,
+                            "_original_char_count": result_char_count,
+                            "_preview": serialized_result[: min(remaining_chars, preview_limit)],
+                        }
+                    }
+                )
+            )
+            remaining_chars = 0
+            truncated_count += 1
+
+        if not truncated_count:
+            return tool_calls
+
+        LOGGER.info(
+            "Truncated %d tool-call result(s) at cumulative threshold=%d",
+            truncated_count,
+            threshold,
+        )
+        return updated_tool_calls
 
     # ========================================================================
     # Authentication helper methods
@@ -1433,7 +1439,7 @@ class CodeExecutionServer(BaseMCPServer):
             except Exception as e:
                 LOGGER.warning(f"Failed to extract tool call trace: {e}")
 
-        return execution_result
+        return self._truncate_output_if_needed(execution_result)
 
     async def _execute_code_with_tracing(self, code: str, timeout: int) -> CodeExecutionResult:
         """

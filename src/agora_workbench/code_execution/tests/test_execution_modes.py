@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
-from ..code_execution import build_tool
-from ..code_execution_models import ServerConfig
+from ..code_execution import build_check_job_tool, build_tool
+from ..code_execution_models import CodeExecutionResult, ServerConfig
 from ..sessions import set_current_session
 
 
@@ -251,6 +251,39 @@ async def test_adaptive_fast_execution_returns_tuple(test_server):
     assert "fast result" in stdout
 
 
+@pytest.mark.asyncio
+async def test_adaptive_fast_execution_truncates_tool_call_results(test_server, monkeypatch):
+    """Adaptive fast-path responses apply the shared tool-call result limit."""
+    session_id = test_server.session_manager.create_session(
+        data={}, user_identity="test_user", user_token="test-token", token_claims={}
+    )
+    session = test_server.session_manager.get_session(session_id)
+    large_result = {"value": "x" * 100}
+    raw_calls = [{"tool_name": "large", "result": large_result}]
+    monkeypatch.setattr(test_server, "output_truncation_threshold", 20)
+    monkeypatch.setattr(
+        test_server.session_manager,
+        "start_promoted_execution_for_session",
+        AsyncMock(return_value=("", "", True, [], [])),
+    )
+    monkeypatch.setattr(test_server, "_tool_tracing_active", lambda _session_id: True)
+    monkeypatch.setattr(
+        test_server,
+        "_execute_code",
+        AsyncMock(return_value=CodeExecutionResult(stdout=json.dumps(raw_calls))),
+    )
+
+    set_current_session(session)
+    try:
+        result = await test_server._execute_code_with_promotion("pass", timeout=10, promotion_threshold_s=5)
+    finally:
+        set_current_session(None)
+
+    assert isinstance(result, CodeExecutionResult)
+    assert result.tool_calls[0].result["_truncated"] is True
+    assert result.tool_calls[0].result["_original_char_count"] > 20
+
+
 # ============================================================================
 # adaptive execution mode — slow path (promoted to background)
 # ============================================================================
@@ -290,6 +323,35 @@ async def test_adaptive_slow_execution_promotes_to_background(test_server):
     assert final_status["status"] == "completed"
     assert final_status["success"] is True
     assert "slow result" in final_status["stdout"]
+
+
+@pytest.mark.asyncio
+async def test_check_job_truncates_tool_call_results(test_server, monkeypatch):
+    """Completed background responses apply the shared tool-call result limit."""
+    large_result = {"value": "x" * 100}
+    raw_calls = [{"tool_name": "large", "result": large_result}]
+    monkeypatch.setattr(test_server, "output_truncation_threshold", 20)
+    monkeypatch.setattr(test_server, "_tool_tracing_active", lambda _session_id: True)
+    monkeypatch.setattr(
+        test_server.session_manager,
+        "check_background_job",
+        lambda _job_id, caller_identity=None: {
+            "status": "completed",
+            "session_id": "session-1",
+            "success": True,
+        },
+    )
+    monkeypatch.setattr(
+        test_server.session_manager,
+        "execute_code_for_session",
+        AsyncMock(return_value=(json.dumps(raw_calls), "", True, [], [])),
+    )
+
+    check_job = build_check_job_tool(test_server)
+    result = json.loads(await check_job(None, "job-1"))
+
+    assert result["tool_calls"][0]["result"]["_truncated"] is True
+    assert result["tool_calls"][0]["result"]["_original_char_count"] > 20
 
 
 # ============================================================================

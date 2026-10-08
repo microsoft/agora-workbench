@@ -984,7 +984,8 @@ def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaita
             stdout, _stderr, success, _displays, _artifacts = trace_result
             if success and stdout:
                 raw_calls = json.loads(stdout.strip())
-                return [ToolCallRecord(**record).model_dump() for record in raw_calls]
+                tool_calls = [ToolCallRecord(**record) for record in raw_calls]
+                return [record.model_dump() for record in server._truncate_tool_call_results(tool_calls)]
         except Exception:
             LOGGER.warning("Failed to flush tool-call trace for session %s", session_id)
         return []

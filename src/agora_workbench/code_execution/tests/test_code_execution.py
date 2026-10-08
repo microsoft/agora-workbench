@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from .. import CodeExecutionResult
 from .. import code_execution as execution_defaults
+from ..code_execution_models import ToolCallRecord
 from ..sessions import (
     set_current_request_token,
     set_current_session,
@@ -710,7 +711,7 @@ class TestOutputTruncation:
         self,
         stdout: str = "",
         stderr: str = "",
-        tool_calls: list[dict] | None = None,
+        tool_calls: list[ToolCallRecord] | None = None,
     ) -> CodeExecutionResult:
         return CodeExecutionResult(
             stdout=stdout,
@@ -788,8 +789,8 @@ class TestOutputTruncation:
         try:
             result = self._make_result(
                 tool_calls=[
-                    {"tool_name": "first", "result": first_result},
-                    {"tool_name": "second", "result": second_result},
+                    ToolCallRecord(tool_name="first", result=first_result),
+                    ToolCallRecord(tool_name="second", result=second_result),
                 ]
             )
             out = test_server._truncate_output_if_needed(result)
@@ -810,8 +811,8 @@ class TestOutputTruncation:
         try:
             result = self._make_result(
                 tool_calls=[
-                    {"tool_name": "first", "result": {"value": 1}},
-                    {"tool_name": "second", "result": {"value": 2}},
+                    ToolCallRecord(tool_name="first", result={"value": 1}),
+                    ToolCallRecord(tool_name="second", result={"value": 2}),
                 ]
             )
             out = test_server._truncate_output_if_needed(result)
@@ -828,7 +829,7 @@ class TestOutputTruncation:
             tool_result = {"value": "x" * 1_000}
             serialized_result = json.dumps(tool_result, ensure_ascii=False, separators=(",", ":"))
             result = self._make_result(
-                tool_calls=[{"tool_name": "large", "result": tool_result}],
+                tool_calls=[ToolCallRecord(tool_name="large", result=tool_result)],
             )
             out = test_server._truncate_output_if_needed(result)
 
@@ -848,7 +849,7 @@ class TestOutputTruncation:
             result = self._make_result(
                 stdout=big,
                 stderr=big,
-                tool_calls=[{"tool_name": "large", "result": tool_result}],
+                tool_calls=[ToolCallRecord(tool_name="large", result=tool_result)],
             )
             out = test_server._truncate_output_if_needed(result)
             assert out.stdout == big
