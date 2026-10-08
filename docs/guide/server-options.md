@@ -203,7 +203,7 @@ class ChemistryServer(CodeExecutionServer):
 | `promotion_threshold_s` | Seconds before adaptive mode promotes to background (default: 60) |
 | `max_timeout` | Maximum allowed timeout per execution (default: 600s) |
 | `default_timeout` | Default timeout (default: 300s) |
-| `output_truncation_threshold` | Max chars in stdout/stderr before truncation |
+| `output_truncation_threshold` | Max chars in each output stream and cumulatively across tool-call results before truncation |
 | `parallel_max_concurrency` | Max parallel executions (0 = unlimited) |
 | `kernel_network_mode` | `"inherit"` (effective default) or `"isolated"`; isolated kernels cannot route to the server or external IP networks. When omitted with a custom `SessionManager`, its `SessionConfig` setting is preserved. |
 

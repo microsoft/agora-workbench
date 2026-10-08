@@ -706,8 +706,18 @@ async def test_get_or_create_session_returns_typed_429_when_at_capacity(test_ser
 class TestOutputTruncation:
     """Unit tests for _truncate_output_if_needed."""
 
-    def _make_result(self, stdout: str = "", stderr: str = "") -> CodeExecutionResult:
-        return CodeExecutionResult(stdout=stdout, stderr=stderr, success=True)
+    def _make_result(
+        self,
+        stdout: str = "",
+        stderr: str = "",
+        tool_calls: list[dict] | None = None,
+    ) -> CodeExecutionResult:
+        return CodeExecutionResult(
+            stdout=stdout,
+            stderr=stderr,
+            success=True,
+            tool_calls=tool_calls or [],
+        )
 
     def test_no_truncation_when_within_threshold(self, test_server):
         """Output within the threshold is returned unchanged."""
@@ -766,16 +776,84 @@ class TestOutputTruncation:
         finally:
             test_server.output_truncation_threshold = original_threshold
 
+    def test_tool_call_results_share_cumulative_threshold(self, test_server):
+        """Tool-call results are retained until their cumulative threshold is exhausted."""
+        original_threshold = test_server.output_truncation_threshold
+        first_result = {"value": "a" * 10}
+        second_result = {"value": "b" * 20}
+        first_serialized = json.dumps(first_result, ensure_ascii=False, separators=(",", ":"))
+        second_serialized = json.dumps(second_result, ensure_ascii=False, separators=(",", ":"))
+        preview_chars = 5
+        test_server.output_truncation_threshold = len(first_serialized) + preview_chars
+        try:
+            result = self._make_result(
+                tool_calls=[
+                    {"tool_name": "first", "result": first_result},
+                    {"tool_name": "second", "result": second_result},
+                ]
+            )
+            out = test_server._truncate_output_if_needed(result)
+
+            assert out.tool_calls[0].result == first_result
+            assert out.tool_calls[1].result == {
+                "_truncated": True,
+                "_original_char_count": len(second_serialized),
+                "_preview": second_serialized[:preview_chars],
+            }
+        finally:
+            test_server.output_truncation_threshold = original_threshold
+
+    def test_tool_call_results_unchanged_within_threshold(self, test_server):
+        """Tool-call results remain complete when their cumulative size is within the threshold."""
+        original_threshold = test_server.output_truncation_threshold
+        test_server.output_truncation_threshold = 100
+        try:
+            result = self._make_result(
+                tool_calls=[
+                    {"tool_name": "first", "result": {"value": 1}},
+                    {"tool_name": "second", "result": {"value": 2}},
+                ]
+            )
+            out = test_server._truncate_output_if_needed(result)
+
+            assert out is result
+        finally:
+            test_server.output_truncation_threshold = original_threshold
+
+    def test_tool_call_result_preview_has_independent_cap(self, test_server):
+        """A near-threshold result is replaced with a bounded preview."""
+        original_threshold = test_server.output_truncation_threshold
+        test_server.output_truncation_threshold = 1_000
+        try:
+            tool_result = {"value": "x" * 1_000}
+            serialized_result = json.dumps(tool_result, ensure_ascii=False, separators=(",", ":"))
+            result = self._make_result(
+                tool_calls=[{"tool_name": "large", "result": tool_result}],
+            )
+            out = test_server._truncate_output_if_needed(result)
+
+            assert out.tool_calls[0].result["_truncated"] is True
+            assert out.tool_calls[0].result["_original_char_count"] == len(serialized_result)
+            assert len(out.tool_calls[0].result["_preview"]) == 500
+        finally:
+            test_server.output_truncation_threshold = original_threshold
+
     def test_truncation_disabled_when_threshold_zero(self, test_server):
         """Setting threshold to 0 disables all truncation."""
         original_threshold = test_server.output_truncation_threshold
         test_server.output_truncation_threshold = 0
         try:
             big = "x" * 1_000_000
-            result = self._make_result(stdout=big, stderr=big)
+            tool_result = {"value": big}
+            result = self._make_result(
+                stdout=big,
+                stderr=big,
+                tool_calls=[{"tool_name": "large", "result": tool_result}],
+            )
             out = test_server._truncate_output_if_needed(result)
             assert out.stdout == big
             assert out.stderr == big
+            assert out.tool_calls[0].result == tool_result
         finally:
             test_server.output_truncation_threshold = original_threshold
 

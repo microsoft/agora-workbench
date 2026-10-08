@@ -154,7 +154,7 @@ az deployment group create \
 | `ENTRA_CLIENT_ID` | Entra ID app registration client ID |
 | `ENTRA_TENANT_ID` | Azure AD tenant ID |
 | `AZURE_CLIENT_ID` | Managed identity client ID |
-| `CODE_OUTPUT_TRUNCATION_THRESHOLD` | Output truncation limit |
+| `CODE_OUTPUT_TRUNCATION_THRESHOLD` | Output stream and tool-call result truncation limit |
 | `PARALLEL_EXECUTE_MAX_CONCURRENCY` | Max parallel executions |
 
 ## Production considerations

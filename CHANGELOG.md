@@ -10,6 +10,10 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Fixed
+
+- Bound serialized tool-call results using the configured output truncation threshold.
+
 ## [0.3.3] - 2026-10-06
 
 ### Added

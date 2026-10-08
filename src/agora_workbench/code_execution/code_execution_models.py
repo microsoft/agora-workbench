@@ -182,7 +182,10 @@ class ToolCallRecord(BaseModel):
 
     tool_name: str = Field(description="Name of the tool that was called")
     args: dict = Field(default_factory=dict, description="Arguments passed to the tool (JSON-safe snapshot)")
-    result: dict = Field(default_factory=dict, description="Return value from the tool (JSON-safe snapshot)")
+    result: dict = Field(
+        default_factory=dict,
+        description="Return value from the tool, or truncation metadata when the response limit is exceeded",
+    )
     duration_ms: float = Field(default=0.0, ge=0, description="Execution time in milliseconds")
     success: bool = Field(default=True, description="Whether the tool call succeeded")
     error: Optional[str] = Field(default=None, description="Error message if tool call failed")
@@ -382,8 +385,9 @@ class ServerConfig(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Maximum characters allowed in stdout/stderr before truncation. "
-            "Large outputs are trimmed and a guidance message is appended. "
+            "Maximum characters allowed in each output stream and across serialized "
+            "tool-call results before truncation. Large outputs are trimmed and "
+            "tool-call result overflow is replaced with truncation metadata. "
             "Set to 0 to disable truncation. When None, falls back to the "
             "CODE_OUTPUT_TRUNCATION_THRESHOLD env var (default: 50000)."
         ),
