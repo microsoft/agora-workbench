@@ -10,11 +10,27 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
-### Changed
+## [0.4.0] - 2026-10-08
+
+### Breaking
 
 - Code-execution MCP responses no longer include internal tool-call arguments
   or results. Agents receive only top-level execution output, while complete
-  traces remain available to activity-event consumers.
+  traces remain available to activity-event consumers
+  ([#382](https://github.com/microsoft/agora-workbench/pull/382)).
+
+  **Who is affected:** clients that read the `tool_calls` field from
+  code-execution MCP responses.
+
+  **To migrate:** consume the top-level execution output for Agent-facing
+  behavior and use activity events when internal tool-call observability is
+  required.
+
+### Fixed
+
+- Updated the locked `jupyter-server` dependency from 2.20.0 to 2.21.1 to
+  resolve GHSA-c3mw-737p-c7g2 / CVE-2026-86049
+  ([#384](https://github.com/microsoft/agora-workbench/pull/384)).
 
 ## [0.3.3] - 2026-10-06
 
