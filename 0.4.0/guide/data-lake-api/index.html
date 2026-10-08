@@ -1,0 +1,2699 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for building sandboxed MCP servers with Agora Workbench.">
+      
+      
+      
+      
+        <link rel="prev" href="../data-lake-operations/">
+      
+      
+        <link rel="next" href="../data-lake-migration/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Data-lake API reference - Agora Workbench</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#data-lake-api-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Agora Workbench" class="md-header__button md-logo" aria-label="Agora Workbench" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agora Workbench
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Data-lake API reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/microsoft/agora-workbench" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Agora Workbench" class="md-nav__button md-logo" aria-label="Agora Workbench" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agora Workbench
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/microsoft/agora-workbench" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agora Workbench
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Options for making a CodeExecutionServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tool-pattern/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeExecutionServer tool pattern
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-pattern/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeExecutionServer skill pattern
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-effective-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing effective tools and skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other options
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Other options
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attaching-to-your-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attaching to your agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../working-with-data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data lake - start here
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake CLI and quickstarts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake API reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#stream-artifact-bytes-safely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream artifact bytes safely
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stream artifact bytes safely">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#storage-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#represent-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Represent artifacts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implement-a-catalog-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implement a catalog provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-revisions-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity, revisions, and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managed-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed writes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managed writes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transfer-integration-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transfer integration boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caller-aware-policy-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caller-aware policy composition
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Caller-aware policy composition">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#request-state-caches-and-revocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request state, caches, and revocation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-the-built-in-sqlite-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use the built-in SQLite catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-an-authoritative-manifest-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use an authoritative manifest provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provide-a-custom-artifact-resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provide a custom artifact resolver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-and-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership and lifetime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 migration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 support and acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sidecars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sidecars (shared helper processes)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Server networks with ConnectorServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploying/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying your server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring your servers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentication options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extension-points/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension points
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/start-chemistry-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start the chemistry MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/maf_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Agent Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/openai_agents_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAI Agents SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/copilot_sdk_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Copilot SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/tool_registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/data_access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#stream-artifact-bytes-safely" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stream artifact bytes safely
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Stream artifact bytes safely">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#storage-boundaries" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Storage boundaries
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#represent-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Represent artifacts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implement-a-catalog-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Implement a catalog provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#identity-revisions-and-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Identity, revisions, and compatibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#managed-writes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managed writes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Managed writes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#transfer-integration-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Transfer integration boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caller-aware-policy-composition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caller-aware policy composition
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Caller-aware policy composition">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#request-state-caches-and-revocation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Request state, caches, and revocation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-sql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw SQL
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-the-built-in-sqlite-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use the built-in SQLite catalog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#use-an-authoritative-manifest-provider" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Use an authoritative manifest provider
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provide-a-custom-artifact-resolver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provide a custom artifact resolver
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ownership-and-lifetime" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ownership and lifetime
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#import-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="data-lake-api-reference">Data-lake API reference<a class="headerlink" href="#data-lake-api-reference" title="Permanent link">&para;</a></h1>
+<p>This page is the detailed reference for transfer behavior, artifact contracts,
+custom providers and resolvers, identity, managed writes, and compatibility.</p>
+<p><strong>New to the data-lake API?</strong> Start with
+<a href="../data-lake/">Add a data catalog to your server</a>. It takes you from a local
+CSV to searchable MCP tools before introducing these extension points.</p>
+<p>Most applications configure the built-in catalog and <code>CatalogIntegration</code>;
+they do not need to implement a provider or call the low-level transfer seam
+directly.</p>
+<p>Choose the import path that matches your task:</p>
+<table>
+<thead>
+<tr>
+<th>Task</th>
+<th>Import from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Define artifact records or implement a catalog/resolver</td>
+<td><code>agora_workbench.data_lake</code></td>
+</tr>
+<tr>
+<td>Use the built-in SQLite catalog and indexer</td>
+<td><code>agora_workbench.data_lake.catalog</code></td>
+</tr>
+<tr>
+<td>Use manifest-backed provider/resolver adapters</td>
+<td><code>agora_workbench.data_lake.catalog</code> / <code>agora_workbench.data_lake.resolvers</code></td>
+</tr>
+<tr>
+<td>Register, upload, remove, or promote durable artifacts</td>
+<td><code>agora_workbench.data_lake</code> / <code>agora_workbench.data_lake.catalog</code></td>
+</tr>
+<tr>
+<td>Use the Azure AI Search resolver</td>
+<td><code>agora_workbench.data_lake.resolvers</code></td>
+</tr>
+<tr>
+<td>Implement or configure fetchers, publishers, credentials, or <code>DataLakeDataManager</code></td>
+<td><code>agora_workbench.data_lake.execution</code></td>
+</tr>
+<tr>
+<td>Mount a catalog or implement <code>CatalogAwareDataManager</code></td>
+<td><code>agora_workbench.code_execution</code></td>
+</tr>
+</tbody>
+</table>
+<p>Importing <code>agora_workbench.data_lake</code> does not start a server, create an
+execution session, or load cloud SDK modules.</p>
+<p>For supported administrative commands, runnable examples, Azure Storage
+hosting guidance, and operational limits, see
+<a href="../data-lake-operations/">Data-lake CLI and quickstarts</a>. For import,
+configuration, reference, and rollback changes from 0.2.x, see
+<a href="../data-lake-migration/">Data-lake migration</a>.</p>
+<h2 id="stream-artifact-bytes-safely">Stream artifact bytes safely<a class="headerlink" href="#stream-artifact-bytes-safely" title="Permanent link">&para;</a></h2>
+<p><code>AssetFetcher.fetch()</code> is explicitly a full-memory convenience. Use
+<code>fetch_to_file()</code> for files that may be large. The built-in local and Azure
+Blob fetchers commit through a sibling partial file, replace the destination
+only after successful validation, and remove the partial after size, quota,
+timeout, cancellation, checksum, or provider failure.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">RequestContext</span><span class="p">,</span> <span class="n">TransferOptions</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">LocalFileFetcher</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="n">cancellation</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="n">fetcher</span> <span class="o">=</span> <span class="n">LocalFileFetcher</span><span class="p">(</span><span class="n">allowed_roots</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;/srv/approved-data&quot;</span><span class="p">])</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">fetcher</span><span class="o">.</span><span class="n">fetch_to_file_result</span><span class="p">(</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="s2">&quot;file:///srv/approved-data/weather.parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    <span class="n">Path</span><span class="p">(</span><span class="s2">&quot;weather.parquet&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">options</span><span class="o">=</span><span class="n">TransferOptions</span><span class="p">(</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        <span class="n">max_bytes</span><span class="o">=</span><span class="mi">512</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        <span class="n">quota_bytes</span><span class="o">=</span><span class="mi">2</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span> <span class="o">*</span> <span class="mi">1024</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>        <span class="n">timeout_seconds</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="n">expected_sha256</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">,</span>  <span class="c1"># optional 64-character hex digest</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>        <span class="n">cancellation_event</span><span class="o">=</span><span class="n">cancellation</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="p">),</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">context</span><span class="o">=</span><span class="n">RequestContext</span><span class="p">(</span><span class="n">request_id</span><span class="o">=</span><span class="s2">&quot;request-42&quot;</span><span class="p">,</span> <span class="n">caller_id</span><span class="o">=</span><span class="s2">&quot;analyst&quot;</span><span class="p">),</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="p">)</span>
+</code></pre></div>
+<p>The default limit is 1 GiB per transfer, the default end-to-end timeout is
+300 seconds, and the default Workbench copy chunk is 1 MiB. Blob downloads
+default to four concurrent 4 MiB SDK ranges, so Workbench/provider buffering
+is bounded independently of object size (approximately 17 MiB plus SDK and
+transport overhead). Operators may tune <code>MCP_BLOB_MAX_CONCURRENCY</code>,
+<code>MCP_BLOB_CHUNK_SIZE</code>, and <code>MCP_BLOB_MAX_SINGLE_GET</code>; those values define the
+deployment's memory budget.</p>
+<p><code>TransferResult</code> contains the byte count, computed SHA-256, elapsed time,
+credential-free resource display value, and the exact <code>RequestContext</code>.
+<code>TransferOptions.diagnostic_hook</code> receives start/completion/failure events with
+that same context for audit integration. Query strings, fragments, user-info,
+and SAS credentials are removed from diagnostics. Hooks must not add raw
+credentials themselves. Hook exceptions are logged and ignored: they cannot
+turn a committed transfer into a reported failure or replace the primary
+transfer error.
+When an upstream layer has already replaced URI user-info with the
+scheme-less <code>******</code> marker, presentation sanitization emits only the
+credential-free <code>host/path</code>; it does not invent a replacement scheme.</p>
+<p><code>AssetPublisher.publish()</code> streams regular files for the built-in local and
+Blob publishers. <code>publish_with_result()</code> additionally returns the
+<code>TransferResult</code>; this is the stable byte-transfer seam intended for managed
+catalog commits. Set <code>TransferOptions(create_exclusive=True)</code> for conditional
+object creation. Blob uses an <code>If-None-Match: *</code> create precondition; local
+publishing uses an atomic create-only link. A successful conditional create
+returns <code>TransferResult.created == True</code>. Ordinary overwrite mode returns
+<code>None</code> because every provider cannot reliably distinguish create from replace.
+For local conditional creates, successfully linking the validated bytes under
+the final name is the commit point; cleanup of the private temporary link is
+best-effort and cannot turn that committed result into a reported failure.
+Blob publication uploads an immutable disk snapshot, and its byte count and
+checksum describe that exact snapshot rather than a second read of a mutable
+source. The snapshot is created in the publisher-controlled <code>staging_dir</code>
+(defaulting below <code>MCP_ASSET_CACHE_DIR</code>, or a private working-directory staging
+folder), so publishing requires only read access to the source directory.
+Secure Blob snapshot staging currently requires POSIX descriptor-relative
+filesystem primitives; constructing <code>BlobPublisher</code> on other platforms raises
+an explicit unsupported-capability error.
+<code>TransferOptions.object_metadata</code> is copied into Azure object metadata and
+returned immutably on <code>TransferResult</code>; unsupported providers reject it
+explicitly. Credential-bearing metadata keys are rejected, as are URI values
+containing user information, query parameters, or fragments. Blob metadata
+keys must use Azure's identifier syntax: an ASCII letter or underscore followed
+only by ASCII letters, digits, and underscores.</p>
+<p>The provider namespace is centralized in <code>agora_workbench.data_lake.identity</code>:
+<code>RESERVED_MANIFEST_PATH</code>, <code>RESERVED_OPERATIONS_PREFIX</code>,
+<code>RESERVED_REVISIONS_PREFIX</code>, and <code>RESERVED_RECEIPTS_PREFIX</code>. Ordinary transfer
+calls reject all <code>.agora/</code> paths. Trusted managed-write code may set
+<code>TransferOptions(allow_reserved=True)</code> after validating a revision object path
+with <code>validate_managed_revision_path()</code>. This is intentionally narrow:
+authoritative manifest logical artifact paths can never use reserved names,
+while physical revision bytes may live only below <code>.agora/revisions/</code>.</p>
+<p>The managed-storage transfer seam is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">uri</span><span class="p">,</span> <span class="n">transfer</span> <span class="o">=</span> <span class="k">await</span> <span class="n">blob_publisher</span><span class="o">.</span><span class="n">publish_with_result</span><span class="p">(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>    <span class="n">snapshot</span><span class="p">,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>    <span class="s2">&quot;.agora/revisions/operation-42/data.bin&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>    <span class="s2">&quot;&quot;</span><span class="p">,</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>    <span class="n">options</span><span class="o">=</span><span class="n">TransferOptions</span><span class="p">(</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        <span class="n">create_exclusive</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>        <span class="n">allow_reserved</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>        <span class="n">object_metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;agora_operation_id&quot;</span><span class="p">:</span> <span class="s2">&quot;operation-42&quot;</span><span class="p">},</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>        <span class="n">max_bytes</span><span class="o">=...</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>        <span class="n">quota_bytes</span><span class="o">=...</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>        <span class="n">timeout_seconds</span><span class="o">=...</span><span class="p">,</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="n">cancellation_event</span><span class="o">=...</span><span class="p">,</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="n">diagnostic_hook</span><span class="o">=...</span><span class="p">,</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="p">),</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>    <span class="n">context</span><span class="o">=</span><span class="n">request_context</span><span class="p">,</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="p">)</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="k">assert</span> <span class="n">transfer</span><span class="o">.</span><span class="n">created</span> <span class="ow">is</span> <span class="kc">True</span>
+</code></pre></div>
+<p>The returned checksum and byte count cover the exact uploaded bytes; context,
+timeout, cancellation, quota, diagnostics, metadata, and conditional-create
+state cross the same provider call. Publication does <strong>not</strong> register or
+reconcile a catalog manifest.
+Managed commit/recovery is a separate lifecycle and must not assume that the
+catalog layer owns cleanup of a failed conditional create.</p>
+<p>The peer <code>ServerPublisher.publish()</code> copies the serialized object into an
+immutable bounded snapshot, validates size/quota/checksum/cancellation, and
+streams its base64 JSON body with backpressure under the remaining timeout.
+It marks that backward-compatible JSON body as protocol version 2 so updated
+receivers incrementally decode it directly to a bounded temporary file; older
+receivers can continue parsing the same JSON envelope through the legacy path.
+Updated receivers also incrementally parse absent-version legacy v1 envelopes,
+enforcing declared and observed encoded-body limits before bounded base64
+decoding; they never materialize the full JSON request body.
+The peer protocol does not expose a durable storage locator or conditional
+creation result, so <code>publish_with_result()</code> still raises
+<code>UnsupportedOperationError</code> rather than claiming that detailed capability.
+Custom fetchers that implement only <code>fetch_to_file()</code> remain usable by the
+legacy manager, but must implement <code>fetch_to_file_result()</code> to advertise the
+bounded streaming contract.</p>
+<h3 id="storage-boundaries">Storage boundaries<a class="headerlink" href="#storage-boundaries" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Local reads may be restricted with <code>allowed_roots</code>. On POSIX, each path
+  component is opened relative to a retained, identity-verified trusted root
+  descriptor with
+  no-follow semantics, preventing traversal, symlink escape, and the common
+  check-then-swap race. Because equivalent primitives are unavailable through
+  Python on other platforms, configured <code>allowed_roots</code> are explicitly
+  unsupported there; unrestricted local reads remain available.</li>
+<li><code>LocalFilePublisher(base_dir=...)</code> treats <code>base_dir</code> as its write root and
+  creates/opens destination components relative to that root on POSIX. Partial
+  files are never exposed as the final name. Other platforms retain legacy
+  publishing with resolved-containment and parent-identity checks, but do not
+  claim the stronger descriptor-relative guarantee.</li>
+<li>Local catalog scanning requires POSIX descriptor-relative filesystem
+  primitives and is rejected when those guarantees are unavailable.</li>
+<li><code>BlobFetcher(allowed_locations=[...])</code> accepts <code>AzureBlobScope</code> values or
+  supported Azure URI strings. Account, container, and prefix boundaries are
+  checked before creating a client or making a request.</li>
+<li><code>BlobPublisher</code> validates its HTTPS account URL, Azure container, and
+  optional <code>prefix</code> during construction. Blob paths reject dot segments,
+  backslashes, encoded separators, malformed percent escapes, and provider
+  reserved paths.</li>
+<li><code>.agora/manifest.json</code> and <code>.agora/operations/</code> (and the containing
+  <code>.agora/</code> namespace), plus <code>.agora/revisions/</code> and <code>.agora/receipts/</code>, are
+  reserved for provider metadata. Local and Blob scans prune hidden/dot
+  directories and the complete reserved namespace. Ordinary fetch/publish
+  operations reject reserved paths.</li>
+<li>Supported Azure locator forms are <code>az://</code>, Blob/DFS <code>https://</code>, and
+  <code>abfss://</code>. The default manager rejects arbitrary web URLs. Add a custom
+  fetcher explicitly when an operator intends to enable another scheme.</li>
+</ul>
+<p>Catalog <code>StorageLocator</code> and <code>resolve()</code> values remain the internal,
+credential-capable locations required by fetchers. Do not sanitize or replace
+those values inside a provider. Sanitize only logs, diagnostics, activity
+events, download/presentation metadata, and other agent-facing references.</p>
+<h2 id="represent-artifacts">Represent artifacts<a class="headerlink" href="#represent-artifacts" title="Permanent link">&para;</a></h2>
+<p>The API separates an artifact's identity, storage location, and display
+metadata:</p>
+<ul>
+<li><code>ArtifactReference</code> identifies an artifact by <code>source_id</code> and <code>artifact_id</code>.
+  Its optional <code>revision</code> pins a retained revision; omitting it follows the
+  current revision. Providers and adapters must either honor a pinned revision
+  exactly or reject it explicitly; they must not silently return current data.</li>
+<li><code>StorageLocator</code> contains the physical URI used to retrieve it.</li>
+<li><code>ArtifactPresentation</code> contains human-facing metadata.</li>
+<li><code>DownloadInfo</code> optionally provides a user-facing download link and expiry.</li>
+</ul>
+<p>For example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">ArtifactPresentation</span><span class="p">,</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    <span class="n">ArtifactReference</span><span class="p">,</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    <span class="n">CatalogArtifact</span><span class="p">,</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    <span class="n">StorageLocator</span><span class="p">,</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="p">)</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">artifact</span> <span class="o">=</span> <span class="n">CatalogArtifact</span><span class="p">(</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>    <span class="n">reference</span><span class="o">=</span><span class="n">ArtifactReference</span><span class="p">(</span><span class="s2">&quot;hourly-wind&quot;</span><span class="p">,</span> <span class="n">source_id</span><span class="o">=</span><span class="s2">&quot;weather&quot;</span><span class="p">),</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>    <span class="n">presentation</span><span class="o">=</span><span class="n">ArtifactPresentation</span><span class="p">(</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>        <span class="s2">&quot;hourly-wind.parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>        <span class="n">media_type</span><span class="o">=</span><span class="s2">&quot;application/x-parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>    <span class="p">),</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>    <span class="n">locator</span><span class="o">=</span><span class="n">StorageLocator</span><span class="p">(</span><span class="s2">&quot;file:///data/hourly-wind.parquet&quot;</span><span class="p">),</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="p">)</span>
+</code></pre></div>
+<h2 id="implement-a-catalog-provider">Implement a catalog provider<a class="headerlink" href="#implement-a-catalog-provider" title="Permanent link">&para;</a></h2>
+<p>Implement the async <code>CatalogProvider</code> protocol when artifacts come from your
+own manifest, database, service, or other catalog. A provider supports
+<code>search</code>, <code>list</code>, <code>get</code>, and <code>resolve</code> operations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">READ_OPERATIONS</span><span class="p">,</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="n">ArtifactNotFoundError</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">ArtifactPresentation</span><span class="p">,</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">ArtifactReference</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>    <span class="n">CatalogArtifact</span><span class="p">,</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="n">CatalogProvider</span><span class="p">,</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="n">ListRequest</span><span class="p">,</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">Page</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="n">RequestContext</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">ResolvedArtifact</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>    <span class="n">SearchRequest</span><span class="p">,</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>    <span class="n">SourceCapabilities</span><span class="p">,</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>    <span class="n">StorageLocator</span><span class="p">,</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="p">)</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="k">class</span><span class="w"> </span><span class="nc">MemoryCatalog</span><span class="p">:</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">artifacts</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">CatalogArtifact</span><span class="p">,</span> <span class="o">...</span><span class="p">]):</span>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">artifacts</span> <span class="o">=</span> <span class="n">artifacts</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">capabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">SourceCapabilities</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>        <span class="k">return</span> <span class="p">(</span><span class="n">SourceCapabilities</span><span class="p">(</span><span class="s2">&quot;weather&quot;</span><span class="p">,</span> <span class="n">READ_OPERATIONS</span><span class="p">),)</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search</span><span class="p">(</span>
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">SearchRequest</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span>
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Page</span><span class="p">[</span><span class="n">CatalogArtifact</span><span class="p">]:</span>
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>        <span class="n">matches</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span>
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>            <span class="n">artifact</span>
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>            <span class="k">for</span> <span class="n">artifact</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">artifacts</span>
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>            <span class="k">if</span> <span class="n">request</span><span class="o">.</span><span class="n">query</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="ow">in</span> <span class="n">artifact</span><span class="o">.</span><span class="n">presentation</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>        <span class="p">)</span>
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>        <span class="k">return</span> <span class="n">Page</span><span class="p">(</span><span class="n">matches</span><span class="p">[:</span> <span class="n">request</span><span class="o">.</span><span class="n">page</span><span class="o">.</span><span class="n">limit</span><span class="p">])</span>
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">list</span><span class="p">(</span>
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">request</span><span class="p">:</span> <span class="n">ListRequest</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span>
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Page</span><span class="p">[</span><span class="n">CatalogArtifact</span><span class="p">]:</span>
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>        <span class="k">return</span> <span class="n">Page</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">artifacts</span><span class="p">[:</span> <span class="n">request</span><span class="o">.</span><span class="n">page</span><span class="o">.</span><span class="n">limit</span><span class="p">])</span>
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get</span><span class="p">(</span>
+<a id="__codelineno-3-41" name="__codelineno-3-41" href="#__codelineno-3-41"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">reference</span><span class="p">:</span> <span class="n">ArtifactReference</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span>
+<a id="__codelineno-3-42" name="__codelineno-3-42" href="#__codelineno-3-42"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CatalogArtifact</span><span class="p">:</span>
+<a id="__codelineno-3-43" name="__codelineno-3-43" href="#__codelineno-3-43"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-3-44" name="__codelineno-3-44" href="#__codelineno-3-44"></a>            <span class="k">return</span> <span class="nb">next</span><span class="p">(</span><span class="n">a</span> <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">artifacts</span> <span class="k">if</span> <span class="n">a</span><span class="o">.</span><span class="n">reference</span> <span class="o">==</span> <span class="n">reference</span><span class="p">)</span>
+<a id="__codelineno-3-45" name="__codelineno-3-45" href="#__codelineno-3-45"></a>        <span class="k">except</span> <span class="ne">StopIteration</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+<a id="__codelineno-3-46" name="__codelineno-3-46" href="#__codelineno-3-46"></a>            <span class="k">raise</span> <span class="n">ArtifactNotFoundError</span><span class="p">(</span>
+<a id="__codelineno-3-47" name="__codelineno-3-47" href="#__codelineno-3-47"></a>                <span class="sa">f</span><span class="s2">&quot;Unknown artifact: </span><span class="si">{</span><span class="n">reference</span><span class="o">.</span><span class="n">artifact_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-48" name="__codelineno-3-48" href="#__codelineno-3-48"></a>                <span class="n">resource_id</span><span class="o">=</span><span class="n">reference</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span>
+<a id="__codelineno-3-49" name="__codelineno-3-49" href="#__codelineno-3-49"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;get&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-50" name="__codelineno-3-50" href="#__codelineno-3-50"></a>            <span class="p">)</span> <span class="kn">from</span><span class="w"> </span><span class="nn">exc</span>
+<a id="__codelineno-3-51" name="__codelineno-3-51" href="#__codelineno-3-51"></a>
+<a id="__codelineno-3-52" name="__codelineno-3-52" href="#__codelineno-3-52"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span>
+<a id="__codelineno-3-53" name="__codelineno-3-53" href="#__codelineno-3-53"></a>        <span class="bp">self</span><span class="p">,</span> <span class="n">reference</span><span class="p">:</span> <span class="n">ArtifactReference</span><span class="p">,</span> <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span>
+<a id="__codelineno-3-54" name="__codelineno-3-54" href="#__codelineno-3-54"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ResolvedArtifact</span><span class="p">:</span>
+<a id="__codelineno-3-55" name="__codelineno-3-55" href="#__codelineno-3-55"></a>        <span class="n">artifact</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">context</span><span class="p">)</span>
+<a id="__codelineno-3-56" name="__codelineno-3-56" href="#__codelineno-3-56"></a>        <span class="k">if</span> <span class="n">artifact</span><span class="o">.</span><span class="n">locator</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-3-57" name="__codelineno-3-57" href="#__codelineno-3-57"></a>            <span class="k">raise</span> <span class="n">ArtifactNotFoundError</span><span class="p">(</span>
+<a id="__codelineno-3-58" name="__codelineno-3-58" href="#__codelineno-3-58"></a>                <span class="sa">f</span><span class="s2">&quot;Artifact has no storage locator: </span><span class="si">{</span><span class="n">reference</span><span class="o">.</span><span class="n">artifact_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-59" name="__codelineno-3-59" href="#__codelineno-3-59"></a>                <span class="n">resource_id</span><span class="o">=</span><span class="n">reference</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">,</span>
+<a id="__codelineno-3-60" name="__codelineno-3-60" href="#__codelineno-3-60"></a>                <span class="n">operation</span><span class="o">=</span><span class="s2">&quot;resolve&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-61" name="__codelineno-3-61" href="#__codelineno-3-61"></a>            <span class="p">)</span>
+<a id="__codelineno-3-62" name="__codelineno-3-62" href="#__codelineno-3-62"></a>        <span class="k">return</span> <span class="n">ResolvedArtifact</span><span class="p">(</span><span class="n">reference</span><span class="p">,</span> <span class="n">artifact</span><span class="o">.</span><span class="n">locator</span><span class="p">)</span>
+<a id="__codelineno-3-63" name="__codelineno-3-63" href="#__codelineno-3-63"></a>
+<a id="__codelineno-3-64" name="__codelineno-3-64" href="#__codelineno-3-64"></a>
+<a id="__codelineno-3-65" name="__codelineno-3-65" href="#__codelineno-3-65"></a><span class="n">artifact</span> <span class="o">=</span> <span class="n">CatalogArtifact</span><span class="p">(</span>
+<a id="__codelineno-3-66" name="__codelineno-3-66" href="#__codelineno-3-66"></a>    <span class="n">reference</span><span class="o">=</span><span class="n">ArtifactReference</span><span class="p">(</span><span class="s2">&quot;hourly-wind&quot;</span><span class="p">,</span> <span class="n">source_id</span><span class="o">=</span><span class="s2">&quot;weather&quot;</span><span class="p">),</span>
+<a id="__codelineno-3-67" name="__codelineno-3-67" href="#__codelineno-3-67"></a>    <span class="n">presentation</span><span class="o">=</span><span class="n">ArtifactPresentation</span><span class="p">(</span><span class="s2">&quot;hourly-wind.parquet&quot;</span><span class="p">),</span>
+<a id="__codelineno-3-68" name="__codelineno-3-68" href="#__codelineno-3-68"></a>    <span class="n">locator</span><span class="o">=</span><span class="n">StorageLocator</span><span class="p">(</span><span class="s2">&quot;file:///data/hourly-wind.parquet&quot;</span><span class="p">),</span>
+<a id="__codelineno-3-69" name="__codelineno-3-69" href="#__codelineno-3-69"></a><span class="p">)</span>
+<a id="__codelineno-3-70" name="__codelineno-3-70" href="#__codelineno-3-70"></a><span class="n">catalog</span><span class="p">:</span> <span class="n">CatalogProvider</span> <span class="o">=</span> <span class="n">MemoryCatalog</span><span class="p">((</span><span class="n">artifact</span><span class="p">,))</span>
+</code></pre></div>
+<p>When a custom provider returns a locator that the built-in local and Blob
+fetchers do not understand, attach a per-session fetcher factory to the server
+integration:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogIntegration</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">integration</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">catalog</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">OWNED</span><span class="p">),</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">authorizer</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    <span class="n">fetcher_factory</span><span class="o">=</span><span class="k">lambda</span> <span class="n">context</span><span class="p">:</span> <span class="n">MyStorageFetcher</span><span class="p">(</span><span class="o">...</span><span class="p">),</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="p">)</span>
+</code></pre></div>
+<p>The integration-provided <code>DataLakeDataManager</code> receives the caller-scoped
+catalog resolver and owns the factory-created fetcher. If an application
+already supplies a custom session manager, <code>DataLakeDataManager</code> implements
+the public <code>CatalogAwareDataManager</code> protocol and preserves its original
+resolver for non-catalog blob IDs. See
+<a href="../working-with-data/#mounting-a-catalog-on-codeexecutionserver">Working with data</a>
+for the full lifecycle and compatibility behavior.</p>
+<p>For a complete runnable implementation, see the
+<a href="https://github.com/microsoft/agora-workbench/tree/main/examples/servers/energysystems">Energy Systems custom storage integration</a>.
+It combines a manifest-backed provider, an <code>energysystems://</code> locator scheme,
+a session-scoped <code>AssetFetcher</code>, and an opaque <code>load_path</code> consumed by PyPSA.</p>
+<h2 id="identity-revisions-and-compatibility">Identity, revisions, and compatibility<a class="headerlink" href="#identity-revisions-and-compatibility" title="Permanent link">&para;</a></h2>
+<p>Catalog identity is independent of physical storage. Configure a stable
+<code>source_id</code> and identify artifacts by their normalized source-relative path:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">sources</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">weather-observations</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/mounted/data/weather</span>
+</code></pre></div>
+<p>The SQLite index persists the resulting logical artifact ID. Moving the local
+root while retaining <code>source_id</code> and relative paths preserves artifact identity;
+local roots themselves are deliberately not portable IDs. A rename or move to a
+different relative path creates a new artifact and tombstones the old one. The
+indexer does not guess rename relationships from size, timestamps, or content.
+In authoritative manifest mode, an explicitly declared stable <code>artifact_id</code> is
+the rename signal: moving that ID to a new registered path keeps the canonical
+identity, appends retained history for the old and new locations, and updates
+current resolution to the new locator.</p>
+<p>Each change appends an <code>artifact_revisions</code> row. <code>content_revision</code> and
+<code>metadata_revision</code> are separate opaque change tokens. <code>checksum_sha256</code>, when
+supplied, is optional integrity metadata and is never the artifact identity.
+Deleted artifacts remain as tombstones and retain history until an operator
+explicitly calls <code>CatalogDB.purge_deleted(before=...)</code>.</p>
+<p>The indexer supplies provider change tokens: local size plus <code>mtime_ns</code>, or a
+Blob ETag. Direct <code>CatalogDB.upsert_artifact()</code> callers should supply an explicit
+<code>content_revision</code> or <code>checksum_sha256</code> when reliable same-size content-change
+detection matters. The fallback size token intentionally does not change merely
+because indexing ran again or the storage location moved.</p>
+<p>Azure Blob locations in <code>az://</code>, Blob HTTPS, and ADLS Gen2 <code>abfss://</code> forms are
+canonicalized to <code>az://account/container/object</code>. SAS/query parameters and
+fragments do not participate in identity, account/container case is normalized,
+and object-name case is preserved. Blob names returned by the Azure SDK are
+quoted exactly once, so a literal <code>%41</code> object remains distinct from <code>A</code>.</p>
+<p>Schema-v0 databases are migrated transactionally to the current version. Their
+original URI-derived IDs and IDs derived from canonical Azure URIs remain
+resolvable through <code>artifact-id</code> aliases. Original and canonical storage
+locations are stored as actual values in the <code>storage-uri</code> namespace. Existing
+sqlite-vec embeddings are preserved and re-keyed during migration when present.
+New aliases use the explicit <code>namespace:value</code> form; unqualified opaque IDs use
+the <code>artifact-id</code> namespace. Aliases are source-scoped, so the same imported
+alias may exist in multiple sources; callers must provide <code>source_id</code> when an
+unqualified lookup is ambiguous. Alias and canonical-ID collisions are rejected.
+<code>artifact_id_from_uri()</code> remains available only as a legacy import/mapping helper
+and does not define new canonical identities. Databases with an unknown newer
+schema fail before mutation.</p>
+<p><code>CatalogDB.export_v0_json()</code> provides deterministic, CLI-independent recovery
+for downgrade or inspection. It emits current, non-deleted artifacts using the
+v0 record fields and prefers a retained legacy <code>artifact-id</code> alias where one
+exists:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">catalog</span><span class="o">.</span><span class="n">export_v0_json</span><span class="p">(</span><span class="s2">&quot;catalog-v0.json&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>The export intentionally omits revision history and tombstones because schema
+v0 cannot represent them. It is a recovery/import artifact, not a guarantee that
+every retained legacy ID can be recomputed from the exported URI: canonicalized
+Azure locators may differ textually from the URI that originally produced a v0
+ID.</p>
+<p>Indexer reconciliation is source-transactional in the safety sense: stale
+paths are tombstoned only for sources that enumerated successfully. Missing or
+unreadable local roots and failed Blob listings leave prior records untouched;
+a successfully enumerated empty source tombstones its former contents. Batch
+database upserts are atomic.</p>
+<p>Providers receive the same <code>RequestContext</code> on every operation. Its fields are
+copied into immutable mappings so they can be propagated safely. They do not
+define authorization or cache identity.</p>
+<p>Use <code>SearchRequest.source_ids</code> and <code>ListRequest.source_ids</code> to restrict an
+operation to specific sources. An empty tuple means all sources. Treat
+pagination cursors as opaque provider values; callers should not parse them.
+Page limits cannot exceed <code>MAX_PAGE_LIMIT</code> (1000).</p>
+<h2 id="managed-writes">Managed writes<a class="headerlink" href="#managed-writes" title="Permanent link">&para;</a></h2>
+<p><code>ManagedCatalogWriter</code> adds durable mutations to an authoritative manifest.
+Use <code>LocalManagedStorage</code> for one filesystem root or <code>BlobManagedStorage</code> with
+a caller-owned container/transfer adapter. Wrap the writer in
+<code>AuthorizedManagedCatalogWriter</code> so application policy is checked before any
+metadata or byte mutation.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="n">ArtifactMetadata</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">AuthorizedManagedCatalogWriter</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">LocalManagedStorage</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">ManagedCatalogWriter</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">PromoteOutputRequest</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">RequestContext</span><span class="p">,</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="p">)</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="n">backend_writer</span> <span class="o">=</span> <span class="n">ManagedCatalogWriter</span><span class="p">(</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="s2">&quot;approved-results&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">LocalManagedStorage</span><span class="p">(</span><span class="s2">&quot;/srv/data/approved&quot;</span><span class="p">),</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a><span class="p">)</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="c1"># `catalog_authorizer` is the application&#39;s caller-aware CatalogAuthorizer.</span>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a><span class="n">writer</span> <span class="o">=</span> <span class="n">AuthorizedManagedCatalogWriter</span><span class="p">(</span><span class="n">backend_writer</span><span class="p">,</span> <span class="n">catalog_authorizer</span><span class="p">)</span>
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a><span class="n">context</span> <span class="o">=</span> <span class="n">RequestContext</span><span class="p">(</span><span class="n">caller_id</span><span class="o">=</span><span class="s2">&quot;researcher@example.com&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a><span class="n">committed</span> <span class="o">=</span> <span class="k">await</span> <span class="n">writer</span><span class="o">.</span><span class="n">promote</span><span class="p">(</span>
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>    <span class="n">PromoteOutputRequest</span><span class="p">(</span>
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>        <span class="n">operation_id</span><span class="o">=</span><span class="s2">&quot;run-42-result&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-22" name="__codelineno-7-22" href="#__codelineno-7-22"></a>        <span class="n">path</span><span class="o">=</span><span class="s2">&quot;results/run-42.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-23" name="__codelineno-7-23" href="#__codelineno-7-23"></a>        <span class="n">local_path</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;/srv/scratch/session-7/result.csv&quot;</span><span class="p">),</span>
+<a id="__codelineno-7-24" name="__codelineno-7-24" href="#__codelineno-7-24"></a>        <span class="n">metadata</span><span class="o">=</span><span class="n">ArtifactMetadata</span><span class="p">(</span><span class="n">description</span><span class="o">=</span><span class="s2">&quot;Validated run 42 result&quot;</span><span class="p">),</span>
+<a id="__codelineno-7-25" name="__codelineno-7-25" href="#__codelineno-7-25"></a>        <span class="n">session_id</span><span class="o">=</span><span class="s2">&quot;session-7&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-26" name="__codelineno-7-26" href="#__codelineno-7-26"></a>        <span class="n">output_name</span><span class="o">=</span><span class="s2">&quot;result.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-27" name="__codelineno-7-27" href="#__codelineno-7-27"></a>    <span class="p">),</span>
+<a id="__codelineno-7-28" name="__codelineno-7-28" href="#__codelineno-7-28"></a>    <span class="n">context</span><span class="p">,</span>
+<a id="__codelineno-7-29" name="__codelineno-7-29" href="#__codelineno-7-29"></a><span class="p">)</span>
+<a id="__codelineno-7-30" name="__codelineno-7-30" href="#__codelineno-7-30"></a><span class="c1"># Direct backend access is trusted-only; ordinary callers mutate through `writer`.</span>
+<a id="__codelineno-7-31" name="__codelineno-7-31" href="#__codelineno-7-31"></a><span class="n">manifest</span> <span class="o">=</span> <span class="k">await</span> <span class="n">backend_writer</span><span class="o">.</span><span class="n">read_manifest</span><span class="p">(</span><span class="n">minimum_generation</span><span class="o">=</span><span class="n">committed</span><span class="o">.</span><span class="n">generation</span><span class="p">)</span>
+</code></pre></div>
+<p>Promotion is always explicit. Ordinary <code>AssetPublisher.publish()</code> calls and
+session output directories remain scratch publication and never become
+discoverable merely because bytes were copied. Promotion copies the output to
+an immutable managed revision and does not delete or transfer ownership of the
+caller/session file.</p>
+<p>The four mutations have distinct ownership:</p>
+<ul>
+<li><code>register()</code> requires the caller's SHA-256 and snapshots bytes already inside
+  the configured source into a managed immutable revision. The original path
+  remains caller-owned and is never modified or deleted. Catalog reads resolve
+  the snapshot, so later changes at the external path cannot mutate a retained
+  revision.</li>
+<li><code>upload()</code> creates a managed immutable revision from a local file.</li>
+<li><code>promote()</code> is an upload with required session/output provenance.</li>
+<li><code>remove()</code> commits a tombstone before optional garbage collection. Collection
+  only deletes revisions marked <code>managed</code>, created by the recorded operation,
+  and still at the recorded storage version.</li>
+</ul>
+<p>Each retained revision stores the provenance of the operation that created it,
+and each removal-history entry stores the provenance of its tombstone
+operation. The artifact-level provenance remains the latest operation for
+compatibility, without replacing the audit history of older revisions.</p>
+<p>Every request supplies a stable <code>operation_id</code>. An operation intent is
+create-exclusive; retries with the same request return the same revision and
+committed result, while reuse for different input raises <code>ConflictError</code>.
+Authorized writers check both source scope and the normalized effective
+<code>ArtifactReference</code> before creating the intent or transferring bytes.
+Revision objects are create-exclusive (<code>O_EXCL</code> locally and
+<code>If-None-Match: *</code> on Blob). Manifest commits use a generation plus an atomic
+replacement under the local writer lock, or Blob ETag <code>If-Match</code>. Conflicts are
+merged and retried only up to <code>max_conflict_retries</code>; exhaustion raises
+<code>RetryExhaustedError</code>. These are ordered, recoverable steps, <strong>not</strong> a
+multi-object atomic transaction.</p>
+<p>Local writers sharing a root serialize through an advisory <code>flock</code>. New files,
+replacement manifests, and their containing directories are fsynced before the
+lock is released. Readers need no lock because they see either complete
+manifest generation. Blob writers use optimistic ETag concurrency. On the
+writer host, <code>read_manifest(minimum_generation=...)</code> provides read-after-write
+for the returned generation. Independent <code>ManifestCatalogProvider</code> readers see
+the generation after their next successful refresh; deployments must set their
+refresh interval and <code>max_stale_seconds</code> to the required cross-reader freshness
+bound.</p>
+<p>Call <code>reconcile(grace_seconds=...)</code> after startup or periodically. It creates a
+missing receipt when a manifest commit succeeded, and removes an uncommitted
+orphan only when the operation record, object ownership metadata, and storage
+version prove that the object belongs to that operation and no committed
+revision references it. Young operations are deferred. Unsafe cleanup raises
+<code>ReconciliationError</code> rather than deleting ambiguous bytes.
+Active operations hold a durable renewable lease. Reconciliation conditionally
+claims an expired operation under the local writer lock or Blob ETag CAS before
+cleanup, and writers re-check their lease before manifest commit. A slow active
+transfer or manifest CAS therefore cannot be collected based on age alone.
+Once revision bytes are complete, the operation enters <code>commit_ready</code>;
+reconciliation does not delete that revision while a manifest commit remains
+possible. After the lease expires, reconciliation conditionally claims the
+intent and commits a manifest fence generation. The fence CAS either loses to
+the original commit, allowing receipt recovery, or changes the manifest ETag so
+the old CAS can no longer succeed; only then may the operation become retryable
+or its verified owned orphan be collected. Fence generations are visible
+manifest generations, but the fenced operation retains its original generation
+precondition only when it equals the recorded pre-fence generation and no
+unrelated catalog mutation occurred before the fence was cleared. Remove receipts
+persist <code>cleanup_pending</code>; retries and reconciliation resume requested garbage
+collection. Confirmed absence after a tombstone satisfies deletion; an
+ownership/version mismatch remains pending.
+Committed tombstone records retain their operation result and exact revision
+cleanup set even if a later upload revives the artifact, so receipt recovery
+cannot delete the replacement revision or lose the completed removal.</p>
+<p>Local transfer staging lives only under <code>.agora/staging/{operation_id}</code>.
+Entries and staged bytes are fsynced before publication. Reconciliation removes
+abandoned staging after the grace period under the writer lock; unlinking a
+post-link leftover does not remove the already-published revision hard link.</p>
+<p>Managed fields are additive to manifest version 1, but managed storage paths
+live in the reserved namespace and cannot be replayed as caller-visible logical
+paths. Rollback therefore uses documented forward recovery rather than a lossy
+legacy export: stop writers, preserve the complete <code>.agora</code> namespace, redeploy
+managed-write-capable code, and run <code>reconcile()</code>. Do not point an older writer
+at the source, guess ownership, or remove <code>.agora</code> objects manually.</p>
+<h3 id="transfer-integration-boundary">Transfer integration boundary<a class="headerlink" href="#transfer-integration-boundary" title="Permanent link">&para;</a></h3>
+<p>Managed commit/recovery uses a private storage adapter boundary. Its transfer
+methods accept the shared <code>TransferOptions</code>, enforce exact checksums, use the
+shared reserved-path validation, and atomically attach ownership metadata while
+preserving the stronger lifecycle state needed for crash recovery. The adapter
+keeps Blob prefix composition in exactly one layer and reports success only
+after the complete revision is durable.</p>
+<p>Use <code>managed_writer_extension_factory(writer)</code> as
+<code>CatalogIntegration.capability_extension_factory</code>. It creates a
+session-scoped <code>AuthorizedManagedCatalogWriter</code> from the same per-session
+authorizer as catalog reads, and <code>CatalogIntegration.capabilities()</code> merges its
+authorized <code>WRITE_OPERATIONS</code>. No second server or session lifecycle is
+created.</p>
+<h2 id="caller-aware-policy-composition">Caller-aware policy composition<a class="headerlink" href="#caller-aware-policy-composition" title="Permanent link">&para;</a></h2>
+<p>Each <code>SourceCapabilities</code> value reports the operations supported by one
+<code>source_id</code>; check these values rather than inferring support from method
+presence. Provider support is not caller authorization. Compose an
+application-defined <code>CatalogAuthorizer</code> outside the provider with
+<code>AuthorizedCatalogProvider</code>; its caller-aware <code>capabilities(context)</code> result is
+the intersection of provider support and policy.</p>
+<p>Search providers may set <code>CatalogArtifact.score</code> to a backend-neutral relevance
+value. Discovery adapters preserve it as the legacy-compatible <code>score</code> payload
+field without assigning cross-provider meaning to the number.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">AuthorizedCatalogProvider</span><span class="p">,</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">CatalogAuthorizationRequest</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">CatalogPolicyMode</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">RequestContext</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="p">)</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="k">class</span><span class="w"> </span><span class="nc">TenantPolicy</span><span class="p">:</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">authorize</span><span class="p">(</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>        <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>        <span class="n">request</span><span class="p">:</span> <span class="n">CatalogAuthorizationRequest</span><span class="p">,</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a>        <span class="n">context</span><span class="p">:</span> <span class="n">RequestContext</span><span class="p">,</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a>    <span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a>        <span class="n">tenant</span> <span class="o">=</span> <span class="n">context</span><span class="o">.</span><span class="n">attributes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;tenant&quot;</span><span class="p">)</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a>        <span class="n">allowed_sources</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a>            <span class="s2">&quot;public&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;weather&quot;</span><span class="p">},</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a>            <span class="s2">&quot;research&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;weather&quot;</span><span class="p">,</span> <span class="s2">&quot;experiments&quot;</span><span class="p">},</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a>        <span class="p">}</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">tenant</span><span class="p">,</span> <span class="nb">set</span><span class="p">())</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a>        <span class="k">return</span> <span class="n">request</span><span class="o">.</span><span class="n">source_id</span> <span class="ow">in</span> <span class="n">allowed_sources</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="n">authorized_catalog</span> <span class="o">=</span> <span class="n">AuthorizedCatalogProvider</span><span class="p">(</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a>    <span class="n">catalog</span><span class="p">,</span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a>    <span class="n">TenantPolicy</span><span class="p">(),</span>
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a>    <span class="n">mode</span><span class="o">=</span><span class="n">CatalogPolicyMode</span><span class="o">.</span><span class="n">HOMOGENEOUS_SOURCE</span><span class="p">,</span>
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="p">)</span>
+</code></pre></div>
+<p>Policy mode is always explicit:</p>
+<ul>
+<li><code>HOMOGENEOUS_SOURCE</code> grants or denies an operation for an entire source. The
+  wrapper constrains <code>search</code> and <code>list</code> before provider ranking/pagination and
+  validates that provider results remain inside the authorized sources.</li>
+<li><code>PER_ARTIFACT</code> requires a backend-specific <code>CatalogPolicyEnforcer</code>. That
+  adapter must apply artifact policy before ranking, pagination, aggregations,
+  alias resolution, and lookup errors. The wrapper refuses this mode without an
+  enforcer; it never silently falls back to filtering one top-k page.</li>
+</ul>
+<p><code>DenyAllCatalogAuthorizer</code> is an explicit fail-closed baseline.
+<code>DevelopmentAllowAllCatalogAuthorizer</code> is an explicit development-only choice;
+<code>AuthorizedCatalogProvider</code> has no implicit allow policy.</p>
+<p>Denied <code>get</code> and <code>resolve</code> calls are reported as a generic not-found result, so
+backend error differences and resource identifiers do not disclose artifact
+existence. Returned references must exactly match the requested logical identity
+<code>(source_id, artifact_id)</code>; a provider or enforcer that substitutes another
+artifact fails closed. Alias resolution must therefore preserve the requested
+logical reference at this boundary or be modeled as a separate, policy-aware
+lookup operation. Search and list requests silently omit unauthorized sources
+before the provider is called. A provider remains responsible for honoring
+ordinary source and cursor constraints, but it does not receive authority to
+decide which callers are allowed.</p>
+<h3 id="request-state-caches-and-revocation">Request state, caches, and revocation<a class="headerlink" href="#request-state-caches-and-revocation" title="Permanent link">&para;</a></h3>
+<p>Treat <code>RequestContext</code> attributes as request-scoped and potentially sensitive.
+Do not retain credentials, bearer tokens, session objects, or the context itself
+in process-wide provider caches or logs. Cache only non-sensitive provider data,
+or partition caller-visible caches by an application-defined authorization scope
+that cannot collide across principals.</p>
+<p>The policy wrapper re-evaluates authorization on every operation and does not
+cache decisions. Applications that cache policy decisions must define bounded
+TTL and explicit invalidation semantics; otherwise revocation cannot take effect
+promptly. Pagination cursors and backend query caches must remain bound to the
+current authorization constraints and must fail closed if those constraints
+cannot be reapplied. <code>AuthorizedCatalogProvider</code> rejects a non-null cursor when
+authorization narrows the request's source set. When the set is unchanged, the
+provider remains responsible for validating that its opaque cursor was minted
+for the same source and query constraints.</p>
+<h3 id="raw-sql">Raw SQL<a class="headerlink" href="#raw-sql" title="Permanent link">&para;</a></h3>
+<p>Raw catalog SQL is not part of <code>CatalogProvider</code> or <code>PolicyEnforcedCatalog</code>.
+SQLite read-only mode prevents writes; it is not row-, artifact-, source-, or
+caller-level authorization. For v0.2.x compatibility, the legacy
+<code>register_catalog_tools</code> function still includes <code>query_catalog</code>, but that whole
+surface is unscoped and is safe only when every artifact and metadata row is
+already authorized to every caller with tool access. New applications should
+prefer the explicit <code>register_catalog_admin_tools</code> extension on a separately
+authenticated and authorized administrative surface.</p>
+<h2 id="errors">Errors<a class="headerlink" href="#errors" title="Permanent link">&para;</a></h2>
+<p>Provider error categories include <code>InvalidRequestError</code>,
+<code>ArtifactNotFoundError</code>, <code>UnsupportedOperationError</code>, <code>PermissionDeniedError</code>, and
+<code>BackendUnavailableError</code>. Provider implementations should raise these typed
+errors at the public boundary and retain backend exceptions as their causes when
+useful. An unclassified <code>DataLakeError</code> uses the <code>INTERNAL</code> code and should not
+be treated as a retryable backend outage.</p>
+<p><code>CatalogProvider</code> and <code>ArtifactResolver</code> are runtime-checkable protocols only for
+basic structural checks. <code>isinstance()</code> verifies member presence, not signatures,
+async behavior, return types, or correct behavior.</p>
+<h2 id="use-the-built-in-sqlite-catalog">Use the built-in SQLite catalog<a class="headerlink" href="#use-the-built-in-sqlite-catalog" title="Permanent link">&para;</a></h2>
+<p>Load catalog configuration from YAML, open a SQLite catalog, index its sources,
+and run a keyword search:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">CatalogConfig</span><span class="p">,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">CatalogDB</span><span class="p">,</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="n">CatalogIndexer</span><span class="p">,</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="p">)</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">search_catalog</span><span class="p">():</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    <span class="n">config</span> <span class="o">=</span> <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogDB</span><span class="p">(</span><span class="s2">&quot;catalog.db&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">catalog</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>        <span class="n">indexer</span> <span class="o">=</span> <span class="n">CatalogIndexer</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">db</span><span class="o">=</span><span class="n">catalog</span><span class="p">)</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>        <span class="n">indexed_count</span> <span class="o">=</span> <span class="k">await</span> <span class="n">indexer</span><span class="o">.</span><span class="n">index</span><span class="p">()</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>        <span class="n">results</span> <span class="o">=</span> <span class="n">catalog</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="s2">&quot;hourly wind&quot;</span><span class="p">)</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>        <span class="k">return</span> <span class="n">indexed_count</span><span class="p">,</span> <span class="n">results</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>        <span class="n">catalog</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</code></pre></div>
+<p>See <a href="../working-with-data/#data-catalog">Working with data</a> for the
+<code>catalog.yaml</code> format, source configuration, and search options.</p>
+<h2 id="use-an-authoritative-manifest-provider">Use an authoritative manifest provider<a class="headerlink" href="#use-an-authoritative-manifest-provider" title="Permanent link">&para;</a></h2>
+<p><code>ManifestCatalogProvider</code> composes the existing versioned SQLite identity,
+revision, alias, search, and refresh implementation with authoritative local or
+Azure Blob manifests:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ListRequest</span><span class="p">,</span> <span class="n">RequestContext</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span><span class="p">,</span> <span class="n">ManifestCatalogProvider</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.resolvers</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogArtifactResolver</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">provider</span> <span class="o">=</span> <span class="n">ManifestCatalogProvider</span><span class="p">(</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="n">db_path</span><span class="o">=</span><span class="s2">&quot;/var/run/agora/catalog-reader.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="n">max_stale_seconds</span><span class="o">=</span><span class="mi">300</span><span class="p">,</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="p">)</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="k">await</span> <span class="n">provider</span><span class="o">.</span><span class="n">load</span><span class="p">()</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="n">readiness</span> <span class="o">=</span> <span class="n">provider</span><span class="o">.</span><span class="n">readiness</span><span class="p">()</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">page</span> <span class="o">=</span> <span class="k">await</span> <span class="n">provider</span><span class="o">.</span><span class="n">list</span><span class="p">(</span><span class="n">ListRequest</span><span class="p">(),</span> <span class="n">RequestContext</span><span class="p">())</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="n">resolver</span> <span class="o">=</span> <span class="n">CatalogArtifactResolver</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">source_id</span><span class="o">=</span><span class="s2">&quot;approved-model-inputs&quot;</span><span class="p">)</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="n">qualified_name</span> <span class="o">=</span> <span class="k">await</span> <span class="n">resolver</span><span class="o">.</span><span class="n">resolve</span><span class="p">(</span><span class="n">page</span><span class="o">.</span><span class="n">items</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">reference</span><span class="o">.</span><span class="n">artifact_id</span><span class="p">)</span>
+</code></pre></div>
+<p>The provider performs no caller authorization. Wrap it with
+<code>AuthorizedCatalogProvider</code> exactly as any other <code>CatalogProvider</code>; credentials
+used to read a Blob manifest are storage-host credentials and remain separate
+from caller policy.</p>
+<p><code>load()</code> is required before serving. On failure it raises
+<code>BackendUnavailableError</code> and records the failed attempt. If a valid generation
+already exists, it is preserved within its stale bound; otherwise the provider
+remains unavailable but may be retried after the manifest or credentials are
+fixed. Caller-facing errors identify affected source IDs and generic failure
+categories without exposing local absolute paths, SAS values, or backend
+response details. <code>readiness()</code> distinguishes ready, bounded-stale, and
+unavailable states. Once the configured stale bound expires, catalog operations
+fail rather than serving indefinitely stale approvals. The age check uses
+<code>last_success_at</code> for each configured source even when validation, embedding, or
+SQLite writes fail after enumeration and the persisted transaction remains at
+its prior successful status. Refresh rows belonging to removed or unrelated
+sources in a reused per-reader cache are ignored.</p>
+<p>Pinned <code>ArtifactReference.revision</code> values are passed to the shared retained
+history store. The exact revision is returned or <code>ArtifactNotFoundError</code> is
+raised; pinned requests never follow current. This remains true across manifest
+moves: an old live revision resolves its old locator, a tombstone revision is
+not returned as live data, and an unqualified current request resolves the new
+locator. <code>CatalogArtifactResolver</code> is the compatibility adapter for the existing
+string-based execution resolver and is bound to one source, so aliases remain
+source-scoped.</p>
+<p><code>SQLiteCatalogProvider</code> adapts an already-open, caller-owned <code>CatalogDB</code>. It
+supports the public list/search/get/resolve surface, source constraints,
+<code>domain</code> and <code>source_type</code> filters, and request-bound opaque cursors. SQLite
+search pages are limited to 100 records, matching the current deterministic
+search candidate bound.</p>
+<p>Manifest-backed SQLite files are private per reader. Do not share one writable
+database between pods; use a pod-local file or <code>:memory:</code> and rebuild from the
+authoritative manifest on startup. <code>ManifestCatalogProvider</code> owns this database,
+keeps it open after a recoverable initial load failure so <code>load()</code> can be
+retried, closes it on initial-load cancellation, supports idempotent <code>aclose()</code>,
+and may be used as an async context manager. <code>SQLiteCatalogProvider</code> instead
+borrows its already-open <code>CatalogDB</code>; the caller retains cleanup ownership.</p>
+<h2 id="provide-a-custom-artifact-resolver">Provide a custom artifact resolver<a class="headerlink" href="#provide-a-custom-artifact-resolver" title="Permanent link">&para;</a></h2>
+<p>An artifact resolver maps an opaque artifact ID, such as the value inside
+<code>&lt;blob&gt;hourly-wind&lt;/blob&gt;</code>, to a qualified storage name or URL. Resolver
+implementations are structural and do not need to inherit from a base class:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ArtifactResolver</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataLakeDataManager</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="k">class</span><span class="w"> </span><span class="nc">ManifestResolver</span><span class="p">:</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">locations</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">locations</span> <span class="o">=</span> <span class="n">locations</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="nd">@property</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">unavailable_reason</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">locations</span><span class="p">[</span><span class="n">artifact_id</span><span class="p">]</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="n">resolver</span><span class="p">:</span> <span class="n">ArtifactResolver</span> <span class="o">=</span> <span class="n">ManifestResolver</span><span class="p">(</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="p">{</span><span class="s2">&quot;hourly-wind&quot;</span><span class="p">:</span> <span class="s2">&quot;file:///data/hourly-wind.parquet&quot;</span><span class="p">}</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="p">)</span>
+<a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="n">manager</span> <span class="o">=</span> <span class="n">DataLakeDataManager</span><span class="p">(</span><span class="n">artifact_resolver</span><span class="o">=</span><span class="n">resolver</span><span class="p">)</span>
+</code></pre></div>
+<p><code>DataLakeDataManager</code> calls <code>resolve</code> on each manager cache miss. Add caching
+inside the resolver if the backend requires it. A resolver may also define
+<code>async def aclose(self) -&gt; None</code>; the manager calls it during cleanup.</p>
+<h2 id="ownership-and-lifetime">Ownership and lifetime<a class="headerlink" href="#ownership-and-lifetime" title="Permanent link">&para;</a></h2>
+<p>Create catalog indexes and their backing clients once per process, share them
+across requests, and close them when the application shuts down.
+<code>DataLakeDataManager</code>, its local cache, and its fetcher clients belong to one
+execution session and must be closed when that session ends.</p>
+<p>The synchronous <code>CatalogDB</code> compatibility API is not a <code>CatalogProvider</code> adapter
+and cannot correctly apply per-artifact policy after its existing top-k search.
+Its existing <code>register_catalog_tools(mcp, context, activity_publisher=None)</code>
+signature and four tools remain available for v0.2.x compatibility, with a
+security warning at registration. This unscoped surface is appropriate only
+when the entire catalog is already authorized to all callers, such as public
+development data. Production mixed-trust deployments must use a caller-aware
+provider adapter and policy composition rather than treating tool access or
+SQLite read-only access as authorization.</p>
+<p><code>ResourceLease</code> records whether a supplied resource is <code>OWNED</code> or <code>BORROWED</code>.
+Close only owned resources. A resolver or manager may close a client it creates,
+but must not close a credential or other resource borrowed from its caller.</p>
+<p><code>CodeExecutionServer</code> provides the opt-in lifecycle composition through
+<code>CatalogIntegration</code>. <code>CatalogIntegration.from_config(...)</code> owns the generated
+SQLite provider and loads it at server startup. Passing
+<code>ResourceLease(provider, ResourceOwnership.BORROWED)</code> mounts an
+application-managed provider without refreshing or closing it by default.
+An owned provider must expose <code>aclose()</code>, <code>close()</code>, or <code>cleanup()</code>.
+Startup failure and cancellation close owned providers and remove their private
+cache. Shutdown closes execution sessions before the shared provider, so one
+session cannot invalidate another session's resolver.</p>
+<p><code>from_config()</code> requires exactly one application <code>authorizer</code> or
+<code>authorizer_factory</code>. <code>development_from_config()</code> is the explicit local-only
+shortcut that supplies an allow-all authorizer. Both constructors create an
+owned provider. When <code>db_path</code> is omitted, the integration creates a unique
+private SQLite cache below <code>~/.cache/agora-workbench/catalogs/</code>; it removes that
+directory after provider shutdown or startup rollback. Supply <code>db_path</code> to use
+an application-selected location that remains after the provider closes.</p>
+<p><code>CatalogPolicyMode.HOMOGENEOUS_SOURCE</code> is the default supported profile for the
+built-in SQLite provider. <code>CatalogPolicyMode.PER_ARTIFACT</code> requires a trusted
+<code>CatalogPolicyEnforcer</code>; supplying the mode without <code>per_artifact_enforcer</code>
+fails explicitly. The enforcer must apply authorization before ranking,
+pagination, aggregation, alias resolution, and not-found decisions. The MCP
+surface currently omits executable <code>load_path</code> values in per-artifact mode
+even when an enforcer is configured.</p>
+<p>Discovery tools use <code>AuthorizedCatalogProvider</code> and a session-specific
+<code>RequestContext</code>; they never expose the legacy raw <code>query_catalog</code> SQL surface.
+Use <code>authorizer_factory(SessionContext)</code> when policy objects hold mutable
+caller state. The factory is invoked again on bearer-token rotation, and its
+session-owned authorizers are closed after replacement or session teardown.
+<code>get_catalog_capabilities</code> and
+<code>CodeExecutionServer.get_data_lake_capabilities(session)</code> expose the effective
+read operations after provider support and caller policy are intersected.
+Discovery omits executable <code>load_path</code> references in <code>PER_ARTIFACT</code> mode unless
+artifact-level resolve authorization can be established; source-level
+<code>RESOLVE</code> capability alone is not advertised as proof.
+<code>CatalogIntegration.capability_extension_factory</code> can attach session-owned,
+authorized capability providers without changing the read provider lifecycle.
+Their <code>SourceCapabilities</code> are merged by source, allowing a later managed
+writer adapter to contribute write operations while remaining independently
+authorized and cleaned up.</p>
+<h2 id="import-reference">Import reference<a class="headerlink" href="#import-reference" title="Permanent link">&para;</a></h2>
+<p>The public modules are organized by responsibility:</p>
+<ul>
+<li><code>agora_workbench.data_lake</code>: records, protocols, policy composition,
+  capabilities, and errors</li>
+<li><code>agora_workbench.data_lake.catalog</code>: <code>CatalogConfig</code>, <code>CatalogDB</code>,
+  <code>CatalogIndexer</code>, <code>SearchConfig</code>, and <code>SourceConfig</code></li>
+<li><code>agora_workbench.data_lake.resolvers</code>: <code>SearchIndexArtifactResolver</code></li>
+<li><code>agora_workbench.data_lake.execution</code>: fetchers, publishers, storage
+  credentials, and <code>DataLakeDataManager</code></li>
+<li><code>agora_workbench.code_execution</code>: <code>CatalogIntegration</code>,
+  <code>CatalogFetcherFactory</code>, and <code>CatalogAwareDataManager</code></li>
+</ul>
+<p>For example, a custom-storage server normally imports from each responsibility
+once:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogAwareDataManager</span><span class="p">,</span> <span class="n">CatalogIntegration</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssetFetcher</span><span class="p">,</span> <span class="n">DataLakeDataManager</span>
+</code></pre></div>
+<p>Use these paths for new code. Imports under
+<code>agora_workbench.code_execution.data_access</code> are also supported for applications
+that already use them.</p>
+<p>Azure-backed implementations require the <code>azure</code> extra. Vector catalog
+operations require the <code>catalog-vector</code> extra, while keyword-only SQLite FTS5
+catalog operations remain available in the base installation.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
