@@ -138,7 +138,10 @@ config = ServerConfig(
 `check_job(job_id)` returns current background-job state and output:
 
 - Running job: `job_id`, `session_id`, `status`, `elapsed_seconds`, partial `stdout`/`stderr`
-- Terminal job (`completed` / `failed`): same fields plus `success`, optional `error`, and `tool_calls` (structured trace records from any domain tools invoked during execution)
+- Terminal job (`completed` / `failed`): same fields plus `success` and optional `error`
+
+Internal domain-tool traces are available through activity events rather than
+the Agent-facing `check_job` response.
 
 Example terminal result:
 
@@ -150,10 +153,7 @@ Example terminal result:
   "elapsed_seconds": 12.341,
   "stdout": "...",
   "stderr": "",
-  "success": true,
-  "tool_calls": [
-    {"tool_name": "run_dft", "args": {"smiles": "CCO"}, "duration_ms": 11200, "success": true}
-  ]
+  "success": true
 }
 ```
 
@@ -163,7 +163,7 @@ Access control: background jobs are user-owned. `check_job` intentionally return
 
 1. A job is created when execution_mode is `async_only`, or when `adaptive` mode promotes a long-running execution.
 2. Poll with `check_job(job_id)` until `status` is terminal.
-3. When terminal, consume final output (`stdout`/`stderr`/`success`/`error`/`tool_calls`).
+3. When terminal, consume final output (`stdout`/`stderr`/`success`/`error`).
 
 Only **one concurrent background job per session** is allowed. If a second execution is attempted while one is running, the server returns a session-busy error with the active `job_id`.
 
