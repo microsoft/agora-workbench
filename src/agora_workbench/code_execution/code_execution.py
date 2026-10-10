@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+_MAX_AGENT_FAILED_TOOL_CALLS = 8
+_MAX_AGENT_TOOL_ERROR_CHARS = 500
+
 
 # block file system calls that agent might use to cross session isolation boundary
 _OS_BLOCKED_FS_CALLS: set[str] = {
@@ -110,13 +113,76 @@ def _saved_files_for_event(server: "CodeExecutionServer", session_id: str, artif
     ]
 
 
-def _agent_execution_payload(result: CodeExecutionResult | dict[str, Any]) -> dict[str, Any]:
-    """Return top-level execution data without internal tool-call traces."""
+def _bounded_tool_error(error: str) -> str:
+    if len(error) <= _MAX_AGENT_TOOL_ERROR_CHARS:
+        return error
+    suffix = "... [truncated]"
+    return error[: _MAX_AGENT_TOOL_ERROR_CHARS - len(suffix)] + suffix
+
+
+def _failed_tool_call_summary(tool_calls: list[ToolCallRecord | dict[str, Any]]) -> dict[str, Any]:
+    """Return a bounded, argument-free summary of internal tool failures."""
+    failures: list[dict[str, Any]] = []
+    failure_count = 0
+    summary_indexes: dict[tuple[str, str], int] = {}
+    summary_truncated = False
+
+    for call_index, raw_call in enumerate(tool_calls, start=1):
+        call = raw_call if isinstance(raw_call, ToolCallRecord) else ToolCallRecord.model_validate(raw_call)
+        domain_failure = call.result.get("success") is False
+        if call.success and not domain_failure:
+            continue
+
+        failure_count += 1
+        result_error = call.result.get("error")
+        error = call.error or (result_error if isinstance(result_error, str) else None)
+        if not error:
+            error = "Tool returned success=false without an error message."
+        summary_key = (call.tool_name, error)
+
+        existing_index = summary_indexes.get(summary_key)
+        if existing_index is not None:
+            failures[existing_index]["occurrences"] += 1
+            continue
+        if len(failures) >= _MAX_AGENT_FAILED_TOOL_CALLS:
+            summary_truncated = True
+            continue
+
+        summary_indexes[summary_key] = len(failures)
+        failures.append(
+            {
+                "first_call_index": call_index,
+                "tool_name": call.tool_name,
+                "error": _bounded_tool_error(error),
+                "occurrences": 1,
+            }
+        )
+
+    if not failures:
+        return {}
+    return {
+        "failed_tool_call_count": failure_count,
+        "failed_tool_calls": failures,
+        "failed_tool_calls_truncated": summary_truncated,
+    }
+
+
+def _agent_execution_payload(
+    result: CodeExecutionResult | dict[str, Any],
+    *,
+    include_failed_tool_calls: bool = False,
+) -> dict[str, Any]:
+    """Return top-level execution data without complete internal tool traces."""
     if isinstance(result, CodeExecutionResult):
-        return result.model_dump(exclude={"displays", "tool_calls"})
-    payload = dict(result)
-    payload.pop("tool_calls", None)
+        payload = result.model_dump(exclude={"displays", "tool_calls"})
+        tool_calls: list[ToolCallRecord | dict[str, Any]] = list(result.tool_calls)
+    else:
+        payload = dict(result)
+        raw_tool_calls = payload.pop("tool_calls", [])
+        tool_calls = raw_tool_calls if isinstance(raw_tool_calls, list) else []
     payload.pop("displays", None)
+    if include_failed_tool_calls:
+        payload.update(_failed_tool_call_summary(tool_calls))
     return payload
 
 
@@ -918,7 +984,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             # payloads ride the activity event).  Lightweight artifact names are
             # included so the agent knows what files are available for publishing
             # via <gui>name</gui>.
-            result_dict = _agent_execution_payload(result)
+            result_dict = _agent_execution_payload(result, include_failed_tool_calls=True)
             # Strip download tokens from artifact metadata — agent only needs
             # names/sizes to decide what to publish.
             result_dict["artifacts"] = [

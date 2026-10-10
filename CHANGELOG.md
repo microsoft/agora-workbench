@@ -12,6 +12,10 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Foreground code-execution responses now include a bounded, argument-free
+  summary of failed internal tool calls, including domain failures reported as
+  `result.success=false`. Background job responses remain trace-free
+  ([#387](https://github.com/microsoft/agora-workbench/pull/387)).
 - Code validation no longer treats literal separators or format specifications
   inside f-strings as standalone filesystem paths, avoiding false absolute-path
   and traversal errors for display strings such as `f"{done}/{total}"`
