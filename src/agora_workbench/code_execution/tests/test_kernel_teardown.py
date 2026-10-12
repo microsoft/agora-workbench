@@ -79,7 +79,6 @@ def register_kernel(manager: SessionManager, session_id: str, name: str = "k", g
     km, kc = StubKernelManager(name, gate), StubKernelClient(name)
     manager._kernels[session_id] = cast(Any, (km, kc))
     manager._kernel_last_used[session_id] = 0.0
-    manager._kernel_tokens[session_id] = "token"
     manager._kernel_execute_locks[session_id] = asyncio.Lock()
     manager._assign_kernel_generation(session_id)
     manager._kernel_session_generations[session_id] = manager._session_generations.get(session_id)
@@ -112,7 +111,6 @@ class TestAtomicClaim:
         assert km.shutdown_finished is False
         assert "s1" not in manager._kernels
         assert "s1" not in manager._kernel_last_used
-        assert "s1" not in manager._kernel_tokens
         assert "s1" in manager._kernel_execute_locks
         assert manager.get_kernel_generation("s1") is None
 

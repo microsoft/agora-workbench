@@ -78,8 +78,8 @@ class SidecarConfig(BaseModel):
 
     Discovery contract:
         The resolved base URL (``http://{host}:{port}``) is exported into the
-        environment under ``url_env_var`` on the server process *before* any
-        kernel is spawned, so every kernel inherits it. Tool code reads it::
+        environment under ``url_env_var`` and explicitly passed to each kernel.
+        Tool code reads it::
 
             import os, httpx
 
@@ -307,7 +307,7 @@ class ServerConfig(BaseModel):
             "Use a sidecar to load an expensive, process-global resource (e.g. a large model) "
             "exactly once and share it across all kernel sessions over loopback HTTP, instead "
             "of paying its memory cost inside every isolated kernel. Each sidecar's base URL is "
-            "exported to kernels via its ``url_env_var``. Not started during ``warm`` (build-time)."
+            "passed to kernels via its ``url_env_var``. Not started during ``warm`` (build-time)."
         ),
     )
 

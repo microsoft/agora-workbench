@@ -100,8 +100,8 @@ class SidecarManager:
 
         await self._await_ready(spec, proc)
 
-        # Publish the discovery URL so kernels (which copy os.environ at spawn)
-        # can reach the sidecar. Mirrors how MCP_ASSET_CACHE_DIR is exposed.
+        # Publish the discovery URL for server-side compatibility. The server
+        # passes this URL explicitly to kernels rather than copying os.environ.
         os.environ[spec.url_env_var] = spec.base_url()
         self._injected_env_vars[spec.name] = spec.url_env_var
         LOGGER.info(

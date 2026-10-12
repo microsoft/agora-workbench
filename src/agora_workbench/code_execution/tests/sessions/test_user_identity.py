@@ -152,25 +152,38 @@ class TestUserTokenKernelPropagation:
         return kc, captured_code
 
     @pytest.mark.asyncio
-    async def test_kernel_started_with_user_assertion_token(self):
-        """USER_ASSERTION_TOKEN env var is set when a new kernel is started."""
+    async def test_kernel_environment_excludes_host_credentials(self, monkeypatch):
         manager = SessionManager()
         manager.create_session({}, "user@example.com", "my-bearer-token", {}, session_id="sess-1")
+        manager.configure_kernel_environment(
+            {
+                "MCP_ASSET_CACHE_DIR": "/cache",
+                "MODEL_SERVICE_URL": "http://127.0.0.1:9100",
+            }
+        )
         km, kc = self._make_mock_kernel()
+        monkeypatch.setenv("IDENTITY_ENDPOINT", "http://169.254.169.254/metadata")
+        monkeypatch.setenv("IDENTITY_HEADER", "secret-header")
+        monkeypatch.setenv("AZURE_CLIENT_ID", "managed-identity-client")
+        monkeypatch.setenv("CUSTOM_API_KEY", "secret")
+        monkeypatch.setenv("USER_ASSERTION_TOKEN", "stale-token")
 
         with patch(
             "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
-            await manager._get_or_create_kernel(
-                "sess-1",
-                user_token="my-bearer-token",
-                user_identity="user@example.com",
-            )
+            await manager._get_or_create_kernel("sess-1", user_identity="user@example.com")
 
         call_kwargs = km.start_kernel.call_args.kwargs
         env = call_kwargs.get("env", {})
-        assert env.get("USER_ASSERTION_TOKEN") == "my-bearer-token"
+        assert "IDENTITY_ENDPOINT" not in env
+        assert "IDENTITY_HEADER" not in env
+        assert "AZURE_CLIENT_ID" not in env
+        assert "CUSTOM_API_KEY" not in env
+        assert "USER_ASSERTION_TOKEN" not in env
+        assert env["MCP_ASSET_CACHE_DIR"] == "/cache"
+        assert env["MODEL_SERVICE_URL"] == "http://127.0.0.1:9100"
+        assert env["USER_IDENTITY"] == "user@example.com"
 
     @pytest.mark.asyncio
     async def test_kernel_started_with_user_identity(self):
@@ -183,32 +196,11 @@ class TestUserTokenKernelPropagation:
             "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
             return_value=km,
         ):
-            await manager._get_or_create_kernel(
-                "sess-2",
-                user_token="token",
-                user_identity="user@example.com",
-            )
+            await manager._get_or_create_kernel("sess-2", user_identity="user@example.com")
 
         call_kwargs = km.start_kernel.call_args.kwargs
         env = call_kwargs.get("env", {})
         assert env.get("USER_IDENTITY") == "user@example.com"
-
-    @pytest.mark.asyncio
-    async def test_kernel_started_without_token_when_none(self):
-        """USER_ASSERTION_TOKEN is NOT set when no token is provided."""
-        manager = SessionManager()
-        manager.create_session({}, "user", "", {}, session_id="sess-3")
-        km, kc = self._make_mock_kernel()
-
-        with patch(
-            "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
-            return_value=km,
-        ):
-            await manager._get_or_create_kernel("sess-3")
-
-        call_kwargs = km.start_kernel.call_args.kwargs
-        env = call_kwargs.get("env", {})
-        assert "USER_ASSERTION_TOKEN" not in env
 
     @pytest.mark.asyncio
     async def test_isolated_kernel_uses_network_namespace_and_ipc(self):
@@ -441,26 +433,8 @@ class TestUserTokenKernelPropagation:
         assert manager._kernel_ipc_dirs == {}
 
     @pytest.mark.asyncio
-    async def test_kernel_token_tracked_after_start(self):
-        """_kernel_tokens tracks the token used when the kernel was started."""
+    async def test_execute_code_does_not_inject_user_token(self):
         manager = SessionManager()
-        manager.create_session({}, "user", "initial-token", {}, session_id="sess-4")
-        km, kc = self._make_mock_kernel()
-
-        with patch(
-            "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
-            return_value=km,
-        ):
-            await manager._get_or_create_kernel("sess-4", user_token="initial-token")
-
-        assert manager._kernel_tokens.get("sess-4") == "initial-token"
-
-    @pytest.mark.asyncio
-    async def test_execute_code_injects_updated_token(self):
-        """If the session token changed, execute_code_for_session prepends an env update."""
-        manager = SessionManager()
-
-        # Create a real session with a token
         session_id = manager.create_session(
             data={},
             user_identity="user@example.com",
@@ -468,84 +442,22 @@ class TestUserTokenKernelPropagation:
             token_claims={},
         )
 
-        # Pre-populate the kernel registry with a mock and an outdated token
         km, _ = self._make_mock_kernel()
         kc, captured_code = self._make_mock_kernel_client_with_capture()
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "old-token"  # Simulate stale token
 
         try:
             await manager.execute_code_for_session(session_id, "print('hello')", timeout=1.0)
         except Exception:
-            pass  # Timeout is expected since kc is mocked
-
-        assert len(captured_code) == 1
-        executed = captured_code[0]
-        assert "USER_ASSERTION_TOKEN" in executed
-        assert "new-token" in executed
-        assert "print('hello')" in executed
-
-    @pytest.mark.asyncio
-    async def test_execute_code_no_preamble_when_token_unchanged(self):
-        """No token preamble is prepended when the token hasn't changed."""
-        manager = SessionManager()
-
-        session_id = manager.create_session(
-            data={},
-            user_identity="user@example.com",
-            user_token="same-token",
-            token_claims={},
-        )
-
-        km, _ = self._make_mock_kernel()
-        kc, captured_code = self._make_mock_kernel_client_with_capture()
-
-        manager._kernels[session_id] = (km, kc)
-        manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "same-token"  # Token matches session
-
-        try:
-            await manager.execute_code_for_session(session_id, "print('hello')", timeout=1.0)
-        except Exception:
-            pass  # Timeout is expected
+            pass
 
         assert len(captured_code) == 1
         executed = captured_code[0]
         assert "USER_ASSERTION_TOKEN" not in executed
+        assert "new-token" not in executed
         assert "print('hello')" in executed
-
-    @pytest.mark.asyncio
-    async def test_execute_code_clears_token_when_removed(self):
-        """If the session token is cleared, a preamble removes it from the kernel env."""
-        manager = SessionManager()
-
-        # Create session with an empty token (simulates token being cleared)
-        session_id = manager.create_session(
-            data={},
-            user_identity="user@example.com",
-            user_token="",
-            token_claims={},
-        )
-
-        km, _ = self._make_mock_kernel()
-        kc, captured_code = self._make_mock_kernel_client_with_capture()
-
-        manager._kernels[session_id] = (km, kc)
-        manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "previously-valid-token"
-
-        try:
-            await manager.execute_code_for_session(session_id, "print('hello')", timeout=1.0)
-        except Exception:
-            pass  # Timeout is expected since kc is mocked
-
-        assert len(captured_code) == 1
-        executed = captured_code[0]
-        assert "del __agora_os__.environ['USER_ASSERTION_TOKEN']" in executed
-        assert "print('hello')" in executed
-        assert session_id not in manager._kernel_tokens
 
     @pytest.mark.asyncio
     async def test_execute_code_returns_notice_when_session_missing(self):
@@ -606,7 +518,6 @@ class TestUserTokenKernelPropagation:
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "test-token"
 
         session = manager.storage.retrieve(session_id)
         assert session is not None
@@ -622,18 +533,15 @@ class TestUserTokenKernelPropagation:
         assert touch_spy.call_count >= 2
 
     @pytest.mark.asyncio
-    async def test_shutdown_kernel_clears_token_tracking(self):
-        """_shutdown_kernel removes the entry from _kernel_tokens."""
+    async def test_shutdown_kernel_clears_kernel_registry(self):
         manager = SessionManager()
 
         km, kc = self._make_mock_kernel()
         manager._kernels["sess-x"] = (km, kc)
         manager._kernel_last_used["sess-x"] = 0.0
-        manager._kernel_tokens["sess-x"] = "some-token"
 
         await manager._shutdown_kernel("sess-x")
 
-        assert "sess-x" not in manager._kernel_tokens
         assert "sess-x" not in manager._kernels
 
     @pytest.mark.asyncio
@@ -674,7 +582,6 @@ class TestUserTokenKernelPropagation:
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "test-token"
 
         started = await manager.start_background_execution_for_session(session_id, "print('hello')", timeout=5.0)
         assert started["job_id"].startswith("j_")
@@ -716,7 +623,6 @@ class TestUserTokenKernelPropagation:
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
-        manager._kernel_tokens[session_id] = "test-token"
 
         started = await manager.start_background_execution_for_session(session_id, "print('long run')", timeout=5.0)
 

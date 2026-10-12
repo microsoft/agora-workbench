@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from .. import CodeExecutionServer, ServerConfig
+from .. import CodeExecutionServer, ServerConfig, SidecarConfig
 from ..auth import create_noop_auth_config
 
 
@@ -36,6 +36,32 @@ class TestServerWarm:
         assert result is None
         server._ensure_environment.assert_awaited_once_with()
         server._register_kernel.assert_awaited_once_with(kernel_name="tools-py-test_warm")
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_startup_configures_only_framework_kernel_environment(self, monkeypatch: pytest.MonkeyPatch):
+        server = _make_server()
+        server.server_config.sidecars = [
+            SidecarConfig(
+                name="model",
+                command=["-m", "model_service"],
+                url_env_var="MODEL_SERVICE_URL",
+                port=9100,
+            )
+        ]
+        monkeypatch.delenv("MCP_ASSET_CACHE_DIR", raising=False)
+        server._ensure_environment = AsyncMock()
+        server._sidecar_manager.start_all = AsyncMock()
+        server._register_kernel = AsyncMock()
+        server._initialize_tool_search_backends = AsyncMock()
+        server.activity_publisher.start = AsyncMock()
+
+        await server._startup()
+
+        assert server.session_manager._kernel_environment == {
+            "MCP_ASSET_CACHE_DIR": str(server.server_config.get_cache_dir()),
+            "MODEL_SERVICE_URL": "http://127.0.0.1:9100",
+        }
 
     @pytest.mark.unit
     @pytest.mark.asyncio

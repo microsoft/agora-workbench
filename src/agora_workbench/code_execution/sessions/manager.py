@@ -15,7 +15,18 @@ from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 from threading import Condition, RLock
-from typing import Any, AsyncContextManager, AsyncIterator, Callable, Literal, Optional, Tuple, TYPE_CHECKING, cast
+from typing import (
+    Any,
+    AsyncContextManager,
+    AsyncIterator,
+    Callable,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    cast,
+)
 
 from jupyter_client.manager import AsyncKernelManager
 
@@ -46,6 +57,25 @@ _MAX_DISPLAY_BYTES_PER_EXECUTE: int = 5 * 1024 * 1024
 # `error` messages.  The activity UI is a browser <pre>, not a terminal, so
 # the codes show up as garbage like ``␛[0;31m``.  Strip them at the source.
 _ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+# Kernel processes receive a deliberately small, non-credential subset of the
+# host environment. Framework-owned values such as asset and sidecar locations
+# are added explicitly through ``configure_kernel_environment``.
+_KERNEL_ENV_PASSTHROUGH = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+)
 
 
 def _strip_ansi(text: str) -> str:
@@ -258,7 +288,7 @@ class SessionManager:
         # session_id -> (KernelManager, KernelClient)
         self._kernels: dict[str, Tuple[AsyncKernelManager, "AsyncKernelClient"]] = {}
         self._kernel_last_used: dict[str, float] = {}  # session_id -> timestamp
-        self._kernel_tokens: dict[str, Optional[str]] = {}  # session_id -> last injected user token
+        self._kernel_environment: dict[str, str] = {}
         self._kernel_session_generations: dict[str, int | None] = {}
         self._kernel_network_isolation_validated = False
         self._kernel_network_isolation_error: str | None = None
@@ -313,6 +343,17 @@ class SessionManager:
             f"timeout={self.config.timeout.total_seconds() / 60}min, "
             f"kernel_network_mode={self.config.kernel_network_mode}"
         )
+
+    def configure_kernel_environment(self, variables: Mapping[str, str]) -> None:
+        """Set framework-owned, non-secret environment values for future kernels."""
+        with self._session_lifecycle_lock:
+            self._kernel_environment = {str(name): str(value) for name, value in variables.items()}
+
+    def _build_kernel_environment(self) -> dict[str, str]:
+        env = {name: os.environ[name] for name in _KERNEL_ENV_PASSTHROUGH if name in os.environ}
+        with self._session_lifecycle_lock:
+            env.update(self._kernel_environment)
+        return env
 
     def set_kernel_network_mode(self, kernel_network_mode: Literal["inherit", "isolated"]) -> None:
         """Change the launch policy only when no kernel can retain the old policy."""
@@ -1092,7 +1133,6 @@ class SessionManager:
         self,
         session_id: str,
         working_dir: Optional[str] = None,
-        user_token: Optional[str] = None,
         user_identity: Optional[str] = None,
     ) -> Tuple:
         """Get existing kernel for session or create a new one.
@@ -1100,9 +1140,6 @@ class SessionManager:
         Args:
             session_id: Session identifier.
             working_dir: Optional working directory for the kernel process.
-            user_token: User bearer token to expose as ``USER_ASSERTION_TOKEN``
-                in the kernel environment. Used by kernel-side tools to authenticate
-                with downstream services on behalf of the user.
             user_identity: User identity string to expose as ``USER_IDENTITY``
                 in the kernel environment.
         """
@@ -1165,10 +1202,9 @@ class SessionManager:
         kernel_manager = AsyncKernelManager(kernel_name=self.kernel_name)
         ipc_dir: Path | None = None
 
-        # Ensure executables from the selected Python environment are on PATH.
-        # The kernelspec argv points at the environment's python, but PATH is
-        # inherited from the server process unless explicitly set.
-        env = os.environ.copy()
+        # Start from a sanitized environment rather than inheriting credentials
+        # and deployment metadata from the server process.
+        env = self._build_kernel_environment()
         try:
             python_argv0 = kernel_manager.kernel_spec.argv[0]
             python_path = Path(python_argv0)
@@ -1183,17 +1219,7 @@ class SessionManager:
             else:
                 env.setdefault("VIRTUAL_ENV", str(prefix))
         except Exception:
-            # If anything about kernelspec inspection fails, fall back to
-            # inherited env; code execution will still work, but external
-            # executables may not be discoverable.
-            LOGGER.debug("Kernelspec inspection failed; falling back to inherited PATH", exc_info=True)
-
-        # Explicitly control these variables to avoid inheriting stale values
-        # from the server process environment.
-        if user_token is not None:
-            env["USER_ASSERTION_TOKEN"] = user_token
-        else:
-            env.pop("USER_ASSERTION_TOKEN", None)
+            LOGGER.debug("Kernelspec inspection failed; using sanitized PATH", exc_info=True)
 
         if user_identity is not None:
             env["USER_IDENTITY"] = user_identity
@@ -1228,7 +1254,6 @@ class SessionManager:
                 if session_is_current:
                     self._kernels[session_id] = (kernel_manager, kernel_client)
                     self._kernel_last_used[session_id] = time.time()
-                    self._kernel_tokens[session_id] = user_token
                     self._assign_kernel_generation(session_id)
                     self._kernel_session_generations[session_id] = session_generation
                     registered = True
@@ -1372,30 +1397,6 @@ class SessionManager:
         if excess > 0:
             for jid, _ in finished[:excess]:
                 del self._background_jobs[jid]
-
-    def _prepare_code_with_token_preamble(self, session_id: str, code: str, user_token: Optional[str]) -> str:
-        """Inject or clear USER_ASSERTION_TOKEN preamble when session token changes."""
-        last_token = self._kernel_tokens.get(session_id)
-        if user_token and user_token != last_token:
-            token_preamble = (
-                "import os as __agora_os__\n"
-                f"__agora_os__.environ['USER_ASSERTION_TOKEN'] = {user_token!r}\n"
-                "del __agora_os__\n"
-            )
-            self._kernel_tokens[session_id] = user_token
-            return token_preamble + code
-
-        if last_token is not None and not user_token:
-            token_preamble = (
-                "import os as __agora_os__\n"
-                "if 'USER_ASSERTION_TOKEN' in __agora_os__.environ:\n"
-                "    del __agora_os__.environ['USER_ASSERTION_TOKEN']\n"
-                "del __agora_os__\n"
-            )
-            self._kernel_tokens.pop(session_id, None)
-            return token_preamble + code
-
-        return code
 
     # ------------------------------------------------------------------
     # Artifact pipeline
@@ -1740,7 +1741,6 @@ class SessionManager:
     ) -> dict[str, str]:
         try:
             session = self.get_session(session_id)
-            user_token = session.user_token
             user_identity = session.user_identity
         except ValueError:
             raise ValueError(
@@ -1752,17 +1752,8 @@ class SessionManager:
         if running_job_id:
             raise RuntimeError(f"Session busy — job {running_job_id} is still running")
 
-        km, kc = await self._get_or_create_kernel(
-            session_id, working_dir, user_token=user_token, user_identity=user_identity
-        )
-        # Same preamble shape as the foreground path: outputs preamble
-        # must run before the token preamble so AGORA_OUTPUT_DIR is
-        # populated even when this background call is the kernel's
-        # first execute.  Snapshot before kc.execute so the terminal
-        # handler can diff for artifacts.
-        code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
-            session_id, code, user_token
-        )
+        km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+        code = self._prepare_outputs_preamble(session_id) + code
         outputs_before = self._snapshot_outputs_dir(session_id)
         msg_id = kc.execute(code)
 
@@ -1842,7 +1833,6 @@ class SessionManager:
     ) -> "Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]":
         try:
             session = self.get_session(session_id)
-            user_token = session.user_token
             user_identity = session.user_identity
         except ValueError:
             return (
@@ -1861,12 +1851,8 @@ class SessionManager:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
         async with self._kernel_execution_lock(session_id):
-            km, kc = await self._get_or_create_kernel(
-                session_id, working_dir, user_token=user_token, user_identity=user_identity
-            )
-            code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
-                session_id, code, user_token
-            )
+            km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+            code = self._prepare_outputs_preamble(session_id) + code
             outputs_before = self._snapshot_outputs_dir(session_id)
             msg_id = kc.execute(code)
 
@@ -2246,7 +2232,6 @@ class SessionManager:
         # access goes through the manager (cleanup, expiry check, touch).
         try:
             session = self.get_session(session_id)
-            user_token = session.user_token
             user_identity = session.user_identity
         except ValueError:
             return (
@@ -2270,7 +2255,6 @@ class SessionManager:
                 code=code,
                 timeout=timeout,
                 working_dir=working_dir,
-                user_token=user_token,
                 user_identity=user_identity,
             )
 
@@ -2281,16 +2265,11 @@ class SessionManager:
         code: str,
         timeout: float,
         working_dir: Optional[str],
-        user_token: Optional[str],
         user_identity: Optional[str],
     ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
-        km, kc = await self._get_or_create_kernel(
-            session_id, working_dir, user_token=user_token, user_identity=user_identity
-        )
-        code = self._prepare_outputs_preamble(session_id) + self._prepare_code_with_token_preamble(
-            session_id, code, user_token
-        )
+        km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+        code = self._prepare_outputs_preamble(session_id) + code
 
         # Snapshot the outputs dir before executing so we can diff against
         # the post-execute state and surface only files this execute created
@@ -2496,7 +2475,6 @@ class SessionManager:
             # Deferring any of it past an await would risk clobbering the state of
             # a *replacement* kernel started for this session in the meantime.
             self._kernel_last_used.pop(session_id, None)
-            self._kernel_tokens.pop(session_id, None)
             self._kernel_session_generations.pop(session_id, None)
             self._discard_kernel_generation(session_id)
         artifacts_dir_to_remove: Path | None = None

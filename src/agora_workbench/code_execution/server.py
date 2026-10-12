@@ -2930,9 +2930,17 @@ else:
 
             # Launch declared sidecars now that the environment exists (env-Python
             # sidecars need the built kernel env). Each sidecar's base URL is
-            # exported to os.environ so kernels spawned below inherit it. This must
-            # precede kernel registration so the discovery env var is in place.
+            # exported to the server environment for compatibility.
             await self._sidecar_manager.start_all()
+
+            # Kernels receive only these framework-owned values in addition to a
+            # small safe baseline. They do not inherit the server's credentials.
+            self.session_manager.configure_kernel_environment(
+                {
+                    "MCP_ASSET_CACHE_DIR": str(cache_dir),
+                    **{sidecar.url_env_var: sidecar.base_url() for sidecar in self.server_config.sidecars},
+                }
+            )
 
             # Register the environment as a Jupyter kernel
             await self._register_kernel(kernel_name=self.kernel_name)

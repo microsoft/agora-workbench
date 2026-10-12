@@ -72,9 +72,11 @@ Lifecycle, handled for you by `CodeExecutionServer`:
    `readiness_timeout_s` elapses, which fails startup). Kernels are only
    registered *after* the sidecars are ready.
 2. **Discovery** — the sidecar's base URL (`http://{host}:{port}`) is exported
-   into the server process environment under `url_env_var`. Because each kernel
-   inherits the server's environment at spawn, **every session sees this
-   variable** — the same mechanism used for `MCP_ASSET_CACHE_DIR`.
+   into the server process environment under `url_env_var` and explicitly added
+   to each kernel's sanitized environment. **Every session sees this variable**
+   through the same explicit kernel configuration used for
+   `MCP_ASSET_CACHE_DIR`; unrelated server environment variables are not
+   inherited.
 3. **Shutdown** — on server exit each sidecar is stopped gracefully
    (`SIGTERM`, then `SIGKILL` after a grace period).
 
