@@ -2191,7 +2191,9 @@ Linux network namespace:</p>
 <p>Workbench switches the Jupyter control channels from TCP to Unix IPC sockets, so
 the server can still execute code while the kernel and its subprocesses have no
 route to the server network or external IP networks. The launcher also creates a
-subordinate user namespace and enables <code>no_new_privs</code>; kernel code does not
+subordinate user namespace, maps the server identity to root only inside that
+namespace while configuring loopback, then drops the capability bounding set
+and enables <code>no_new_privs</code> before executing the kernel. Kernel code does not
 receive namespace capabilities in the server's user namespace.</p>
 <p>This option is Linux-only and requires the <code>unshare</code> and <code>setpriv</code> commands from
 util-linux, the <code>ip</code> command from iproute2, and runtime permission to create
