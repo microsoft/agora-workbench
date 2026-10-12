@@ -229,7 +229,7 @@ class TestUserTokenKernelPropagation:
         assert km.kernel_spec.argv[:5] == [
             "/usr/bin/unshare",
             "--user",
-            "--map-current-user",
+            "--map-root-user",
             "--net",
             "--",
         ]

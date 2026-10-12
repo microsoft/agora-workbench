@@ -225,7 +225,9 @@ config = ServerConfig(
 Workbench switches the Jupyter control channels from TCP to Unix IPC sockets, so
 the server can still execute code while the kernel and its subprocesses have no
 route to the server network or external IP networks. The launcher also creates a
-subordinate user namespace and enables `no_new_privs`; kernel code does not
+subordinate user namespace, maps the server identity to root only inside that
+namespace while configuring loopback, then drops the capability bounding set
+and enables `no_new_privs` before executing the kernel. Kernel code does not
 receive namespace capabilities in the server's user namespace.
 
 This option is Linux-only and requires the `unshare` and `setpriv` commands from

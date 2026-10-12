@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from jupyter_client.manager import AsyncKernelManager
 
 
-_UNSHARE_ARGS = ("--user", "--map-current-user", "--net", "--")
+_UNSHARE_ARGS = ("--user", "--map-root-user", "--net", "--")
 _SETPRIV_ARGS = (
     "--no-new-privs",
     "--bounding-set=-all",
