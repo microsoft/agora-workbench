@@ -17,7 +17,8 @@ changes that require action from existing users. Each entry there states who is 
   starts Jupyter over Unix IPC, hardens the pre-filter startup environment,
   applies a thread-synchronized libseccomp filter before exposing the kernel,
   rejects non-Unix sockets, new connections, and io_uring, and verifies that
-  no IP socket descriptors remain open.
+  no IP socket descriptors remain open
+  ([#390](https://github.com/microsoft/agora-workbench/pull/390)).
 
 ### Fixed
 
