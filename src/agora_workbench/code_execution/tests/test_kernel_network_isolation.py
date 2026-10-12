@@ -1,5 +1,7 @@
 """Unit tests for the Linux kernel network-namespace launcher."""
 
+import json
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -69,3 +71,54 @@ def test_namespace_launcher_enables_private_loopback_and_drops_capabilities():
             "ipykernel_launcher",
         ],
     )
+
+
+def test_seccomp_filter_allows_unix_sockets_and_denies_ip_sockets():
+    try:
+        network_isolation.validate_seccomp_isolation_support()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+
+
+def test_seccomp_validation_reports_probe_failure():
+    with (
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+            return_value=network_isolation.subprocess.CompletedProcess([], 1, "", "filter rejected"),
+        ),
+        pytest.raises(RuntimeError, match="seccomp kernel networking is unavailable: filter rejected"),
+    ):
+        network_isolation.validate_seccomp_isolation_support()
+
+
+def test_seccomp_kernel_environment_rejects_kernel_owned_startup_paths():
+    kernel_manager = type(
+        "KernelManager",
+        (),
+        {
+            "kernel_spec": type(
+                "KernelSpec",
+                (),
+                {"argv": ["/env/bin/python"], "metadata": {}},
+            )()
+        },
+    )()
+    python_paths = {
+        "stdlib": "/env/lib/python",
+        "platstdlib": "/env/lib/python",
+        "purelib": "/env/lib/python/site-packages",
+        "platlib": "/env/lib/python/site-packages",
+    }
+
+    with (
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, json.dumps(python_paths), ""),
+        ),
+        patch("agora_workbench.code_execution.sessions.network_isolation.os.geteuid", return_value=1000),
+        patch("agora_workbench.code_execution.sessions.network_isolation.Path.stat") as stat,
+        patch("agora_workbench.code_execution.sessions.network_isolation.os.access", return_value=False),
+        pytest.raises(RuntimeError, match="immutable Python environment"),
+    ):
+        stat.return_value.st_uid = 1000
+        network_isolation.validate_seccomp_kernel_environment(kernel_manager)

@@ -39,6 +39,23 @@ def test_server_config_propagates_isolated_kernel_network_mode():
     assert server.session_manager.config.kernel_network_mode == "isolated"
 
 
+def test_server_config_propagates_seccomp_kernel_network_mode():
+    config = ServerConfig(
+        name="seccomp",
+        description="Test server",
+        type="uv",
+        dependency_file="# empty",
+        kernel_network_mode="seccomp",
+    )
+
+    server = CodeExecutionServer(
+        server_config=config,
+        auth_config=create_noop_auth_config(),
+    )
+
+    assert server.session_manager.config.kernel_network_mode == "seccomp"
+
+
 def test_server_config_overrides_custom_manager_network_mode():
     manager = SessionManager(SessionConfig(kernel_network_mode="inherit"))
     config = ServerConfig(
@@ -129,8 +146,9 @@ def test_manager_rejects_network_mode_change_during_kernel_start():
     assert manager.config.kernel_network_mode == "inherit"
 
 
-def test_custom_isolated_manager_rejects_loopback_sidecars():
-    manager = SessionManager(SessionConfig(kernel_network_mode="isolated"))
+@pytest.mark.parametrize("kernel_network_mode", ["isolated", "seccomp"])
+def test_custom_restricted_manager_rejects_loopback_sidecars(kernel_network_mode):
+    manager = SessionManager(SessionConfig(kernel_network_mode=kernel_network_mode))
     config = ServerConfig(
         name="isolated",
         description="Test server",

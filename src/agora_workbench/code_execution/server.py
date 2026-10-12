@@ -258,8 +258,8 @@ class CodeExecutionServer(BaseMCPServer):
                     _session_manager.config.kernel_network_mode,
                 )
                 _session_manager.set_kernel_network_mode(server_config.kernel_network_mode)
-        if _session_manager.config.kernel_network_mode == "isolated" and server_config.sidecars:
-            raise ValueError("isolated kernel networking cannot be combined with loopback HTTP sidecars")
+        if _session_manager.config.kernel_network_mode in {"isolated", "seccomp"} and server_config.sidecars:
+            raise ValueError("restricted kernel networking cannot be combined with loopback HTTP sidecars")
 
         self.session_manager = _session_manager
         self.session_manager.kernel_name = self.kernel_name

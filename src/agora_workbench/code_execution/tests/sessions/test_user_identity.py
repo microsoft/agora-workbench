@@ -433,6 +433,121 @@ class TestUserTokenKernelPropagation:
         assert manager._kernel_ipc_dirs == {}
 
     @pytest.mark.asyncio
+    async def test_seccomp_kernel_uses_ipc_and_hardened_startup(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="seccomp"))
+        manager.create_session({}, "user", "", {}, session_id="sess-seccomp")
+        manager.configure_kernel_environment(
+            {
+                "PYTHONPATH": "/untrusted/python",
+                "PYTHONSTARTUP": "/untrusted/startup.py",
+                "IPYTHONDIR": "/untrusted/ipython",
+                "JUPYTER_CONFIG_DIR": "/untrusted/jupyter",
+            }
+        )
+        km, kc = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
+                new_callable=AsyncMock,
+            ) as install_filter,
+        ):
+            await manager._get_or_create_kernel("sess-seccomp", working_dir="/workspace")
+
+        assert km.transport == "ipc"
+        assert km.ip.endswith("/kernel")
+        assert km.kernel_spec.argv == ["/usr/bin/python"]
+        ipc_dir = Path(km.ip).parent
+        call_kwargs = km.start_kernel.call_args.kwargs
+        assert call_kwargs["cwd"] == str(ipc_dir)
+        env = call_kwargs["env"]
+        assert env["PYTHONNOUSERSITE"] == "1"
+        assert env["IPYTHONDIR"] == str(ipc_dir / "ipython")
+        assert env["JUPYTER_CONFIG_DIR"] == str(ipc_dir / "jupyter")
+        assert "PYTHONPATH" not in env
+        assert "PYTHONSTARTUP" not in env
+        install_filter.assert_awaited_once_with(kc, "/workspace")
+
+        await manager._shutdown_kernel("sess-seccomp", cleanup_artifacts=False)
+        assert not ipc_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_seccomp_kernel_fails_closed_when_filter_installation_fails(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="seccomp"))
+        manager.create_session({}, "user", "", {}, session_id="sess-seccomp")
+        km, kc = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                return_value=km,
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("filter failed"),
+            ),
+            pytest.raises(RuntimeError, match="filter failed"),
+        ):
+            await manager._get_or_create_kernel("sess-seccomp")
+
+        kc.stop_channels.assert_called_once()
+        km.shutdown_kernel.assert_awaited_once_with(now=True)
+        km.cleanup_resources.assert_awaited_once()
+        assert manager._kernels == {}
+        assert manager._kernel_ipc_dirs == {}
+
+    @pytest.mark.asyncio
+    async def test_seccomp_kernel_reapplies_filter_after_restart(self):
+        manager = SessionManager(SessionConfig(kernel_network_mode="seccomp"))
+        manager.create_session({}, "user", "", {}, session_id="sess-seccomp")
+        first_km, first_kc = self._make_mock_kernel()
+        second_km, second_kc = self._make_mock_kernel()
+
+        with (
+            patch(
+                "agora_workbench.code_execution.sessions.manager.AsyncKernelManager",
+                side_effect=[first_km, second_km],
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+            ),
+            patch(
+                "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
+                new_callable=AsyncMock,
+            ) as install_filter,
+        ):
+            await manager._get_or_create_kernel("sess-seccomp")
+            await manager._shutdown_kernel("sess-seccomp", cleanup_artifacts=False)
+            await manager._get_or_create_kernel("sess-seccomp")
+
+        assert install_filter.await_args_list[0].args[0] is first_kc
+        assert install_filter.await_args_list[1].args[0] is second_kc
+        await manager._shutdown_kernel("sess-seccomp", cleanup_artifacts=False)
+
+    @pytest.mark.asyncio
     async def test_execute_code_does_not_inject_user_token(self):
         manager = SessionManager()
         session_id = manager.create_session(

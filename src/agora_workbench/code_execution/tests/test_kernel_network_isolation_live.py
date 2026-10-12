@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import socket
 from pathlib import Path
@@ -9,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ..sessions import SessionConfig, SessionManager
-from ..sessions.network_isolation import validate_network_isolation_support
+from ..sessions.network_isolation import validate_network_isolation_support, validate_seccomp_isolation_support
 
 
 pytestmark = [pytest.mark.live, pytest.mark.asyncio]
@@ -120,6 +121,90 @@ print(json.dumps({{
         assert result["no_new_privs"] == "1"
     finally:
         host_listener.close()
+        await manager.aclose_session(session_id)
+        if ipc_dir is not None:
+            assert not ipc_dir.exists()
+
+
+async def test_seccomp_kernel_and_subprocess_cannot_create_ip_sockets():
+    try:
+        validate_seccomp_isolation_support()
+    except RuntimeError as exc:
+        pytest.skip(str(exc))
+
+    manager = SessionManager(SessionConfig(kernel_network_mode="seccomp"))
+    session_id = manager.create_session({}, "live-test", "", {})
+    ipc_dir: Path | None = None
+    try:
+        kernel_manager, kernel_client = await manager._get_or_create_kernel(session_id)
+        ipc_dir = Path(kernel_manager.ip).parent
+        output = await _execute_and_collect(
+            kernel_client,
+            """
+import json
+import socket
+import subprocess
+import sys
+
+status = dict(
+    line.rstrip().split(":", 1)
+    for line in open("/proc/self/status", encoding="utf-8")
+    if ":" in line
+)
+
+def socket_error(family):
+    try:
+        sock = socket.socket(family, socket.SOCK_STREAM)
+    except OSError as exc:
+        return {"type": type(exc).__name__, "errno": exc.errno}
+    else:
+        sock.close()
+        return {"type": None, "errno": None}
+
+unix_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+unix_socket.close()
+socketpair_left, socketpair_right = socket.socketpair()
+socketpair_left.close()
+socketpair_right.close()
+unix_connect = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    unix_connect.connect("/nonexistent-agora-seccomp-live-test.sock")
+except OSError as exc:
+    unix_connect_error = {"type": type(exc).__name__, "errno": exc.errno}
+else:
+    unix_connect_error = {"type": None, "errno": None}
+finally:
+    unix_connect.close()
+child = subprocess.run(
+    [
+        sys.executable,
+        "-c",
+        "import json,socket; "
+        "\\ntry: socket.socket(socket.AF_INET,socket.SOCK_STREAM); r={'type':None,'errno':None}"
+        "\\nexcept OSError as e: r={'type':type(e).__name__,'errno':e.errno}"
+        "\\nprint(json.dumps(r))",
+    ],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+print(json.dumps({
+    "ipv4": socket_error(socket.AF_INET),
+    "ipv6": socket_error(socket.AF_INET6),
+    "unix_connect": unix_connect_error,
+    "child_ipv4": json.loads(child.stdout),
+    "no_new_privs": status["NoNewPrivs"].strip(),
+}))
+""",
+        )
+        result = json.loads(output)
+
+        assert result["ipv4"]["errno"] == errno.EPERM
+        assert result["ipv6"]["errno"] == errno.EPERM
+        assert result["unix_connect"]["errno"] == errno.EPERM
+        assert result["child_ipv4"]["errno"] == errno.EPERM
+        assert result["no_new_privs"] == "1"
+    finally:
         await manager.aclose_session(session_id)
         if ipc_dir is not None:
             assert not ipc_dir.exists()

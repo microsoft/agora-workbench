@@ -34,7 +34,11 @@ from .session import Session, SessionContext, SessionResources
 from .network_isolation import (
     cleanup_isolated_kernel,
     configure_isolated_kernel,
+    configure_seccomp_kernel,
+    install_seccomp_network_filter,
     validate_network_isolation_support,
+    validate_seccomp_isolation_support,
+    validate_seccomp_kernel_environment,
 )
 from .storage import InMemoryStorage, SessionStorageBackend
 
@@ -204,7 +208,7 @@ class SessionConfig:
         cleanup_interval_seconds: int = 300,  # 5 minutes
         storage_backend: Optional[SessionStorageBackend] = None,
         data_manager_factory: Optional[Callable[[SessionContext], "DataLakeDataManager | SessionResources"]] = None,
-        kernel_network_mode: Literal["inherit", "isolated"] = "inherit",
+        kernel_network_mode: Literal["inherit", "isolated", "seccomp"] = "inherit",
     ):
         """
         Initialize session manager configuration.
@@ -241,14 +245,18 @@ class SessionConfig:
             kernel_network_mode: ``"inherit"`` lets kernels use the host network.
                 ``"isolated"`` launches each kernel in an empty Linux network
                 namespace and uses Unix IPC sockets for Jupyter communication.
+                ``"seccomp"`` starts Jupyter over Unix IPC sockets, then installs
+                an irreversible syscall filter that permits Unix-domain socket
+                creation and socket pairs while rejecting IP sockets and new
+                connections.
         """
         self.max_sessions = max_sessions
         self.timeout = timedelta(minutes=timeout_minutes)
         self.cleanup_interval = timedelta(seconds=cleanup_interval_seconds)
         self.storage_backend = storage_backend or InMemoryStorage()
         self.data_manager_factory = data_manager_factory
-        if kernel_network_mode not in ("inherit", "isolated"):
-            raise ValueError("kernel_network_mode must be 'inherit' or 'isolated'")
+        if kernel_network_mode not in ("inherit", "isolated", "seccomp"):
+            raise ValueError("kernel_network_mode must be 'inherit', 'isolated', or 'seccomp'")
         self.kernel_network_mode = kernel_network_mode
 
 
@@ -355,10 +363,10 @@ class SessionManager:
             env.update(self._kernel_environment)
         return env
 
-    def set_kernel_network_mode(self, kernel_network_mode: Literal["inherit", "isolated"]) -> None:
+    def set_kernel_network_mode(self, kernel_network_mode: Literal["inherit", "isolated", "seccomp"]) -> None:
         """Change the launch policy only when no kernel can retain the old policy."""
-        if kernel_network_mode not in ("inherit", "isolated"):
-            raise ValueError("kernel_network_mode must be 'inherit' or 'isolated'")
+        if kernel_network_mode not in ("inherit", "isolated", "seccomp"):
+            raise ValueError("kernel_network_mode must be 'inherit', 'isolated', or 'seccomp'")
 
         with self._session_lifecycle_lock:
             if self.config.kernel_network_mode == kernel_network_mode:
@@ -1123,7 +1131,12 @@ class SessionManager:
             if self._kernel_network_isolation_error is not None:
                 raise RuntimeError(self._kernel_network_isolation_error)
             try:
-                await asyncio.to_thread(validate_network_isolation_support)
+                validator = (
+                    validate_seccomp_isolation_support
+                    if self.config.kernel_network_mode == "seccomp"
+                    else validate_network_isolation_support
+                )
+                await asyncio.to_thread(validator)
             except RuntimeError as exc:
                 self._kernel_network_isolation_error = str(exc)
                 raise
@@ -1229,6 +1242,8 @@ class SessionManager:
         kernel_client = None
         kernel_start_attempted = False
         registered = False
+        launch_working_dir = working_dir
+        seccomp_working_dir: str | None = None
         current_task = asyncio.current_task()
         if current_task is None:
             raise RuntimeError("Kernel startup requires an asyncio task.")
@@ -1241,12 +1256,34 @@ class SessionManager:
                 await self._ensure_kernel_network_isolation_support()
                 ipc_dir = configure_isolated_kernel(kernel_manager)
                 self._kernel_ipc_dirs[kernel_manager] = ipc_dir
+            elif self.config.kernel_network_mode == "seccomp":
+                await self._ensure_kernel_network_isolation_support()
+                validate_seccomp_kernel_environment(kernel_manager)
+                ipc_dir = configure_seccomp_kernel(kernel_manager)
+                self._kernel_ipc_dirs[kernel_manager] = ipc_dir
+                seccomp_working_dir = str(Path(working_dir or os.getcwd()).resolve())
+                launch_working_dir = str(ipc_dir)
+                for variable in (
+                    "PYTHONHOME",
+                    "PYTHONPATH",
+                    "PYTHONSTARTUP",
+                    "IPYTHONDIR",
+                    "JUPYTER_CONFIG_DIR",
+                    "JUPYTER_CONFIG_PATH",
+                    "JUPYTER_PATH",
+                ):
+                    env.pop(variable, None)
+                env["PYTHONNOUSERSITE"] = "1"
+                env["IPYTHONDIR"] = str(ipc_dir / "ipython")
+                env["JUPYTER_CONFIG_DIR"] = str(ipc_dir / "jupyter")
 
             kernel_start_attempted = True
-            await kernel_manager.start_kernel(env=env, cwd=working_dir)
+            await kernel_manager.start_kernel(env=env, cwd=launch_working_dir)
             kernel_client = kernel_manager.client()
             kernel_client.start_channels()
             await kernel_client.wait_for_ready()
+            if seccomp_working_dir is not None:
+                await install_seccomp_network_filter(kernel_client, seccomp_working_dir)
 
             # Store in registry
             with self._session_lifecycle_lock:

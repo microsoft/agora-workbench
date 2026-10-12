@@ -396,12 +396,13 @@ class ServerConfig(BaseModel):
             "PARALLEL_EXECUTE_MAX_CONCURRENCY env var (default: 0)."
         ),
     )
-    kernel_network_mode: Optional[Literal["inherit", "isolated"]] = Field(
+    kernel_network_mode: Optional[Literal["inherit", "isolated", "seccomp"]] = Field(
         default=None,
         description=(
             "Optional network policy for Jupyter kernels. 'inherit' uses the server "
             "process network. 'isolated' launches each kernel in an empty Linux "
-            "network namespace and switches Jupyter channels to Unix IPC sockets. "
+            "network namespace. 'seccomp' installs a process-local syscall filter "
+            "after Jupyter starts. Both restricted modes use Unix IPC sockets. "
             "When omitted, a default SessionManager uses 'inherit' and a caller-"
             "provided SessionManager keeps its SessionConfig setting."
         ),
@@ -409,9 +410,11 @@ class ServerConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_isolated_kernel_network(self) -> "ServerConfig":
-        """Loopback HTTP sidecars are unreachable from an isolated netns."""
-        if self.kernel_network_mode == "isolated" and self.sidecars:
-            raise ValueError("kernel_network_mode='isolated' cannot be combined with loopback HTTP sidecars")
+        """Loopback HTTP sidecars are unreachable from restricted kernels."""
+        if self.kernel_network_mode in {"isolated", "seccomp"} and self.sidecars:
+            raise ValueError(
+                f"kernel_network_mode={self.kernel_network_mode!r} cannot be combined with loopback HTTP sidecars"
+            )
         return self
 
     # --- Features ---

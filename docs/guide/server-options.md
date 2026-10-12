@@ -205,12 +205,13 @@ class ChemistryServer(CodeExecutionServer):
 | `default_timeout` | Default timeout (default: 300s) |
 | `output_truncation_threshold` | Max chars in stdout/stderr before truncation |
 | `parallel_max_concurrency` | Max parallel executions (0 = unlimited) |
-| `kernel_network_mode` | `"inherit"` (effective default) or `"isolated"`; isolated kernels cannot route to the server or external IP networks. When omitted with a custom `SessionManager`, its `SessionConfig` setting is preserved. |
+| `kernel_network_mode` | `"inherit"` (effective default), `"isolated"` (network namespace), or `"seccomp"` (post-start syscall filter). Restricted kernels cannot open IP network connections. When omitted with a custom `SessionManager`, its `SessionConfig` setting is preserved. |
 
-### Isolating kernels from the network
+### Isolating kernels from IP networks
 
-Set `kernel_network_mode="isolated"` to launch every Jupyter kernel in an empty
-Linux network namespace:
+Workbench provides two fail-closed Linux backends. Prefer
+`kernel_network_mode="isolated"` when the runtime permits unprivileged user and
+network namespaces:
 
 ```python
 config = ServerConfig(
@@ -236,28 +237,71 @@ unprivileged user and network namespaces. Workbench fails the kernel launch
 rather than falling back to the inherited network when the boundary is
 unavailable.
 
-Network-isolated kernels cannot use:
+Managed container runtimes sometimes prohibit namespace creation. On a 64-bit
+Linux image with `libseccomp.so.2`, use `kernel_network_mode="seccomp"` instead:
+
+```python
+config = ServerConfig(
+    name="offline-analysis",
+    description="Analyze operator-provided local data without network access.",
+    type="uv",
+    dependency_file="numpy\npandas\n",
+    kernel_network_mode="seccomp",
+)
+```
+
+This backend starts Jupyter over Unix IPC first because ZeroMQ creates temporary
+IP sockets during initialization. Workbench starts the kernel from a fresh
+private directory with user-site imports disabled and fresh IPython/Jupyter
+configuration directories, waits for readiness, then installs an irreversible
+libseccomp filter before registering the kernel for execution. The filter is
+synchronized across existing kernel threads, inherited by subprocesses, rejects
+all new non-Unix sockets and new `connect()` calls, blocks io_uring syscalls
+that could provide an alternative networking path, and verifies that no
+non-Unix socket descriptors remain open. Denying later connections also
+prevents an already-running same-UID kernel from attaching to another kernel
+during its pre-filter startup window. The kernel is shut down if any
+installation or verification step fails.
+
+Install the libseccomp runtime library in the container image, for example
+`libseccomp2` on Debian/Ubuntu. Unlike namespace isolation, seccomp isolation
+also blocks private TCP loopback created by the kernel. Existing applications
+that use `127.0.0.1` for local worker coordination should continue using the
+namespace backend.
+
+The Python environment used by a seccomp kernel must be immutable to executed
+code. Install the interpreter and site-packages as a different user, then run
+Workbench as a non-root user without write access to the interpreter, its
+directory, or its standard-library and site-packages directories. For images
+that build the kernel environment with `--warm`, change that environment to
+`root:root` ownership in a later root build step before switching back to the
+runtime user. Workbench rejects seccomp kernel startup when these ownership and
+write-access checks fail; otherwise code could persist a modified startup
+module and run it before the filter is reinstalled after a kernel restart.
+
+Restricted kernels cannot use:
 
 - public or private HTTP services;
 - host TCP loopback services, including Workbench `SidecarConfig` sidecars;
 - server-to-server transfers initiated inside the kernel;
 - domain tools that open IP sockets.
 
-Private loopback remains available within each kernel namespace, so a kernel and
-its own subprocesses can communicate over `127.0.0.1`. They cannot use that
-address to reach services running in the Workbench server namespace.
+Private loopback remains available only with the namespace backend, so a kernel
+and its own subprocesses can communicate over `127.0.0.1` without reaching
+services in the Workbench server namespace. The seccomp backend permits
+Unix-domain socket creation and socket pairs, but rejects new connections as
+well as new IPv4 and IPv6 sockets, including loopback.
 
 Environment construction, asset provisioning, catalog materialization, and
 artifact publishing run in the server process and are not affected. Files
 materialized before execution remain available to the kernel.
 
 !!! warning "Network boundary, not a complete process sandbox"
-    This setting isolates IP networking only. It does not remove inherited
-    environment variables or assign a different operating-system user to the
-    kernel. Creating the user namespace drops supplementary group memberships,
-    so paths accessible only through a supplementary group may become
-    unreadable. `no_new_privs` also prevents setuid helpers from gaining
-    privileges.
+    These settings isolate IP networking only. They do not assign a different
+    operating-system user to the kernel. Namespace isolation drops supplementary
+    group memberships, so paths accessible only through a supplementary group
+    may become unreadable. Both backends enable `no_new_privs`, which prevents
+    setuid helpers from gaining privileges.
 
     All kernels still run with the same host UID by default. Network isolation
     therefore does not prevent one kernel from accessing another kernel's files

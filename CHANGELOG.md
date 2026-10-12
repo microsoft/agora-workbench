@@ -10,6 +10,15 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Added
+
+- `kernel_network_mode="seccomp"` provides a fail-closed IP-network boundary
+  for 64-bit Linux runtimes that prohibit user/network namespace creation. It
+  starts Jupyter over Unix IPC, hardens the pre-filter startup environment,
+  applies a thread-synchronized libseccomp filter before exposing the kernel,
+  rejects non-Unix sockets, new connections, and io_uring, and verifies that
+  no IP socket descriptors remain open.
+
 ### Fixed
 
 - Foreground code-execution responses now include a bounded, argument-free
