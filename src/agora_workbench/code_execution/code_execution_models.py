@@ -110,8 +110,8 @@ class SidecarConfig(BaseModel):
     url_env_var: str = Field(
         description=(
             "Environment variable name under which the sidecar's base URL is exported to "
-            "the server process (and therefore inherited by every kernel). Tool code reads "
-            "this to locate the sidecar."
+            "the server process and explicitly included in each kernel's sanitized environment. "
+            "Tool code reads this to locate the sidecar."
         )
     )
     host: str = Field(

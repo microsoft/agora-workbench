@@ -162,7 +162,7 @@ def predict_retrosynthesis(smiles: str) -> dict:
 | `name` | — | Logical name for the sidecar (must be unique within a server). |
 | `command` | — | Argument vector. With `use_env_python=True` these args are appended to the kernel env's Python; with `False`, executed verbatim. |
 | `use_env_python` | `True` | Prepend the kernel environment's Python interpreter to `command`. |
-| `url_env_var` | — | Env var under which the base URL is exported to the server process (and inherited by kernels). |
+| `url_env_var` | — | Env var under which the base URL is exported to the server process and explicitly included in each kernel's sanitized environment. |
 | `host` | `127.0.0.1` | Loopback bind address. Keep internal. |
 | `port` | — | TCP port the sidecar listens on (also passed as `SIDECAR_PORT`). |
 | `health_path` | `/health` | Path polled (HTTP GET, expecting `2xx`) to determine readiness. |

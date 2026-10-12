@@ -15,7 +15,7 @@ declared on a :class:`ServerConfig`. It:
 * launches the process bound to loopback,
 * waits for the sidecar's health endpoint to report ready,
 * exports the sidecar base URL into ``os.environ`` under the configured
-  ``url_env_var`` so every subsequently-spawned kernel inherits it, and
+  ``url_env_var`` for the server to pass explicitly to subsequent kernels, and
 * terminates the processes on shutdown (graceful SIGTERM, then SIGKILL).
 """
 
