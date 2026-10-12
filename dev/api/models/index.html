@@ -1897,8 +1897,8 @@ sidecar shipped as a standalone binary or served from another interpreter).</p>
 <details class="discovery-contract" open>
   <summary>Discovery contract</summary>
   <p>The resolved base URL (<code>http://{host}:{port}</code>) is exported into the
-environment under <code>url_env_var</code> on the server process <em>before</em> any
-kernel is spawned, so every kernel inherits it. Tool code reads it::</p>
+environment under <code>url_env_var</code> and explicitly passed to each kernel.
+Tool code reads it::</p>
 <div class="highlight"><pre><span></span><code>import os, httpx
 
 base = os.environ[&quot;MYMODEL_SERVICE_URL&quot;]

@@ -1665,9 +1665,11 @@ kernels stay cheap and call into it over HTTP.</p>
    <code>readiness_timeout_s</code> elapses, which fails startup). Kernels are only
    registered <em>after</em> the sidecars are ready.</li>
 <li><strong>Discovery</strong> — the sidecar's base URL (<code>http://{host}:{port}</code>) is exported
-   into the server process environment under <code>url_env_var</code>. Because each kernel
-   inherits the server's environment at spawn, <strong>every session sees this
-   variable</strong> — the same mechanism used for <code>MCP_ASSET_CACHE_DIR</code>.</li>
+   into the server process environment under <code>url_env_var</code> and explicitly added
+   to each kernel's sanitized environment. <strong>Every session sees this variable</strong>
+   through the same explicit kernel configuration used for
+   <code>MCP_ASSET_CACHE_DIR</code>; unrelated server environment variables are not
+   inherited.</li>
 <li><strong>Shutdown</strong> — on server exit each sidecar is stopped gracefully
    (<code>SIGTERM</code>, then <code>SIGKILL</code> after a grace period).</li>
 </ol>
@@ -1760,7 +1762,7 @@ in tests and local development without the sidecar running:</p>
 <tr>
 <td><code>url_env_var</code></td>
 <td>—</td>
-<td>Env var under which the base URL is exported to the server process (and inherited by kernels).</td>
+<td>Env var under which the base URL is exported to the server process and explicitly included in each kernel's sanitized environment.</td>
 </tr>
 <tr>
 <td><code>host</code></td>
