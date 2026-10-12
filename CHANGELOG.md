@@ -16,6 +16,16 @@ changes that require action from existing users. Each entry there states who is 
   inside f-strings as standalone filesystem paths, avoiding false absolute-path
   and traversal errors for display strings such as `f"{done}/{total}"`
   ([#386](https://github.com/microsoft/agora-workbench/pull/386)).
+- Code-execution kernels now start with a sanitized environment instead of
+  inheriting the server process environment, and user assertion tokens are no
+  longer exposed to executed code. Framework-owned asset and sidecar discovery
+  values are passed explicitly
+  ([#388](https://github.com/microsoft/agora-workbench/pull/388)).
+- Isolated kernel networking now works when the Workbench server runs as a
+  non-root user by mapping that identity to root only inside the subordinate
+  user namespace while configuring loopback and dropping capabilities before
+  kernel execution
+  ([#389](https://github.com/microsoft/agora-workbench/pull/389)).
 
 ## [0.4.0] - 2026-10-08
 
