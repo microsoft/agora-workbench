@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-13
+
 ### Added
 
 - `kernel_network_mode="seccomp"` provides a fail-closed IP-network boundary
