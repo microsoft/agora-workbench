@@ -29,7 +29,8 @@ changes that require action from existing users. Each entry there states who is 
 
 - The scaffolded Azure Linux base image now builds uv kernel environments from
   the root-owned system Python so sealing `/opt/kernel-envs` satisfies seccomp
-  startup validation.
+  startup validation
+  ([#393](https://github.com/microsoft/agora-workbench/pull/393)).
 - Foreground code-execution responses now include a bounded, argument-free
   summary of failed internal tool calls, including domain failures reported as
   `result.success=false`. Summaries use generic failure messages; raw error
