@@ -601,10 +601,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#isolating-kernels-from-the-network" class="md-nav__link">
+  <a href="#isolating-kernels-from-ip-networks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Isolating kernels from the network
+        Isolating kernels from IP networks
       
     </span>
   </a>
@@ -1809,10 +1809,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#isolating-kernels-from-the-network" class="md-nav__link">
+  <a href="#isolating-kernels-from-ip-networks" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Isolating kernels from the network
+        Isolating kernels from IP networks
       
     </span>
   </a>
@@ -2173,13 +2173,14 @@ and share it across sessions instead.</p>
 </tr>
 <tr>
 <td><code>kernel_network_mode</code></td>
-<td><code>"inherit"</code> (effective default) or <code>"isolated"</code>; isolated kernels cannot route to the server or external IP networks. When omitted with a custom <code>SessionManager</code>, its <code>SessionConfig</code> setting is preserved.</td>
+<td><code>"inherit"</code> (effective default), <code>"isolated"</code> (network namespace), or <code>"seccomp"</code> (post-start syscall filter). Restricted kernels cannot open IP network connections. When omitted with a custom <code>SessionManager</code>, its <code>SessionConfig</code> setting is preserved.</td>
 </tr>
 </tbody>
 </table>
-<h3 id="isolating-kernels-from-the-network">Isolating kernels from the network<a class="headerlink" href="#isolating-kernels-from-the-network" title="Permanent link">&para;</a></h3>
-<p>Set <code>kernel_network_mode="isolated"</code> to launch every Jupyter kernel in an empty
-Linux network namespace:</p>
+<h3 id="isolating-kernels-from-ip-networks">Isolating kernels from IP networks<a class="headerlink" href="#isolating-kernels-from-ip-networks" title="Permanent link">&para;</a></h3>
+<p>Workbench provides two fail-closed Linux backends. Prefer
+<code>kernel_network_mode="isolated"</code> when the runtime permits unprivileged user and
+network namespaces:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
@@ -2200,27 +2201,84 @@ util-linux, the <code>ip</code> command from iproute2, and runtime permission to
 unprivileged user and network namespaces. Workbench fails the kernel launch
 rather than falling back to the inherited network when the boundary is
 unavailable.</p>
-<p>Network-isolated kernels cannot use:</p>
+<p>Managed container runtimes sometimes prohibit namespace creation. On a 64-bit
+Linux image with <code>libseccomp.so.2</code>, use <code>kernel_network_mode="seccomp"</code> instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">kernel_network_mode</span><span class="o">=</span><span class="s2">&quot;seccomp&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
+</code></pre></div>
+<p>This backend starts Jupyter over Unix IPC first because ZeroMQ creates temporary
+IP sockets during initialization. Workbench starts the kernel from a fresh
+private directory with user-site imports disabled and fresh IPython/Jupyter
+configuration directories. It replaces mutable kernelspec arguments and
+environment entries with an isolated Python startup that disables automatic
+site processing, IPython/Jupyter configuration loading, and profile startup
+files before initialization. Only validated package roots are added before
+loading the kernel application. After Jupyter is ready, Workbench installs an
+irreversible libseccomp filter before registering the kernel for execution. The
+filter is synchronized across existing kernel threads, inherited by
+subprocesses, rejects all new non-Unix sockets plus new <code>connect()</code>, <code>bind()</code>,
+and <code>listen()</code> calls, blocks io_uring and cross-process memory syscalls that
+could provide alternative bypasses, and verifies that no non-Unix socket
+descriptors remain open. Workbench also disables process dumpability for the
+server and seccomp kernels, preventing same-UID <code>ptrace</code> and <code>/proc/&lt;pid&gt;/mem</code>
+injection independently of host Yama settings. This disables core dumps for the
+Workbench server. The kernel is shut down if any installation or verification
+step fails.</p>
+<p>Install the libseccomp runtime library in the container image, for example
+<code>libseccomp2</code> on Debian/Ubuntu. Unlike namespace isolation, seccomp isolation
+also blocks private TCP loopback created by the kernel. Existing applications
+that use <code>127.0.0.1</code> for local worker coordination should continue using the
+namespace backend.</p>
+<p>The Python environment used by a seccomp kernel must be immutable to executed
+code. Install the interpreter and site-packages under a parent hierarchy owned
+by a different user, then run Workbench as a non-root user without write access
+to any path in that hierarchy. Workbench recursively validates standard-library
+and package roots, including symlink targets, before starting the kernel. For
+images that build the kernel environment
+with <code>--warm</code>, configure its build directory under a location such as
+<code>/opt/kernel-envs</code>, recursively change that hierarchy to <code>root:root</code> ownership
+in a later root build step, and switch back to the runtime user. Changing only
+an environment below a writable home or cache directory is insufficient because
+the runtime user could replace the entire environment. Workbench validates the
+interpreter, virtual-environment configuration, standard-library and
+site-packages paths, resolved symlink targets, and every controlling parent
+directory. Startup fails if any path is owned or writable by the kernel
+identity.</p>
+<p>Restricted kernels cannot use:</p>
 <ul>
 <li>public or private HTTP services;</li>
 <li>host TCP loopback services, including Workbench <code>SidecarConfig</code> sidecars;</li>
 <li>server-to-server transfers initiated inside the kernel;</li>
 <li>domain tools that open IP sockets.</li>
 </ul>
-<p>Private loopback remains available within each kernel namespace, so a kernel and
-its own subprocesses can communicate over <code>127.0.0.1</code>. They cannot use that
-address to reach services running in the Workbench server namespace.</p>
+<p>Private loopback remains available only with the namespace backend, so a kernel
+and its own subprocesses can communicate over <code>127.0.0.1</code> without reaching
+services in the Workbench server namespace. The seccomp backend permits
+Unix-domain socket creation and socket pairs, but rejects new stream
+connections/listeners as well as new IPv4 and IPv6 sockets, including loopback.
+Unix datagrams can still send to an existing filesystem endpoint, so do not
+expose trusted Unix sockets inside writable or kernel-accessible paths.</p>
+<p>Seccomp startup does not process <code>.pth</code> files because they can redirect imports
+to paths outside the validated immutable environment. Editable installs and
+legacy namespace packages that depend on <code>.pth</code> processing must be converted to
+regular installed packages. Jupyter debugging, <code>multiprocessing.Manager</code>,
+<code>forkserver</code>, and non-native-architecture helper binaries are also incompatible
+with this mode; use the namespace backend when those features are required.</p>
 <p>Environment construction, asset provisioning, catalog materialization, and
 artifact publishing run in the server process and are not affected. Files
 materialized before execution remain available to the kernel.</p>
 <div class="admonition warning">
 <p class="admonition-title">Network boundary, not a complete process sandbox</p>
-<p>This setting isolates IP networking only. It does not remove inherited
-environment variables or assign a different operating-system user to the
-kernel. Creating the user namespace drops supplementary group memberships,
-so paths accessible only through a supplementary group may become
-unreadable. <code>no_new_privs</code> also prevents setuid helpers from gaining
-privileges.</p>
+<p>These settings isolate IP networking only. They do not assign a different
+operating-system user to the kernel. Namespace isolation drops supplementary
+group memberships, so paths accessible only through a supplementary group
+may become unreadable. Both backends enable <code>no_new_privs</code>, which prevents
+setuid helpers from gaining privileges.</p>
 <p>All kernels still run with the same host UID by default. Network isolation
 therefore does not prevent one kernel from accessing another kernel's files
 or Unix IPC endpoints when host filesystem permissions allow it. Do not
@@ -2245,40 +2303,40 @@ require per-kernel OS identities or separate worker isolation.</p>
 </table>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>Pass an <code>AuthConfig</code> to control how requests are authenticated:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth.entra</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_entra_auth_config</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># For local development (no auth):</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">())</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># For production with Entra ID:</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_entra_auth_config</span><span class="p">())</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth.entra</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_entra_auth_config</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># For local development (no auth):</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">())</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># For production with Entra ID:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_entra_auth_config</span><span class="p">())</span>
 </code></pre></div>
 <p>See <a href="../authentication/">Authentication options</a> for the full auth guide.</p>
 <h2 id="publishers-artifact-output">Publishers (artifact output)<a class="headerlink" href="#publishers-artifact-output" title="Permanent link">&para;</a></h2>
 <p>Configure publishers to allow the agent to publish artifacts (files, plots) from code execution:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlobPublisher</span><span class="p">,</span> <span class="n">LocalFilePublisher</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">publishers</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">LocalFilePublisher</span><span class="p">(</span><span class="n">base_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/artifacts&quot;</span><span class="p">),</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">BlobPublisher</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="s2">&quot;https://myaccount.blob.core.windows.net&quot;</span><span class="p">,</span> <span class="n">container</span><span class="o">=</span><span class="s2">&quot;outputs&quot;</span><span class="p">),</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">]</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
-<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
-<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
-<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">(),</span>
-<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>    <span class="n">publishers</span><span class="o">=</span><span class="n">publishers</span><span class="p">,</span>
-<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlobPublisher</span><span class="p">,</span> <span class="n">LocalFilePublisher</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">publishers</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">LocalFilePublisher</span><span class="p">(</span><span class="n">base_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/artifacts&quot;</span><span class="p">),</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">BlobPublisher</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="s2">&quot;https://myaccount.blob.core.windows.net&quot;</span><span class="p">,</span> <span class="n">container</span><span class="o">=</span><span class="s2">&quot;outputs&quot;</span><span class="p">),</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">]</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">(),</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">publishers</span><span class="o">=</span><span class="n">publishers</span><span class="p">,</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="running-the-server">Running the server<a class="headerlink" href="#running-the-server" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># HTTP mode (standard deployment)</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">))</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># Warm up environment without serving (useful in Docker builds)</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># HTTP mode (standard deployment)</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">))</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Warm up environment without serving (useful in Docker builds)</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
 </code></pre></div>
 <p>The server exposes:</p>
 <ul>
