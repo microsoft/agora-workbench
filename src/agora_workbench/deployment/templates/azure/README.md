@@ -271,11 +271,65 @@ EasyAuth on the activity UI validates it automatically.
 No shared secrets are used. MCP servers authenticate using their managed
 identity to acquire a token for the activity UI's app registration audience.
 
-## Environment caching with Azure Files
+## Seccomp kernel isolation
 
-For servers that build Python environments at startup or provision large assets
-(model weights, data files), mount an Azure File Share so the cache persists
-across container restarts and scale events.
+ACA does not permit the user and network namespace creation required by
+`kernel_network_mode="isolated"`. Use the seccomp backend for code-execution
+servers whose kernels must not open IP connections.
+
+Configure a dedicated immutable environment path and a separate writable asset
+cache:
+
+```python
+from pathlib import Path
+
+config = ServerConfig(
+    name="my-server",
+    description="Analyze operator-provided data.",
+    type="uv",
+    dependency_file="numpy\npandas\n",
+    kernel_network_mode="seccomp",
+    build_dir=Path("/opt/kernel-envs/my-server/uv"),
+    asset_cache_dir=Path("/home/appuser/.cache/mcp-assets/my-server"),
+)
+```
+
+The scaffolded base image includes libseccomp and creates `/opt/kernel-envs`
+with build-time ownership for `appuser`. Warm and seal the environment in the
+server image:
+
+```dockerfile
+ARG BASE_IMAGE=mcp-server-base:local
+FROM ${BASE_IMAGE}
+
+COPY --chown=appuser:appuser path/to/your/server /app/servers/my_server
+
+RUN python -m servers.my_server.server --warm
+
+USER root
+RUN chown -R root:root /opt/kernel-envs \
+    && chmod -R a-w /opt/kernel-envs
+USER appuser
+
+CMD ["python", "-m", "servers.my_server.server"]
+```
+
+Every component of the kernel environment path must be owned by another
+operating-system user and non-writable by `appuser`. Do not place the
+environment below `/home/appuser`, mount Azure Files over `/opt/kernel-envs`,
+or mount a writable volume over any parent of the environment. Workbench fails
+kernel startup rather than weakening this boundary.
+
+No Bicep security-context changes are required. Standard ACA containers can
+install the process-local filter as a non-root user.
+
+## Writable caching with Azure Files
+
+For non-seccomp servers that build Python environments at startup, or for any
+server that provisions large writable assets, mount an Azure File Share so the
+cache persists across container restarts and scale events. A seccomp kernel
+environment must be baked into the image; use Azure Files only for the separate
+`asset_cache_dir`.
 
 ### 1. Create a storage account and file share
 
@@ -314,7 +368,11 @@ Add to your `.env.server`:
 
 ```bash
 ACA_STORAGE_LINK=envcache
-# ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-envs  # default, override if needed
+# Default/legacy combined environment and asset cache:
+# ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-envs
+
+# Seccomp deployment with ServerConfig.asset_cache_dir configured to match:
+ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-assets
 ```
 
 Then deploy as usual — `deploy-server.sh` passes the storage parameters to Bicep:
@@ -331,8 +389,10 @@ Or pass explicitly:
   --dockerfile /path/to/Dockerfile --context /path/to/context
 ```
 
-The first container replica will build the environment and provision assets into
-the file share. Subsequent replicas (and restarts) reuse the cached content.
+For non-seccomp deployments, the first replica can build the environment into
+the file share and later replicas reuse it. For seccomp deployments, the
+environment comes from the immutable image while writable assets and transfer
+staging use the mounted asset cache.
 
 ## Adding a new server
 
@@ -349,6 +409,12 @@ the file share. Subsequent replicas (and restarts) reuse the cached content.
    # The server's --warm flag builds the conda/pip/uv environment and exits.
    # At runtime, the server detects the pre-built env and starts immediately.
    RUN python -m servers.<name>.server.<name>_server --warm
+
+   # When kernel_network_mode="seccomp", the configured build_dir must be under
+   # /opt/kernel-envs and sealed before restoring the runtime user.
+   USER root
+   RUN chown -R root:root /opt/kernel-envs && chmod -R a-w /opt/kernel-envs
+   USER appuser
 
    CMD ["python", "-m", "servers.<name>.server.<name>_server"]
    ```

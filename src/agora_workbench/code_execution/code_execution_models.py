@@ -296,6 +296,13 @@ class ServerConfig(BaseModel):
     build_dir: Optional[Path] = Field(
         default=None, description="Directory where environment should be created (default: ~/.cache/mcp-envs/{name})"
     )
+    asset_cache_dir: Optional[Path] = Field(
+        default=None,
+        description=(
+            "Writable directory for provisioned assets and transfer staging. "
+            "Defaults to the parent of build_dir, preserving existing behavior."
+        ),
+    )
     additional_commands: list[str] = Field(
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
@@ -448,10 +455,12 @@ class ServerConfig(BaseModel):
         return Path.home() / ".cache" / "mcp-envs" / self.name / self.type
 
     def get_cache_dir(self) -> Path:
-        """Get the root cache directory for this environment (parent of build_dir).
+        """Get the writable cache directory for assets and transfer staging.
 
         Asset destinations are resolved relative to this directory.
         """
+        if self.asset_cache_dir:
+            return self.asset_cache_dir
         if self.build_dir:
             return self.build_dir.parent
         return Path.home() / ".cache" / "mcp-envs" / self.name

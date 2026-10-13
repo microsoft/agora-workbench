@@ -175,6 +175,22 @@ def test_server_config_custom_build_dir(tmp_path):
     assert config.get_build_dir() == custom_dir
 
 
+def test_server_config_custom_asset_cache_dir(tmp_path):
+    build_dir = tmp_path / "immutable" / "uv"
+    asset_cache_dir = tmp_path / "writable-assets"
+    config = ServerConfig(
+        name="myenv",
+        description="Test",
+        type="uv",
+        dependency_file="numpy\n",
+        build_dir=build_dir,
+        asset_cache_dir=asset_cache_dir,
+    )
+
+    assert config.get_build_dir() == build_dir
+    assert config.get_cache_dir() == asset_cache_dir
+
+
 # ---------------------------------------------------------------------------
 # additional_commands behaviour
 # ---------------------------------------------------------------------------

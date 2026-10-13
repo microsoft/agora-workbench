@@ -75,15 +75,15 @@ param passthroughEnvVars object = {}
 @description('Container startup command. When empty (default), the image CMD is used.')
 param command array = []
 
-// ── Optional: Azure Files volume for environment/asset cache ────────────────
-// When provided, mounts an Azure File Share into the container so that built
-// environments and large assets (model weights) persist across restarts and
-// scale events.  Leave empty to use ephemeral storage only.
+// ── Optional: Azure Files volume for writable cache data ────────────────────
+// When provided, mounts an Azure File Share into the container so assets and,
+// for non-seccomp deployments, built environments can persist across restarts.
+// Seccomp kernel environments must remain image-baked and immutable.
 
-@description('Name of the ACA environment storage link for Azure Files. Must be pre-created via `az containerapp env storage set`.')
+@description('Name of the ACA environment storage link for a writable Azure Files cache. Must be pre-created via `az containerapp env storage set`.')
 param storageLink string = ''
 
-@description('Mount path inside the container for the environment cache volume.')
+@description('Mount path inside the container for the writable cache volume. Do not mount over a seccomp kernel build_dir or its parents.')
 param cacheMountPath string = '/home/appuser/.cache/mcp-envs'
 
 @description('Whether ingress is externally accessible. Set false for internal-only upstreams.')

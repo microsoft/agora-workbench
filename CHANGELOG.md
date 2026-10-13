@@ -19,6 +19,10 @@ changes that require action from existing users. Each entry there states who is 
   rejects non-Unix sockets, new connections, and io_uring, and verifies that
   no IP socket descriptors remain open
   ([#390](https://github.com/microsoft/agora-workbench/pull/390)).
+- Azure Container Apps deployment scaffolds install the libseccomp runtime and
+  document image-baked, root-owned kernel environments for seccomp isolation.
+  `ServerConfig.asset_cache_dir` keeps writable assets and transfer staging
+  separate from the immutable Python environment.
 
 ### Fixed
 

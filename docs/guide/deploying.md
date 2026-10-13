@@ -145,6 +145,61 @@ az deployment group create \
   --parameters containerImage=<your-acr>.azurecr.io/myserver:latest
 ```
 
+### Seccomp kernel isolation on Azure Container Apps
+
+Azure Container Apps does not permit the user and network namespace creation
+required by `kernel_network_mode="isolated"`. Use the seccomp backend when
+kernels must be prevented from opening IP connections:
+
+```python
+from pathlib import Path
+
+config = ServerConfig(
+    name="myserver",
+    description="Analyze operator-provided data.",
+    type="uv",
+    dependency_file="numpy\npandas\n",
+    kernel_network_mode="seccomp",
+    build_dir=Path("/opt/kernel-envs/myserver/uv"),
+    asset_cache_dir=Path("/home/appuser/.cache/mcp-assets/myserver"),
+)
+```
+
+The scaffolded base image installs the libseccomp runtime and creates
+`/opt/kernel-envs` for build-time warming. Warm the environment as `appuser`,
+then make the entire hierarchy root-owned and non-writable before restoring the
+runtime user:
+
+```dockerfile
+FROM mcp-server-base:local
+
+COPY --chown=appuser:appuser my_server/ /app/my_server/
+
+RUN python -m my_server.server --warm
+
+USER root
+RUN chown -R root:root /opt/kernel-envs \
+    && chmod -R a-w /opt/kernel-envs
+USER appuser
+
+CMD ["python", "-m", "my_server.server"]
+```
+
+Do not mount Azure Files over `/opt/kernel-envs` or any parent directory.
+Seccomp startup intentionally fails when the kernel interpreter, site-packages,
+or a controlling parent is writable by the runtime identity. If writable assets
+must persist, mount Azure Files separately and point `asset_cache_dir` at that
+mount:
+
+```bash
+ACA_STORAGE_LINK=assetcache
+ACA_CACHE_MOUNT_PATH=/home/appuser/.cache/mcp-assets
+```
+
+No privileged-container, capability, or custom ACA security-context setting is
+required. The filter is installed by the non-root kernel process after Jupyter
+initializes over Unix IPC.
+
 ### Environment variables for deployment
 
 | Variable | Description |

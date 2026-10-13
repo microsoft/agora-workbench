@@ -34,8 +34,9 @@ Optional:
   --resource-group, -g  NAME    Override ACA_RESOURCE_GROUP from .env.server
   --tag, -t             TAG     Docker image tag (default: git short SHA)
   --acr-name            NAME    Override ACA_ACR_NAME from .env.server
-  --storage-link        NAME    ACA environment storage link name for Azure Files cache
-  --cache-mount-path    PATH    Container mount path for cache (default: /home/appuser/.cache/mcp-envs)
+  --storage-link        NAME    ACA environment storage link name for a writable Azure Files cache
+  --cache-mount-path    PATH    Container mount path for writable cache data
+                                (default: /home/appuser/.cache/mcp-envs)
   --dry-run                     Show what would be deployed without building or deploying
   -h, --help                    Show this help message
 EOF

@@ -79,6 +79,17 @@ class TestScaffoldInit:
         assert base.exists()
         content = base.read_text()
         assert "mcp-server-base" in content or "miniforge" in content
+        assert "libseccomp" in content
+        assert "/opt/kernel-envs" in content
+
+    @pytest.mark.unit
+    def test_azure_readme_documents_seccomp_deployment(self, tmp_path):
+        init(target="azure", output_dir=str(tmp_path / "out"))
+        content = (tmp_path / "out" / "azure" / "README.md").read_text()
+
+        assert 'kernel_network_mode="seccomp"' in content
+        assert "asset_cache_dir" in content
+        assert "/opt/kernel-envs" in content
 
     @pytest.mark.unit
     def test_base_dockerfile_builds_without_a_workbench_checkout(self, tmp_path):

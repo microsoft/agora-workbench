@@ -19,7 +19,12 @@
 # Then create your own Dockerfile:
 #   FROM mcp-server-base:local
 #   COPY --chown=appuser:appuser my_server/ /app/my_server/
+#   # Configure ServerConfig.build_dir below /opt/kernel-envs before warming.
 #   RUN python -m my_server.server --warm
+#   # Required only for kernel_network_mode="seccomp":
+#   USER root
+#   RUN chown -R root:root /opt/kernel-envs && chmod -R a-w /opt/kernel-envs
+#   USER appuser
 #   CMD ["python", "-m", "my_server.server"]
 #
 # The --warm flag pre-builds the Python environment (conda/pip/uv) during
@@ -59,6 +64,7 @@ RUN tdnf install -y \
     bzip2 \
     xz \
     gawk \
+    libseccomp \
     && tdnf clean all
 
 # Install uv with version pinning. The uv wheel ships the standalone binary
@@ -122,10 +128,11 @@ COPY src/agora_workbench /app/agora_workbench
 # ============================================================================
 FROM workbench-${AGORA_WORKBENCH_SOURCE} AS final
 
-# Set up remaining appuser directories (no large chown needed — miniforge
-# and wheelhouse were already owned correctly in their install layers)
-RUN mkdir -p /home/appuser/.cache/mcp-envs && \
-    chown -R appuser:appuser /app /home/appuser
+# Set up remaining appuser directories. /opt/kernel-envs is writable while a
+# server-specific image runs --warm, then must be sealed as root-owned before
+# using kernel_network_mode="seccomp".
+RUN mkdir -p /home/appuser/.cache/mcp-envs /home/appuser/.cache/mcp-assets /opt/kernel-envs && \
+    chown -R appuser:appuser /app /home/appuser /opt/kernel-envs
 
 # Add /app to PYTHONPATH so kernel processes can import domain modules
 ENV PYTHONPATH="/app"

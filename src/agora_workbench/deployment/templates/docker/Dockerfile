@@ -23,4 +23,15 @@ COPY --chown=appuser:appuser my_server/ /app/my_server/
 #     && rm -rf /var/lib/apt/lists/*
 # USER appuser
 
+# For Azure Container Apps seccomp isolation:
+# 1. Set ServerConfig.build_dir under /opt/kernel-envs and asset_cache_dir
+#    under /home/appuser/.cache/mcp-assets.
+# 2. Warm the environment while this image still runs as appuser.
+# 3. Seal the environment before restoring the non-root runtime user:
+#
+# RUN python -m my_server.server --warm
+# USER root
+# RUN chown -R root:root /opt/kernel-envs && chmod -R a-w /opt/kernel-envs
+# USER appuser
+
 CMD ["python", "-m", "my_server.server"]

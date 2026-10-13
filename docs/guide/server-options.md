@@ -180,6 +180,7 @@ class ChemistryServer(CodeExecutionServer):
 | `dependency_file` | Content of the dependency file |
 | `auto_build` | Build environment on startup if missing (default: `True`) |
 | `build_dir` | Custom build directory (default: `~/.cache/mcp-envs/{name}`) |
+| `asset_cache_dir` | Writable directory for provisioned assets and transfer staging (default: parent of `build_dir`) |
 | `additional_commands` | Extra shell commands after env setup |
 
 ### Assets
