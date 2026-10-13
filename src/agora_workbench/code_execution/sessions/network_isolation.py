@@ -174,11 +174,14 @@ _SECCOMP_INSTALL_CODE = textwrap.dedent(
             # the socket syscall rule through asynchronous networking opcodes.
             for syscall_name in (b"io_uring_setup", b"io_uring_enter", b"io_uring_register"):
                 syscall_number = seccomp.seccomp_syscall_resolve_name(syscall_name)
-                if syscall_number >= 0:
-                    check_result(
-                        seccomp.seccomp_rule_add_array(context, deny, syscall_number, 0, None),
-                        f"adding the {syscall_name.decode()} rule",
+                if syscall_number < 0:
+                    raise RuntimeError(
+                        f"libseccomp could not resolve the required {syscall_name.decode()} syscall"
                     )
+                check_result(
+                    seccomp.seccomp_rule_add_array(context, deny, syscall_number, 0, None),
+                    f"adding the {syscall_name.decode()} rule",
+                )
 
             check_result(seccomp.seccomp_load(context), "loading the seccomp filter")
         finally:

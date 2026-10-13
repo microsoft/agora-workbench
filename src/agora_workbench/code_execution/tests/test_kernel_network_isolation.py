@@ -1,5 +1,6 @@
 """Unit tests for the Linux kernel network-namespace launcher."""
 
+import io
 import json
 import subprocess
 import sys
@@ -92,6 +93,51 @@ def test_seccomp_validation_reports_probe_failure():
         pytest.raises(RuntimeError, match="seccomp kernel networking is unavailable: filter rejected"),
     ):
         network_isolation.validate_seccomp_isolation_support()
+
+
+def test_seccomp_filter_rejects_unresolved_io_uring_syscall():
+    class FakeFunction:
+        def __init__(self, implementation):
+            self.implementation = implementation
+            self.argtypes = None
+            self.restype = None
+
+        def __call__(self, *args):
+            return self.implementation(*args)
+
+    class FakeSeccomp:
+        def __init__(self):
+            syscall_numbers = {
+                b"socket": 1,
+                b"socketpair": 2,
+                b"connect": 3,
+                b"socketcall": -1,
+                b"io_uring_setup": -1,
+            }
+            self.seccomp_init = FakeFunction(lambda _action: 1)
+            self.seccomp_release = FakeFunction(lambda _context: None)
+            self.seccomp_attr_set = FakeFunction(lambda _context, _attribute, _value: 0)
+            self.seccomp_syscall_resolve_name = FakeFunction(syscall_numbers.__getitem__)
+            self.seccomp_rule_add_array = FakeFunction(
+                lambda _context, _action, _syscall, _argument_count, _comparisons: 0
+            )
+            self.seccomp_load = FakeFunction(lambda _context: 0)
+
+    class FakeLibc:
+        prctl = FakeFunction(lambda *_args: 0)
+
+    fake_seccomp = FakeSeccomp()
+
+    def fake_cdll(name, **_kwargs):
+        return FakeLibc() if name is None else fake_seccomp
+
+    capabilities = "CapInh:\t0\nCapPrm:\t0\nCapEff:\t0\nCapAmb:\t0\n"
+    with (
+        patch("ctypes.CDLL", side_effect=fake_cdll),
+        patch("builtins.open", side_effect=lambda *_args, **_kwargs: io.StringIO(capabilities)),
+        pytest.raises(RuntimeError, match="could not resolve the required io_uring_setup syscall"),
+    ):
+        exec(network_isolation._SECCOMP_INSTALL_CODE, {})
 
 
 def test_seccomp_startup_paths_include_venv_site_packages(tmp_path):
