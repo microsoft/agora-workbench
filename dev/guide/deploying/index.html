@@ -1942,10 +1942,10 @@ kernels must be prevented from opening IP connections:</p>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="n">asset_cache_dir</span><span class="o">=</span><span class="n">Path</span><span class="p">(</span><span class="s2">&quot;/home/appuser/.cache/mcp-assets/myserver&quot;</span><span class="p">),</span>
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">)</span>
 </code></pre></div>
-<p>The scaffolded base image installs the libseccomp runtime and creates
-<code>/opt/kernel-envs</code> for build-time warming. Warm the environment as <code>appuser</code>,
-then make the entire hierarchy root-owned and non-writable before restoring the
-runtime user:</p>
+<p>The scaffolded base image installs the libseccomp runtime, creates
+<code>/opt/kernel-envs</code> for build-time warming, and pins uv-created environments to
+the root-owned system Python. Warm the environment as <code>appuser</code>, then make the
+entire hierarchy root-owned and non-writable before restoring the runtime user:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">mcp-server-base:local</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
 <a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>appuser:appuser<span class="w"> </span>my_server/<span class="w"> </span>/app/my_server/
