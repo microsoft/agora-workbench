@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -102,9 +103,6 @@ def test_seccomp_startup_paths_include_venv_site_packages(tmp_path):
     venv_site_packages = venv_root / "lib" / "python3.11" / "site-packages"
     venv_site_packages.mkdir(parents=True)
 
-    kernel_manager = MagicMock(spec=AsyncKernelManager)
-    kernel_manager.kernel_spec.argv = [str(executable), "-m", "ipykernel_launcher"]
-    kernel_manager.kernel_spec.metadata = {}
     python_metadata = {
         "version": [3, 11],
         "paths": {
@@ -119,20 +117,20 @@ def test_seccomp_startup_paths_include_venv_site_packages(tmp_path):
         "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
         return_value=subprocess.CompletedProcess([], 0, json.dumps(python_metadata), ""),
     ):
-        startup_paths = network_isolation._seccomp_kernel_startup_paths(kernel_manager)
+        startup_paths, import_paths = network_isolation._seccomp_kernel_startup_paths(executable)
 
     assert startup_paths["pyvenv configuration"] == venv_root / "pyvenv.cfg"
     assert startup_paths["venv site-packages"] == venv_site_packages
+    assert import_paths[0] == venv_site_packages
 
 
 def test_seccomp_kernel_environment_rejects_kernel_owned_startup_paths():
     kernel_manager = MagicMock(spec=AsyncKernelManager)
-    startup_path = network_isolation.Path("/opt/kernel-env/lib/python/site-packages")
 
     with (
         patch(
-            "agora_workbench.code_execution.sessions.network_isolation._seccomp_kernel_startup_paths",
-            return_value={"purelib": startup_path},
+            "agora_workbench.code_execution.sessions.network_isolation._kernel_python_executable",
+            return_value=network_isolation.Path("/opt/kernel-env/bin/python"),
         ),
         patch("agora_workbench.code_execution.sessions.network_isolation.os.geteuid", return_value=1000),
         patch(
@@ -140,9 +138,12 @@ def test_seccomp_kernel_environment_rejects_kernel_owned_startup_paths():
             return_value=SimpleNamespace(st_uid=1000),
         ),
         patch("agora_workbench.code_execution.sessions.network_isolation.os.access", return_value=False),
+        patch("agora_workbench.code_execution.sessions.network_isolation.subprocess.run") as run,
         pytest.raises(RuntimeError, match="immutable Python environment"),
     ):
         network_isolation.validate_seccomp_kernel_environment(kernel_manager)
+
+    run.assert_not_called()
 
 
 def test_seccomp_kernel_environment_rejects_writable_parent_directory():
@@ -152,8 +153,8 @@ def test_seccomp_kernel_environment_rejects_writable_parent_directory():
 
     with (
         patch(
-            "agora_workbench.code_execution.sessions.network_isolation._seccomp_kernel_startup_paths",
-            return_value={"purelib": startup_path},
+            "agora_workbench.code_execution.sessions.network_isolation._kernel_python_executable",
+            return_value=startup_path / "bin" / "python",
         ),
         patch("agora_workbench.code_execution.sessions.network_isolation.os.geteuid", return_value=1000),
         patch(
@@ -167,3 +168,37 @@ def test_seccomp_kernel_environment_rejects_writable_parent_directory():
         pytest.raises(RuntimeError, match=r"/home/app/\.cache"),
     ):
         network_isolation.validate_seccomp_kernel_environment(kernel_manager)
+
+
+def test_seccomp_kernel_bootstrap_skips_pth_hooks(tmp_path):
+    package_root = tmp_path / "site-packages"
+    package_root.mkdir()
+    marker = tmp_path / "pth-hook-ran"
+    (package_root / "untrusted.pth").write_text(
+        f"import pathlib; pathlib.Path({str(marker)!r}).touch()\n",
+        encoding="utf-8",
+    )
+    (package_root / "ipykernel_launcher.py").write_text(
+        "import json,sys\nprint(json.dumps({'argv': sys.argv, 'path': sys.path}))\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            network_isolation._seccomp_kernel_bootstrap_code((package_root,)),
+            "-f",
+            "connection.json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    output = json.loads(result.stdout)
+    assert output["argv"][1:] == ["-f", "connection.json"]
+    assert str(package_root) in output["path"]
+    assert not marker.exists()

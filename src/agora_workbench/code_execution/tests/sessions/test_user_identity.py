@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ...sessions import Session, SessionConfig, SessionManager
+from ...sessions.network_isolation import SeccompKernelEnvironment
 
 
 class TestUserIdentityInSessions:
@@ -459,6 +460,10 @@ class TestUserTokenKernelPropagation:
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+                return_value=SeccompKernelEnvironment(
+                    executable=Path("/usr/bin/python"),
+                    import_paths=(Path("/trusted/site-packages"),),
+                ),
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
@@ -471,8 +476,14 @@ class TestUserTokenKernelPropagation:
         assert km.ip.endswith("/kernel")
         assert km.kernel_spec.argv == [
             "/usr/bin/python",
-            "-m",
-            "ipykernel_launcher",
+            "-I",
+            "-S",
+            "-c",
+            (
+                "import runpy as __agora_runpy, sys as __agora_sys\n"
+                "__agora_sys.path.extend(['/trusted/site-packages'])\n"
+                "__agora_runpy.run_module('ipykernel_launcher', run_name='__main__', alter_sys=True)\n"
+            ),
             "-f",
             "{connection_file}",
         ]
@@ -508,6 +519,10 @@ class TestUserTokenKernelPropagation:
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+                return_value=SeccompKernelEnvironment(
+                    executable=Path("/usr/bin/python"),
+                    import_paths=(Path("/trusted/site-packages"),),
+                ),
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
@@ -542,6 +557,10 @@ class TestUserTokenKernelPropagation:
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
+                return_value=SeccompKernelEnvironment(
+                    executable=Path("/usr/bin/python"),
+                    import_paths=(Path("/trusted/site-packages"),),
+                ),
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",

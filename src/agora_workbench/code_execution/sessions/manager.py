@@ -1258,8 +1258,8 @@ class SessionManager:
                 self._kernel_ipc_dirs[kernel_manager] = ipc_dir
             elif self.config.kernel_network_mode == "seccomp":
                 await self._ensure_kernel_network_isolation_support()
-                await asyncio.to_thread(validate_seccomp_kernel_environment, kernel_manager)
-                ipc_dir = configure_seccomp_kernel(kernel_manager)
+                seccomp_environment = await asyncio.to_thread(validate_seccomp_kernel_environment, kernel_manager)
+                ipc_dir = configure_seccomp_kernel(kernel_manager, seccomp_environment)
                 self._kernel_ipc_dirs[kernel_manager] = ipc_dir
                 seccomp_working_dir = str(Path(working_dir or os.getcwd()).resolve())
                 launch_working_dir = str(ipc_dir)

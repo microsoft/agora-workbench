@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -244,6 +245,14 @@ _SECCOMP_INSTALL_CODE = textwrap.dedent(
 ).strip()
 
 
+@dataclass(frozen=True)
+class SeccompKernelEnvironment:
+    """Validated paths required to start a seccomp-isolated Python kernel."""
+
+    executable: Path
+    import_paths: tuple[Path, ...]
+
+
 def _required_executable(name: str, purpose: str) -> str:
     executable = shutil.which(name)
     if executable is None:
@@ -381,8 +390,31 @@ def _kernel_python_executable(kernel_manager: "AsyncKernelManager") -> Path:
     return executable_path.absolute()
 
 
-def _seccomp_kernel_startup_paths(kernel_manager: "AsyncKernelManager") -> dict[str, Path]:
-    executable_path = _kernel_python_executable(kernel_manager)
+def _with_resolved_paths(startup_paths: dict[str, Path]) -> dict[str, Path]:
+    resolved_paths = dict(startup_paths)
+    for label, path in startup_paths.items():
+        resolved_path = path.resolve()
+        if resolved_path != path:
+            resolved_paths[f"resolved {label}"] = resolved_path
+    return resolved_paths
+
+
+def _seccomp_kernel_preprobe_paths(executable_path: Path) -> dict[str, Path]:
+    startup_paths = {
+        "kernel executable": executable_path,
+        "kernel executable directory": executable_path.parent,
+        "resolved kernel executable": executable_path.resolve(),
+        "resolved kernel executable directory": executable_path.resolve().parent,
+    }
+    pyvenv_config = executable_path.parent.parent / "pyvenv.cfg"
+    if pyvenv_config.exists():
+        startup_paths["pyvenv configuration"] = pyvenv_config
+    return _with_resolved_paths(startup_paths)
+
+
+def _seccomp_kernel_startup_paths(
+    executable_path: Path,
+) -> tuple[dict[str, Path], tuple[Path, ...]]:
     probe_code = (
         "import json,sys,sysconfig;"
         "print(json.dumps({'version':[sys.version_info.major,sys.version_info.minor],"
@@ -421,32 +453,29 @@ def _seccomp_kernel_startup_paths(kernel_manager: "AsyncKernelManager") -> dict[
     ):
         raise RuntimeError("seccomp kernel networking received invalid kernel Python path metadata")
 
-    startup_paths: dict[str, Path] = {
-        "kernel executable": executable_path,
-        "kernel executable directory": executable_path.parent,
-        "resolved kernel executable": executable_path.resolve(),
-        "resolved kernel executable directory": executable_path.resolve().parent,
-    }
+    startup_paths = _seccomp_kernel_preprobe_paths(executable_path)
+    import_paths: list[Path] = []
     for name, path in python_paths.items():
         if isinstance(name, str) and isinstance(path, str) and path:
-            startup_paths[name] = Path(path).absolute()
+            python_path = Path(path).absolute()
+            startup_paths[name] = python_path
+            if name in {"purelib", "platlib"} and python_path not in import_paths:
+                import_paths.append(python_path)
 
     venv_root = executable_path.parent.parent
     pyvenv_config = venv_root / "pyvenv.cfg"
     if pyvenv_config.exists():
         major, minor = version
-        startup_paths["pyvenv configuration"] = pyvenv_config
         venv_site_packages = venv_root / "lib" / f"python{major}.{minor}" / "site-packages"
         startup_paths["venv site-packages"] = venv_site_packages
+        import_paths.insert(0, venv_site_packages)
         lib64_site_packages = venv_root / "lib64" / f"python{major}.{minor}" / "site-packages"
         if lib64_site_packages.exists():
             startup_paths["venv lib64 site-packages"] = lib64_site_packages
+            import_paths.insert(1, lib64_site_packages)
 
-    for label, path in tuple(startup_paths.items()):
-        resolved_path = path.resolve()
-        if resolved_path != path:
-            startup_paths[f"resolved {label}"] = resolved_path
-    return startup_paths
+    unique_import_paths = tuple(dict.fromkeys(import_paths))
+    return _with_resolved_paths(startup_paths), unique_import_paths
 
 
 def _path_and_parents(path: Path) -> list[Path]:
@@ -456,15 +485,14 @@ def _path_and_parents(path: Path) -> list[Path]:
     return paths
 
 
-def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> None:
-    """Require every startup path to have an immutable ownership chain."""
-    if os.geteuid() == 0:
-        raise RuntimeError("seccomp kernel networking requires Workbench to run as a non-root user")
-
-    startup_paths = _seccomp_kernel_startup_paths(kernel_manager)
-    kernel_uid = os.geteuid()
+def _validate_seccomp_startup_paths(
+    startup_paths: dict[str, Path],
+    *,
+    kernel_uid: int,
+    inspected_paths: set[Path] | None = None,
+) -> set[Path]:
+    inspected_paths = inspected_paths or set()
     unsafe_paths: list[str] = []
-    inspected_paths: set[Path] = set()
     for label, path in startup_paths.items():
         for controlled_path in _path_and_parents(path):
             if controlled_path in inspected_paths:
@@ -484,6 +512,27 @@ def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") ->
             "seccomp kernel networking requires an immutable Python environment owned by another operating-system "
             f"user; kernel code can modify or replace: {detail}"
         )
+    return inspected_paths
+
+
+def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> SeccompKernelEnvironment:
+    """Require every startup path to have an immutable ownership chain."""
+    if os.geteuid() == 0:
+        raise RuntimeError("seccomp kernel networking requires Workbench to run as a non-root user")
+
+    kernel_uid = os.geteuid()
+    executable_path = _kernel_python_executable(kernel_manager)
+    inspected_paths = _validate_seccomp_startup_paths(
+        _seccomp_kernel_preprobe_paths(executable_path),
+        kernel_uid=kernel_uid,
+    )
+    startup_paths, import_paths = _seccomp_kernel_startup_paths(executable_path)
+    _validate_seccomp_startup_paths(
+        startup_paths,
+        kernel_uid=kernel_uid,
+        inspected_paths=inspected_paths,
+    )
+    return SeccompKernelEnvironment(executable=executable_path, import_paths=import_paths)
 
 
 def _configure_ipc_kernel(kernel_manager: "AsyncKernelManager") -> tuple[Path, list[str]]:
@@ -516,15 +565,27 @@ def configure_isolated_kernel(kernel_manager: "AsyncKernelManager") -> Path:
     return ipc_dir
 
 
-def configure_seccomp_kernel(kernel_manager: "AsyncKernelManager") -> Path:
+def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...]) -> str:
+    return (
+        "import runpy as __agora_runpy, sys as __agora_sys\n"
+        f"__agora_sys.path.extend({[str(path) for path in import_paths]!r})\n"
+        "__agora_runpy.run_module('ipykernel_launcher', run_name='__main__', alter_sys=True)\n"
+    )
+
+
+def configure_seccomp_kernel(
+    kernel_manager: "AsyncKernelManager",
+    environment: SeccompKernelEnvironment,
+) -> Path:
     """Use IPC for Jupyter channels before installing a process-local filter."""
-    executable_path = _kernel_python_executable(kernel_manager)
     ipc_dir, _ = _configure_ipc_kernel(kernel_manager)
     try:
         kernel_manager.kernel_spec.argv = [
-            str(executable_path),
-            "-m",
-            "ipykernel_launcher",
+            str(environment.executable),
+            "-I",
+            "-S",
+            "-c",
+            _seccomp_kernel_bootstrap_code(environment.import_paths),
             "-f",
             "{connection_file}",
         ]

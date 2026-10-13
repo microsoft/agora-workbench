@@ -254,15 +254,17 @@ This backend starts Jupyter over Unix IPC first because ZeroMQ creates temporary
 IP sockets during initialization. Workbench starts the kernel from a fresh
 private directory with user-site imports disabled and fresh IPython/Jupyter
 configuration directories. It replaces mutable kernelspec arguments and
-environment entries with a fixed Python `ipykernel_launcher` command, waits for
-readiness, then installs an irreversible libseccomp filter before registering
-the kernel for execution. The filter is synchronized across existing kernel
-threads, inherited by subprocesses, rejects all new non-Unix sockets and new
-`connect()` calls, blocks io_uring syscalls that could provide an alternative
-networking path, and verifies that no non-Unix socket descriptors remain open.
-Denying later connections also prevents an already-running same-UID kernel from
-attaching to another kernel during its pre-filter startup window. The kernel is
-shut down if any installation or verification step fails.
+environment entries with an isolated Python startup that disables automatic
+site processing and adds only validated package roots before loading
+`ipykernel_launcher`. After Jupyter is ready, Workbench installs an irreversible
+libseccomp filter before registering the kernel for execution. The filter is
+synchronized across existing kernel threads, inherited by subprocesses, rejects
+all new non-Unix sockets and new `connect()` calls, blocks io_uring syscalls that
+could provide an alternative networking path, and verifies that no non-Unix
+socket descriptors remain open. Denying later connections also prevents an
+already-running same-UID kernel from attaching to another kernel during its
+pre-filter startup window. The kernel is shut down if any installation or
+verification step fails.
 
 Install the libseccomp runtime library in the container image, for example
 `libseccomp2` on Debian/Ubuntu. Unlike namespace isolation, seccomp isolation
