@@ -165,10 +165,10 @@ config = ServerConfig(
 )
 ```
 
-The scaffolded base image installs the libseccomp runtime and creates
-`/opt/kernel-envs` for build-time warming. Warm the environment as `appuser`,
-then make the entire hierarchy root-owned and non-writable before restoring the
-runtime user:
+The scaffolded base image installs the libseccomp runtime, creates
+`/opt/kernel-envs` for build-time warming, and pins uv-created environments to
+the root-owned system Python. Warm the environment as `appuser`, then make the
+entire hierarchy root-owned and non-writable before restoring the runtime user:
 
 ```dockerfile
 FROM mcp-server-base:local

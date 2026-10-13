@@ -85,6 +85,10 @@ RUN curl -L -O "https://github.com/conda-forge/miniforge/releases/download/${MIN
     chown -R appuser:appuser /opt/miniforge3
 ENV PATH="/opt/miniforge3/bin:$PATH"
 
+# Keep uv-created kernel environments anchored to the root-owned system
+# interpreter rather than the writable Miniforge bootstrap installation.
+ENV UV_PYTHON="/usr/bin/python3"
+
 # Ensure pip is up to date
 RUN python3 -m pip install --upgrade pip
 

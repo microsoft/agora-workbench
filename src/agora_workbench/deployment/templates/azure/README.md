@@ -294,9 +294,9 @@ config = ServerConfig(
 )
 ```
 
-The scaffolded base image includes libseccomp and creates `/opt/kernel-envs`
-with build-time ownership for `appuser`. Warm and seal the environment in the
-server image:
+The scaffolded base image includes libseccomp, creates `/opt/kernel-envs` with
+build-time ownership for `appuser`, and pins uv-created environments to the
+root-owned system Python. Warm and seal the environment in the server image:
 
 ```dockerfile
 ARG BASE_IMAGE=mcp-server-base:local

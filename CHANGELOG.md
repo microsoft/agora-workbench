@@ -27,6 +27,9 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- The scaffolded Azure Linux base image now builds uv kernel environments from
+  the root-owned system Python so sealing `/opt/kernel-envs` satisfies seccomp
+  startup validation.
 - Foreground code-execution responses now include a bounded, argument-free
   summary of failed internal tool calls, including domain failures reported as
   `result.success=false`. Summaries use generic failure messages; raw error

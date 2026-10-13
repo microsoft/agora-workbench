@@ -81,6 +81,7 @@ class TestScaffoldInit:
         assert "mcp-server-base" in content or "miniforge" in content
         assert "libseccomp" in content
         assert "/opt/kernel-envs" in content
+        assert 'ENV UV_PYTHON="/usr/bin/python3"' in content
 
     @pytest.mark.unit
     def test_azure_readme_documents_seccomp_deployment(self, tmp_path):
