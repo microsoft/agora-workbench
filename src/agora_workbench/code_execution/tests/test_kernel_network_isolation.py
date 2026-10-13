@@ -106,10 +106,11 @@ def test_namespace_launcher_enables_private_loopback_and_drops_capabilities():
 
 
 def test_seccomp_filter_allows_unix_sockets_and_denies_ip_sockets():
-    try:
-        network_isolation.validate_seccomp_isolation_support()
-    except RuntimeError as exc:
-        pytest.skip(str(exc))
+    with patch("agora_workbench.code_execution.sessions.network_isolation._disable_process_dumpability"):
+        try:
+            network_isolation.validate_seccomp_isolation_support()
+        except RuntimeError as exc:
+            pytest.skip(str(exc))
 
 
 def test_seccomp_validation_reports_probe_failure():
@@ -118,9 +119,32 @@ def test_seccomp_validation_reports_probe_failure():
             "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
             return_value=network_isolation.subprocess.CompletedProcess([], 1, "", "filter rejected"),
         ),
+        patch("agora_workbench.code_execution.sessions.network_isolation._disable_process_dumpability"),
         pytest.raises(RuntimeError, match="seccomp kernel networking is unavailable: filter rejected"),
     ):
         network_isolation.validate_seccomp_isolation_support()
+
+
+def test_seccomp_disables_process_dumpability():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import ctypes;"
+                "from agora_workbench.code_execution.sessions.network_isolation "
+                "import _disable_process_dumpability;"
+                "_disable_process_dumpability();"
+                "libc=ctypes.CDLL(None);"
+                "print(libc.prctl(3,0,0,0,0))"
+            ),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip() == "0"
 
 
 def test_seccomp_filter_rejects_unresolved_io_uring_syscall():
@@ -139,8 +163,14 @@ def test_seccomp_filter_rejects_unresolved_io_uring_syscall():
                 b"socket": 1,
                 b"socketpair": 2,
                 b"connect": 3,
+                b"bind": 4,
+                b"listen": 5,
                 b"socketcall": -1,
                 b"io_uring_setup": -1,
+                b"ptrace": 6,
+                b"process_vm_readv": 7,
+                b"process_vm_writev": 8,
+                b"pidfd_getfd": 9,
             }
             self.seccomp_init = FakeFunction(lambda _action: 1)
             self.seccomp_release = FakeFunction(lambda _context: None)
@@ -177,6 +207,32 @@ def test_seccomp_startup_paths_include_venv_site_packages(tmp_path):
     assert import_paths[0] == venv_site_packages
     assert base_site_packages not in import_paths
     assert venv_site_packages in startup_tree_paths
+
+
+def test_seccomp_rejects_nonstandard_kernelspec_argv():
+    kernel_manager = MagicMock(spec=AsyncKernelManager)
+    kernel_manager.kernel_spec.argv = ["/env/bin/python", "-c", "print('untrusted')"]
+    kernel_manager.kernel_spec.metadata = {}
+    kernel_manager.kernel_spec.env = {}
+
+    with pytest.raises(RuntimeError, match="standard Python ipykernel kernelspec"):
+        network_isolation._kernel_python_executable(kernel_manager)
+
+
+def test_seccomp_rejects_kernelspec_environment_entries():
+    kernel_manager = MagicMock(spec=AsyncKernelManager)
+    kernel_manager.kernel_spec.argv = [
+        "/env/bin/python",
+        "-m",
+        "ipykernel_launcher",
+        "-f",
+        "{connection_file}",
+    ]
+    kernel_manager.kernel_spec.metadata = {}
+    kernel_manager.kernel_spec.env = {"PYTHONSTARTUP": "/untrusted.py"}
+
+    with pytest.raises(RuntimeError, match="does not support kernelspec environment entries"):
+        network_isolation._kernel_python_executable(kernel_manager)
 
 
 def test_seccomp_startup_paths_include_enabled_system_site_packages(tmp_path):
@@ -284,11 +340,19 @@ def test_seccomp_kernel_bootstrap_skips_config_startup_and_pth_hooks(tmp_path):
     ipykernel_package = package_root / "ipykernel"
     ipykernel_package.mkdir(parents=True)
     (ipykernel_package / "__init__.py").touch()
+    send_marker = tmp_path / "iopub-send"
     (ipykernel_package / "iostream.py").write_text(
-        """
+        f"""
+import os
+from pathlib import Path
+
 class IOPubThread:
     def __init__(self, socket, pipe=True, **kwargs):
         assert pipe is False
+        self._master_pid = os.getpid()
+
+    def _really_send(self, *args, **kwargs):
+        Path({str(send_marker)!r}).touch()
 """,
         encoding="utf-8",
     )
@@ -313,6 +377,7 @@ class IPKernelApp:
         return cls()
 
     def __init__(self):
+        self.capture_fd_output = True
         self.exec_PYTHONSTARTUP = True
         self.exec_files = ["untrusted.py"]
         self.exec_lines = ["raise RuntimeError('untrusted')"]
@@ -333,8 +398,19 @@ class IPKernelApp:
         Path({str(startup_marker)!r}).touch()
 
     def initialize(self):
+        import ctypes
+        import sys
         from ipykernel.iostream import IOPubThread
-        IOPubThread(None, pipe=True)
+        assert ctypes.CDLL(None).prctl(3, 0, 0, 0, 0) == 0
+        assert sys.prefix == {str(tmp_path / "venv")!r}
+        thread = IOPubThread(None, pipe=True)
+        thread._really_send()
+        assert Path({str(send_marker)!r}).exists()
+        Path({str(send_marker)!r}).unlink()
+        thread._master_pid = -1
+        thread._really_send()
+        assert not Path({str(send_marker)!r}).exists()
+        assert self.capture_fd_output is True
         self.load_config_file()
         self.init_path()
         self.init_extensions()
@@ -359,7 +435,7 @@ class IPKernelApp:
             "-I",
             "-S",
             "-c",
-            network_isolation._seccomp_kernel_bootstrap_code((package_root,)),
+            network_isolation._seccomp_kernel_bootstrap_code((package_root,), tmp_path / "venv"),
             "-f",
             "connection.json",
         ],
@@ -375,3 +451,4 @@ class IPKernelApp:
     assert not path_marker.exists()
     assert not extensions_marker.exists()
     assert not startup_marker.exists()
+    assert not send_marker.exists()

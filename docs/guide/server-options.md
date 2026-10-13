@@ -260,12 +260,14 @@ files before initialization. Only validated package roots are added before
 loading the kernel application. After Jupyter is ready, Workbench installs an
 irreversible libseccomp filter before registering the kernel for execution. The
 filter is synchronized across existing kernel threads, inherited by
-subprocesses, rejects all new non-Unix sockets and new `connect()` calls, blocks
-io_uring syscalls that could provide an alternative networking path, and
-verifies that no non-Unix socket descriptors remain open. Denying later
-connections also prevents an already-running same-UID kernel from attaching to
-another kernel during its pre-filter startup window. The kernel is shut down if
-any installation or verification step fails.
+subprocesses, rejects all new non-Unix sockets plus new `connect()`, `bind()`,
+and `listen()` calls, blocks io_uring and cross-process memory syscalls that
+could provide alternative bypasses, and verifies that no non-Unix socket
+descriptors remain open. Workbench also disables process dumpability for the
+server and seccomp kernels, preventing same-UID `ptrace` and `/proc/<pid>/mem`
+injection independently of host Yama settings. This disables core dumps for the
+Workbench server. The kernel is shut down if any installation or verification
+step fails.
 
 Install the libseccomp runtime library in the container image, for example
 `libseccomp2` on Debian/Ubuntu. Unlike namespace isolation, seccomp isolation
@@ -299,8 +301,17 @@ Restricted kernels cannot use:
 Private loopback remains available only with the namespace backend, so a kernel
 and its own subprocesses can communicate over `127.0.0.1` without reaching
 services in the Workbench server namespace. The seccomp backend permits
-Unix-domain socket creation and socket pairs, but rejects new connections as
-well as new IPv4 and IPv6 sockets, including loopback.
+Unix-domain socket creation and socket pairs, but rejects new stream
+connections/listeners as well as new IPv4 and IPv6 sockets, including loopback.
+Unix datagrams can still send to an existing filesystem endpoint, so do not
+expose trusted Unix sockets inside writable or kernel-accessible paths.
+
+Seccomp startup does not process `.pth` files because they can redirect imports
+to paths outside the validated immutable environment. Editable installs and
+legacy namespace packages that depend on `.pth` processing must be converted to
+regular installed packages. Jupyter debugging, `multiprocessing.Manager`,
+`forkserver`, and non-native-architecture helper binaries are also incompatible
+with this mode; use the namespace backend when those features are required.
 
 Environment construction, asset provisioning, catalog materialization, and
 artifact publishing run in the server process and are not affected. Files

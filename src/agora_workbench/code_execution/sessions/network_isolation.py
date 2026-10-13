@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 import queue
 import re
@@ -33,6 +34,8 @@ _SETPRIV_ARGS = (
 )
 _MAX_UNIX_SOCKET_PATH_BYTES = 107
 _SECCOMP_BOOTSTRAP_TIMEOUT_SECONDS = 30
+_PR_GET_DUMPABLE = 3
+_PR_SET_DUMPABLE = 4
 _SECCOMP_INSTALL_CODE = textwrap.dedent(
     """
     def __agora_install_seccomp_network_filter():
@@ -140,26 +143,41 @@ _SECCOMP_INSTALL_CODE = textwrap.dedent(
                 "adding the socket-domain rule",
             )
             socketpair_syscall = seccomp.seccomp_syscall_resolve_name(b"socketpair")
-            if socketpair_syscall >= 0:
-                check_result(
-                    seccomp.seccomp_rule_add_array(
-                        context,
-                        deny,
-                        socketpair_syscall,
-                        1,
-                        ctypes.pointer(comparison),
-                    ),
-                    "adding the socketpair-domain rule",
-                )
+            if socketpair_syscall < 0:
+                raise RuntimeError("libseccomp could not resolve the required socketpair syscall")
+            check_result(
+                seccomp.seccomp_rule_add_array(
+                    context,
+                    deny,
+                    socketpair_syscall,
+                    1,
+                    ctypes.pointer(comparison),
+                ),
+                "adding the socketpair-domain rule",
+            )
 
             # The Jupyter IPC channels are already connected. Denying future
             # connect() calls prevents one same-UID kernel from attaching to a
             # different kernel's startup sockets before its filter is loaded.
             connect_syscall = seccomp.seccomp_syscall_resolve_name(b"connect")
-            if connect_syscall >= 0:
+            if connect_syscall < 0:
+                raise RuntimeError("libseccomp could not resolve the required connect syscall")
+            check_result(
+                seccomp.seccomp_rule_add_array(context, deny, connect_syscall, 0, None),
+                "adding the connect rule",
+            )
+
+            # All kernel-owned listeners are established before the filter.
+            # Prevent user code from creating a Unix-socket fd-import channel.
+            for syscall_name in (b"bind", b"listen"):
+                syscall_number = seccomp.seccomp_syscall_resolve_name(syscall_name)
+                if syscall_number < 0:
+                    raise RuntimeError(
+                        f"libseccomp could not resolve the required {syscall_name.decode()} syscall"
+                    )
                 check_result(
-                    seccomp.seccomp_rule_add_array(context, deny, connect_syscall, 0, None),
-                    "adding the connect rule",
+                    seccomp.seccomp_rule_add_array(context, deny, syscall_number, 0, None),
+                    f"adding the {syscall_name.decode()} rule",
                 )
 
             # A 64-bit process normally uses socket(), but deny the legacy
@@ -174,6 +192,19 @@ _SECCOMP_INSTALL_CODE = textwrap.dedent(
             # Blocking io_uring creation prevents applications from bypassing
             # the socket syscall rule through asynchronous networking opcodes.
             for syscall_name in (b"io_uring_setup", b"io_uring_enter", b"io_uring_register"):
+                syscall_number = seccomp.seccomp_syscall_resolve_name(syscall_name)
+                if syscall_number < 0:
+                    raise RuntimeError(
+                        f"libseccomp could not resolve the required {syscall_name.decode()} syscall"
+                    )
+                check_result(
+                    seccomp.seccomp_rule_add_array(context, deny, syscall_number, 0, None),
+                    f"adding the {syscall_name.decode()} rule",
+                )
+
+            # Same-UID process injection would otherwise let a filtered kernel
+            # execute inside the unfiltered server or a starting sibling kernel.
+            for syscall_name in (b"ptrace", b"process_vm_readv", b"process_vm_writev", b"pidfd_getfd"):
                 syscall_number = seccomp.seccomp_syscall_resolve_name(syscall_name)
                 if syscall_number < 0:
                     raise RuntimeError(
@@ -360,10 +391,22 @@ def validate_network_isolation_support() -> None:
     )
 
 
+def _disable_process_dumpability() -> None:
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+    libc.prctl.restype = ctypes.c_int
+    if libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        error_number = ctypes.get_errno()
+        raise OSError(error_number, "failed to disable process dumpability for seccomp kernel isolation")
+    if libc.prctl(_PR_GET_DUMPABLE, 0, 0, 0, 0) != 0:
+        raise RuntimeError("seccomp kernel networking could not disable process dumpability")
+
+
 def validate_seccomp_isolation_support() -> None:
     """Fail closed unless a child process can load the required seccomp filter."""
     if sys.platform != "linux":
         raise RuntimeError("seccomp kernel networking is supported only on Linux")
+    _disable_process_dumpability()
     try:
         result = subprocess.run(
             [sys.executable, "-I", "-c", _SECCOMP_INSTALL_CODE],
@@ -384,6 +427,23 @@ def validate_seccomp_isolation_support() -> None:
 
 def _kernel_python_executable(kernel_manager: "AsyncKernelManager") -> Path:
     kernel_argv = _normalized_kernel_argv(kernel_manager)
+    allowed_arguments = {
+        ("-m", "ipykernel_launcher", "-f", "{connection_file}"),
+        ("-Xfrozen_modules=off", "-m", "ipykernel_launcher", "-f", "{connection_file}"),
+    }
+    if tuple(kernel_argv[1:]) not in allowed_arguments:
+        raise RuntimeError(
+            "seccomp kernel networking requires a standard Python ipykernel kernelspec; "
+            f"configured argv is {kernel_argv!r}"
+        )
+    kernel_spec = kernel_manager.kernel_spec
+    if kernel_spec is None:
+        raise RuntimeError("seccomp kernel networking requires a local kernelspec")
+    if kernel_spec.env:
+        raise RuntimeError(
+            "seccomp kernel networking does not support kernelspec environment entries; "
+            f"configured variables are {sorted(kernel_spec.env)}"
+        )
     executable_name = kernel_argv[0]
     executable_path = Path(executable_name)
     if not executable_path.is_absolute():
@@ -694,10 +754,20 @@ def configure_isolated_kernel(kernel_manager: "AsyncKernelManager") -> Path:
     return ipc_dir
 
 
-def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...]) -> str:
+def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...], environment_root: Path) -> str:
     return textwrap.dedent(
         f"""
-        import sys as __agora_sys
+        import ctypes as __agora_ctypes
+        __agora_libc = __agora_ctypes.CDLL(None, use_errno=True)
+        if __agora_libc.prctl({_PR_SET_DUMPABLE}, 0, 0, 0, 0) != 0:
+            __agora_error = __agora_ctypes.get_errno()
+            raise OSError(__agora_error, "failed to disable kernel process dumpability")
+        if __agora_libc.prctl({_PR_GET_DUMPABLE}, 0, 0, 0, 0) != 0:
+            raise RuntimeError("seccomp kernel networking could not disable kernel process dumpability")
+
+        import os as __agora_os, sys as __agora_sys
+        __agora_sys.prefix = {str(environment_root)!r}
+        __agora_sys.exec_prefix = {str(environment_root)!r}
         __agora_sys.path.extend({[str(path) for path in import_paths]!r})
         from ipykernel.iostream import IOPubThread as __AgoraIOPubThread
         from ipykernel.kernelapp import IPKernelApp as __AgoraIPKernelApp
@@ -706,11 +776,18 @@ def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...]) -> str:
             return None
 
         __agora_iopub_init = __AgoraIOPubThread.__init__
+        __agora_iopub_send = __AgoraIOPubThread._really_send
 
         def __agora_init_iopub(self, socket, pipe=False, **kwargs):
             __agora_iopub_init(self, socket, pipe=False, **kwargs)
 
+        def __agora_send_iopub(self, *args, **kwargs):
+            if __agora_os.getpid() != self._master_pid:
+                return None
+            return __agora_iopub_send(self, *args, **kwargs)
+
         __AgoraIOPubThread.__init__ = __agora_init_iopub
+        __AgoraIOPubThread._really_send = __agora_send_iopub
         __AgoraIPKernelApp.load_config_file = __agora_noop
         __AgoraIPKernelApp.init_path = __agora_noop
         __AgoraIPKernelApp.init_extensions = __agora_noop
@@ -719,7 +796,6 @@ def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...]) -> str:
         __agora_app.default_extensions = []
         __agora_app.extensions = []
         __agora_app.extra_extensions = []
-        __agora_app.capture_fd_output = False
         __agora_app.exec_PYTHONSTARTUP = False
         __agora_app.exec_files = []
         __agora_app.exec_lines = []
@@ -744,7 +820,7 @@ def configure_seccomp_kernel(
             "-I",
             "-S",
             "-c",
-            _seccomp_kernel_bootstrap_code(environment.import_paths),
+            _seccomp_kernel_bootstrap_code(environment.import_paths, environment.executable.parent.parent),
             "-f",
             "{connection_file}",
         ]

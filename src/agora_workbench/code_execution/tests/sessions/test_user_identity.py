@@ -481,8 +481,11 @@ class TestUserTokenKernelPropagation:
             "-c",
         ]
         bootstrap_code = km.kernel_spec.argv[4]
+        assert "__agora_libc.prctl(4, 0, 0, 0, 0)" in bootstrap_code
+        assert "__agora_sys.prefix = '/usr'" in bootstrap_code
         assert "__agora_sys.path.extend(['/trusted/site-packages'])" in bootstrap_code
         assert "__AgoraIOPubThread.__init__ = __agora_init_iopub" in bootstrap_code
+        assert "__AgoraIOPubThread._really_send = __agora_send_iopub" in bootstrap_code
         assert "__AgoraIPKernelApp.load_config_file = __agora_noop" in bootstrap_code
         assert "__AgoraIPKernelApp.init_path = __agora_noop" in bootstrap_code
         assert "__AgoraIPKernelApp.init_extensions = __agora_noop" in bootstrap_code
