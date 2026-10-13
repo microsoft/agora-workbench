@@ -253,15 +253,16 @@ config = ServerConfig(
 This backend starts Jupyter over Unix IPC first because ZeroMQ creates temporary
 IP sockets during initialization. Workbench starts the kernel from a fresh
 private directory with user-site imports disabled and fresh IPython/Jupyter
-configuration directories, waits for readiness, then installs an irreversible
-libseccomp filter before registering the kernel for execution. The filter is
-synchronized across existing kernel threads, inherited by subprocesses, rejects
-all new non-Unix sockets and new `connect()` calls, blocks io_uring syscalls
-that could provide an alternative networking path, and verifies that no
-non-Unix socket descriptors remain open. Denying later connections also
-prevents an already-running same-UID kernel from attaching to another kernel
-during its pre-filter startup window. The kernel is shut down if any
-installation or verification step fails.
+configuration directories. It replaces mutable kernelspec arguments and
+environment entries with a fixed Python `ipykernel_launcher` command, waits for
+readiness, then installs an irreversible libseccomp filter before registering
+the kernel for execution. The filter is synchronized across existing kernel
+threads, inherited by subprocesses, rejects all new non-Unix sockets and new
+`connect()` calls, blocks io_uring syscalls that could provide an alternative
+networking path, and verifies that no non-Unix socket descriptors remain open.
+Denying later connections also prevents an already-running same-UID kernel from
+attaching to another kernel during its pre-filter startup window. The kernel is
+shut down if any installation or verification step fails.
 
 Install the libseccomp runtime library in the container image, for example
 `libseccomp2` on Debian/Ubuntu. Unlike namespace isolation, seccomp isolation
@@ -270,14 +271,18 @@ that use `127.0.0.1` for local worker coordination should continue using the
 namespace backend.
 
 The Python environment used by a seccomp kernel must be immutable to executed
-code. Install the interpreter and site-packages as a different user, then run
-Workbench as a non-root user without write access to the interpreter, its
-directory, or its standard-library and site-packages directories. For images
-that build the kernel environment with `--warm`, change that environment to
-`root:root` ownership in a later root build step before switching back to the
-runtime user. Workbench rejects seccomp kernel startup when these ownership and
-write-access checks fail; otherwise code could persist a modified startup
-module and run it before the filter is reinstalled after a kernel restart.
+code. Install the interpreter and site-packages under a parent hierarchy owned
+by a different user, then run Workbench as a non-root user without write access
+to any path in that hierarchy. For images that build the kernel environment
+with `--warm`, configure its build directory under a location such as
+`/opt/kernel-envs`, recursively change that hierarchy to `root:root` ownership
+in a later root build step, and switch back to the runtime user. Changing only
+an environment below a writable home or cache directory is insufficient because
+the runtime user could replace the entire environment. Workbench validates the
+interpreter, virtual-environment configuration, standard-library and
+site-packages paths, resolved symlink targets, and every controlling parent
+directory. Startup fails if any path is owned or writable by the kernel
+identity.
 
 Restricted kernels cannot use:
 

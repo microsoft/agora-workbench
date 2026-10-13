@@ -2,9 +2,11 @@
 
 import json
 import subprocess
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
+from jupyter_client.manager import AsyncKernelManager
 
 from ..sessions import network_isolation
 
@@ -91,34 +93,77 @@ def test_seccomp_validation_reports_probe_failure():
         network_isolation.validate_seccomp_isolation_support()
 
 
-def test_seccomp_kernel_environment_rejects_kernel_owned_startup_paths():
-    kernel_manager = type(
-        "KernelManager",
-        (),
-        {
-            "kernel_spec": type(
-                "KernelSpec",
-                (),
-                {"argv": ["/env/bin/python"], "metadata": {}},
-            )()
+def test_seccomp_startup_paths_include_venv_site_packages(tmp_path):
+    venv_root = tmp_path / "venv"
+    executable = venv_root / "bin" / "python"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    (venv_root / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+    venv_site_packages = venv_root / "lib" / "python3.11" / "site-packages"
+    venv_site_packages.mkdir(parents=True)
+
+    kernel_manager = MagicMock(spec=AsyncKernelManager)
+    kernel_manager.kernel_spec.argv = [str(executable), "-m", "ipykernel_launcher"]
+    kernel_manager.kernel_spec.metadata = {}
+    python_metadata = {
+        "version": [3, 11],
+        "paths": {
+            "stdlib": "/usr/lib/python3.11",
+            "platstdlib": "/usr/lib/python3.11",
+            "purelib": "/usr/lib/python3.11/site-packages",
+            "platlib": "/usr/lib/python3.11/site-packages",
         },
-    )()
-    python_paths = {
-        "stdlib": "/env/lib/python",
-        "platstdlib": "/env/lib/python",
-        "purelib": "/env/lib/python/site-packages",
-        "platlib": "/env/lib/python/site-packages",
     }
+
+    with patch(
+        "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
+        return_value=subprocess.CompletedProcess([], 0, json.dumps(python_metadata), ""),
+    ):
+        startup_paths = network_isolation._seccomp_kernel_startup_paths(kernel_manager)
+
+    assert startup_paths["pyvenv configuration"] == venv_root / "pyvenv.cfg"
+    assert startup_paths["venv site-packages"] == venv_site_packages
+
+
+def test_seccomp_kernel_environment_rejects_kernel_owned_startup_paths():
+    kernel_manager = MagicMock(spec=AsyncKernelManager)
+    startup_path = network_isolation.Path("/opt/kernel-env/lib/python/site-packages")
 
     with (
         patch(
-            "agora_workbench.code_execution.sessions.network_isolation.subprocess.run",
-            return_value=subprocess.CompletedProcess([], 0, json.dumps(python_paths), ""),
+            "agora_workbench.code_execution.sessions.network_isolation._seccomp_kernel_startup_paths",
+            return_value={"purelib": startup_path},
         ),
         patch("agora_workbench.code_execution.sessions.network_isolation.os.geteuid", return_value=1000),
-        patch("agora_workbench.code_execution.sessions.network_isolation.Path.stat") as stat,
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation.Path.stat",
+            return_value=SimpleNamespace(st_uid=1000),
+        ),
         patch("agora_workbench.code_execution.sessions.network_isolation.os.access", return_value=False),
         pytest.raises(RuntimeError, match="immutable Python environment"),
     ):
-        stat.return_value.st_uid = 1000
+        network_isolation.validate_seccomp_kernel_environment(kernel_manager)
+
+
+def test_seccomp_kernel_environment_rejects_writable_parent_directory():
+    kernel_manager = MagicMock(spec=AsyncKernelManager)
+    startup_path = network_isolation.Path("/home/app/.cache/kernel-env/lib/python/site-packages")
+    writable_parent = network_isolation.Path("/home/app/.cache")
+
+    with (
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation._seccomp_kernel_startup_paths",
+            return_value={"purelib": startup_path},
+        ),
+        patch("agora_workbench.code_execution.sessions.network_isolation.os.geteuid", return_value=1000),
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation.Path.stat",
+            return_value=SimpleNamespace(st_uid=0),
+        ),
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation.os.access",
+            side_effect=lambda path, mode: path == writable_parent,
+        ),
+        pytest.raises(RuntimeError, match=r"/home/app/\.cache"),
+    ):
         network_isolation.validate_seccomp_kernel_environment(kernel_manager)

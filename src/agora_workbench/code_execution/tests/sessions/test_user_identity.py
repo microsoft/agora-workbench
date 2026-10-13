@@ -162,6 +162,8 @@ class TestUserTokenKernelPropagation:
             }
         )
         km, kc = self._make_mock_kernel()
+        km.kernel_spec.argv = ["/usr/bin/python", "-c", "raise RuntimeError('untrusted')"]
+        km.kernel_spec.env = {"PYTHONSTARTUP": "/untrusted/kernel-spec-startup.py"}
         monkeypatch.setenv("IDENTITY_ENDPOINT", "http://169.254.169.254/metadata")
         monkeypatch.setenv("IDENTITY_HEADER", "secret-header")
         monkeypatch.setenv("AZURE_CLIENT_ID", "managed-identity-client")
@@ -467,7 +469,14 @@ class TestUserTokenKernelPropagation:
 
         assert km.transport == "ipc"
         assert km.ip.endswith("/kernel")
-        assert km.kernel_spec.argv == ["/usr/bin/python"]
+        assert km.kernel_spec.argv == [
+            "/usr/bin/python",
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
+        ]
+        assert km.kernel_spec.env == {}
         ipc_dir = Path(km.ip).parent
         call_kwargs = km.start_kernel.call_args.kwargs
         assert call_kwargs["cwd"] == str(ipc_dir)

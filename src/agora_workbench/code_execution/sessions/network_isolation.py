@@ -369,11 +369,7 @@ def validate_seccomp_isolation_support() -> None:
     raise RuntimeError(f"seccomp kernel networking is unavailable{suffix}")
 
 
-def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> None:
-    """Require startup code to live outside the kernel operating-system identity."""
-    if os.geteuid() == 0:
-        raise RuntimeError("seccomp kernel networking requires Workbench to run as a non-root user")
-
+def _kernel_python_executable(kernel_manager: "AsyncKernelManager") -> Path:
     kernel_argv = _normalized_kernel_argv(kernel_manager)
     executable_name = kernel_argv[0]
     executable_path = Path(executable_name)
@@ -382,13 +378,16 @@ def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") ->
         if resolved_executable is None:
             raise RuntimeError(f"seccomp kernel networking could not resolve kernel executable {executable_name!r}")
         executable_path = Path(resolved_executable)
-    executable_path = executable_path.absolute()
-    resolved_executable_path = executable_path.resolve()
+    return executable_path.absolute()
 
+
+def _seccomp_kernel_startup_paths(kernel_manager: "AsyncKernelManager") -> dict[str, Path]:
+    executable_path = _kernel_python_executable(kernel_manager)
     probe_code = (
-        "import json,sysconfig;"
-        "print(json.dumps({name:sysconfig.get_path(name) "
-        "for name in ('stdlib','platstdlib','purelib','platlib')}))"
+        "import json,sys,sysconfig;"
+        "print(json.dumps({'version':[sys.version_info.major,sys.version_info.minor],"
+        "'paths':{name:sysconfig.get_path(name) "
+        "for name in ('stdlib','platstdlib','purelib','platlib')}}))"
     )
     try:
         result = subprocess.run(
@@ -406,33 +405,84 @@ def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") ->
         raise RuntimeError(f"seccomp kernel networking requires a Python kernelspec{suffix}")
 
     try:
-        python_paths = json.loads(result.stdout)
+        python_metadata = json.loads(result.stdout)
     except (json.JSONDecodeError, TypeError) as exc:
         raise RuntimeError("seccomp kernel networking could not inspect the kernel Python paths") from exc
-    if not isinstance(python_paths, dict):
+    if not isinstance(python_metadata, dict):
         raise RuntimeError("seccomp kernel networking received invalid kernel Python path metadata")
 
-    startup_paths = {
+    version = python_metadata.get("version")
+    python_paths = python_metadata.get("paths")
+    if (
+        not isinstance(version, list)
+        or len(version) != 2
+        or not all(isinstance(component, int) for component in version)
+        or not isinstance(python_paths, dict)
+    ):
+        raise RuntimeError("seccomp kernel networking received invalid kernel Python path metadata")
+
+    startup_paths: dict[str, Path] = {
         "kernel executable": executable_path,
         "kernel executable directory": executable_path.parent,
-        "resolved kernel executable": resolved_executable_path,
-        "resolved kernel executable directory": resolved_executable_path.parent,
-        **{name: Path(path).resolve() for name, path in python_paths.items() if path},
+        "resolved kernel executable": executable_path.resolve(),
+        "resolved kernel executable directory": executable_path.resolve().parent,
     }
+    for name, path in python_paths.items():
+        if isinstance(name, str) and isinstance(path, str) and path:
+            startup_paths[name] = Path(path).absolute()
+
+    venv_root = executable_path.parent.parent
+    pyvenv_config = venv_root / "pyvenv.cfg"
+    if pyvenv_config.exists():
+        major, minor = version
+        startup_paths["pyvenv configuration"] = pyvenv_config
+        venv_site_packages = venv_root / "lib" / f"python{major}.{minor}" / "site-packages"
+        startup_paths["venv site-packages"] = venv_site_packages
+        lib64_site_packages = venv_root / "lib64" / f"python{major}.{minor}" / "site-packages"
+        if lib64_site_packages.exists():
+            startup_paths["venv lib64 site-packages"] = lib64_site_packages
+
+    for label, path in tuple(startup_paths.items()):
+        resolved_path = path.resolve()
+        if resolved_path != path:
+            startup_paths[f"resolved {label}"] = resolved_path
+    return startup_paths
+
+
+def _path_and_parents(path: Path) -> list[Path]:
+    paths = [path]
+    while paths[-1].parent != paths[-1]:
+        paths.append(paths[-1].parent)
+    return paths
+
+
+def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> None:
+    """Require every startup path to have an immutable ownership chain."""
+    if os.geteuid() == 0:
+        raise RuntimeError("seccomp kernel networking requires Workbench to run as a non-root user")
+
+    startup_paths = _seccomp_kernel_startup_paths(kernel_manager)
     kernel_uid = os.geteuid()
     unsafe_paths: list[str] = []
+    inspected_paths: set[Path] = set()
     for label, path in startup_paths.items():
-        try:
-            stat_result = path.stat()
-        except OSError as exc:
-            raise RuntimeError(f"seccomp kernel networking could not inspect {label} {path}: {exc}") from exc
-        if stat_result.st_uid == kernel_uid or os.access(path, os.W_OK):
-            unsafe_paths.append(f"{label} {path}")
+        for controlled_path in _path_and_parents(path):
+            if controlled_path in inspected_paths:
+                continue
+            inspected_paths.add(controlled_path)
+            try:
+                stat_result = controlled_path.stat()
+            except OSError as exc:
+                raise RuntimeError(
+                    f"seccomp kernel networking could not inspect {label} path {controlled_path}: {exc}"
+                ) from exc
+            if stat_result.st_uid == kernel_uid or os.access(controlled_path, os.W_OK):
+                unsafe_paths.append(f"{controlled_path} (controls {label})")
     if unsafe_paths:
         detail = ", ".join(unsafe_paths)
         raise RuntimeError(
             "seccomp kernel networking requires an immutable Python environment owned by another operating-system "
-            f"user; kernel code can modify: {detail}"
+            f"user; kernel code can modify or replace: {detail}"
         )
 
 
@@ -468,7 +518,20 @@ def configure_isolated_kernel(kernel_manager: "AsyncKernelManager") -> Path:
 
 def configure_seccomp_kernel(kernel_manager: "AsyncKernelManager") -> Path:
     """Use IPC for Jupyter channels before installing a process-local filter."""
+    executable_path = _kernel_python_executable(kernel_manager)
     ipc_dir, _ = _configure_ipc_kernel(kernel_manager)
+    try:
+        kernel_manager.kernel_spec.argv = [
+            str(executable_path),
+            "-m",
+            "ipykernel_launcher",
+            "-f",
+            "{connection_file}",
+        ]
+        kernel_manager.kernel_spec.env = {}
+    except BaseException:
+        shutil.rmtree(ipc_dir, ignore_errors=True)
+        raise
     return ipc_dir
 
 
