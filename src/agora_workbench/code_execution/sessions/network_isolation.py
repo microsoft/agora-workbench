@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import queue
+import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -402,7 +403,7 @@ def _with_resolved_paths(startup_paths: dict[str, Path]) -> dict[str, Path]:
     return resolved_paths
 
 
-def _seccomp_kernel_preprobe_paths(executable_path: Path) -> dict[str, Path]:
+def _seccomp_kernel_initial_paths(executable_path: Path) -> dict[str, Path]:
     startup_paths = {
         "kernel executable": executable_path,
         "kernel executable directory": executable_path.parent,
@@ -415,70 +416,138 @@ def _seccomp_kernel_preprobe_paths(executable_path: Path) -> dict[str, Path]:
     return _with_resolved_paths(startup_paths)
 
 
+def _read_pyvenv_config(pyvenv_config: Path) -> dict[str, str]:
+    try:
+        lines = pyvenv_config.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise RuntimeError(f"seccomp kernel networking could not read {pyvenv_config}: {exc}") from exc
+
+    values: dict[str, str] = {}
+    for line in lines:
+        key, separator, value = line.partition("=")
+        if separator:
+            values[key.strip().lower()] = value.strip()
+    return values
+
+
+def _python_version_from_environment(
+    executable_path: Path,
+    environment_root: Path,
+    pyvenv_values: dict[str, str],
+) -> tuple[int, int]:
+    version_value = pyvenv_values.get("version", "")
+    version_match = re.match(r"^(?P<major>\d+)\.(?P<minor>\d+)", version_value)
+    if version_match is not None:
+        return int(version_match.group("major")), int(version_match.group("minor"))
+
+    executable_match = re.search(r"python(?P<major>\d+)\.(?P<minor>\d+)", executable_path.resolve().name)
+    if executable_match is not None:
+        return int(executable_match.group("major")), int(executable_match.group("minor"))
+
+    versions: set[tuple[int, int]] = set()
+    for library_directory in (environment_root / "lib", environment_root / "lib64"):
+        if not library_directory.is_dir():
+            continue
+        for candidate in library_directory.glob("python*.*"):
+            candidate_match = re.fullmatch(r"python(?P<major>\d+)\.(?P<minor>\d+)", candidate.name)
+            if candidate_match is not None and candidate.is_dir():
+                versions.add((int(candidate_match.group("major")), int(candidate_match.group("minor"))))
+    if len(versions) == 1:
+        return next(iter(versions))
+    raise RuntimeError(
+        "seccomp kernel networking could not determine the kernel Python version from its immutable environment"
+    )
+
+
+def _python_prefix_from_pyvenv(environment_root: Path, pyvenv_values: dict[str, str]) -> Path:
+    configured_executable = pyvenv_values.get("executable")
+    if configured_executable:
+        executable_path = Path(configured_executable)
+        if not executable_path.is_absolute():
+            executable_path = environment_root / executable_path
+        return executable_path.absolute().parent.parent
+
+    configured_home = pyvenv_values.get("home")
+    if configured_home:
+        home_path = Path(configured_home)
+        if not home_path.is_absolute():
+            home_path = environment_root / home_path
+        home_path = home_path.absolute()
+        return home_path.parent if home_path.name in {"bin", "Scripts"} else home_path
+
+    raise RuntimeError("seccomp kernel networking requires pyvenv.cfg to declare 'home' or 'executable'")
+
+
+def _python_standard_library_paths(prefix: Path, version: tuple[int, int]) -> tuple[Path, ...]:
+    major, minor = version
+    candidates = [
+        prefix / "lib" / f"python{major}.{minor}",
+        prefix / "lib64" / f"python{major}.{minor}",
+        prefix / "lib" / f"python{major}{minor}.zip",
+        prefix / "lib64" / f"python{major}{minor}.zip",
+    ]
+    return tuple(path for path in candidates if path.exists())
+
+
+def _python_package_paths(prefix: Path, version: tuple[int, int]) -> tuple[Path, ...]:
+    major, minor = version
+    candidates = [
+        prefix / "lib" / f"python{major}.{minor}" / "site-packages",
+        prefix / "lib64" / f"python{major}.{minor}" / "site-packages",
+        prefix / "lib" / f"python{major}.{minor}" / "dist-packages",
+        prefix / "lib64" / f"python{major}.{minor}" / "dist-packages",
+        prefix / "lib" / f"python{major}" / "dist-packages",
+        prefix / "lib64" / f"python{major}" / "dist-packages",
+    ]
+    return tuple(path for path in candidates if path.is_dir())
+
+
 def _seccomp_kernel_startup_paths(
     executable_path: Path,
-) -> tuple[dict[str, Path], tuple[Path, ...]]:
-    probe_code = (
-        "import json,sys,sysconfig;"
-        "print(json.dumps({'version':[sys.version_info.major,sys.version_info.minor],"
-        "'paths':{name:sysconfig.get_path(name) "
-        "for name in ('stdlib','platstdlib','purelib','platlib')}}))"
-    )
-    try:
-        result = subprocess.run(
-            [str(executable_path), "-I", "-S", "-c", probe_code],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError(f"failed to inspect the seccomp kernel Python environment: {exc}") from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        suffix = f": {detail}" if detail else ""
-        raise RuntimeError(f"seccomp kernel networking requires a Python kernelspec{suffix}")
-
-    try:
-        python_metadata = json.loads(result.stdout)
-    except (json.JSONDecodeError, TypeError) as exc:
-        raise RuntimeError("seccomp kernel networking could not inspect the kernel Python paths") from exc
-    if not isinstance(python_metadata, dict):
-        raise RuntimeError("seccomp kernel networking received invalid kernel Python path metadata")
-
-    version = python_metadata.get("version")
-    python_paths = python_metadata.get("paths")
-    if (
-        not isinstance(version, list)
-        or len(version) != 2
-        or not all(isinstance(component, int) for component in version)
-        or not isinstance(python_paths, dict)
-    ):
-        raise RuntimeError("seccomp kernel networking received invalid kernel Python path metadata")
-
-    startup_paths = _seccomp_kernel_preprobe_paths(executable_path)
-    import_paths: list[Path] = []
-    for name, path in python_paths.items():
-        if isinstance(name, str) and isinstance(path, str) and path:
-            python_path = Path(path).absolute()
-            startup_paths[name] = python_path
-            if name in {"purelib", "platlib"} and python_path not in import_paths:
-                import_paths.append(python_path)
-
+) -> tuple[dict[str, Path], tuple[Path, ...], tuple[Path, ...]]:
+    startup_paths = _seccomp_kernel_initial_paths(executable_path)
     venv_root = executable_path.parent.parent
     pyvenv_config = venv_root / "pyvenv.cfg"
+    pyvenv_values: dict[str, str] = {}
     if pyvenv_config.exists():
-        major, minor = version
-        venv_site_packages = venv_root / "lib" / f"python{major}.{minor}" / "site-packages"
-        startup_paths["venv site-packages"] = venv_site_packages
-        import_paths.insert(0, venv_site_packages)
-        lib64_site_packages = venv_root / "lib64" / f"python{major}.{minor}" / "site-packages"
-        if lib64_site_packages.exists():
-            startup_paths["venv lib64 site-packages"] = lib64_site_packages
-            import_paths.insert(1, lib64_site_packages)
+        pyvenv_values = _read_pyvenv_config(pyvenv_config)
 
-    unique_import_paths = tuple(dict.fromkeys(import_paths))
-    return _with_resolved_paths(startup_paths), unique_import_paths
+    version = _python_version_from_environment(executable_path, venv_root, pyvenv_values)
+    base_prefix = _python_prefix_from_pyvenv(venv_root, pyvenv_values) if pyvenv_values else venv_root
+    if pyvenv_values:
+        configured_home = pyvenv_values.get("home")
+        if configured_home:
+            home_path = Path(configured_home)
+            startup_paths["pyvenv home"] = (home_path if home_path.is_absolute() else venv_root / home_path).absolute()
+        configured_executable = pyvenv_values.get("executable")
+        if configured_executable:
+            configured_executable_path = Path(configured_executable)
+            startup_paths["pyvenv executable"] = (
+                configured_executable_path
+                if configured_executable_path.is_absolute()
+                else venv_root / configured_executable_path
+            ).absolute()
+
+    standard_library_paths = _python_standard_library_paths(base_prefix, version)
+    if not standard_library_paths:
+        raise RuntimeError(
+            f"seccomp kernel networking could not locate the kernel Python standard library under {base_prefix}"
+        )
+    for index, path in enumerate(standard_library_paths):
+        startup_paths[f"standard library {index + 1}"] = path
+
+    import_paths = list(_python_package_paths(venv_root, version))
+    include_system_site_packages = pyvenv_values.get("include-system-site-packages", "").lower() == "true"
+    if not pyvenv_values or include_system_site_packages:
+        import_paths.extend(_python_package_paths(base_prefix, version))
+    import_paths = list(dict.fromkeys(import_paths))
+    if not any((path / "ipykernel").is_dir() or (path / "ipykernel.py").is_file() for path in import_paths):
+        raise RuntimeError("seccomp kernel networking could not locate ipykernel in the immutable Python environment")
+    for index, path in enumerate(import_paths):
+        startup_paths[f"package root {index + 1}"] = path
+
+    startup_tree_paths = tuple(dict.fromkeys((*standard_library_paths, *import_paths)))
+    return _with_resolved_paths(startup_paths), tuple(import_paths), startup_tree_paths
 
 
 def _path_and_parents(path: Path) -> list[Path]:
@@ -507,7 +576,7 @@ def _validate_seccomp_startup_paths(
                 raise RuntimeError(
                     f"seccomp kernel networking could not inspect {label} path {controlled_path}: {exc}"
                 ) from exc
-            if stat_result.st_uid == kernel_uid or os.access(controlled_path, os.W_OK):
+            if _path_is_mutable_by_kernel(controlled_path, stat_result, kernel_uid):
                 unsafe_paths.append(f"{controlled_path} (controls {label})")
     if unsafe_paths:
         detail = ", ".join(unsafe_paths)
@@ -518,6 +587,58 @@ def _validate_seccomp_startup_paths(
     return inspected_paths
 
 
+def _path_is_mutable_by_kernel(path: Path, stat_result: os.stat_result, kernel_uid: int) -> bool:
+    return stat_result.st_uid == kernel_uid or os.access(path, os.W_OK)
+
+
+def _validate_seccomp_startup_trees(
+    startup_paths: tuple[Path, ...],
+    *,
+    kernel_uid: int,
+    inspected_paths: set[Path],
+) -> None:
+    pending = [(path, str(path)) for path in startup_paths]
+    visited_directories: set[tuple[int, int]] = set()
+    while pending:
+        path, label = pending.pop()
+        try:
+            stat_result = path.lstat()
+        except OSError as exc:
+            raise RuntimeError(f"seccomp kernel networking could not inspect startup path {path}: {exc}") from exc
+        if _path_is_mutable_by_kernel(path, stat_result, kernel_uid):
+            raise RuntimeError(
+                "seccomp kernel networking requires an immutable Python environment owned by another "
+                f"operating-system user; kernel code can modify or replace: {path} (within {label})"
+            )
+
+        if stat.S_ISLNK(stat_result.st_mode):
+            try:
+                resolved_path = path.resolve(strict=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"seccomp kernel networking could not resolve startup symlink {path}: {exc}"
+                ) from exc
+            _validate_seccomp_startup_paths(
+                {f"symlink target for {path}": resolved_path},
+                kernel_uid=kernel_uid,
+                inspected_paths=inspected_paths,
+            )
+            pending.append((resolved_path, label))
+            continue
+
+        if not stat.S_ISDIR(stat_result.st_mode):
+            continue
+        directory_identity = (stat_result.st_dev, stat_result.st_ino)
+        if directory_identity in visited_directories:
+            continue
+        visited_directories.add(directory_identity)
+        try:
+            with os.scandir(path) as entries:
+                pending.extend((Path(entry.path), label) for entry in entries)
+        except OSError as exc:
+            raise RuntimeError(f"seccomp kernel networking could not traverse startup path {path}: {exc}") from exc
+
+
 def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> SeccompKernelEnvironment:
     """Require every startup path to have an immutable ownership chain."""
     if os.geteuid() == 0:
@@ -526,12 +647,17 @@ def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") ->
     kernel_uid = os.geteuid()
     executable_path = _kernel_python_executable(kernel_manager)
     inspected_paths = _validate_seccomp_startup_paths(
-        _seccomp_kernel_preprobe_paths(executable_path),
+        _seccomp_kernel_initial_paths(executable_path),
         kernel_uid=kernel_uid,
     )
-    startup_paths, import_paths = _seccomp_kernel_startup_paths(executable_path)
-    _validate_seccomp_startup_paths(
+    startup_paths, import_paths, startup_tree_paths = _seccomp_kernel_startup_paths(executable_path)
+    inspected_paths = _validate_seccomp_startup_paths(
         startup_paths,
+        kernel_uid=kernel_uid,
+        inspected_paths=inspected_paths,
+    )
+    _validate_seccomp_startup_trees(
+        startup_tree_paths,
         kernel_uid=kernel_uid,
         inspected_paths=inspected_paths,
     )
@@ -569,11 +695,41 @@ def configure_isolated_kernel(kernel_manager: "AsyncKernelManager") -> Path:
 
 
 def _seccomp_kernel_bootstrap_code(import_paths: tuple[Path, ...]) -> str:
-    return (
-        "import runpy as __agora_runpy, sys as __agora_sys\n"
-        f"__agora_sys.path.extend({[str(path) for path in import_paths]!r})\n"
-        "__agora_runpy.run_module('ipykernel_launcher', run_name='__main__', alter_sys=True)\n"
-    )
+    return textwrap.dedent(
+        f"""
+        import sys as __agora_sys
+        __agora_sys.path.extend({[str(path) for path in import_paths]!r})
+        from ipykernel.iostream import IOPubThread as __AgoraIOPubThread
+        from ipykernel.kernelapp import IPKernelApp as __AgoraIPKernelApp
+
+        def __agora_noop(self, *_args, **_kwargs):
+            return None
+
+        __agora_iopub_init = __AgoraIOPubThread.__init__
+
+        def __agora_init_iopub(self, socket, pipe=False, **kwargs):
+            __agora_iopub_init(self, socket, pipe=False, **kwargs)
+
+        __AgoraIOPubThread.__init__ = __agora_init_iopub
+        __AgoraIPKernelApp.load_config_file = __agora_noop
+        __AgoraIPKernelApp.init_path = __agora_noop
+        __AgoraIPKernelApp.init_extensions = __agora_noop
+        __AgoraIPKernelApp._run_startup_files = __agora_noop
+        __agora_app = __AgoraIPKernelApp.instance()
+        __agora_app.default_extensions = []
+        __agora_app.extensions = []
+        __agora_app.extra_extensions = []
+        __agora_app.capture_fd_output = False
+        __agora_app.exec_PYTHONSTARTUP = False
+        __agora_app.exec_files = []
+        __agora_app.exec_lines = []
+        __agora_app.file_to_run = ""
+        __agora_app.code_to_run = ""
+        __agora_app.module_to_run = ""
+        __agora_app.initialize()
+        __agora_app.start()
+        """
+    ).strip()
 
 
 def configure_seccomp_kernel(
@@ -605,7 +761,11 @@ async def install_seccomp_network_filter(
 ) -> None:
     """Install and verify the filter before exposing the kernel to callers."""
     bootstrap_code = (
-        f"{_SECCOMP_INSTALL_CODE}\nimport os as __agora_os\n__agora_os.chdir({working_dir!r})\ndel __agora_os\n"
+        f"{_SECCOMP_INSTALL_CODE}\n"
+        "import os as __agora_os, sys as __agora_sys\n"
+        f"__agora_os.chdir({working_dir!r})\n"
+        f"__agora_sys.path.insert(0, {working_dir!r})\n"
+        "del __agora_os, __agora_sys\n"
     )
     msg_id = kernel_client.execute(
         bootstrap_code,

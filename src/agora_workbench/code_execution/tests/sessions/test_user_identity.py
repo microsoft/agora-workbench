@@ -474,16 +474,20 @@ class TestUserTokenKernelPropagation:
 
         assert km.transport == "ipc"
         assert km.ip.endswith("/kernel")
-        assert km.kernel_spec.argv == [
+        assert km.kernel_spec.argv[:4] == [
             "/usr/bin/python",
             "-I",
             "-S",
             "-c",
-            (
-                "import runpy as __agora_runpy, sys as __agora_sys\n"
-                "__agora_sys.path.extend(['/trusted/site-packages'])\n"
-                "__agora_runpy.run_module('ipykernel_launcher', run_name='__main__', alter_sys=True)\n"
-            ),
+        ]
+        bootstrap_code = km.kernel_spec.argv[4]
+        assert "__agora_sys.path.extend(['/trusted/site-packages'])" in bootstrap_code
+        assert "__AgoraIOPubThread.__init__ = __agora_init_iopub" in bootstrap_code
+        assert "__AgoraIPKernelApp.load_config_file = __agora_noop" in bootstrap_code
+        assert "__AgoraIPKernelApp.init_path = __agora_noop" in bootstrap_code
+        assert "__AgoraIPKernelApp.init_extensions = __agora_noop" in bootstrap_code
+        assert "__AgoraIPKernelApp._run_startup_files = __agora_noop" in bootstrap_code
+        assert km.kernel_spec.argv[5:] == [
             "-f",
             "{connection_file}",
         ]
