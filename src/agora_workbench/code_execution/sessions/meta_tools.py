@@ -121,7 +121,7 @@ def create_close_session_tool(session_manager: "SessionManager"):
             JSON string with success status
         """
         try:
-            session_manager.close_session(session_id)
+            await session_manager.aclose_session(session_id)
 
             return json.dumps(
                 {
