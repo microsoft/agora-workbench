@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-23
+
 ### Added
 
 - `ServerConfig.kernel_environment` declares non-secret environment variables
