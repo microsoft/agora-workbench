@@ -198,8 +198,8 @@ loader reads it at process start, so setting it from kernel code is too late:
 config = ServerConfig(
     ...,
     kernel_environment={
-        "LD_LIBRARY_PATH": "/opt/ipopt/lib:/usr/local/lib/dwsim",
-        "DWSIM_PATH": "/usr/local/lib/dwsim/",
+        "LD_LIBRARY_PATH": "/opt/vendor/lib:/usr/local/lib/domain-runtime",
+        "DOMAIN_RUNTIME_ROOT": "/usr/local/lib/domain-runtime/",
     },
 )
 ```
@@ -314,8 +314,17 @@ The Python environment used by a seccomp kernel must be immutable to executed
 code. Install the interpreter and site-packages under a parent hierarchy owned
 by a different user, then run Workbench as a non-root user without write access
 to any path in that hierarchy. Workbench recursively validates standard-library
-and package roots, including symlink targets, before starting the kernel. For
-images that build the kernel environment
+and package roots, including symlink targets, before starting the kernel.
+Configured `LD_LIBRARY_PATH` entries must also be absolute and non-empty, and
+every directory, library, symlink target, and controlling parent in those
+search trees must satisfy the same immutable-ownership policy. Seccomp startup
+environment controls are fail-closed: `LD_LIBRARY_PATH` and Workbench's
+`PYTHONNOUSERSITE=1` are the explicitly supported members. Other `LD_*`,
+`DYLD_*`, Python, IPython, and Jupyter startup controls are rejected unless a
+future release adds variable-specific validation. Ordinary domain variables
+such as `DOMAIN_RUNTIME_ROOT` remain available because they do not affect the
+fixed Python kernel startup before the filter is installed. For images that
+build the kernel environment
 with `--warm`, configure its build directory under a location such as
 `/opt/kernel-envs`, recursively change that hierarchy to `root:root` ownership
 in a later root build step, and switch back to the runtime user. Changing only

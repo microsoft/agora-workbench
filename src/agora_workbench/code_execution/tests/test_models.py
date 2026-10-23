@@ -113,9 +113,14 @@ def _server_config(**overrides) -> ServerConfig:
 
 
 def test_server_config_accepts_domain_kernel_environment():
-    config = _server_config(kernel_environment={"LD_LIBRARY_PATH": "/opt/ipopt/lib", "DWSIM_PATH": "/opt/dwsim/"})
+    config = _server_config(
+        kernel_environment={
+            "LD_LIBRARY_PATH": "/opt/vendor/lib",
+            "DOMAIN_RUNTIME_ROOT": "/usr/local/lib/domain-runtime/",
+        }
+    )
 
-    assert config.kernel_environment["LD_LIBRARY_PATH"] == "/opt/ipopt/lib"
+    assert config.kernel_environment["LD_LIBRARY_PATH"] == "/opt/vendor/lib"
 
 
 @pytest.mark.parametrize(

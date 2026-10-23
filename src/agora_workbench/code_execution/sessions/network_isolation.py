@@ -15,7 +15,7 @@ import tempfile
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Callable, Mapping, TYPE_CHECKING
 
 from jupyter_client.provisioning.factory import KernelProvisionerFactory
 
@@ -699,11 +699,96 @@ def _validate_seccomp_startup_trees(
             raise RuntimeError(f"seccomp kernel networking could not traverse startup path {path}: {exc}") from exc
 
 
-def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") -> SeccompKernelEnvironment:
+def _seccomp_loader_paths(environment: Mapping[str, str] | None) -> tuple[Path, ...]:
+    if environment is None or "LD_LIBRARY_PATH" not in environment:
+        return ()
+
+    entries = environment["LD_LIBRARY_PATH"].split(os.pathsep)
+    if any(not entry for entry in entries):
+        raise RuntimeError("seccomp kernel networking requires LD_LIBRARY_PATH entries to be non-empty")
+
+    paths: list[Path] = []
+    for entry in entries:
+        path = Path(entry)
+        if not path.is_absolute():
+            raise RuntimeError(
+                f"seccomp kernel networking requires absolute LD_LIBRARY_PATH entries; received {entry!r}"
+            )
+        paths.append(path.absolute())
+    return tuple(dict.fromkeys(paths))
+
+
+def _validate_seccomp_ld_library_path(value: str) -> None:
+    _seccomp_loader_paths({"LD_LIBRARY_PATH": value})
+
+
+def _validate_seccomp_python_no_user_site(value: str) -> None:
+    if value != "1":
+        raise RuntimeError("seccomp kernel networking requires PYTHONNOUSERSITE=1")
+
+
+_SECCOMP_STARTUP_ENVIRONMENT_VALIDATORS: dict[str, Callable[[str], None]] = {
+    "LD_LIBRARY_PATH": _validate_seccomp_ld_library_path,
+    "PYTHONNOUSERSITE": _validate_seccomp_python_no_user_site,
+}
+_SECCOMP_STARTUP_ENVIRONMENT_PREFIXES = ("LD_", "DYLD_", "PYTHON", "IPYTHON", "JUPYTER_")
+_SECCOMP_STARTUP_ENVIRONMENT_NAMES = frozenset({"GCONV_PATH", "GLIBC_TUNABLES"})
+
+
+def _validate_seccomp_startup_environment(environment: Mapping[str, str] | None) -> None:
+    """Fail closed for environment controls that can affect pre-filter startup."""
+    if environment is None:
+        return
+
+    for name, value in environment.items():
+        validator = _SECCOMP_STARTUP_ENVIRONMENT_VALIDATORS.get(name)
+        if validator is not None:
+            validator(value)
+            continue
+
+        normalized_name = name.upper()
+        startup_sensitive = normalized_name in _SECCOMP_STARTUP_ENVIRONMENT_NAMES or normalized_name.startswith(
+            _SECCOMP_STARTUP_ENVIRONMENT_PREFIXES
+        )
+        if startup_sensitive:
+            allowed = ", ".join(sorted(_SECCOMP_STARTUP_ENVIRONMENT_VALIDATORS))
+            raise RuntimeError(
+                "seccomp kernel networking does not permit unreviewed startup-sensitive environment variable "
+                f"{name!r}; explicitly supported variables are: {allowed}"
+            )
+
+
+def _validate_seccomp_loader_paths(
+    environment: Mapping[str, str] | None,
+    *,
+    kernel_uid: int,
+    inspected_paths: set[Path],
+) -> None:
+    loader_paths = _seccomp_loader_paths(environment)
+    if not loader_paths:
+        return
+
+    inspected_paths = _validate_seccomp_startup_paths(
+        {f"LD_LIBRARY_PATH entry {index + 1}": path for index, path in enumerate(loader_paths)},
+        kernel_uid=kernel_uid,
+        inspected_paths=inspected_paths,
+    )
+    _validate_seccomp_startup_trees(
+        loader_paths,
+        kernel_uid=kernel_uid,
+        inspected_paths=inspected_paths,
+    )
+
+
+def validate_seccomp_kernel_environment(
+    kernel_manager: "AsyncKernelManager",
+    environment: Mapping[str, str] | None = None,
+) -> SeccompKernelEnvironment:
     """Require every startup path to have an immutable ownership chain."""
     if os.geteuid() == 0:
         raise RuntimeError("seccomp kernel networking requires Workbench to run as a non-root user")
 
+    _validate_seccomp_startup_environment(environment)
     kernel_uid = os.geteuid()
     executable_path = _kernel_python_executable(kernel_manager)
     inspected_paths = _validate_seccomp_startup_paths(
@@ -718,6 +803,11 @@ def validate_seccomp_kernel_environment(kernel_manager: "AsyncKernelManager") ->
     )
     _validate_seccomp_startup_trees(
         startup_tree_paths,
+        kernel_uid=kernel_uid,
+        inspected_paths=inspected_paths,
+    )
+    _validate_seccomp_loader_paths(
+        environment,
         kernel_uid=kernel_uid,
         inspected_paths=inspected_paths,
     )

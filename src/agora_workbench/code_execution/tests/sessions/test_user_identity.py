@@ -200,7 +200,10 @@ class TestUserTokenKernelPropagation:
             type="uv",
             dependency_file="",
             build_dir=tmp_path / "env",
-            kernel_environment={"LD_LIBRARY_PATH": "/opt/ipopt/lib", "DWSIM_PATH": "/usr/local/lib/dwsim/"},
+            kernel_environment={
+                "LD_LIBRARY_PATH": "/opt/vendor/lib",
+                "DOMAIN_RUNTIME_ROOT": "/usr/local/lib/domain-runtime/",
+            },
         )
         # Bypass validation to prove framework-owned values still win at merge time.
         config.kernel_environment["MCP_ASSET_CACHE_DIR"] = "/domain/override"
@@ -221,8 +224,8 @@ class TestUserTokenKernelPropagation:
             await manager._get_or_create_kernel("sess-env", user_identity="user@example.com")
 
         env = km.start_kernel.call_args.kwargs["env"]
-        assert env["LD_LIBRARY_PATH"] == "/opt/ipopt/lib"
-        assert env["DWSIM_PATH"] == "/usr/local/lib/dwsim/"
+        assert env["LD_LIBRARY_PATH"] == "/opt/vendor/lib"
+        assert env["DOMAIN_RUNTIME_ROOT"] == "/usr/local/lib/domain-runtime/"
         assert env["MCP_ASSET_CACHE_DIR"] == str(config.get_cache_dir())
         assert env["USER_IDENTITY"] == "user@example.com"
 
@@ -483,9 +486,18 @@ class TestUserTokenKernelPropagation:
                 "PYTHONSTARTUP": "/untrusted/startup.py",
                 "IPYTHONDIR": "/untrusted/ipython",
                 "JUPYTER_CONFIG_DIR": "/untrusted/jupyter",
+                "LD_LIBRARY_PATH": "/opt/domain/lib",
             }
         )
         km, kc = self._make_mock_kernel()
+        validated_environment = {}
+
+        def validate_environment(_kernel_manager, environment):
+            validated_environment.update(environment)
+            return SeccompKernelEnvironment(
+                executable=Path("/usr/bin/python"),
+                import_paths=(Path("/trusted/site-packages"),),
+            )
 
         with (
             patch(
@@ -498,10 +510,7 @@ class TestUserTokenKernelPropagation:
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.validate_seccomp_kernel_environment",
-                return_value=SeccompKernelEnvironment(
-                    executable=Path("/usr/bin/python"),
-                    import_paths=(Path("/trusted/site-packages"),),
-                ),
+                side_effect=validate_environment,
             ),
             patch(
                 "agora_workbench.code_execution.sessions.manager.install_seccomp_network_filter",
@@ -542,6 +551,13 @@ class TestUserTokenKernelPropagation:
         assert env["JUPYTER_CONFIG_DIR"] == str(ipc_dir / "jupyter")
         assert "PYTHONPATH" not in env
         assert "PYTHONSTARTUP" not in env
+        assert env["LD_LIBRARY_PATH"] == "/opt/domain/lib"
+        assert validated_environment["PYTHONNOUSERSITE"] == "1"
+        assert validated_environment["LD_LIBRARY_PATH"] == "/opt/domain/lib"
+        assert "PYTHONPATH" not in validated_environment
+        assert "PYTHONSTARTUP" not in validated_environment
+        assert "IPYTHONDIR" not in validated_environment
+        assert "JUPYTER_CONFIG_DIR" not in validated_environment
         install_filter.assert_awaited_once_with(kc, "/workspace")
 
         await manager._shutdown_kernel("sess-seccomp", cleanup_artifacts=False)

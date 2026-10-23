@@ -1238,6 +1238,8 @@ class SessionManager:
             # must be replaced rather than handed out again.
             kernel_alive = await self._kernel_process_is_alive(existing_kernel[0])
             with self._session_lifecycle_lock:
+                if self._session_generations.get(session_id) != session_generation:
+                    raise ValueError(f"Session {session_id} was closed while checking its kernel.")
                 if self._kernels.get(session_id) is not existing_kernel:
                     # Torn down or replaced while probing; re-evaluate.
                     continue
@@ -1322,15 +1324,12 @@ class SessionManager:
                 self._kernel_ipc_dirs[kernel_manager] = ipc_dir
             elif self.config.kernel_network_mode == "seccomp":
                 await self._ensure_kernel_network_isolation_support()
-                seccomp_environment = await asyncio.to_thread(validate_seccomp_kernel_environment, kernel_manager)
-                ipc_dir = configure_seccomp_kernel(kernel_manager, seccomp_environment)
-                self._kernel_ipc_dirs[kernel_manager] = ipc_dir
-                seccomp_working_dir = str(Path(working_dir or os.getcwd()).resolve())
-                launch_working_dir = str(ipc_dir)
                 for variable in (
                     "PYTHONHOME",
                     "PYTHONPATH",
                     "PYTHONSTARTUP",
+                    "PYTHONUSERBASE",
+                    "PYTHONNOUSERSITE",
                     "IPYTHONDIR",
                     "JUPYTER_CONFIG_DIR",
                     "JUPYTER_CONFIG_PATH",
@@ -1338,6 +1337,15 @@ class SessionManager:
                 ):
                     env.pop(variable, None)
                 env["PYTHONNOUSERSITE"] = "1"
+                seccomp_environment = await asyncio.to_thread(
+                    validate_seccomp_kernel_environment,
+                    kernel_manager,
+                    env,
+                )
+                ipc_dir = configure_seccomp_kernel(kernel_manager, seccomp_environment)
+                self._kernel_ipc_dirs[kernel_manager] = ipc_dir
+                seccomp_working_dir = str(Path(working_dir or os.getcwd()).resolve())
+                launch_working_dir = str(ipc_dir)
                 env["IPYTHONDIR"] = str(ipc_dir / "ipython")
                 env["JUPYTER_CONFIG_DIR"] = str(ipc_dir / "jupyter")
 
@@ -1445,6 +1453,8 @@ class SessionManager:
         hold it).
         """
         with self._session_lifecycle_lock:
+            existing_shutdown = self._kernel_shutdown_tasks.get(session_id)
+            joined_existing = existing_shutdown is not None and not existing_shutdown.done()
             if kernel_generation is not None and self._kernel_generations.get(session_id) == kernel_generation:
                 shutdown = self._schedule_kernel_shutdown(
                     session_id,
@@ -1454,6 +1464,10 @@ class SessionManager:
             else:
                 shutdown = self._kernel_shutdown_tasks.get(session_id)
         if shutdown is None:
+            return
+        if joined_existing:
+            # Close-path teardown may be waiting for the execution lease held by
+            # this caller. Let it finish after the lease is released.
             return
         try:
             await asyncio.shield(shutdown)
@@ -2361,6 +2375,25 @@ class SessionManager:
         else:
             self._kernel_execute_locks.pop(session_id, None)
             self._retired_kernel_execute_locks.discard(session_id)
+
+    async def ensure_kernel_for_session(
+        self,
+        session_id: str,
+        working_dir: Optional[str] = None,
+    ) -> None:
+        """Ensure the session has a live kernel before checking kernel-local state."""
+        resource_operation = self.session_resource_operation(session_id)
+        await resource_operation.__aenter__()
+        try:
+            session = self.get_session(session_id)
+            async with self._kernel_execution_lock(session_id):
+                await self._get_or_create_kernel(
+                    session_id,
+                    working_dir,
+                    user_identity=session.user_identity,
+                )
+        finally:
+            await resource_operation.__aexit__(None, None, None)
 
     async def execute_code_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None

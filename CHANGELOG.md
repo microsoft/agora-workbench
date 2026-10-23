@@ -15,7 +15,10 @@ changes that require action from existing users. Each entry there states who is 
 - `ServerConfig.kernel_environment` declares non-secret environment variables
   (for example `LD_LIBRARY_PATH`) for every kernel process, which no longer
   inherits the server environment. Framework-owned and code-injection
-  variables are rejected ([#403](https://github.com/microsoft/agora-workbench/issues/403)).
+  variables are rejected. Seccomp kernels additionally validate configured
+  loader search trees as immutable before startup and reject unreviewed
+  loader/Python/Jupyter startup environment controls
+  ([#403](https://github.com/microsoft/agora-workbench/issues/403)).
 
 ### Fixed
 

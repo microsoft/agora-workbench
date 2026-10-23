@@ -1,12 +1,22 @@
 """Real-kernel tests for detecting kernel processes that die during execution."""
 
 import asyncio
+import json
 import os
 import signal
 import time
+from types import SimpleNamespace
 
 import pytest
 
+from .. import code_execution as execution_defaults
+from ..sessions import (
+    set_current_request_token,
+    set_current_session,
+    set_current_token_claims,
+    set_current_user_identity,
+)
+from ..tool_registry import ToolDefinition, ToolRegistry
 from .conftest import TEST_USER_TOKEN
 
 # Disable core dumps so aborting kernels do not litter the working directory.
@@ -147,4 +157,69 @@ async def test_dead_idle_kernel_is_replaced_on_next_call(test_server):
 
         await _assert_fresh_kernel_works(manager, session_id, generation)
     finally:
+        await manager.aclose_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_handler_reinjects_tool_helpers_after_dead_idle_kernel(test_server):
+    manager = test_server.session_manager
+    token_claims = {"oid": "dev-user", "tid": "dev-tenant"}
+    session_id = manager.create_session(
+        data={},
+        user_identity="dev-user@dev-tenant",
+        user_token=TEST_USER_TOKEN,
+        token_claims=token_claims,
+    )
+    original_registry = test_server.tool_registry
+    registry = ToolRegistry(package="test.tools")
+    registry.register_tool(
+        ToolDefinition(
+            name="recovery_probe",
+            description="Probe recovery bootstrap.",
+            module="test.tools.recovery",
+        )
+    )
+    test_server.tool_registry = registry
+    set_current_user_identity("dev-user@dev-tenant")
+    set_current_request_token(TEST_USER_TOKEN)
+    set_current_token_claims(token_claims)
+
+    try:
+        execute_code_tool = execution_defaults.build_tool(test_server)
+        initial = json.loads(
+            await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="import os\nprint(os.getpid())",
+                execution_session_id=session_id,
+            )
+        )
+        assert initial["success"] is True
+        generation = manager.get_kernel_generation(session_id)
+        os.kill(int(initial["stdout"].strip()), signal.SIGKILL)
+        km, _ = manager._kernels[session_id]
+        for _ in range(50):
+            if not await km.is_alive():
+                break
+            await asyncio.sleep(0.1)
+
+        set_current_user_identity("dev-user@dev-tenant")
+        set_current_request_token(TEST_USER_TOKEN)
+        set_current_token_claims(token_claims)
+        recovered = json.loads(
+            await execute_code_tool(
+                ctx=SimpleNamespace(session_id=None),
+                code="print(callable(list_tools))",
+                execution_session_id=session_id,
+            )
+        )
+
+        assert recovered["success"] is True
+        assert recovered["stdout"].strip() == "True"
+        assert manager.get_kernel_generation(session_id) != generation
+    finally:
+        test_server.tool_registry = original_registry
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
         await manager.aclose_session(session_id)
