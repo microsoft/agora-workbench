@@ -1,0 +1,2771 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for building sandboxed MCP servers with Agora Workbench.">
+      
+      
+      
+      
+        <link rel="prev" href="../attaching-to-your-agent/">
+      
+      
+        <link rel="next" href="../data-lake/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Working with data - Agora Workbench</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#working-with-data" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Agora Workbench" class="md-header__button md-logo" aria-label="Agora Workbench" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agora Workbench
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Working with data
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/microsoft/agora-workbench" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Agora Workbench" class="md-nav__button md-logo" aria-label="Agora Workbench" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agora Workbench
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/microsoft/agora-workbench" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_1" id="__nav_1_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Home
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agora Workbench
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server-options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Options for making a CodeExecutionServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tool-pattern/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeExecutionServer tool pattern
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../skill-pattern/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CodeExecutionServer skill pattern
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../writing-effective-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Writing effective tools and skills
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Other options
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Other options
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attaching-to-your-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attaching to your agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with data
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Working with data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#asset-provisioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset provisioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Asset provisioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-source-uris" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported source URIs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accessing-assets-from-tool-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accessing assets from tool code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-cache-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution cache manager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution cache manager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asset-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asset-references-in-code-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset references in code execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-artifact-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom artifact resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publishing-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing artifacts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Publishing artifacts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publisher-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publisher dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#catalog-installation-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog installation options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setting-up-the-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up the catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mounting-a-catalog-on-codeexecutionserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mounting a catalog on CodeExecutionServer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authoritative-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoritative manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversion-and-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversion and dry-run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-indexing-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How indexing works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-tools-exposed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP tools exposed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-agent-using-search_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: agent using search_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#privileged-sql-administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privileged SQL administration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catalog-database-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog database schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data lake - start here
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-operations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake CLI and quickstarts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake API reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-migration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 migration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../data-lake-support/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data-lake 0.3 support and acceptance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sidecars/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sidecars (shared helper processes)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../server-networks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Server networks with ConnectorServer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../deploying/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deploying your server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../monitoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Monitoring your servers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../authentication/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Authentication options
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extension-points/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extension points
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/start-chemistry-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Start the chemistry MCP server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/first_server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your First Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/maf_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Microsoft Agent Framework
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/openai_agents_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenAI Agents SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/copilot_sdk_connect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Copilot SDK
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Models
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/tool_registry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tool Registry
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/data_access/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data Access
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/auth/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Auth
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#asset-provisioning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset provisioning
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Asset provisioning">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-source-uris" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supported source URIs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#accessing-assets-from-tool-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Accessing assets from tool code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-cache-manager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution cache manager
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution cache manager">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asset-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#asset-references-in-code-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset references in code execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#custom-artifact-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Custom artifact resolution
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#publishing-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publishing artifacts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Publishing artifacts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#publisher-dispatch" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publisher dispatch
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data catalog
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data catalog">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#catalog-installation-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog installation options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#setting-up-the-catalog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setting up the catalog
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mounting-a-catalog-on-codeexecutionserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mounting a catalog on CodeExecutionServer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#source-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authoritative-manifests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authoritative manifests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#conversion-and-dry-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Conversion and dry-run
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Search configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-indexing-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How indexing works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-tools-exposed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP tools exposed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-agent-using-search_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: agent using search_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#privileged-sql-administration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Privileged SQL administration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catalog-database-schema" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catalog database schema
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="working-with-data">Working with data<a class="headerlink" href="#working-with-data" title="Permanent link">&para;</a></h1>
+<p>If your goal is to let an agent search existing data and load a selected file,
+start with <a href="../data-lake/">Add a data catalog to your server</a>. This page compares
+that workflow with startup provisioning, session caching, and output
+publication.</p>
+<p>Agora Workbench separates four roles:</p>
+<ol>
+<li><strong>asset provisioning</strong> copies fixed startup inputs into an environment;</li>
+<li>the <strong>catalog/index</strong> discovers metadata and resolves logical references;</li>
+<li><code>DataLakeDataManager</code> is an execution-side <strong>fetch/cache manager</strong>; and</li>
+<li>publishers and managed writers handle <strong>publication and durable catalog
+   mutation</strong>.</li>
+</ol>
+<p>These roles can be composed, but none implies the others. Indexing does not
+download data into session caches, caching does not register an artifact,
+ordinary publication does not update a catalog manifest, and importing or
+starting the library does not provision storage resources.</p>
+<h2 id="asset-provisioning">Asset provisioning<a class="headerlink" href="#asset-provisioning" title="Permanent link">&para;</a></h2>
+<p>For large files (model weights, reference datasets) that need to be available at server startup, use <code>AssetSpec</code> in your <code>ServerConfig</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">ServerConfig</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.code_execution_models</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssetSpec</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;myserver&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">assets</span><span class="o">=</span><span class="p">[</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        <span class="n">AssetSpec</span><span class="p">(</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;reference-data&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>            <span class="n">source</span><span class="o">=</span><span class="s2">&quot;https://storage.blob.core.windows.net/data/reference.parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>            <span class="n">destination</span><span class="o">=</span><span class="s2">&quot;data/reference.parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>            <span class="n">size_hint_mb</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>            <span class="n">checksum</span><span class="o">=</span><span class="s2">&quot;sha256:abc123...&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>        <span class="p">),</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="p">],</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">auto_provision</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="p">)</span>
+</code></pre></div>
+<h3 id="supported-source-uris">Supported source URIs<a class="headerlink" href="#supported-source-uris" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Scheme</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>https://</code></td>
+<td>HTTP download with retry</td>
+</tr>
+<tr>
+<td><code>abfss://</code></td>
+<td>Azure Blob Storage (ADLS Gen2)</td>
+</tr>
+<tr>
+<td><code>https://*.blob.core.windows.net/</code></td>
+<td>Azure Blob Storage (classic)</td>
+</tr>
+<tr>
+<td><code>file:///path</code> or bare path</td>
+<td>Local copy (Docker bind mounts)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="accessing-assets-from-tool-code">Accessing assets from tool code<a class="headerlink" href="#accessing-assets-from-tool-code" title="Permanent link">&para;</a></h3>
+<p>Assets are provisioned into the environment cache directory. Tool code accesses them via the <code>MCP_ASSET_CACHE_DIR</code> environment variable:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="n">cache</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;MCP_ASSET_CACHE_DIR&quot;</span><span class="p">])</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">reference</span> <span class="o">=</span> <span class="n">cache</span> <span class="o">/</span> <span class="s2">&quot;data/reference.parquet&quot;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="n">reference</span><span class="p">)</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Provisioning model weights?</p>
+<p>Assets deliver the <strong>files</strong>. If loading those files (e.g. into a large
+model) is expensive, don't load them inside every session — that pays the
+cost once per kernel. Provision the weights as an asset, then load them once
+in a <strong><a href="../sidecars/">sidecar</a></strong> that serves inference over loopback HTTP.</p>
+</div>
+<h2 id="execution-cache-manager">Execution cache manager<a class="headerlink" href="#execution-cache-manager" title="Permanent link">&para;</a></h2>
+<p><code>DataLakeDataManager</code> resolves and caches dynamic assets that a session has
+already selected. It is not the catalog or search index.</p>
+<p>Features:</p>
+<ul>
+<li><strong>Automatic caching</strong> — fetched assets are cached to disk; subsequent accesses are instant</li>
+<li><strong>Multiple backends</strong> — Azure Blob Storage, local filesystem, or custom fetchers</li>
+</ul>
+<h3 id="asset-resolution">Asset resolution<a class="headerlink" href="#asset-resolution" title="Permanent link">&para;</a></h3>
+<p>When the agent passes asset references in tool parameters (e.g., <code>grid_file="&lt;blob&gt;abc123&lt;/blob&gt;"</code>), the <code>AssetResolutionMiddleware</code> automatically:</p>
+<ol>
+<li>Detects tagged references in parameter values</li>
+<li>Fetches and caches the referenced asset</li>
+<li>Replaces the tag with a local <code>Path</code> before the tool receives the parameter</li>
+</ol>
+<p>This works transparently — your tool implementation receives a <code>Path</code> object, not a blob reference.</p>
+<h3 id="asset-references-in-code-execution">Asset references in code execution<a class="headerlink" href="#asset-references-in-code-execution" title="Permanent link">&para;</a></h3>
+<p>For <code>execute_{name}_code</code> calls, asset tags embedded as string literals in the code are detected via AST analysis and resolved automatically:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># The agent writes this code:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">data</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;&lt;blob&gt;abc123&lt;/blob&gt;&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># The server resolves it to:</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># data = pd.read_parquet(Path(&quot;/cache/assets/abc123.parquet&quot;))</span>
+</code></pre></div>
+<h3 id="custom-artifact-resolution">Custom artifact resolution<a class="headerlink" href="#custom-artifact-resolution" title="Permanent link">&para;</a></h3>
+<p>The <code>&lt;blob&gt;id&lt;/blob&gt;</code> payload is an opaque catalog identifier. By default it is looked up in an Azure AI Search index (<code>DATA_LAKE_SEARCH_ENDPOINT</code> / <code>DATA_LAKE_BLOB_DETAILS_INDEX</code>). Deployments whose catalog is a manifest file, a database, a REST service, or an offline test fixture can supply their own resolver instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">DataLakeDataManager</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="k">class</span><span class="w"> </span><span class="nc">ManifestArtifactResolver</span><span class="p">:</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolve artifact ids from a preloaded manifest.&quot;&quot;&quot;</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">manifest</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]):</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>        <span class="bp">self</span><span class="o">.</span><span class="n">_manifest</span> <span class="o">=</span> <span class="n">manifest</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">resolve</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">artifact_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>        <span class="k">if</span> <span class="n">artifact_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_manifest</span><span class="p">:</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown artifact: </span><span class="si">{</span><span class="n">artifact_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_manifest</span><span class="p">[</span><span class="n">artifact_id</span><span class="p">]</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>    <span class="nd">@property</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">unavailable_reason</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>        <span class="k">return</span> <span class="kc">None</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_manifest</span> <span class="k">else</span> <span class="s2">&quot;The asset manifest is empty.&quot;</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a><span class="n">manifest</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>    <span class="s2">&quot;abc123&quot;</span><span class="p">:</span> <span class="s2">&quot;https://acct.blob.core.windows.net/datasets/hourly_wind.parquet&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>    <span class="s2">&quot;def456&quot;</span><span class="p">:</span> <span class="s2">&quot;/mnt/data/reference/grid_topology.json&quot;</span><span class="p">,</span>
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a><span class="p">}</span>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a><span class="n">manager</span> <span class="o">=</span> <span class="n">DataLakeDataManager</span><span class="p">(</span><span class="n">artifact_resolver</span><span class="o">=</span><span class="n">ManifestArtifactResolver</span><span class="p">(</span><span class="n">manifest</span><span class="p">))</span>
+</code></pre></div>
+<p><code>resolve</code> returns any qualified name a registered fetcher can handle (<code>https://</code>, <code>abfss://</code>, <code>az://</code>, or a local path). <code>unavailable_reason</code> returns <code>None</code> when resolution is ready, or a short operator-facing explanation otherwise — it is folded into the asset-tag guidance the agent sees, so the guidance stays truthful for whichever backend is in use.</p>
+<p>The <code>ArtifactResolver</code> protocol is available from <code>agora_workbench.data_lake</code>
+for type annotations. It is structural, so a resolver does not need to subclass
+it.</p>
+<p>The manager calls <code>resolve</code> on each manager cache miss; resolver implementations
+own any backend-result caching. Resolvers may also define
+<code>async def aclose(self)</code> to release backend clients, and the manager calls it
+during cleanup when present. A resolver you supply is used as-is and is not
+handed the manager's Azure credential, so it must arrange its own authentication.
+It may close clients it creates, but must not close credentials or other resources
+borrowed from its caller.</p>
+<p>If you omit <code>artifact_resolver</code>, the manager uses the built-in Azure AI Search
+resolver.</p>
+<h2 id="publishing-artifacts">Publishing artifacts<a class="headerlink" href="#publishing-artifacts" title="Permanent link">&para;</a></h2>
+<p>Tools and code execution can produce output files. Configure publishers to make these available:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlobPublisher</span><span class="p">,</span> <span class="n">LocalFilePublisher</span><span class="p">,</span> <span class="n">create_storage_credential</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">publishers</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="n">LocalFilePublisher</span><span class="p">(</span><span class="n">base_dir</span><span class="o">=</span><span class="s2">&quot;/srv/agora/artifacts&quot;</span><span class="p">),</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">BlobPublisher</span><span class="p">(</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">account_url</span><span class="o">=</span><span class="s2">&quot;https://myaccount.blob.core.windows.net&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="n">container</span><span class="o">=</span><span class="s2">&quot;outputs&quot;</span><span class="p">,</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>        <span class="n">credential</span><span class="o">=</span><span class="n">create_storage_credential</span><span class="p">(),</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>    <span class="p">),</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="p">]</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">(),</span>
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>    <span class="n">publishers</span><span class="o">=</span><span class="n">publishers</span><span class="p">,</span>
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a><span class="p">)</span>
+</code></pre></div>
+<p>The agent publishes artifacts using <code>&lt;gui&gt;name&lt;/gui&gt;</code> destinations for
+interactive display, or blob destinations for persistent storage. Ordinary
+publisher calls move bytes but do not register them in the catalog. Durable
+registration, upload, removal, and promotion use
+<code>AuthorizedManagedCatalogWriter</code>, which commits a versioned authoritative
+manifest after application authorization. See
+<a href="../data-lake-operations/#managed-registration-and-promotion">Data-lake CLI and quickstarts</a>.
+To minimize unexpected data egress, publisher tools instruct the agent not to
+publish files unless instructed by the user.</p>
+<h3 id="publisher-dispatch">Publisher dispatch<a class="headerlink" href="#publisher-dispatch" title="Permanent link">&para;</a></h3>
+<p>Publishers are checked in order via <code>can_handle()</code>. The first match wins. A <code>GuiPublisher</code> is always prepended automatically, so <code>&lt;gui&gt;name&lt;/gui&gt;</code> destinations always work.</p>
+<h2 id="data-catalog">Data catalog<a class="headerlink" href="#data-catalog" title="Permanent link">&para;</a></h2>
+<p>The catalog/index provides server-side metadata discovery and logical
+resolution. The agent can search for files by natural-language query and browse
+by domain. SQLite FTS5 keyword search is always available; sqlite-vec vector
+similarity is loaded only when vector search is selected. Catalog results are
+not execution cache entries; bytes are fetched only when the selected reference
+is resolved by a session's data manager.</p>
+<h3 id="catalog-installation-options">Catalog installation options<a class="headerlink" href="#catalog-installation-options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Installation</th>
+<th>Catalog capabilities</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agora-workbench</code></td>
+<td>Local sources and FTS5 keyword search; no Azure SDK, OpenAI client, or sqlite-vec installation</td>
+</tr>
+<tr>
+<td><code>agora-workbench[azure]</code></td>
+<td>Azure Blob sources, Entra credentials, and Azure AI Search, still without vector dependencies</td>
+</tr>
+<tr>
+<td><code>agora-workbench[catalog-vector]</code></td>
+<td>sqlite-vec and the OpenAI client; use an injected credential provider for Azure OpenAI</td>
+</tr>
+<tr>
+<td><code>agora-workbench[azure,catalog-vector]</code></td>
+<td>Built-in Azure sources and Azure OpenAI hybrid search</td>
+</tr>
+</tbody>
+</table>
+<p>These are installation boundaries, not configuration modes. Installing the
+<code>azure</code> extra does not contact Azure or require credentials during a local
+keyword-only catalog import. A base-only installation is different: the cloud
+SDKs are absent, and selecting a cloud capability reports that the <code>azure</code>
+extra is required.</p>
+<p>The base distribution still includes the existing MCP, execution, session, and
+kernel runtime dependencies. Importing the backend-neutral
+<code>agora_workbench.data_lake</code> contracts does not initialize execution or cloud
+modules. Import concrete catalog, resolver, and execution implementations from
+their documented public submodules; optional extras determine whether cloud
+and vector backends are available.</p>
+<h3 id="setting-up-the-catalog">Setting up the catalog<a class="headerlink" href="#setting-up-the-catalog" title="Permanent link">&para;</a></h3>
+<p>Create a <code>catalog.yaml</code> file in your server's directory:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># catalog.yaml</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nt">sources</span><span class="p">:</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="c1"># Scan mode is the compatibility default. Every discovered non-hidden file</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="c1"># under the validated root is disclosed.</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">weather</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/weather/</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="w">    </span><span class="nt">discovery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scan</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">    </span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">earthscience</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;NOAA</span><span class="nv"> </span><span class="s">daily</span><span class="nv"> </span><span class="s">weather</span><span class="nv"> </span><span class="s">observations</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">Pacific</span><span class="nv"> </span><span class="s">Northwest&quot;</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">    </span><span class="nt">files</span><span class="p">:</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="w">      </span><span class="nt">daily_obs.csv</span><span class="p">:</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Daily</span><span class="nv"> </span><span class="s">temperature</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">precipitation</span><span class="nv"> </span><span class="s">readings</span><span class="nv"> </span><span class="s">from</span><span class="nv"> </span><span class="s">Pacific</span><span class="nv"> </span><span class="s">NW</span><span class="nv"> </span><span class="s">stations&quot;</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="w">      </span><span class="nt">hourly_wind.parquet</span><span class="p">:</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Hourly</span><span class="nv"> </span><span class="s">wind</span><span class="nv"> </span><span class="s">speed</span><span class="nv"> </span><span class="s">measurements</span><span class="nv"> </span><span class="s">from</span><span class="nv"> </span><span class="s">coastal</span><span class="nv"> </span><span class="s">stations&quot;</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a><span class="w">  </span><span class="c1"># Another directory with auto-discovered files (no per-file overrides)</span>
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data/grid/</span>
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a><span class="w">    </span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">powergrid</span>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a><span class="w">  </span><span class="c1"># Azure Blob Storage source</span>
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">az://mystorageaccount/container/prefix/</span>
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a><span class="w">    </span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">powergrid</span>
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a><span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Geospatial</span><span class="nv"> </span><span class="s">transmission</span><span class="nv"> </span><span class="s">line</span><span class="nv"> </span><span class="s">dataset&quot;</span>
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a><span class="w">  </span><span class="c1"># HTTPS Blob URL format also works</span>
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://mystorageaccount.blob.core.windows.net/container/prefix/</span>
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a><span class="w">    </span><span class="nt">domain</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">powergrid</span>
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a><span class="w">    </span><span class="nt">files</span><span class="p">:</span>
+<a id="__codelineno-5-30" name="__codelineno-5-30" href="#__codelineno-5-30"></a><span class="w">      </span><span class="nt">lines.geojson</span><span class="p">:</span>
+<a id="__codelineno-5-31" name="__codelineno-5-31" href="#__codelineno-5-31"></a><span class="w">        </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;US</span><span class="nv"> </span><span class="s">high-voltage</span><span class="nv"> </span><span class="s">transmission</span><span class="nv"> </span><span class="s">lines</span><span class="nv"> </span><span class="s">with</span><span class="nv"> </span><span class="s">voltage</span><span class="nv"> </span><span class="s">and</span><span class="nv"> </span><span class="s">owner</span><span class="nv"> </span><span class="s">metadata&quot;</span>
+<a id="__codelineno-5-32" name="__codelineno-5-32" href="#__codelineno-5-32"></a>
+<a id="__codelineno-5-33" name="__codelineno-5-33" href="#__codelineno-5-33"></a><span class="w">  </span><span class="c1"># Manifest mode is authoritative. Only manifest entries are disclosed.</span>
+<a id="__codelineno-5-34" name="__codelineno-5-34" href="#__codelineno-5-34"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">source_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">approved-model-inputs</span>
+<a id="__codelineno-5-35" name="__codelineno-5-35" href="#__codelineno-5-35"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">az://mystorageaccount/approved/model-inputs/</span>
+<a id="__codelineno-5-36" name="__codelineno-5-36" href="#__codelineno-5-36"></a><span class="w">    </span><span class="nt">discovery</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">manifest</span>
+<a id="__codelineno-5-37" name="__codelineno-5-37" href="#__codelineno-5-37"></a><span class="w">    </span><span class="nt">manifest</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">catalog.manifest.json</span>
+<a id="__codelineno-5-38" name="__codelineno-5-38" href="#__codelineno-5-38"></a><span class="w">    </span><span class="nt">max_stale_seconds</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">300</span>
+<a id="__codelineno-5-39" name="__codelineno-5-39" href="#__codelineno-5-39"></a>
+<a id="__codelineno-5-40" name="__codelineno-5-40" href="#__codelineno-5-40"></a><span class="nt">search</span><span class="p">:</span>
+<a id="__codelineno-5-41" name="__codelineno-5-41" href="#__codelineno-5-41"></a><span class="w">  </span><span class="c1"># Only Azure OpenAI embeddings are currently supported for vector search</span>
+<a id="__codelineno-5-42" name="__codelineno-5-42" href="#__codelineno-5-42"></a><span class="w">  </span><span class="nt">embedding_model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">azure-openai</span>
+<a id="__codelineno-5-43" name="__codelineno-5-43" href="#__codelineno-5-43"></a><span class="w">  </span><span class="nt">azure_openai_endpoint</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://your-resource.openai.azure.com</span>
+<a id="__codelineno-5-44" name="__codelineno-5-44" href="#__codelineno-5-44"></a><span class="w">  </span><span class="nt">azure_openai_deployment</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">text-embedding-3-large</span>
+<a id="__codelineno-5-45" name="__codelineno-5-45" href="#__codelineno-5-45"></a><span class="w">  </span><span class="c1"># Optional: request a supported shortened vector size. Omit this for the</span>
+<a id="__codelineno-5-46" name="__codelineno-5-46" href="#__codelineno-5-46"></a><span class="w">  </span><span class="c1"># deployment&#39;s service-default dimensions.</span>
+<a id="__codelineno-5-47" name="__codelineno-5-47" href="#__codelineno-5-47"></a><span class="w">  </span><span class="c1"># embedding_dimensions: 1536</span>
+<a id="__codelineno-5-48" name="__codelineno-5-48" href="#__codelineno-5-48"></a>
+<a id="__codelineno-5-49" name="__codelineno-5-49" href="#__codelineno-5-49"></a><span class="w">  </span><span class="c1"># Hybrid ranking weight: 0.0 = pure vector, 1.0 = pure keyword</span>
+<a id="__codelineno-5-50" name="__codelineno-5-50" href="#__codelineno-5-50"></a><span class="w">  </span><span class="nt">hybrid_alpha</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.5</span>
+</code></pre></div>
+<p>Set <code>source_id</code> explicitly when artifact identity must remain stable after moving
+a local root. See
+<a href="../data-lake-api/#identity-revisions-and-compatibility">Identity, revisions, and compatibility</a>
+for the full contract.</p>
+<p>Construct the database from the same search configuration so an explicit
+dimension is applied consistently. When <code>embedding_dimensions</code> is omitted,
+<code>CatalogDB</code> infers the service-default size from the first embedding and, on
+reopen, from the existing vector table:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span><span class="p">,</span> <span class="n">CatalogDB</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogDB</span><span class="p">(</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="s2">&quot;catalog.db&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">vec_dimensions</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">search</span><span class="o">.</span><span class="n">embedding_dimensions</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">catalog</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+</code></pre></div>
+<h3 id="mounting-a-catalog-on-codeexecutionserver">Mounting a catalog on <code>CodeExecutionServer</code><a class="headerlink" href="#mounting-a-catalog-on-codeexecutionserver" title="Permanent link">&para;</a></h3>
+<p>Catalogs are opt-in. The supported host composition point is
+<code>CatalogIntegration</code>, passed to <code>CodeExecutionServer</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogIntegration</span><span class="p">,</span> <span class="n">CodeExecutionServer</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogPolicyMode</span><span class="p">,</span> <span class="n">DevelopmentAllowAllCatalogAuthorizer</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogConfig</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">catalog_config</span> <span class="o">=</span> <span class="n">CatalogConfig</span><span class="o">.</span><span class="n">from_yaml</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>    <span class="n">catalog_config</span><span class="p">,</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">DevelopmentAllowAllCatalogAuthorizer</span><span class="p">(),</span>  <span class="c1"># development only</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>    <span class="n">policy_mode</span><span class="o">=</span><span class="n">CatalogPolicyMode</span><span class="o">.</span><span class="n">HOMOGENEOUS_SOURCE</span><span class="p">,</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="p">)</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">auth</span><span class="p">,</span>
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>    <span class="n">catalog</span><span class="o">=</span><span class="n">catalog</span><span class="p">,</span>
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a><span class="p">)</span>
+</code></pre></div>
+<p>Choose the constructor based on who owns catalog setup and policy:</p>
+<table>
+<thead>
+<tr>
+<th>Constructor</th>
+<th>Use it when</th>
+<th>Ownership and lifecycle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CatalogIntegration.from_config(...)</code></td>
+<td>The server should build the provider from <code>CatalogConfig</code></td>
+<td>The integration loads and closes the provider</td>
+</tr>
+<tr>
+<td><code>CatalogIntegration.development_from_config(...)</code></td>
+<td>A local demo needs an explicit allow-all authorizer</td>
+<td>Same ownership as <code>from_config</code>; never use for production authorization</td>
+</tr>
+<tr>
+<td><code>CatalogIntegration(ResourceLease(...), ...)</code></td>
+<td>The application supplies a custom provider</td>
+<td><code>OWNED</code> resources are loaded/closed by the integration; <code>BORROWED</code> resources remain application-managed</td>
+</tr>
+</tbody>
+</table>
+<p><code>from_config()</code> requires exactly one of <code>authorizer</code> or <code>authorizer_factory</code>.
+Use <code>authorizer_factory(SessionContext)</code> when policy holds caller-specific
+mutable state. <code>development_from_config()</code> supplies
+<code>DevelopmentAllowAllCatalogAuthorizer</code> only as an explicit local-development
+shortcut.</p>
+<p>When <code>db_path</code> is omitted, <code>from_config()</code> creates a private SQLite cache below
+<code>~/.cache/agora-workbench/catalogs/</code> and removes it after the owned provider
+closes. This cache is rebuildable and intentionally does not persist across
+server lifecycles. Pass an explicit <code>db_path</code> when the deployment owns the
+location and wants to retain the index between starts.</p>
+<p>The default <code>HOMOGENEOUS_SOURCE</code> policy assumes every artifact in an authorized
+source has the same caller policy. Select <code>PER_ARTIFACT</code> only with a trusted,
+backend-specific <code>per_artifact_enforcer</code> that applies authorization before
+ranking, pagination, lookup, and not-found decisions. The policy-aware MCP
+tools conservatively omit executable <code>load_path</code> values in per-artifact mode.</p>
+<p>The server loads configured scan or manifest sources during startup, fails
+startup if no ready generation is available, and closes its owned catalog on
+startup rollback or shutdown. <code>search_data</code>, <code>get_artifact</code>, <code>list_domains</code>,
+and <code>get_catalog_capabilities</code> are registered only when <code>catalog</code> is supplied.
+Search/get payloads retain <code>id</code>, <code>source_id</code>, familiar metadata fields, and
+relevance <code>score</code> when supplied by the provider. They do not eagerly resolve or
+expose credential-bearing storage locators. A <code>load_path</code> is returned only when
+the session's data manager supports the catalog resolver, either through the
+integration-provided manager or the explicit custom-manager contract described
+below. Paste that opaque, revision-pinned tag into <code>execute_*_code</code>, where
+resolution occurs on demand.
+Per-artifact policy sessions conservatively omit <code>load_path</code> because source
+capabilities alone cannot prove that the caller may resolve a specific result.</p>
+<p>Do not also call the legacy <code>register_catalog_tools()</code> on the same MCP server:
+both surfaces own <code>search_data</code>, <code>get_artifact</code>, and <code>list_domains</code>, so
+registration fails explicitly rather than silently replacing handlers. The
+policy-aware integration deliberately does not expose legacy <code>query_catalog</code>;
+raw SQL remains available only through <code>register_catalog_admin_tools()</code> on a
+separately authorized administrative MCP surface.</p>
+<p>For production, provide an application authorizer or <code>authorizer_factory</code>.
+The factory receives a <code>SessionContext</code>; each execution session gets a distinct
+policy wrapper, immutable request context, resolver, and data-manager cache.
+Token claims are available to policy as <code>context.attributes["claims"]</code>, but
+bearer tokens are not copied into catalog request attributes. When a transport
+session presents a refreshed bearer token, the factory is invoked again before
+the session adopts it, and the previous factory-created authorizer is closed
+through the tracked session cleanup path. The catalog-created data manager also
+rebinds its token-scoped downstream credential while retaining prior providers
+for cleanup at session shutdown, and invalidates catalog-derived cache entries
+so the next load is reauthorized. An authorizer passed directly is borrowed
+and continues to evaluate each immutable per-request context.</p>
+<p>Custom catalog storage usually needs only a fetcher that understands the
+provider's locator scheme. Supply a factory to <code>CatalogIntegration</code>; it is
+called once per execution session and the standard data manager owns and
+closes the returned fetchers:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">OWNED</span><span class="p">),</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">authorizer</span><span class="p">,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="n">fetcher_factory</span><span class="o">=</span><span class="k">lambda</span> <span class="n">context</span><span class="p">:</span> <span class="n">MyStorageFetcher</span><span class="p">(</span><span class="n">storage_client</span><span class="p">),</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="p">)</span>
+</code></pre></div>
+<p>The factory may return one <code>AssetFetcher</code>, a list or tuple of fetchers, or
+<code>None</code>. It must return fresh instances for every call because fetchers become
+session-owned resources. Fetchers may implement <code>aclose()</code>, <code>close()</code>, or
+<code>cleanup()</code>; synchronous and asynchronous lifecycle methods are both
+supported. This path preserves the integration-provided resolver,
+authorization refresh, cache invalidation, and cleanup without requiring a
+custom <code>SessionManager</code>.</p>
+<p>If the supplied <code>SessionManager</code> already has a <code>data_manager_factory</code>, the
+server preserves that manager and its existing resolver. <code>DataLakeDataManager</code>
+implements the public <code>CatalogAwareDataManager</code> protocol, so the server
+automatically calls
+<code>bind_catalog_resolver(resolver, fetchers=...)</code>: <code>catalog-v1:</code> references route
+through the caller-scoped catalog while legacy blob IDs continue to use the
+manager's original resolver. Authorization-context refresh invalidates
+catalog-derived cache entries before reuse.</p>
+<p>Other custom managers can implement the same protocol:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">CatalogAwareDataManager</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="k">class</span><span class="w"> </span><span class="nc">MyDataManager</span><span class="p">(</span><span class="n">CatalogAwareDataManager</span><span class="p">):</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">bind_catalog_resolver</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">resolver</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">fetchers</span><span class="o">=</span><span class="p">()):</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>        <span class="o">...</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">invalidate_cache_entries</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">artifact_id_prefix</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>        <span class="o">...</span>
+</code></pre></div>
+<p>The <code>SessionResources.extensions</code> key <code>catalog</code> is reserved for the binding;
+returning a custom extension under that name rejects session creation and
+cleans the factory-created manager and extensions.</p>
+<p><code>CatalogAwareDataManager</code> is the 0.3 custom-manager composition contract. The
+unreleased preview hook <code>supports_catalog_references()</code> is not supported.
+Without <code>bind_catalog_resolver()</code>, a custom manager remains discovery-only;
+when <code>fetcher_factory</code> requires transferring custom fetchers, session creation
+fails rather than leaking those resources.</p>
+<p>To mount an application-managed provider, make ownership explicit:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">ResourceLease</span><span class="p">,</span> <span class="n">ResourceOwnership</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="p">(</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">ResourceLease</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">ResourceOwnership</span><span class="o">.</span><span class="n">BORROWED</span><span class="p">),</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="n">authorizer_factory</span><span class="o">=</span><span class="n">make_authorizer</span><span class="p">,</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+</code></pre></div>
+<p>Borrowed providers are neither loaded nor closed by the server by default.
+Owned providers are loaded at startup, so they must expose <code>load()</code> when
+<code>load_on_startup=True</code> (the default), plus <code>aclose()</code>, <code>close()</code>, or <code>cleanup()</code>
+for shutdown. Set <code>load_on_startup=False</code> when the application owns refreshes.
+Catalog refresh remains an administrative/application operation; no agent
+reindex or filesystem-watcher tool is registered.</p>
+<p><code>capability_extension_factory</code> adds separately authorized, session-scoped
+capabilities to the catalog integration. To expose a managed writer through the
+same session policy, use the public adapter:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake</span><span class="w"> </span><span class="kn">import</span> <span class="n">managed_writer_extension_factory</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">catalog</span> <span class="o">=</span> <span class="n">CatalogIntegration</span><span class="o">.</span><span class="n">from_config</span><span class="p">(</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">catalog_config</span><span class="p">,</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">authorizer</span><span class="o">=</span><span class="n">application_authorizer</span><span class="p">,</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">capability_extension_factory</span><span class="o">=</span><span class="n">managed_writer_extension_factory</span><span class="p">(</span><span class="n">backend_writer</span><span class="p">),</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="p">)</span>
+</code></pre></div>
+<p>The factory receives the session context, authorized read catalog, and
+immutable request context. The managed-writer adapter reuses that catalog's
+authorizer, so write capabilities are visible only when the caller is
+authorized. Returned extension capabilities are merged into
+<code>get_catalog_capabilities</code>. The managed-writer adapter has no independent
+resource lifecycle: session teardown releases the adapter but does not close
+the backend writer. The read provider and backend writer retain their
+separately declared ownership and must be closed by their owner when needed.</p>
+<p>Other custom extensions may implement async-only <code>aclose()</code>. Synchronous session
+closure and timeout cleanup schedule and retain that work; server shutdown
+waits for it before closing the shared provider. Cleanup attempts the manager,
+every extension, session payload, and session files independently, reporting
+aggregated failures only after all steps have run.</p>
+<h3 id="source-configuration">Source configuration<a class="headerlink" href="#source-configuration" title="Permanent link">&para;</a></h3>
+<p>Each source entry in <code>sources</code> declares a data location:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>✓</td>
+<td>Local path, <code>az://account/container/prefix/</code>, or HTTPS blob URL</td>
+</tr>
+<tr>
+<td><code>source_id</code></td>
+<td>manifest mode</td>
+<td>Stable source identity. Strongly recommended in scan mode and required in manifest mode</td>
+</tr>
+<tr>
+<td><code>discovery</code></td>
+<td></td>
+<td><code>scan</code> (default) or authoritative <code>manifest</code></td>
+</tr>
+<tr>
+<td><code>manifest</code></td>
+<td>manifest mode</td>
+<td>Local path within the source root, or Blob name/full URI within the source prefix</td>
+</tr>
+<tr>
+<td><code>max_stale_seconds</code></td>
+<td></td>
+<td>How long a previously valid manifest generation may remain readable after refresh failure</td>
+</tr>
+<tr>
+<td><code>domain</code></td>
+<td></td>
+<td>Domain label (used for filtering in search, e.g. <code>"earthscience"</code>)</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td></td>
+<td>Default description for files that don't have a per-file override</td>
+</tr>
+<tr>
+<td><code>files</code></td>
+<td></td>
+<td>Dict of <code>filename → {description, domain, artifact_id, aliases}</code> metadata overrides</td>
+</tr>
+</tbody>
+</table>
+<p>Source type is inferred automatically from the path:</p>
+<ul>
+<li>Bare paths or <code>file://</code> → <code>local</code></li>
+<li><code>az://</code> or <code>https://*.blob.core.windows.net/</code> → <code>blob</code></li>
+</ul>
+<p><code>files</code> remains a metadata override map. It is never an allowlist. In scan mode,
+files not named in <code>files</code> are still discovered. In manifest mode, registration
+comes only from the manifest; a <code>files</code> entry can override metadata for a
+registered path but cannot register an otherwise absent file.</p>
+<h3 id="authoritative-manifests">Authoritative manifests<a class="headerlink" href="#authoritative-manifests" title="Permanent link">&para;</a></h3>
+<p>Manifest files use strict JSON with this versioned shape:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="p">{</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">&quot;generation&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">&quot;artifacts&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="w">      </span><span class="nt">&quot;path&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved/data.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="w">      </span><span class="nt">&quot;artifact_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;approved-data&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="w">      </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;data.csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="w">      </span><span class="nt">&quot;description&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Approved experiment input&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a><span class="w">      </span><span class="nt">&quot;domain&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;science&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a><span class="w">      </span><span class="nt">&quot;media_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text/csv&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a><span class="w">      </span><span class="nt">&quot;size_bytes&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1204</span><span class="p">,</span>
+<a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">      </span><span class="nt">&quot;content_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sha256:4f...&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">      </span><span class="nt">&quot;metadata_revision&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;metadata-7&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">      </span><span class="nt">&quot;checksum_sha256&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;4f...&quot;</span><span class="p">,</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">      </span><span class="nt">&quot;aliases&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;external:experiment-input&quot;</span><span class="p">]</span>
+<a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>generation</code> is a positive, monotonically non-decreasing integer. Reusing a
+generation with different manifest bytes is rejected, as is rolling back to an
+older generation. Artifact paths are normalized source-relative paths and must
+remain inside the configured local root or Blob prefix. Duplicate paths,
+artifact IDs, storage locators, or source-scoped aliases; duplicate JSON keys;
+unknown fields; oversized or malformed JSON; missing manifests; and unsupported
+versions fail the source refresh explicitly. Manifest JSON is size- and
+item-bounded and does not support YAML anchors or aliases. The 4 MiB byte limit
+is enforced while reading: local reads stop at limit-plus-one bytes, and Blob
+downloads request and consume only a bounded range of response chunks.</p>
+<p>Manifest mode never falls back to listing the source. A valid empty manifest is
+an authoritatively empty catalog and tombstones previously registered entries.
+An invalid or unavailable manifest preserves the last valid SQLite generation
+according to the configured stale-read bound; if no valid generation has ever
+loaded, the provider is not ready and all operations fail closed. Fixing the
+manifest or credentials and retrying <code>load()</code> on the same provider is supported.
+Public load/readiness errors contain source IDs and generic categories, not
+absolute local paths, SAS query values, or backend response details.</p>
+<p>Local and Blob manifests use the same records and identity rules. Blob loading
+downloads the configured manifest object directly and records the ETag from that
+same download response; it does not enumerate the container or issue a second
+properties request. If the response exposes no ETag, the SHA-256 digest of the
+downloaded bytes is used as the generation token. Azure SDK imports remain
+optional and selecting a Blob source without <code>agora-workbench[azure]</code> fails with
+the existing explicit optional-dependency error.</p>
+<h3 id="conversion-and-dry-run">Conversion and dry-run<a class="headerlink" href="#conversion-and-dry-run" title="Permanent link">&para;</a></h3>
+<p>Existing unversioned <code>catalog.yaml</code> files remain valid and are interpreted as
+version 1 with <code>discovery: scan</code>. Convert one to an explicit representation
+without touching storage:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.catalog</span><span class="w"> </span><span class="kn">import</span> <span class="n">convert_catalog_config</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">report</span> <span class="o">=</span> <span class="n">convert_catalog_config</span><span class="p">(</span><span class="s2">&quot;catalog.yaml&quot;</span><span class="p">)</span>  <span class="c1"># dry-run by default</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">rendered_yaml</span><span class="p">)</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="nb">print</span><span class="p">(</span><span class="n">report</span><span class="o">.</span><span class="n">summary</span><span class="p">)</span>
+</code></pre></div>
+<p>Pass a separate destination and <code>dry_run=False</code> to write the converted file.
+The conversion report distinguishes <code>configuration_valid</code>,
+<code>manifest_checked</code>, and <code>manifest_content_valid</code>; side-effect-free conversion
+does not claim that an unaccessed manifest is valid.
+<code>CatalogIndexer.dry_run()</code> performs storage-backed enumeration/manifest
+validation and reports additions, updates, deletions, unchanged entries,
+generation/ETag, whether the manifest was checked, manifest content validity,
+and errors without writing SQLite or computing embeddings.</p>
+<h3 id="search-configuration">Search configuration<a class="headerlink" href="#search-configuration" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>embedding_model</code></td>
+<td><code>"none"</code></td>
+<td><code>"none"</code> for keyword-only search or <code>"azure-openai"</code> for vector search</td>
+</tr>
+<tr>
+<td><code>azure_openai_endpoint</code></td>
+<td>—</td>
+<td>Azure OpenAI resource endpoint, such as <code>https://my-resource.openai.azure.com</code></td>
+</tr>
+<tr>
+<td><code>azure_openai_deployment</code></td>
+<td>—</td>
+<td>Deployment name (e.g. <code>text-embedding-3-large</code>)</td>
+</tr>
+<tr>
+<td><code>embedding_dimensions</code></td>
+<td>service default</td>
+<td>Optional requested vector size. Set only when the deployed model supports shortening; pass the same value to <code>CatalogDB</code></td>
+</tr>
+<tr>
+<td><code>hybrid_alpha</code></td>
+<td><code>0.5</code></td>
+<td>Blend weight: 0.0 = pure vector search, 1.0 = pure keyword search</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Keyword-only search</p>
+<p>If you don't have an Azure OpenAI embeddings endpoint, you can use the base
+package with keyword search (FTS5) by omitting the <code>search</code> section entirely.
+Catalog creation, refresh, search, and reopen do not import or load
+sqlite-vec, create a vector table, or initialize Azure credentials and
+clients.</p>
+</div>
+<h3 id="how-indexing-works">How indexing works<a class="headerlink" href="#how-indexing-works" title="Permanent link">&para;</a></h3>
+<p>At server startup, the catalog indexer:</p>
+<ol>
+<li>Reads <code>catalog.yaml</code> and either scans each source or loads its authoritative manifest</li>
+<li>Resolves stable identity from the source/path model or an explicit manifest <code>artifact_id</code></li>
+<li>Inserts metadata into the SQLite <code>artifacts</code> table (with FTS5 triggers for keyword indexing)</li>
+<li>When <code>embedding_model</code> is selected, computes embeddings in batches and
+   stores them in an on-demand sqlite-vec virtual table</li>
+</ol>
+<p>The SQLite database is a rebuildable per-reader index/cache. A manifest-backed
+reader opens its own database, calls <code>load()</code> before serving, validates the
+schema and manifest generation/ETag, and atomically refreshes artifacts, aliases,
+history, FTS, vectors, and readiness state. Unchanged generations are skipped;
+changed generations create normal artifact revisions. Failed refreshes preserve
+the previous successful generation until its stale bound expires. Expiry is
+always measured from that source's <code>last_success_at</code>, including validation,
+embedding, and database-write failures whose transactions roll back.
+Legacy timezone-naive success timestamps are interpreted as UTC; malformed
+timestamps fail readiness closed.</p>
+<p>An explicitly declared manifest <code>artifact_id</code> may move to a new logical path in
+one generation. The current row and locator move without changing canonical
+identity, while retained revisions preserve exact old locators and any
+tombstones. Removing the entry in one generation and re-registering the same ID
+at a new path later is also supported. Destination paths or aliases retained by
+a different artifact fail only that source; independently valid source
+generations still commit.</p>
+<p>Do not place one writable SQLite file on a shared volume and open it from
+multiple pods. The supported deployment model is one writable SQLite file per
+reader/pod (or <code>:memory:</code>), rebuilt from the manifest after restart. The manifest
+is the authority; SQLite is disposable. Historical refresh rows for sources no
+longer configured by that reader do not affect readiness or visibility.</p>
+<h3 id="mcp-tools-exposed">MCP tools exposed<a class="headerlink" href="#mcp-tools-exposed" title="Permanent link">&para;</a></h3>
+<p>The synchronous SQLite catalog is not yet caller-aware. Its legacy registration
+surface is unscoped and should be used only when every catalog entry is already
+authorized to every caller with tool access, such as public development data.
+These tool names are <strong>not</strong> prefixed with the server name:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>search_data</code></td>
+<td>Hybrid keyword + vector search over the catalog. Supports filters by domain and source type.</td>
+</tr>
+<tr>
+<td><code>get_artifact</code></td>
+<td>Get full metadata for a specific artifact by ID</td>
+</tr>
+<tr>
+<td><code>list_domains</code></td>
+<td>List all unique domain labels in the catalog</td>
+</tr>
+<tr>
+<td><code>query_catalog</code></td>
+<td>Legacy unscoped read-only SQL over all catalog metadata</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-agent-using-search_data">Example: agent using search_data<a class="headerlink" href="#example-agent-using-search_data" title="Permanent link">&para;</a></h3>
+<p>The agent calls <code>search_data</code> to find relevant files, then uses the returned metadata to access them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Agent finds relevant data</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">results</span> <span class="o">=</span> <span class="n">search_data</span><span class="p">(</span><span class="n">query</span><span class="o">=</span><span class="s2">&quot;wind speed measurements&quot;</span><span class="p">,</span> <span class="n">domain</span><span class="o">=</span><span class="s2">&quot;earthscience&quot;</span><span class="p">,</span> <span class="n">top</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># Returns: [{&quot;id&quot;: &quot;abc123&quot;, &quot;name&quot;: &quot;hourly_wind.parquet&quot;, &quot;storage_uri&quot;: &quot;/data/weather/hourly_wind.parquet&quot;, ...}]</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="c1"># Agent then reads the file in code execution</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">&quot;/data/weather/hourly_wind.parquet&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="privileged-sql-administration">Privileged SQL administration<a class="headerlink" href="#privileged-sql-administration" title="Permanent link">&para;</a></h3>
+<p>For v0.2.x compatibility, <code>query_catalog</code> remains part of
+<code>register_catalog_tools</code>. That does not make it authorized: read-only SQLite
+prevents writes but does not enforce caller, source, row, or artifact policy.
+Use the legacy function only when the entire catalog is already visible to every
+caller.</p>
+<p>New applications may instead register SQL separately with
+<code>register_catalog_admin_tools</code> on a separately authenticated and authorized
+administrative MCP surface:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.catalog_tools</span><span class="w"> </span><span class="kn">import</span> <span class="n">register_catalog_admin_tools</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">register_catalog_admin_tools</span><span class="p">(</span><span class="n">admin_mcp</span><span class="p">,</span> <span class="n">catalog_context</span><span class="p">)</span>
+</code></pre></div>
+<p>The administrative helper is an exposure seam, not an authorization mechanism;
+the host remains responsible for protecting that surface.</p>
+<h3 id="catalog-database-schema">Catalog database schema<a class="headerlink" href="#catalog-database-schema" title="Permanent link">&para;</a></h3>
+<p>The underlying SQLite database has this structure:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1">-- Main table</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts</span><span class="w"> </span><span class="p">(</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="n">id</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">PRIMARY</span><span class="w"> </span><span class="k">KEY</span><span class="p">,</span><span class="w">         </span><span class="c1">-- Deterministic hash of storage_uri</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="w">    </span><span class="n">name</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">          </span><span class="c1">-- Filename</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="n">storage_uri</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="p">,</span><span class="w">   </span><span class="c1">-- Full path or blob URI</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="n">description</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- Human-readable description</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="k">domain</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">                 </span><span class="c1">-- Domain label</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="n">source_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">            </span><span class="c1">-- &#39;local&#39; or &#39;blob&#39;</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="w">    </span><span class="n">content_type</span><span class="w"> </span><span class="nb">TEXT</span><span class="p">,</span><span class="w">           </span><span class="c1">-- MIME type (inferred from extension)</span>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="n">size_bytes</span><span class="w"> </span><span class="nb">INTEGER</span><span class="p">,</span><span class="w">          </span><span class="c1">-- File size</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="n">indexed_at</span><span class="w"> </span><span class="nb">TEXT</span><span class="w"> </span><span class="k">NOT</span><span class="w"> </span><span class="k">NULL</span><span class="w">     </span><span class="c1">-- ISO timestamp</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="p">);</span>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="c1">-- FTS5 virtual table (keyword search)</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a><span class="k">CREATE</span><span class="w"> </span><span class="n">VIRTUAL</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">artifacts_fts</span><span class="w"> </span><span class="k">USING</span><span class="w"> </span><span class="n">fts5</span><span class="p">(</span><span class="n">name</span><span class="p">,</span><span class="w"> </span><span class="n">description</span><span class="p">,</span><span class="w"> </span><span class="k">domain</span><span class="p">);</span>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="c1">-- sqlite-vec virtual table (created lazily only when vectors are indexed/searched)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.sections", "navigation.expand", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
