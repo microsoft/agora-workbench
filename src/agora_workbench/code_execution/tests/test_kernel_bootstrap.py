@@ -57,7 +57,11 @@ class _RecordingServer:
             self.executed.append(code)
             return CodeExecutionResult(success=True)
 
+        async def _fake_ensure_kernel(_session_id: str) -> None:
+            return None
+
         self.server._execute_code = _fake_execute_code
+        self.server._ensure_kernel_for_bootstrap = _fake_ensure_kernel
 
     def pop_executed(self) -> list[str]:
         batch, self.executed = list(self.executed), []

@@ -182,6 +182,40 @@ class ChemistryServer(CodeExecutionServer):
 | `build_dir` | Custom build directory (default: `~/.cache/mcp-envs/{name}`) |
 | `asset_cache_dir` | Writable directory for provisioned assets and transfer staging (default: parent of `build_dir`) |
 | `additional_commands` | Extra shell commands after env setup |
+| `kernel_environment` | Non-secret environment variables set on every kernel process (see [Kernel process environment](#kernel-process-environment)) |
+
+#### Kernel process environment
+
+Kernels do not inherit the server's environment. Each kernel receives only a
+small sanitized baseline (`PATH`, `HOME`, locale, timezone, and temp-directory
+variables), framework-owned values (`MCP_ASSET_CACHE_DIR`, sidecar URLs,
+`USER_IDENTITY`), and the variables declared in `kernel_environment`. Use
+`kernel_environment` for non-secret settings that must exist when the kernel
+process starts, such as `LD_LIBRARY_PATH` for native libraries; the dynamic
+loader reads it at process start, so setting it from kernel code is too late:
+
+```python
+config = ServerConfig(
+    ...,
+    kernel_environment={
+        "LD_LIBRARY_PATH": "/opt/vendor/lib:/usr/local/lib/domain-runtime",
+        "DOMAIN_RUNTIME_ROOT": "/usr/local/lib/domain-runtime/",
+    },
+)
+```
+
+Names must be valid environment variable names. Names that Workbench controls
+(`PATH`, `MCP_ASSET_CACHE_DIR`, `USER_IDENTITY`, `VIRTUAL_ENV`, `CONDA_PREFIX`,
+`CONDA_DEFAULT_ENV`, sidecar `url_env_var`s, and the IPython/Jupyter directory
+variables) and variables that inject code before kernel isolation applies
+(`PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `PYTHONUSERBASE`,
+`PYTHONNOUSERSITE`, `LD_PRELOAD`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`) are
+rejected. Never put credentials in `kernel_environment`.
+
+If a kernel process dies during an execution (for example a native-library
+crash or an out-of-memory kill), the call fails promptly with the exit code or
+signal, and the next call in the same session starts a fresh kernel. Session
+outputs are kept, but in-memory kernel state is lost.
 
 ### Assets
 
@@ -280,8 +314,17 @@ The Python environment used by a seccomp kernel must be immutable to executed
 code. Install the interpreter and site-packages under a parent hierarchy owned
 by a different user, then run Workbench as a non-root user without write access
 to any path in that hierarchy. Workbench recursively validates standard-library
-and package roots, including symlink targets, before starting the kernel. For
-images that build the kernel environment
+and package roots, including symlink targets, before starting the kernel.
+Configured `LD_LIBRARY_PATH` entries must also be absolute and non-empty, and
+every directory, library, symlink target, and controlling parent in those
+search trees must satisfy the same immutable-ownership policy. Seccomp startup
+environment controls are fail-closed: `LD_LIBRARY_PATH` and Workbench's
+`PYTHONNOUSERSITE=1` are the explicitly supported members. Other `LD_*`,
+`DYLD_*`, Python, IPython, and Jupyter startup controls are rejected unless a
+future release adds variable-specific validation. Ordinary domain variables
+such as `DOMAIN_RUNTIME_ROOT` remain available because they do not affect the
+fixed Python kernel startup before the filter is installed. For images that
+build the kernel environment
 with `--warm`, configure its build directory under a location such as
 `/opt/kernel-envs`, recursively change that hierarchy to `root:root` ownership
 in a later root build step, and switch back to the runtime user. Changing only

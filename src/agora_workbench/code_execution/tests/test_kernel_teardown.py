@@ -1511,6 +1511,46 @@ class TestKernelRebuildWaits:
         assert not shutdown_waited
         assert "s1" not in manager._kernels
 
+    async def test_kernel_probe_rejects_session_closed_while_probe_yields(self, manager, monkeypatch):
+        probe_started = asyncio.Event()
+        release_probe = asyncio.Event()
+        manager.create_session(data={}, user_identity="u", user_token="token", token_claims={}, session_id="s1")
+        register_kernel(manager, "s1")
+
+        async def probe(_kernel):
+            probe_started.set()
+            await release_probe.wait()
+            return False
+
+        monkeypatch.setattr(manager, "_kernel_process_is_alive", probe)
+
+        async def get_kernel_under_execution_lease():
+            async with manager._kernel_execution_lock("s1"):
+                return await manager._get_or_create_kernel("s1")
+
+        get_kernel = asyncio.create_task(get_kernel_under_execution_lease())
+        await probe_started.wait()
+        shutdown = manager.close_session("s1")
+        assert shutdown is not None
+
+        release_probe.set()
+        with pytest.raises(ValueError, match="closed while checking its kernel"):
+            await asyncio.wait_for(get_kernel, timeout=1)
+        await asyncio.wait_for(shutdown, timeout=1)
+
+    async def test_dead_kernel_eviction_does_not_join_close_teardown_under_execution_lease(self, manager):
+        manager.create_session(data={}, user_identity="u", user_token="token", token_claims={}, session_id="s1")
+        register_kernel(manager, "s1")
+        generation = manager.get_kernel_generation("s1")
+
+        async with manager._kernel_execution_lock("s1"):
+            shutdown = manager.close_session("s1")
+            assert shutdown is not None
+            await asyncio.wait_for(manager._evict_dead_kernel("s1", generation), timeout=1)
+            assert not shutdown.done()
+
+        await asyncio.wait_for(shutdown, timeout=1)
+
     async def test_preexisting_storage_session_gets_kernel_generation(self, monkeypatch):
         from .. import sessions as sessions_pkg
 

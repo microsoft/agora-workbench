@@ -1246,6 +1246,14 @@ class CodeExecutionServer(BaseMCPServer):
         LOGGER.info(f"Kernel '{kernel_name}' registered successfully")
         LOGGER.debug(f"Kernel install output: {result.stdout}")
 
+    async def _ensure_kernel_for_bootstrap(self, session_id: str) -> None:
+        """Replace a dead kernel before consulting generation-keyed bootstrap state."""
+        working_dir = getattr(self, "working_dir", None)
+        await self.session_manager.ensure_kernel_for_session(
+            session_id,
+            working_dir=str(working_dir) if working_dir else None,
+        )
+
     async def _inject_tool_proxies(self, session_id: str) -> None:
         """
         Inject instrumented tool proxy functions into the kernel for a session.
@@ -1258,6 +1266,8 @@ class CodeExecutionServer(BaseMCPServer):
         """
         if not self.tool_registry or not self.tool_registry.tools:
             return
+
+        await self._ensure_kernel_for_bootstrap(session_id)
 
         if self.session_manager.is_kernel_bootstrapped(session_id, KERNEL_BOOTSTRAP_TOOL_PROXIES):
             return
@@ -2985,10 +2995,12 @@ else:
             # exported to the server environment for compatibility.
             await self._sidecar_manager.start_all()
 
-            # Kernels receive only these framework-owned values in addition to a
-            # small safe baseline. They do not inherit the server's credentials.
+            # Kernels receive only the server-declared kernel_environment and these
+            # framework-owned values (which win) in addition to a small safe
+            # baseline. They do not inherit the server's credentials.
             self.session_manager.configure_kernel_environment(
                 {
+                    **self.server_config.kernel_environment,
                     "MCP_ASSET_CACHE_DIR": str(cache_dir),
                     **{sidecar.url_env_var: sidecar.base_url() for sidecar in self.server_config.sidecars},
                 }

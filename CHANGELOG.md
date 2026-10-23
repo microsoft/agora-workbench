@@ -10,7 +10,23 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Added
+
+- `ServerConfig.kernel_environment` declares non-secret environment variables
+  (for example `LD_LIBRARY_PATH`) for every kernel process, which no longer
+  inherits the server environment. Framework-owned and code-injection
+  variables are rejected. Seccomp kernels additionally validate configured
+  loader search trees as immutable before startup and reject unreviewed
+  loader/Python/Jupyter startup environment controls
+  ([#403](https://github.com/microsoft/agora-workbench/issues/403)).
+
 ### Fixed
+
+- A kernel process that dies during a foreground, adaptive, or background
+  execution now fails the call promptly with its exit code or signal instead of
+  hanging until the timeout. The dead kernel is evicted, keeping session outputs,
+  so the next call starts a fresh kernel
+  ([#403](https://github.com/microsoft/agora-workbench/issues/403)).
 
 - Closing a parent session now cancels its parallel jobs, waits for child
   sessions to close, and retires batch state, including worker-thread closure
