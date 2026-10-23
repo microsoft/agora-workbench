@@ -16,6 +16,7 @@ from ..sessions import (
     set_current_token_claims,
     set_current_user_identity,
 )
+from ..sessions import manager as session_manager_module
 from ..tool_registry import ToolDefinition, ToolRegistry
 from .conftest import TEST_USER_TOKEN
 
@@ -95,6 +96,47 @@ async def test_background_job_fails_fast_when_kernel_is_killed(test_server):
         assert manager._get_running_job_for_session(session_id) is None
 
         await _assert_fresh_kernel_works(manager, session_id, generation)
+    finally:
+        await manager.aclose_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_dead_background_kernel_is_left_for_collector_to_finalize(test_server, monkeypatch):
+    manager = test_server.session_manager
+    session_id = _new_session(test_server)
+    monkeypatch.setattr(session_manager_module, "_KERNEL_LIVENESS_CHECK_INTERVAL_S", 60.0)
+    try:
+        code = (
+            _ABORT_KERNEL
+            + "from pathlib import Path\n"
+            + "Path(AGORA_OUTPUT_DIR, 'partial.txt').write_text('partial')\n"
+            + "os.kill(os.getpid(), 9)"
+        )
+        handle = await manager.start_background_execution_for_session(session_id, code, timeout=120)
+        generation = manager.get_kernel_generation(session_id)
+        km, _ = manager._kernels[session_id]
+        for _ in range(50):
+            if not await km.is_alive():
+                break
+            await asyncio.sleep(0.1)
+
+        with pytest.raises(RuntimeError, match=f"Session busy — job {handle['job_id']} is still running"):
+            await manager.ensure_kernel_for_session(session_id)
+
+        job = manager._background_jobs[handle["job_id"]]
+        assert job.status == "running"
+        assert job.task is not None and not job.task.done()
+        assert manager.get_kernel_generation(session_id) == generation
+
+        monkeypatch.setattr(session_manager_module, "_KERNEL_LIVENESS_CHECK_INTERVAL_S", 0.0)
+        result = await asyncio.wait_for(manager.await_background_job(handle["job_id"]), timeout=30)
+
+        assert result is not None
+        assert result["status"] == "failed"
+        assert "SIGKILL" in result["error"]
+        assert "before crash" in result["stdout"]
+        assert [artifact["name"] for artifact in result["artifacts"]] == ["partial.txt"]
+        assert session_id not in manager._kernels
     finally:
         await manager.aclose_session(session_id)
 

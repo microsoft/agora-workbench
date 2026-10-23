@@ -1247,6 +1247,14 @@ class SessionManager:
                     LOGGER.debug(f"Reusing kernel for session {session_id}")
                     self._kernel_last_used[session_id] = time.time()
                     return existing_kernel
+                running_job_id = self._get_running_job_for_session(session_id)
+                running_job = self._background_jobs.get(running_job_id) if running_job_id is not None else None
+                current_kernel_generation = self._kernel_generations.get(session_id)
+                if running_job is not None and running_job.kernel_generation == current_kernel_generation:
+                    # The collector owns crash diagnosis and artifact finalization
+                    # for this generation. Replacing it here would cancel that task
+                    # through teardown and overwrite the richer terminal result.
+                    raise RuntimeError(f"Session busy — job {running_job_id} is still running")
                 LOGGER.warning(
                     "Kernel process for session %s is no longer running (%s); replacing it",
                     session_id,

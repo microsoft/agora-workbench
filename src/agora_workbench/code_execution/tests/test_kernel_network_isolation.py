@@ -397,6 +397,29 @@ def test_seccomp_loader_paths_reject_mutable_nested_library(tmp_path):
         )
 
 
+def test_seccomp_loader_paths_reject_mutable_resolved_ancestor(tmp_path):
+    lexical_parent = tmp_path / "immutable"
+    resolved_parent = tmp_path / "mutable"
+    loader_target = resolved_parent / "lib"
+    lexical_parent.mkdir()
+    loader_target.mkdir(parents=True)
+    (lexical_parent / "alias").symlink_to(resolved_parent, target_is_directory=True)
+    loader_path = lexical_parent / "alias" / "lib"
+
+    with (
+        patch(
+            "agora_workbench.code_execution.sessions.network_isolation._path_is_mutable_by_kernel",
+            side_effect=lambda path, _stat_result, _kernel_uid: path == resolved_parent,
+        ),
+        pytest.raises(RuntimeError, match=str(resolved_parent)),
+    ):
+        network_isolation._validate_seccomp_loader_paths(
+            {"LD_LIBRARY_PATH": str(loader_path)},
+            kernel_uid=1000,
+            inspected_paths=set(),
+        )
+
+
 def test_seccomp_kernel_bootstrap_skips_config_startup_and_pth_hooks(tmp_path):
     package_root = tmp_path / "site-packages"
     ipykernel_package = package_root / "ipykernel"

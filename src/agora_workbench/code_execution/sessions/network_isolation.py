@@ -768,8 +768,11 @@ def _validate_seccomp_loader_paths(
     if not loader_paths:
         return
 
+    loader_startup_paths = _with_resolved_paths(
+        {f"LD_LIBRARY_PATH entry {index + 1}": path for index, path in enumerate(loader_paths)}
+    )
     inspected_paths = _validate_seccomp_startup_paths(
-        {f"LD_LIBRARY_PATH entry {index + 1}": path for index, path in enumerate(loader_paths)},
+        loader_startup_paths,
         kernel_uid=kernel_uid,
         inspected_paths=inspected_paths,
     )
