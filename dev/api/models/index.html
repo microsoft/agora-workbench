@@ -1368,6 +1368,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agora_workbench.code_execution.code_execution_models.ServerConfig.validate_kernel_environment_sidecar_names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_kernel_environment_sidecar_names
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agora_workbench.code_execution.code_execution_models.ServerConfig.validate_isolated_kernel_network" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1683,6 +1694,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#agora_workbench.code_execution.code_execution_models.ServerConfig.validate_kernel_environment_sidecar_names" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate_kernel_environment_sidecar_names
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#agora_workbench.code_execution.code_execution_models.ServerConfig.validate_isolated_kernel_network" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1945,11 +1967,11 @@ overrides), so a single entrypoint can honor the configured address.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-166">166</a></span>
-<span class="normal"><a href="#__codelineno-0-167">167</a></span>
-<span class="normal"><a href="#__codelineno-0-168">168</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-166" name="__codelineno-0-166"></a><span class="k">def</span><span class="w"> </span><span class="nf">base_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-167" name="__codelineno-0-167"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;The base URL kernels use to reach the sidecar.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-168" name="__codelineno-0-168"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;http://</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-198">198</a></span>
+<span class="normal"><a href="#__codelineno-0-199">199</a></span>
+<span class="normal"><a href="#__codelineno-0-200">200</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-198" name="__codelineno-0-198"></a><span class="k">def</span><span class="w"> </span><span class="nf">base_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-199" name="__codelineno-0-199"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;The base URL kernels use to reach the sidecar.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-200" name="__codelineno-0-200"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;http://</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -1972,11 +1994,11 @@ overrides), so a single entrypoint can honor the configured address.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-170">170</a></span>
-<span class="normal"><a href="#__codelineno-0-171">171</a></span>
-<span class="normal"><a href="#__codelineno-0-172">172</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-170" name="__codelineno-0-170"></a><span class="k">def</span><span class="w"> </span><span class="nf">health_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-171" name="__codelineno-0-171"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;The URL polled to determine readiness.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-172" name="__codelineno-0-172"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">base_url</span><span class="p">()</span><span class="si">}{</span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;/&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="si">}</span><span class="s2">&quot;</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-202">202</a></span>
+<span class="normal"><a href="#__codelineno-0-203">203</a></span>
+<span class="normal"><a href="#__codelineno-0-204">204</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-202" name="__codelineno-0-202"></a><span class="k">def</span><span class="w"> </span><span class="nf">health_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-203" name="__codelineno-0-203"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;The URL polled to determine readiness.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-204" name="__codelineno-0-204"></a>    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">base_url</span><span class="p">()</span><span class="si">}{</span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">)</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s1">&#39;/&#39;</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">health_path</span><span class="si">}</span><span class="s2">&quot;</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2112,7 +2134,8 @@ result, timing, and success/failure status.</p>
 <p><strong>Identity</strong> — server and tool naming/description:
     name, description, server_description, entra_client_id, entra_tenant_id</p>
 <p><strong>Environment</strong> — Python environment build settings:
-    type, dependency_file, auto_build, build_dir, additional_commands</p>
+    type, dependency_file, auto_build, build_dir, additional_commands,
+    kernel_environment</p>
 <p><strong>Assets</strong> — large artifact provisioning:
     assets, auto_provision</p>
 <p><strong>Execution</strong> — code execution policy:
@@ -2162,27 +2185,70 @@ a deployment-wide default.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-376">376</a></span>
-<span class="normal"><a href="#__codelineno-0-377">377</a></span>
-<span class="normal"><a href="#__codelineno-0-378">378</a></span>
-<span class="normal"><a href="#__codelineno-0-379">379</a></span>
-<span class="normal"><a href="#__codelineno-0-380">380</a></span>
-<span class="normal"><a href="#__codelineno-0-381">381</a></span>
-<span class="normal"><a href="#__codelineno-0-382">382</a></span>
-<span class="normal"><a href="#__codelineno-0-383">383</a></span>
-<span class="normal"><a href="#__codelineno-0-384">384</a></span>
-<span class="normal"><a href="#__codelineno-0-385">385</a></span>
-<span class="normal"><a href="#__codelineno-0-386">386</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-376" name="__codelineno-0-376"></a><span class="nd">@model_validator</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;after&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-377" name="__codelineno-0-377"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_adaptive_timeout_settings</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ServerConfig&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-378" name="__codelineno-0-378"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Ensure adaptive executions have time to promote before timing out.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-379" name="__codelineno-0-379"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">execution_mode</span> <span class="o">!=</span> <span class="s2">&quot;adaptive&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-380" name="__codelineno-0-380"></a>        <span class="k">return</span> <span class="bp">self</span>
-<a id="__codelineno-0-381" name="__codelineno-0-381"></a>
-<a id="__codelineno-0-382" name="__codelineno-0-382"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_timeout</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">promotion_threshold_s</span><span class="p">:</span>
-<a id="__codelineno-0-383" name="__codelineno-0-383"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;default_timeout must be greater than promotion_threshold_s in adaptive mode&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-384" name="__codelineno-0-384"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_timeout</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">promotion_threshold_s</span><span class="p">:</span>
-<a id="__codelineno-0-385" name="__codelineno-0-385"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;max_timeout must be greater than promotion_threshold_s in adaptive mode&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-386" name="__codelineno-0-386"></a>    <span class="k">return</span> <span class="bp">self</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-422">422</a></span>
+<span class="normal"><a href="#__codelineno-0-423">423</a></span>
+<span class="normal"><a href="#__codelineno-0-424">424</a></span>
+<span class="normal"><a href="#__codelineno-0-425">425</a></span>
+<span class="normal"><a href="#__codelineno-0-426">426</a></span>
+<span class="normal"><a href="#__codelineno-0-427">427</a></span>
+<span class="normal"><a href="#__codelineno-0-428">428</a></span>
+<span class="normal"><a href="#__codelineno-0-429">429</a></span>
+<span class="normal"><a href="#__codelineno-0-430">430</a></span>
+<span class="normal"><a href="#__codelineno-0-431">431</a></span>
+<span class="normal"><a href="#__codelineno-0-432">432</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-422" name="__codelineno-0-422"></a><span class="nd">@model_validator</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;after&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-423" name="__codelineno-0-423"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_adaptive_timeout_settings</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ServerConfig&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-424" name="__codelineno-0-424"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Ensure adaptive executions have time to promote before timing out.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-425" name="__codelineno-0-425"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">execution_mode</span> <span class="o">!=</span> <span class="s2">&quot;adaptive&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-426" name="__codelineno-0-426"></a>        <span class="k">return</span> <span class="bp">self</span>
+<a id="__codelineno-0-427" name="__codelineno-0-427"></a>
+<a id="__codelineno-0-428" name="__codelineno-0-428"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_timeout</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">promotion_threshold_s</span><span class="p">:</span>
+<a id="__codelineno-0-429" name="__codelineno-0-429"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;default_timeout must be greater than promotion_threshold_s in adaptive mode&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-430" name="__codelineno-0-430"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_timeout</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">promotion_threshold_s</span><span class="p">:</span>
+<a id="__codelineno-0-431" name="__codelineno-0-431"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;max_timeout must be greater than promotion_threshold_s in adaptive mode&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-432" name="__codelineno-0-432"></a>    <span class="k">return</span> <span class="bp">self</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="agora_workbench.code_execution.code_execution_models.ServerConfig.validate_kernel_environment_sidecar_names" class="doc doc-heading">
+<code class="doc-symbol doc-symbol-heading doc-symbol-method"></code>            <code class="highlight language-python"><span class="n">validate_kernel_environment_sidecar_names</span><span class="p">()</span></code>
+
+<a href="#agora_workbench.code_execution.code_execution_models.ServerConfig.validate_kernel_environment_sidecar_names" class="headerlink" title="Permanent link">&para;</a></h4>
+
+
+    <div class="doc doc-contents ">
+
+        <p>Sidecar URL variables are framework-owned in the kernel environment.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-480">480</a></span>
+<span class="normal"><a href="#__codelineno-0-481">481</a></span>
+<span class="normal"><a href="#__codelineno-0-482">482</a></span>
+<span class="normal"><a href="#__codelineno-0-483">483</a></span>
+<span class="normal"><a href="#__codelineno-0-484">484</a></span>
+<span class="normal"><a href="#__codelineno-0-485">485</a></span>
+<span class="normal"><a href="#__codelineno-0-486">486</a></span>
+<span class="normal"><a href="#__codelineno-0-487">487</a></span>
+<span class="normal"><a href="#__codelineno-0-488">488</a></span>
+<span class="normal"><a href="#__codelineno-0-489">489</a></span>
+<span class="normal"><a href="#__codelineno-0-490">490</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-480" name="__codelineno-0-480"></a><span class="nd">@model_validator</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;after&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-481" name="__codelineno-0-481"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_kernel_environment_sidecar_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ServerConfig&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-482" name="__codelineno-0-482"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Sidecar URL variables are framework-owned in the kernel environment.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-483" name="__codelineno-0-483"></a>    <span class="n">sidecar_names</span> <span class="o">=</span> <span class="p">{</span><span class="n">sidecar</span><span class="o">.</span><span class="n">url_env_var</span> <span class="k">for</span> <span class="n">sidecar</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">sidecars</span><span class="p">}</span>
+<a id="__codelineno-0-484" name="__codelineno-0-484"></a>    <span class="n">conflicts</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">sidecar_names</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">kernel_environment</span><span class="p">))</span>
+<a id="__codelineno-0-485" name="__codelineno-0-485"></a>    <span class="k">if</span> <span class="n">conflicts</span><span class="p">:</span>
+<a id="__codelineno-0-486" name="__codelineno-0-486"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-487" name="__codelineno-0-487"></a>            <span class="sa">f</span><span class="s2">&quot;kernel_environment may not set sidecar url_env_var name(s) </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">conflicts</span><span class="p">)</span><span class="si">}</span><span class="s2">; &quot;</span>
+<a id="__codelineno-0-488" name="__codelineno-0-488"></a>            <span class="s2">&quot;Agora Workbench sets them to each sidecar&#39;s base URL&quot;</span>
+<a id="__codelineno-0-489" name="__codelineno-0-489"></a>        <span class="p">)</span>
+<a id="__codelineno-0-490" name="__codelineno-0-490"></a>    <span class="k">return</span> <span class="bp">self</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2205,21 +2271,21 @@ a deployment-wide default.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-418">418</a></span>
-<span class="normal"><a href="#__codelineno-0-419">419</a></span>
-<span class="normal"><a href="#__codelineno-0-420">420</a></span>
-<span class="normal"><a href="#__codelineno-0-421">421</a></span>
-<span class="normal"><a href="#__codelineno-0-422">422</a></span>
-<span class="normal"><a href="#__codelineno-0-423">423</a></span>
-<span class="normal"><a href="#__codelineno-0-424">424</a></span>
-<span class="normal"><a href="#__codelineno-0-425">425</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-418" name="__codelineno-0-418"></a><span class="nd">@model_validator</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;after&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-419" name="__codelineno-0-419"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_isolated_kernel_network</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ServerConfig&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-420" name="__codelineno-0-420"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Loopback HTTP sidecars are unreachable from restricted kernels.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-421" name="__codelineno-0-421"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">kernel_network_mode</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;isolated&quot;</span><span class="p">,</span> <span class="s2">&quot;seccomp&quot;</span><span class="p">}</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">sidecars</span><span class="p">:</span>
-<a id="__codelineno-0-422" name="__codelineno-0-422"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-<a id="__codelineno-0-423" name="__codelineno-0-423"></a>            <span class="sa">f</span><span class="s2">&quot;kernel_network_mode=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">kernel_network_mode</span><span class="si">!r}</span><span class="s2"> cannot be combined with loopback HTTP sidecars&quot;</span>
-<a id="__codelineno-0-424" name="__codelineno-0-424"></a>        <span class="p">)</span>
-<a id="__codelineno-0-425" name="__codelineno-0-425"></a>    <span class="k">return</span> <span class="bp">self</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-492">492</a></span>
+<span class="normal"><a href="#__codelineno-0-493">493</a></span>
+<span class="normal"><a href="#__codelineno-0-494">494</a></span>
+<span class="normal"><a href="#__codelineno-0-495">495</a></span>
+<span class="normal"><a href="#__codelineno-0-496">496</a></span>
+<span class="normal"><a href="#__codelineno-0-497">497</a></span>
+<span class="normal"><a href="#__codelineno-0-498">498</a></span>
+<span class="normal"><a href="#__codelineno-0-499">499</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-492" name="__codelineno-0-492"></a><span class="nd">@model_validator</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s2">&quot;after&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-493" name="__codelineno-0-493"></a><span class="k">def</span><span class="w"> </span><span class="nf">validate_isolated_kernel_network</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;ServerConfig&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-494" name="__codelineno-0-494"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Loopback HTTP sidecars are unreachable from restricted kernels.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-495" name="__codelineno-0-495"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">kernel_network_mode</span> <span class="ow">in</span> <span class="p">{</span><span class="s2">&quot;isolated&quot;</span><span class="p">,</span> <span class="s2">&quot;seccomp&quot;</span><span class="p">}</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">sidecars</span><span class="p">:</span>
+<a id="__codelineno-0-496" name="__codelineno-0-496"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-497" name="__codelineno-0-497"></a>            <span class="sa">f</span><span class="s2">&quot;kernel_network_mode=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">kernel_network_mode</span><span class="si">!r}</span><span class="s2"> cannot be combined with loopback HTTP sidecars&quot;</span>
+<a id="__codelineno-0-498" name="__codelineno-0-498"></a>        <span class="p">)</span>
+<a id="__codelineno-0-499" name="__codelineno-0-499"></a>    <span class="k">return</span> <span class="bp">self</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2242,15 +2308,15 @@ a deployment-wide default.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-451">451</a></span>
-<span class="normal"><a href="#__codelineno-0-452">452</a></span>
-<span class="normal"><a href="#__codelineno-0-453">453</a></span>
-<span class="normal"><a href="#__codelineno-0-454">454</a></span>
-<span class="normal"><a href="#__codelineno-0-455">455</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-451" name="__codelineno-0-451"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_build_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
-<a id="__codelineno-0-452" name="__codelineno-0-452"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the directory where environment will be built.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-453" name="__codelineno-0-453"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="p">:</span>
-<a id="__codelineno-0-454" name="__codelineno-0-454"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span>
-<a id="__codelineno-0-455" name="__codelineno-0-455"></a>    <span class="k">return</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;.cache&quot;</span> <span class="o">/</span> <span class="s2">&quot;mcp-envs&quot;</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-525">525</a></span>
+<span class="normal"><a href="#__codelineno-0-526">526</a></span>
+<span class="normal"><a href="#__codelineno-0-527">527</a></span>
+<span class="normal"><a href="#__codelineno-0-528">528</a></span>
+<span class="normal"><a href="#__codelineno-0-529">529</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-525" name="__codelineno-0-525"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_build_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<a id="__codelineno-0-526" name="__codelineno-0-526"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the directory where environment will be built.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-527" name="__codelineno-0-527"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="p">:</span>
+<a id="__codelineno-0-528" name="__codelineno-0-528"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span>
+<a id="__codelineno-0-529" name="__codelineno-0-529"></a>    <span class="k">return</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;.cache&quot;</span> <span class="o">/</span> <span class="s2">&quot;mcp-envs&quot;</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2274,25 +2340,25 @@ a deployment-wide default.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-457">457</a></span>
-<span class="normal"><a href="#__codelineno-0-458">458</a></span>
-<span class="normal"><a href="#__codelineno-0-459">459</a></span>
-<span class="normal"><a href="#__codelineno-0-460">460</a></span>
-<span class="normal"><a href="#__codelineno-0-461">461</a></span>
-<span class="normal"><a href="#__codelineno-0-462">462</a></span>
-<span class="normal"><a href="#__codelineno-0-463">463</a></span>
-<span class="normal"><a href="#__codelineno-0-464">464</a></span>
-<span class="normal"><a href="#__codelineno-0-465">465</a></span>
-<span class="normal"><a href="#__codelineno-0-466">466</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-457" name="__codelineno-0-457"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_cache_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
-<a id="__codelineno-0-458" name="__codelineno-0-458"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the writable cache directory for assets and transfer staging.</span>
-<a id="__codelineno-0-459" name="__codelineno-0-459"></a>
-<a id="__codelineno-0-460" name="__codelineno-0-460"></a><span class="sd">    Asset destinations are resolved relative to this directory.</span>
-<a id="__codelineno-0-461" name="__codelineno-0-461"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-462" name="__codelineno-0-462"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">asset_cache_dir</span><span class="p">:</span>
-<a id="__codelineno-0-463" name="__codelineno-0-463"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">asset_cache_dir</span>
-<a id="__codelineno-0-464" name="__codelineno-0-464"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="p">:</span>
-<a id="__codelineno-0-465" name="__codelineno-0-465"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="o">.</span><span class="n">parent</span>
-<a id="__codelineno-0-466" name="__codelineno-0-466"></a>    <span class="k">return</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;.cache&quot;</span> <span class="o">/</span> <span class="s2">&quot;mcp-envs&quot;</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-531">531</a></span>
+<span class="normal"><a href="#__codelineno-0-532">532</a></span>
+<span class="normal"><a href="#__codelineno-0-533">533</a></span>
+<span class="normal"><a href="#__codelineno-0-534">534</a></span>
+<span class="normal"><a href="#__codelineno-0-535">535</a></span>
+<span class="normal"><a href="#__codelineno-0-536">536</a></span>
+<span class="normal"><a href="#__codelineno-0-537">537</a></span>
+<span class="normal"><a href="#__codelineno-0-538">538</a></span>
+<span class="normal"><a href="#__codelineno-0-539">539</a></span>
+<span class="normal"><a href="#__codelineno-0-540">540</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-531" name="__codelineno-0-531"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_cache_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<a id="__codelineno-0-532" name="__codelineno-0-532"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the writable cache directory for assets and transfer staging.</span>
+<a id="__codelineno-0-533" name="__codelineno-0-533"></a>
+<a id="__codelineno-0-534" name="__codelineno-0-534"></a><span class="sd">    Asset destinations are resolved relative to this directory.</span>
+<a id="__codelineno-0-535" name="__codelineno-0-535"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-536" name="__codelineno-0-536"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">asset_cache_dir</span><span class="p">:</span>
+<a id="__codelineno-0-537" name="__codelineno-0-537"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">asset_cache_dir</span>
+<a id="__codelineno-0-538" name="__codelineno-0-538"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="p">:</span>
+<a id="__codelineno-0-539" name="__codelineno-0-539"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">build_dir</span><span class="o">.</span><span class="n">parent</span>
+<a id="__codelineno-0-540" name="__codelineno-0-540"></a>    <span class="k">return</span> <span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()</span> <span class="o">/</span> <span class="s2">&quot;.cache&quot;</span> <span class="o">/</span> <span class="s2">&quot;mcp-envs&quot;</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">name</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2315,21 +2381,21 @@ a deployment-wide default.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/code_execution_models.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-468">468</a></span>
-<span class="normal"><a href="#__codelineno-0-469">469</a></span>
-<span class="normal"><a href="#__codelineno-0-470">470</a></span>
-<span class="normal"><a href="#__codelineno-0-471">471</a></span>
-<span class="normal"><a href="#__codelineno-0-472">472</a></span>
-<span class="normal"><a href="#__codelineno-0-473">473</a></span>
-<span class="normal"><a href="#__codelineno-0-474">474</a></span>
-<span class="normal"><a href="#__codelineno-0-475">475</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-468" name="__codelineno-0-468"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_python_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
-<a id="__codelineno-0-469" name="__codelineno-0-469"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the path to the Python executable.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-470" name="__codelineno-0-470"></a>    <span class="n">build_dir</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_build_dir</span><span class="p">()</span>
-<a id="__codelineno-0-471" name="__codelineno-0-471"></a>
-<a id="__codelineno-0-472" name="__codelineno-0-472"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;conda&quot;</span><span class="p">,</span> <span class="s2">&quot;uv&quot;</span><span class="p">,</span> <span class="s2">&quot;pip&quot;</span><span class="p">]:</span>
-<a id="__codelineno-0-473" name="__codelineno-0-473"></a>        <span class="k">return</span> <span class="n">build_dir</span> <span class="o">/</span> <span class="s2">&quot;bin&quot;</span> <span class="o">/</span> <span class="s2">&quot;python&quot;</span>
-<a id="__codelineno-0-474" name="__codelineno-0-474"></a>    <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-475" name="__codelineno-0-475"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown environment type: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-542">542</a></span>
+<span class="normal"><a href="#__codelineno-0-543">543</a></span>
+<span class="normal"><a href="#__codelineno-0-544">544</a></span>
+<span class="normal"><a href="#__codelineno-0-545">545</a></span>
+<span class="normal"><a href="#__codelineno-0-546">546</a></span>
+<span class="normal"><a href="#__codelineno-0-547">547</a></span>
+<span class="normal"><a href="#__codelineno-0-548">548</a></span>
+<span class="normal"><a href="#__codelineno-0-549">549</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-542" name="__codelineno-0-542"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_python_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<a id="__codelineno-0-543" name="__codelineno-0-543"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Get the path to the Python executable.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-544" name="__codelineno-0-544"></a>    <span class="n">build_dir</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_build_dir</span><span class="p">()</span>
+<a id="__codelineno-0-545" name="__codelineno-0-545"></a>
+<a id="__codelineno-0-546" name="__codelineno-0-546"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;conda&quot;</span><span class="p">,</span> <span class="s2">&quot;uv&quot;</span><span class="p">,</span> <span class="s2">&quot;pip&quot;</span><span class="p">]:</span>
+<a id="__codelineno-0-547" name="__codelineno-0-547"></a>        <span class="k">return</span> <span class="n">build_dir</span> <span class="o">/</span> <span class="s2">&quot;bin&quot;</span> <span class="o">/</span> <span class="s2">&quot;python&quot;</span>
+<a id="__codelineno-0-548" name="__codelineno-0-548"></a>    <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-549" name="__codelineno-0-549"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown environment type: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

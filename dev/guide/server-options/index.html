@@ -565,6 +565,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kernel-process-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel process environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1773,6 +1790,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kernel-process-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kernel process environment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2106,8 +2140,39 @@ and share it across sessions instead.</p>
 <td><code>additional_commands</code></td>
 <td>Extra shell commands after env setup</td>
 </tr>
+<tr>
+<td><code>kernel_environment</code></td>
+<td>Non-secret environment variables set on every kernel process (see <a href="#kernel-process-environment">Kernel process environment</a>)</td>
+</tr>
 </tbody>
 </table>
+<h4 id="kernel-process-environment">Kernel process environment<a class="headerlink" href="#kernel-process-environment" title="Permanent link">&para;</a></h4>
+<p>Kernels do not inherit the server's environment. Each kernel receives only a
+small sanitized baseline (<code>PATH</code>, <code>HOME</code>, locale, timezone, and temp-directory
+variables), framework-owned values (<code>MCP_ASSET_CACHE_DIR</code>, sidecar URLs,
+<code>USER_IDENTITY</code>), and the variables declared in <code>kernel_environment</code>. Use
+<code>kernel_environment</code> for non-secret settings that must exist when the kernel
+process starts, such as <code>LD_LIBRARY_PATH</code> for native libraries; the dynamic
+loader reads it at process start, so setting it from kernel code is too late:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="o">...</span><span class="p">,</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">kernel_environment</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>        <span class="s2">&quot;LD_LIBRARY_PATH&quot;</span><span class="p">:</span> <span class="s2">&quot;/opt/vendor/lib:/usr/local/lib/domain-runtime&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>        <span class="s2">&quot;DOMAIN_RUNTIME_ROOT&quot;</span><span class="p">:</span> <span class="s2">&quot;/usr/local/lib/domain-runtime/&quot;</span><span class="p">,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="p">},</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
+</code></pre></div>
+<p>Names must be valid environment variable names. Names that Workbench controls
+(<code>PATH</code>, <code>MCP_ASSET_CACHE_DIR</code>, <code>USER_IDENTITY</code>, <code>VIRTUAL_ENV</code>, <code>CONDA_PREFIX</code>,
+<code>CONDA_DEFAULT_ENV</code>, sidecar <code>url_env_var</code>s, and the IPython/Jupyter directory
+variables) and variables that inject code before kernel isolation applies
+(<code>PYTHONPATH</code>, <code>PYTHONHOME</code>, <code>PYTHONSTARTUP</code>, <code>PYTHONUSERBASE</code>,
+<code>PYTHONNOUSERSITE</code>, <code>LD_PRELOAD</code>, <code>LD_AUDIT</code>, <code>DYLD_INSERT_LIBRARIES</code>) are
+rejected. Never put credentials in <code>kernel_environment</code>.</p>
+<p>If a kernel process dies during an execution (for example a native-library
+crash or an out-of-memory kill), the call fails promptly with the exit code or
+signal, and the next call in the same session starts a fresh kernel. Session
+outputs are kept, but in-memory kernel state is lost.</p>
 <h3 id="assets">Assets<a class="headerlink" href="#assets" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2185,13 +2250,13 @@ and share it across sessions instead.</p>
 <p>Workbench provides two fail-closed Linux backends. Prefer
 <code>kernel_network_mode="isolated"</code> when the runtime permits unprivileged user and
 network namespaces:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>    <span class="n">kernel_network_mode</span><span class="o">=</span><span class="s2">&quot;isolated&quot;</span><span class="p">,</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">kernel_network_mode</span><span class="o">=</span><span class="s2">&quot;isolated&quot;</span><span class="p">,</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
 </code></pre></div>
 <p>Workbench switches the Jupyter control channels from TCP to Unix IPC sockets, so
 the server can still execute code while the kernel and its subprocesses have no
@@ -2207,13 +2272,13 @@ rather than falling back to the inherited network when the boundary is
 unavailable.</p>
 <p>Managed container runtimes sometimes prohibit namespace creation. On a 64-bit
 Linux image with <code>libseccomp.so.2</code>, use <code>kernel_network_mode="seccomp"</code> instead:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    <span class="n">kernel_network_mode</span><span class="o">=</span><span class="s2">&quot;seccomp&quot;</span><span class="p">,</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">config</span> <span class="o">=</span> <span class="n">ServerConfig</span><span class="p">(</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;offline-analysis&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Analyze operator-provided local data without network access.&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="nb">type</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">dependency_file</span><span class="o">=</span><span class="s2">&quot;numpy</span><span class="se">\n</span><span class="s2">pandas</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>    <span class="n">kernel_network_mode</span><span class="o">=</span><span class="s2">&quot;seccomp&quot;</span><span class="p">,</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="p">)</span>
 </code></pre></div>
 <p>This backend starts Jupyter over Unix IPC first because ZeroMQ creates temporary
 IP sockets during initialization. Workbench starts the kernel from a fresh
@@ -2242,8 +2307,17 @@ namespace backend.</p>
 code. Install the interpreter and site-packages under a parent hierarchy owned
 by a different user, then run Workbench as a non-root user without write access
 to any path in that hierarchy. Workbench recursively validates standard-library
-and package roots, including symlink targets, before starting the kernel. For
-images that build the kernel environment
+and package roots, including symlink targets, before starting the kernel.
+Configured <code>LD_LIBRARY_PATH</code> entries must also be absolute and non-empty, and
+every directory, library, symlink target, and controlling parent in those
+search trees must satisfy the same immutable-ownership policy. Seccomp startup
+environment controls are fail-closed: <code>LD_LIBRARY_PATH</code> and Workbench's
+<code>PYTHONNOUSERSITE=1</code> are the explicitly supported members. Other <code>LD_*</code>,
+<code>DYLD_*</code>, Python, IPython, and Jupyter startup controls are rejected unless a
+future release adds variable-specific validation. Ordinary domain variables
+such as <code>DOMAIN_RUNTIME_ROOT</code> remain available because they do not affect the
+fixed Python kernel startup before the filter is installed. For images that
+build the kernel environment
 with <code>--warm</code>, configure its build directory under a location such as
 <code>/opt/kernel-envs</code>, recursively change that hierarchy to <code>root:root</code> ownership
 in a later root build step, and switch back to the runtime user. Changing only
@@ -2307,40 +2381,40 @@ require per-kernel OS identities or separate worker isolation.</p>
 </table>
 <h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
 <p>Pass an <code>AuthConfig</code> to control how requests are authenticated:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth.entra</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_entra_auth_config</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># For local development (no auth):</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">())</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># For production with Entra ID:</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_entra_auth_config</span><span class="p">())</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth.entra</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_entra_auth_config</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># For local development (no auth):</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">())</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># For production with Entra ID:</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span><span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">auth_config</span><span class="o">=</span><span class="n">create_entra_auth_config</span><span class="p">())</span>
 </code></pre></div>
 <p>See <a href="../authentication/">Authentication options</a> for the full auth guide.</p>
 <h2 id="publishers-artifact-output">Publishers (artifact output)<a class="headerlink" href="#publishers-artifact-output" title="Permanent link">&para;</a></h2>
 <p>Configure publishers to allow the agent to publish artifacts (files, plots) from code execution:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlobPublisher</span><span class="p">,</span> <span class="n">LocalFilePublisher</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">publishers</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">LocalFilePublisher</span><span class="p">(</span><span class="n">base_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/artifacts&quot;</span><span class="p">),</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">BlobPublisher</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="s2">&quot;https://myaccount.blob.core.windows.net&quot;</span><span class="p">,</span> <span class="n">container</span><span class="o">=</span><span class="s2">&quot;outputs&quot;</span><span class="p">),</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">]</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">(),</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>    <span class="n">publishers</span><span class="o">=</span><span class="n">publishers</span><span class="p">,</span>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.code_execution.auth</span><span class="w"> </span><span class="kn">import</span> <span class="n">create_noop_auth_config</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agora_workbench.data_lake.execution</span><span class="w"> </span><span class="kn">import</span> <span class="n">BlobPublisher</span><span class="p">,</span> <span class="n">LocalFilePublisher</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">publishers</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>    <span class="n">LocalFilePublisher</span><span class="p">(</span><span class="n">base_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/artifacts&quot;</span><span class="p">),</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>    <span class="n">BlobPublisher</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="s2">&quot;https://myaccount.blob.core.windows.net&quot;</span><span class="p">,</span> <span class="n">container</span><span class="o">=</span><span class="s2">&quot;outputs&quot;</span><span class="p">),</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="p">]</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="n">server</span> <span class="o">=</span> <span class="n">CodeExecutionServer</span><span class="p">(</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    <span class="n">server_config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    <span class="n">auth_config</span><span class="o">=</span><span class="n">create_noop_auth_config</span><span class="p">(),</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>    <span class="n">publishers</span><span class="o">=</span><span class="n">publishers</span><span class="p">,</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="p">)</span>
 </code></pre></div>
 <h2 id="running-the-server">Running the server<a class="headerlink" href="#running-the-server" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># HTTP mode (standard deployment)</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">))</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Warm up environment without serving (useful in Docker builds)</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># HTTP mode (standard deployment)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">run_http</span><span class="p">(</span><span class="n">host</span><span class="o">=</span><span class="s2">&quot;127.0.0.1&quot;</span><span class="p">,</span> <span class="n">port</span><span class="o">=</span><span class="mi">8000</span><span class="p">))</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1"># Warm up environment without serving (useful in Docker builds)</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">server</span><span class="o">.</span><span class="n">warm</span><span class="p">())</span>
 </code></pre></div>
 <p>The server exposes:</p>
 <ul>
