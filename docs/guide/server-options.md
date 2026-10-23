@@ -182,6 +182,40 @@ class ChemistryServer(CodeExecutionServer):
 | `build_dir` | Custom build directory (default: `~/.cache/mcp-envs/{name}`) |
 | `asset_cache_dir` | Writable directory for provisioned assets and transfer staging (default: parent of `build_dir`) |
 | `additional_commands` | Extra shell commands after env setup |
+| `kernel_environment` | Non-secret environment variables set on every kernel process (see [Kernel process environment](#kernel-process-environment)) |
+
+#### Kernel process environment
+
+Kernels do not inherit the server's environment. Each kernel receives only a
+small sanitized baseline (`PATH`, `HOME`, locale, timezone, and temp-directory
+variables), framework-owned values (`MCP_ASSET_CACHE_DIR`, sidecar URLs,
+`USER_IDENTITY`), and the variables declared in `kernel_environment`. Use
+`kernel_environment` for non-secret settings that must exist when the kernel
+process starts, such as `LD_LIBRARY_PATH` for native libraries; the dynamic
+loader reads it at process start, so setting it from kernel code is too late:
+
+```python
+config = ServerConfig(
+    ...,
+    kernel_environment={
+        "LD_LIBRARY_PATH": "/opt/ipopt/lib:/usr/local/lib/dwsim",
+        "DWSIM_PATH": "/usr/local/lib/dwsim/",
+    },
+)
+```
+
+Names must be valid environment variable names. Names that Workbench controls
+(`PATH`, `MCP_ASSET_CACHE_DIR`, `USER_IDENTITY`, `VIRTUAL_ENV`, `CONDA_PREFIX`,
+`CONDA_DEFAULT_ENV`, sidecar `url_env_var`s, and the IPython/Jupyter directory
+variables) and variables that inject code before kernel isolation applies
+(`PYTHONPATH`, `PYTHONHOME`, `PYTHONSTARTUP`, `PYTHONUSERBASE`,
+`PYTHONNOUSERSITE`, `LD_PRELOAD`, `LD_AUDIT`, `DYLD_INSERT_LIBRARIES`) are
+rejected. Never put credentials in `kernel_environment`.
+
+If a kernel process dies during an execution (for example a native-library
+crash or an out-of-memory kill), the call fails promptly with the exit code or
+signal, and the next call in the same session starts a fresh kernel. Session
+outputs are kept, but in-memory kernel state is lost.
 
 ### Assets
 

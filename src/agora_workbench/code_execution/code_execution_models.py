@@ -7,10 +7,42 @@ This module contains Pydantic models used by the code execution server:
 - ServerConfig: Configuration for a CodeExecutionServer instance
 """
 
+import re
 from pathlib import Path
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Kernel environment variables that ``ServerConfig.kernel_environment`` may not
+# set. The framework derives these itself (PATH, virtual/conda env hints, the
+# asset cache, the caller's identity, seccomp-mode IPython/Jupyter dirs), or they
+# inject code into the interpreter/process before Workbench's isolation and
+# environment sanitization can take effect (Python startup hooks, dynamic-loader
+# preloading/auditing). Sidecar ``url_env_var`` names are rejected separately.
+RESERVED_KERNEL_ENVIRONMENT_NAMES: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "MCP_ASSET_CACHE_DIR",
+        "USER_IDENTITY",
+        "VIRTUAL_ENV",
+        "CONDA_PREFIX",
+        "CONDA_DEFAULT_ENV",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "PYTHONUSERBASE",
+        "PYTHONNOUSERSITE",
+        "IPYTHONDIR",
+        "JUPYTER_CONFIG_DIR",
+        "JUPYTER_CONFIG_PATH",
+        "JUPYTER_PATH",
+        "LD_PRELOAD",
+        "LD_AUDIT",
+        "DYLD_INSERT_LIBRARIES",
+    }
+)
 
 
 class AssetSpec(BaseModel):
@@ -237,7 +269,8 @@ class ServerConfig(BaseModel):
         name, description, server_description, entra_client_id, entra_tenant_id
 
     **Environment** — Python environment build settings:
-        type, dependency_file, auto_build, build_dir, additional_commands
+        type, dependency_file, auto_build, build_dir, additional_commands,
+        kernel_environment
 
     **Assets** — large artifact provisioning:
         assets, auto_provision
@@ -306,6 +339,19 @@ class ServerConfig(BaseModel):
     additional_commands: list[str] = Field(
         default_factory=list,
         description="Additional shell commands to run after environment setup (e.g., 'pip install package', 'conda install -y tool')",
+    )
+    kernel_environment: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Non-secret environment variables set on every kernel process, e.g. "
+            "``{'LD_LIBRARY_PATH': '/opt/ipopt/lib'}`` for native libraries the dynamic "
+            "loader must find at process start. Kernels otherwise receive only a small "
+            "sanitized baseline (PATH, HOME, locale, temp dirs) and do not inherit the "
+            "server's environment. Do not put credentials here. Names must be valid "
+            "environment variable names and may not be framework-owned or startup-"
+            "injection variables (see ``RESERVED_KERNEL_ENVIRONMENT_NAMES``) or a "
+            "sidecar ``url_env_var``; framework-owned values always take precedence."
+        ),
     )
     sidecars: list[SidecarConfig] = Field(
         default_factory=list,
@@ -414,6 +460,34 @@ class ServerConfig(BaseModel):
             "provided SessionManager keeps its SessionConfig setting."
         ),
     )
+
+    @field_validator("kernel_environment")
+    @classmethod
+    def _validate_kernel_environment(cls, value: dict[str, str]) -> dict[str, str]:
+        """Reject invalid, framework-owned, and startup-injection variable names."""
+        for name, variable_value in value.items():
+            if not _ENV_VAR_NAME_RE.fullmatch(name):
+                raise ValueError(f"kernel_environment name {name!r} is not a valid environment variable name")
+            if name.upper() in RESERVED_KERNEL_ENVIRONMENT_NAMES:
+                raise ValueError(
+                    f"kernel_environment may not set {name!r}: it is controlled by Agora Workbench "
+                    "or can inject code before kernel isolation takes effect"
+                )
+            if "\x00" in variable_value:
+                raise ValueError(f"kernel_environment value for {name!r} contains a NUL character")
+        return value
+
+    @model_validator(mode="after")
+    def validate_kernel_environment_sidecar_names(self) -> "ServerConfig":
+        """Sidecar URL variables are framework-owned in the kernel environment."""
+        sidecar_names = {sidecar.url_env_var for sidecar in self.sidecars}
+        conflicts = sorted(sidecar_names.intersection(self.kernel_environment))
+        if conflicts:
+            raise ValueError(
+                f"kernel_environment may not set sidecar url_env_var name(s) {', '.join(conflicts)}; "
+                "Agora Workbench sets them to each sidecar's base URL"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_isolated_kernel_network(self) -> "ServerConfig":

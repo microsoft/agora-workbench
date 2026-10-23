@@ -1,12 +1,14 @@
 """Session manager with automatic cleanup."""
 
 import asyncio
+import inspect
 import logging
 import mimetypes
 import os
 import queue
 import re
 import shutil
+import signal
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -63,8 +65,9 @@ _MAX_DISPLAY_BYTES_PER_EXECUTE: int = 5 * 1024 * 1024
 _ANSI_SGR_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # Kernel processes receive a deliberately small, non-credential subset of the
-# host environment. Framework-owned values such as asset and sidecar locations
-# are added explicitly through ``configure_kernel_environment``.
+# host environment. Server-declared ``ServerConfig.kernel_environment`` values
+# and framework-owned values such as asset and sidecar locations are added
+# explicitly through ``configure_kernel_environment``.
 _KERNEL_ENV_PASSTHROUGH = (
     "PATH",
     "HOME",
@@ -80,6 +83,40 @@ _KERNEL_ENV_PASSTHROUGH = (
     "COMSPEC",
     "PATHEXT",
 )
+
+
+# Minimum seconds between kernel-process liveness probes while an execution is
+# waiting on an empty iopub queue.
+_KERNEL_LIVENESS_CHECK_INTERVAL_S = 1.0
+
+
+def _describe_kernel_exit(km: Any) -> str:
+    """Best-effort description of a dead kernel process's exit status."""
+    provisioner = getattr(km, "provisioner", None)
+    process = getattr(provisioner, "process", None)
+    returncode = getattr(process, "returncode", None)
+    if not isinstance(returncode, int):
+        return "exit status unavailable"
+
+    def signal_name(number: int) -> str:
+        try:
+            return signal.Signals(number).name
+        except ValueError:
+            return f"signal {number}"
+
+    if returncode < 0:
+        return f"exit code {returncode}, {signal_name(-returncode)}"
+    if returncode > 128:
+        return f"exit code {returncode}, likely {signal_name(returncode - 128)}"
+    return f"exit code {returncode}"
+
+
+def _kernel_death_message(session_id: str, km: Any) -> str:
+    return (
+        f"Kernel process for session {session_id} exited unexpectedly ({_describe_kernel_exit(km)}) "
+        "during execution; kernel state was lost and a fresh kernel will be started on the next call. "
+        "Native-library crashes and out-of-memory kills are common causes."
+    )
 
 
 def _strip_ansi(text: str) -> str:
@@ -196,6 +233,9 @@ class _BackgroundJob:
     # before/after pattern in :meth:`_execute_code_locked`.
     outputs_before: dict[str, Tuple[int, float]] = field(default_factory=dict)
     artifacts: list[dict] = field(default_factory=list)
+    # Generation of the kernel executing this job, so a dead kernel is evicted
+    # only if it has not already been replaced.
+    kernel_generation: Optional[int] = None
 
 
 class SessionConfig:
@@ -1169,30 +1209,53 @@ class SessionManager:
                 # Pluggable storage may be pre-populated before this manager
                 # starts. Adopt such sessions lazily under the lifecycle lock.
                 session_generation = self._adopt_session_generation_locked(session_id)
-        await self.await_kernel_shutdown(session_id)
+        while True:
+            await self.await_kernel_shutdown(session_id)
 
-        with self._session_lifecycle_lock:
-            if self._session_generations.get(session_id) != session_generation:
-                raise ValueError(f"Session {session_id} was closed before its kernel could start.")
-            existing_kernel = self._kernels.get(session_id)
-            kernel_session_generation = self._kernel_session_generations.get(session_id)
-            if existing_kernel is not None and (
-                session_generation is None
-                or kernel_session_generation is None
-                or kernel_session_generation == session_generation
-            ):
-                LOGGER.debug(f"Reusing kernel for session {session_id}")
-                self._kernel_last_used[session_id] = time.time()
-                return existing_kernel
-            stale_shutdown = (
-                self._schedule_kernel_shutdown(
+            with self._session_lifecycle_lock:
+                if self._session_generations.get(session_id) != session_generation:
+                    raise ValueError(f"Session {session_id} was closed before its kernel could start.")
+                existing_kernel = self._kernels.get(session_id)
+                kernel_session_generation = self._kernel_session_generations.get(session_id)
+                reusable_kernel = existing_kernel is not None and (
+                    session_generation is None
+                    or kernel_session_generation is None
+                    or kernel_session_generation == session_generation
+                )
+                stale_shutdown = (
+                    self._schedule_kernel_shutdown(
+                        session_id,
+                        caller="_get_or_create_kernel()",
+                        cleanup_artifacts=False,
+                    )
+                    if existing_kernel is not None and not reusable_kernel
+                    else None
+                )
+            if existing_kernel is None or not reusable_kernel:
+                break
+
+            # A registered kernel whose process died (native crash, OOM kill)
+            # must be replaced rather than handed out again.
+            kernel_alive = await self._kernel_process_is_alive(existing_kernel[0])
+            with self._session_lifecycle_lock:
+                if self._kernels.get(session_id) is not existing_kernel:
+                    # Torn down or replaced while probing; re-evaluate.
+                    continue
+                if kernel_alive:
+                    LOGGER.debug(f"Reusing kernel for session {session_id}")
+                    self._kernel_last_used[session_id] = time.time()
+                    return existing_kernel
+                LOGGER.warning(
+                    "Kernel process for session %s is no longer running (%s); replacing it",
+                    session_id,
+                    _describe_kernel_exit(existing_kernel[0]),
+                )
+                stale_shutdown = self._schedule_kernel_shutdown(
                     session_id,
                     caller="_get_or_create_kernel()",
                     cleanup_artifacts=False,
                 )
-                if existing_kernel is not None
-                else None
-            )
+            break
         if stale_shutdown is not None:
             # Drain the captured teardown under a shield so a cancelled
             # kernel-start request cannot cancel the shared task and leave the
@@ -1358,6 +1421,46 @@ class SessionManager:
         generation = self._kernel_generations.pop(session_id, None)
         if generation is not None:
             self._kernel_bootstrap_state.pop(generation, None)
+
+    async def _kernel_process_is_alive(self, km: AsyncKernelManager) -> bool:
+        """Probe the kernel process; probe failures are treated as alive."""
+        try:
+            result = km.is_alive()
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception:
+            LOGGER.debug("Kernel liveness probe failed", exc_info=True)
+            return True
+        return bool(result)
+
+    async def _evict_dead_kernel(self, session_id: str, kernel_generation: Optional[int]) -> None:
+        """Tear down a session's dead kernel so the next call starts a fresh one.
+
+        Only the kernel of ``kernel_generation`` is evicted; a replacement that
+        is already registered is left alone. Session outputs and artifacts are
+        preserved. Callers must already have recorded any background job's
+        terminal state (and cleared the session's running-job marker) so the
+        teardown neither overwrites it nor cancels the calling collector, and
+        must not wait for the session's execution lock to drain (callers may
+        hold it).
+        """
+        with self._session_lifecycle_lock:
+            if kernel_generation is not None and self._kernel_generations.get(session_id) == kernel_generation:
+                shutdown = self._schedule_kernel_shutdown(
+                    session_id,
+                    caller="dead kernel eviction",
+                    cleanup_artifacts=False,
+                )
+            else:
+                shutdown = self._kernel_shutdown_tasks.get(session_id)
+        if shutdown is None:
+            return
+        try:
+            await asyncio.shield(shutdown)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.debug("Dead kernel eviction for session %s failed", session_id, exc_info=True)
 
     def get_kernel_generation(self, session_id: str) -> Optional[int]:
         """Return the generation id of the session's current kernel.
@@ -1636,6 +1739,7 @@ class SessionManager:
         """Collect iopub messages for a running background execution."""
         keepalive_interval_seconds = self.execution_session_keepalive_seconds
         last_keepalive = job.start_time - keepalive_interval_seconds
+        last_liveness_check = time.monotonic()
         try:
             while True:
                 now = time.monotonic()
@@ -1665,6 +1769,19 @@ class SessionManager:
                 try:
                     msg = await kc.get_iopub_msg(timeout=1.0)
                 except queue.Empty:
+                    if time.monotonic() - last_liveness_check >= _KERNEL_LIVENESS_CHECK_INTERVAL_S:
+                        last_liveness_check = time.monotonic()
+                        if not await self._kernel_process_is_alive(km):
+                            job.success = False
+                            job.error = _kernel_death_message(job.session_id, km)
+                            job.status = "failed"
+                            LOGGER.error("%s (background job %s)", job.error, job.job_id)
+                            self._finalize_background_artifacts(job)
+                            # Finish the job before evicting so the teardown
+                            # does not overwrite its error or cancel this task.
+                            self._mark_job_finished(job)
+                            await self._evict_dead_kernel(job.session_id, job.kernel_generation)
+                            return
                     continue
 
                 msg_type = msg["msg_type"]
@@ -1791,6 +1908,7 @@ class SessionManager:
             raise RuntimeError(f"Session busy — job {running_job_id} is still running")
 
         km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+        kernel_generation = self.get_kernel_generation(session_id)
         code = self._prepare_outputs_preamble(session_id) + code
         outputs_before = self._snapshot_outputs_dir(session_id)
         msg_id = kc.execute(code)
@@ -1804,6 +1922,7 @@ class SessionManager:
             start_time=time.monotonic(),
             user_identity=user_identity,
             outputs_before=outputs_before,
+            kernel_generation=kernel_generation,
         )
         resource_operation = self.session_resource_operation(session_id)
         await resource_operation.__aenter__()
@@ -1890,6 +2009,7 @@ class SessionManager:
 
         async with self._kernel_execution_lock(session_id):
             km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+            kernel_generation = self.get_kernel_generation(session_id)
             code = self._prepare_outputs_preamble(session_id) + code
             outputs_before = self._snapshot_outputs_dir(session_id)
             msg_id = kc.execute(code)
@@ -1915,6 +2035,8 @@ class SessionManager:
 
             start_time = time.monotonic()
             deadline = start_time + promotion_threshold_s
+            last_liveness_check = start_time
+            kernel_died = False
 
             while True:
                 now = time.monotonic()
@@ -1928,6 +2050,11 @@ class SessionManager:
                         timeout=remaining + 0.5,
                     )
                 except (queue.Empty, asyncio.TimeoutError):
+                    if time.monotonic() - last_liveness_check >= _KERNEL_LIVENESS_CHECK_INTERVAL_S:
+                        last_liveness_check = time.monotonic()
+                        if not await self._kernel_process_is_alive(km):
+                            kernel_died = True
+                            break
                     if time.monotonic() >= deadline:
                         break
                     continue
@@ -1994,6 +2121,17 @@ class SessionManager:
                     completed = True
                     break
 
+            if kernel_died:
+                return await self._fail_execution_on_dead_kernel(
+                    session_id=session_id,
+                    km=km,
+                    kernel_generation=kernel_generation,
+                    stdout_parts=stdout_parts,
+                    stderr_parts=stderr_parts,
+                    displays=displays,
+                    outputs_before=outputs_before,
+                )
+
             if completed:
                 # Finished within threshold — return as normal foreground result
                 stdout = "".join(stdout_parts)
@@ -2020,6 +2158,7 @@ class SessionManager:
                 stderr_parts=stderr_parts,
                 success=success,
                 outputs_before=outputs_before,
+                kernel_generation=kernel_generation,
             )
             resource_operation = self.session_resource_operation(session_id)
             await resource_operation.__aenter__()
@@ -2311,6 +2450,7 @@ class SessionManager:
     ) -> Tuple[str, str, bool, list[dict], list[dict]]:
         """Inner kernel-execution body; runs under :meth:`_get_kernel_execute_lock`."""
         km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
+        kernel_generation = self.get_kernel_generation(session_id)
         code = self._prepare_outputs_preamble(session_id) + code
 
         # Snapshot the outputs dir before executing so we can diff against
@@ -2348,6 +2488,7 @@ class SessionManager:
         start_time = time.monotonic()
         keepalive_interval_seconds = self.execution_session_keepalive_seconds
         last_keepalive = start_time - keepalive_interval_seconds
+        last_liveness_check = start_time
 
         # Collect output messages
         while True:
@@ -2374,6 +2515,18 @@ class SessionManager:
             try:
                 msg = await kc.get_iopub_msg(timeout=1.0)
             except queue.Empty:
+                if time.monotonic() - last_liveness_check >= _KERNEL_LIVENESS_CHECK_INTERVAL_S:
+                    last_liveness_check = time.monotonic()
+                    if not await self._kernel_process_is_alive(km):
+                        return await self._fail_execution_on_dead_kernel(
+                            session_id=session_id,
+                            km=km,
+                            kernel_generation=kernel_generation,
+                            stdout_parts=stdout_parts,
+                            stderr_parts=stderr_parts,
+                            displays=displays,
+                            outputs_before=outputs_before,
+                        )
                 continue
 
             msg_type = msg["msg_type"]
@@ -2476,6 +2629,36 @@ class SessionManager:
             artifacts = []
 
         return stdout, stderr, success, displays, artifacts
+
+    async def _fail_execution_on_dead_kernel(
+        self,
+        *,
+        session_id: str,
+        km: AsyncKernelManager,
+        kernel_generation: Optional[int],
+        stdout_parts: list[str],
+        stderr_parts: list[str],
+        displays: list[dict],
+        outputs_before: dict[str, Tuple[int, float]],
+    ) -> Tuple[str, str, bool, list[dict], list[dict]]:
+        """Build a foreground failure result for a dead kernel and evict it.
+
+        Runs while the caller holds the session's execution lock, which the
+        eviction therefore must not wait for.
+        """
+        message = _kernel_death_message(session_id, km)
+        LOGGER.error(message)
+        try:
+            outputs_after = self._snapshot_outputs_dir(session_id)
+            artifacts = self._register_artifacts_from_diff(session_id, outputs_before, outputs_after)
+        except Exception:
+            LOGGER.warning("Artifact discovery failed for session %s", session_id, exc_info=True)
+            artifacts = []
+        await self._evict_dead_kernel(session_id, kernel_generation)
+        stderr = "".join(stderr_parts)
+        if stderr and not stderr.endswith("\n"):
+            stderr += "\n"
+        return "".join(stdout_parts), stderr + message, False, displays, artifacts
 
     async def _shutdown_kernel(
         self,

@@ -189,6 +189,44 @@ class TestUserTokenKernelPropagation:
         assert env["USER_IDENTITY"] == "user@example.com"
 
     @pytest.mark.asyncio
+    async def test_server_kernel_environment_reaches_kernel_with_framework_precedence(self, tmp_path):
+        from ...auth import create_noop_auth_config
+        from ...code_execution_models import ServerConfig
+        from ...server import CodeExecutionServer
+
+        config = ServerConfig(
+            name="kernel-env",
+            description="Kernel environment test",
+            type="uv",
+            dependency_file="",
+            build_dir=tmp_path / "env",
+            kernel_environment={"LD_LIBRARY_PATH": "/opt/ipopt/lib", "DWSIM_PATH": "/usr/local/lib/dwsim/"},
+        )
+        # Bypass validation to prove framework-owned values still win at merge time.
+        config.kernel_environment["MCP_ASSET_CACHE_DIR"] = "/domain/override"
+        manager = SessionManager()
+        server = CodeExecutionServer(config, session_manager=manager, auth_config=create_noop_auth_config())
+        with (
+            patch.object(server, "_ensure_environment", new=AsyncMock()),
+            patch.object(server, "_register_kernel", new=AsyncMock()),
+            patch.object(server, "_initialize_tool_search_backends", new=AsyncMock()),
+            patch.object(server.activity_publisher, "start", new=AsyncMock()),
+        ):
+            await server._startup()
+
+        manager.create_session({}, "user@example.com", "token", {}, session_id="sess-env")
+        km, _ = self._make_mock_kernel()
+        km.kernel_spec.argv = ["/env/bin/python"]
+        with patch("agora_workbench.code_execution.sessions.manager.AsyncKernelManager", return_value=km):
+            await manager._get_or_create_kernel("sess-env", user_identity="user@example.com")
+
+        env = km.start_kernel.call_args.kwargs["env"]
+        assert env["LD_LIBRARY_PATH"] == "/opt/ipopt/lib"
+        assert env["DWSIM_PATH"] == "/usr/local/lib/dwsim/"
+        assert env["MCP_ASSET_CACHE_DIR"] == str(config.get_cache_dir())
+        assert env["USER_IDENTITY"] == "user@example.com"
+
+    @pytest.mark.asyncio
     async def test_kernel_started_with_user_identity(self):
         """USER_IDENTITY env var is set when a new kernel is started."""
         manager = SessionManager()
