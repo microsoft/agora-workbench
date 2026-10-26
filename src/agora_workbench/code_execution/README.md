@@ -186,6 +186,9 @@ Each server registers a prefixed inspect meta tool (for example `gis_inspect_ses
 }
 ```
 
+While a background job is running, inspection reports `"status": "busy"` with its `job_id` and `job_status`.
+The namespace is not probed concurrently; `namespace_error` explains that it is temporarily unavailable.
+
 ## Parallel execution tools
 
 Each server also registers map-style parallel tools:
