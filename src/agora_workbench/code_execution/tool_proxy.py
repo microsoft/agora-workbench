@@ -71,7 +71,9 @@ def generate_tracing_infrastructure_code() -> str:
     match statements, PEP 585 built-in generics like list[int]).
     """
     return textwrap.dedent("""\
-        import time, json, traceback
+        import builtins as _agora_trace_builtins
+        import json as _agora_trace_json
+        import time as _agora_trace_time
 
         class ToolCallLog:
             \"\"\"Accumulates structured tool-call records during a single execute_code invocation.\"\"\"
@@ -81,15 +83,31 @@ def generate_tracing_infrastructure_code() -> str:
                 self._object_refs = {}
                 self._next_ref = 1
 
-            def record(self, tool_name, args, result, duration_ms, success, error=None):
+            def record(
+                self,
+                tool_name,
+                args,
+                result,
+                duration_ms,
+                success,
+                error=None,
+                _isinstance=_agora_trace_builtins.isinstance,
+                _dict_type=_agora_trace_builtins.dict,
+                _round=_agora_trace_builtins.round,
+                _time=_agora_trace_time.time,
+            ):
                 self._calls.append({
                     "tool_name": tool_name,
                     "args": self._safe_serialize(args),
-                    "result": self._safe_serialize(result) if isinstance(result, dict) else self._safe_serialize_value(result),
-                    "duration_ms": round(duration_ms, 2),
+                    "result": (
+                        self._safe_serialize(result)
+                        if _isinstance(result, _dict_type)
+                        else self._safe_serialize_value(result)
+                    ),
+                    "duration_ms": _round(duration_ms, 2),
                     "success": success,
                     "error": error,
-                    "timestamp": time.time(),
+                    "timestamp": _time(),
                 })
 
             def flush(self):
@@ -100,15 +118,28 @@ def generate_tracing_infrastructure_code() -> str:
                 self._next_ref = 1
                 return calls
 
-            def _safe_serialize(self, obj):
+            def _safe_serialize(
+                self,
+                obj,
+                _isinstance=_agora_trace_builtins.isinstance,
+                _dict_type=_agora_trace_builtins.dict,
+                _sequence_types=(_agora_trace_builtins.list, _agora_trace_builtins.tuple),
+            ):
                 \"\"\"Make a JSON-safe copy. For dicts, process each value recursively.\"\"\"
-                if isinstance(obj, dict):
+                if _isinstance(obj, _dict_type):
                     return {k: self._safe_serialize(v) for k, v in obj.items()}
-                if isinstance(obj, (list, tuple)):
+                if _isinstance(obj, _sequence_types):
                     return [self._safe_serialize(item) for item in obj]
                 return self._safe_serialize_value(obj)
 
-            def _safe_serialize_value(self, val):
+            def _safe_serialize_value(
+                self,
+                val,
+                _json_dumps=_agora_trace_json.dumps,
+                _id=_agora_trace_builtins.id,
+                _type=_agora_trace_builtins.type,
+                _serialization_errors=(_agora_trace_builtins.TypeError, _agora_trace_builtins.ValueError),
+            ):
                 \"\"\"Serialize a single value safely.
 
                 Non-serializable objects get stable identity refs (e.g. '<Flowsheet@1>')
@@ -116,19 +147,19 @@ def generate_tracing_infrastructure_code() -> str:
                 trace correlation without polluting the tool interface with handle IDs.
                 \"\"\"
                 try:
-                    json.dumps(val)
+                    _json_dumps(val)
                     return val
-                except (TypeError, ValueError):
-                    obj_id = id(val)
+                except _serialization_errors:
+                    obj_id = _id(val)
                     if obj_id not in self._object_refs:
-                        type_name = type(val).__name__
+                        type_name = _type(val).__name__
                         ref_num = self._next_ref
                         self._next_ref += 1
                         self._object_refs[obj_id] = f"<{type_name}@{ref_num}>"
                     return self._object_refs[obj_id]
 
-        if '_tool_call_log' not in globals():
-            globals()['_tool_call_log'] = ToolCallLog()
+        if '_tool_call_log' not in _agora_trace_builtins.globals():
+            _agora_trace_builtins.globals()['_tool_call_log'] = ToolCallLog()
     """)
 
 
@@ -216,20 +247,26 @@ def _build_proxy_source(tool_def: "ToolDefinition") -> str:  # noqa: C901 – ge
     body_lines.append("_t0 = _time.perf_counter()")
     body_lines.append("try:")
     body_lines.append(f"    _result = _impl({kwargs_entries})")
-    body_lines.append("    _duration = (_time.perf_counter() - _t0) * 1000")
-    body_lines.append("    if _log is not None:")
-    body_lines.append("        _log.record({name!r}, _args, _result, _duration, success=True)".format(name=name))
-    body_lines.append("    return _result")
-
-    # exception handling
     body_lines.append("except Exception as _e:")
     body_lines.append("    _duration = (_time.perf_counter() - _t0) * 1000")
     body_lines.append("    if _log is not None:")
+    body_lines.append("        try:")
     body_lines.append(
-        "        _log.record({name!r}, _args, {{}}, _duration, success=False, "
+        "            _log.record({name!r}, _args, {{}}, _duration, success=False, "
         'error=f"{{type(_e).__name__}}: {{_e}}")'.format(name=name)
     )
+    body_lines.append("        except Exception:")
+    body_lines.append("            # Tracing must not replace the tool implementation's exception.")
+    body_lines.append("            pass")
     body_lines.append("    raise")
+    body_lines.append("_duration = (_time.perf_counter() - _t0) * 1000")
+    body_lines.append("if _log is not None:")
+    body_lines.append("    try:")
+    body_lines.append("        _log.record({name!r}, _args, _result, _duration, success=True)".format(name=name))
+    body_lines.append("    except Exception:")
+    body_lines.append("        # Tracing must not change a successful tool call's result.")
+    body_lines.append("        pass")
+    body_lines.append("return _result")
 
     indented_body = "\n    ".join(body_lines)
 
