@@ -859,13 +859,17 @@ class CodeExecutionServer(BaseMCPServer):
         # Build code execution tool
         execute_code_tool = execution_defaults.build_tool(self)
 
-        # Build tool description from the domain config description + the function docstring,
-        # resolving the {max_timeout} placeholder.
+        # FastMCP derives parameter descriptions from the callable's docstring,
+        # so resolve dynamic values before registration.
+        execute_code_doc = inspect.cleandoc(execute_code_tool.__doc__ or "").format(max_timeout=self.max_timeout)
+        execute_code_tool.__doc__ = execute_code_doc
+
+        # Build tool description from the domain config description + the resolved function docstring.
         tool_catalog = self._build_tool_catalog_summary()
         tool_description = (
             self.server_config.description
             + "\n\n"
-            + inspect.cleandoc(execute_code_tool.__doc__ or "").format(max_timeout=self.max_timeout)
+            + execute_code_doc
             + "\n\n"
             + execution_defaults._build_disallowed_actions_description(self)
         )
