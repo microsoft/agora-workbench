@@ -22,6 +22,29 @@ class _SessionResourceOperation:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_execute_tool_formats_timeout_parameter_description():
+    server = CodeExecutionServer(
+        server_config=ServerConfig(
+            name="test_direct",
+            description="Test direct code execution",
+            type="uv",
+            dependency_file="# empty",
+            max_timeout=36000,
+        ),
+        auth_config=create_noop_auth_config(),
+    )
+
+    tool = await server.mcp.get_tool(server.get_tool_name())
+    timeout_description = tool.parameters["properties"]["timeout"]["description"]
+
+    assert "max: 36000" in timeout_description
+    assert "{max_timeout}" not in timeout_description
+    assert tool.description is not None
+    assert "max: 36000" in tool.description
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_execute_tool_has_no_duplicate_structured_content():
     server = CodeExecutionServer(
         server_config=ServerConfig(
