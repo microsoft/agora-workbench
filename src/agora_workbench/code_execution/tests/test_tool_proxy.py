@@ -181,6 +181,91 @@ def test_safe_serialize_handles_non_serializable():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("shadowed_name", "shadowed_value"),
+    [
+        ("id", "ordinary identifier"),
+        ("time", 100.0),
+        ("json", {"status": "user data"}),
+    ],
+)
+def test_tracing_is_unchanged_when_user_shadows_common_names(shadowed_name, shadowed_value):
+    """User variables must not replace dependencies captured by the tracing infrastructure."""
+    tool = _make_single_object_return_tool()
+    reg = _registry_with(tool)
+
+    class FakeNetwork:
+        pass
+
+    network = FakeNetwork()
+    mock_mod = types.ModuleType("mock_tools")
+    mock_mod.define_network = lambda name: network
+    sys.modules["mock_tools"] = mock_mod
+
+    try:
+        ns = _exec_infrastructure()
+        exec(generate_tool_proxies(reg), ns)
+        ns[shadowed_name] = shadowed_value
+
+        assert ns["define_network"](name="test") is network
+        calls = ns["_tool_call_log"].flush()
+        assert len(calls) == 1
+        assert calls[0]["success"] is True
+        assert calls[0]["result"] == "<FakeNetwork@1>"
+    finally:
+        del sys.modules["mock_tools"]
+
+
+@pytest.mark.unit
+def test_tracing_failure_does_not_replace_successful_tool_result():
+    """Observability failures must not change a successful tool call's behavior."""
+    tool = _make_simple_tool()
+    reg = _registry_with(tool)
+    mock_mod = types.ModuleType("mock_tools")
+    mock_mod.my_tool = lambda x, y, z=1.5: {"value": y}
+    sys.modules["mock_tools"] = mock_mod
+
+    try:
+        ns = _exec_infrastructure()
+        exec(generate_tool_proxies(reg), ns)
+
+        def fail_to_record(*args, **kwargs):
+            raise RuntimeError("trace unavailable")
+
+        ns["_tool_call_log"].record = fail_to_record
+        assert ns["my_tool"](x="test", y=42) == {"value": 42}
+    finally:
+        del sys.modules["mock_tools"]
+
+
+@pytest.mark.unit
+def test_tracing_failure_does_not_replace_tool_exception():
+    """Observability failures must not hide the exception raised by the tool implementation."""
+    tool = _make_simple_tool()
+    reg = _registry_with(tool)
+    mock_mod = types.ModuleType("mock_tools")
+
+    def fail_tool(x, y, z=1.5):
+        raise ValueError("tool failed")
+
+    mock_mod.my_tool = fail_tool
+    sys.modules["mock_tools"] = mock_mod
+
+    try:
+        ns = _exec_infrastructure()
+        exec(generate_tool_proxies(reg), ns)
+
+        def fail_to_record(*args, **kwargs):
+            raise RuntimeError("trace unavailable")
+
+        ns["_tool_call_log"].record = fail_to_record
+        with pytest.raises(ValueError, match="tool failed"):
+            ns["my_tool"](x="test", y=42)
+    finally:
+        del sys.modules["mock_tools"]
+
+
+@pytest.mark.unit
 def test_generate_tool_proxies_valid_python():
     """Generated proxy code must be valid Python (compilable)."""
     reg = _registry_with(_make_simple_tool("tool_a"), _make_simple_tool("tool_b", module="other_mod"))
