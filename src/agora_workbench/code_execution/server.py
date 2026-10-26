@@ -2294,7 +2294,38 @@ class CodeExecutionServer(BaseMCPServer):
     async def _inspect_session_payload(self, session_id: str) -> dict[str, Any]:
         """Inspect a session's namespace and background job status."""
         self.session_manager.get_session(session_id)
-        inspect_code = """
+
+        async def get_job_state() -> tuple[Optional[str], Optional[str], bool]:
+            background_job_id = self.session_manager._get_running_job_for_session(session_id)
+            async with self._parallel_state_lock:
+                latest_job_id = self._parallel_job_by_session.get(session_id)
+                latest_job = self._parallel_jobs.get(latest_job_id or "")
+                running_job = next(
+                    (
+                        job
+                        for job in self._parallel_jobs.values()
+                        if job["session_id"] == session_id and job["status"] == "running"
+                    ),
+                    None,
+                )
+
+            if background_job_id:
+                return background_job_id, "running", True
+            job = running_job or latest_job
+            return (
+                job["job_id"] if job else None,
+                job["status"] if job else None,
+                running_job is not None,
+            )
+
+        job_id, job_status, busy = await get_job_state()
+        namespace: dict[str, Any] = {}
+        namespace_error: Optional[str] = None
+
+        if busy:
+            namespace_error = f"Session busy — job {job_id} is still running"
+        else:
+            inspect_code = """
 import json as __agora_json__
 
 def __agora_safe_repr__(value, limit=300):
@@ -2317,37 +2348,29 @@ for __name__, __value__ in list(globals().items()):
 
 print(__agora_json__.dumps(__agora_ns__, sort_keys=True))
 """
-        stdout, _stderr, success, _displays, _artifacts = await self.session_manager.execute_code_for_session(
-            session_id=session_id,
-            code=inspect_code,
-            timeout=10,
-            working_dir=str(self.working_dir) if self.working_dir else None,
-        )
-
-        namespace: dict[str, Any] = {}
-        if success and stdout.strip():
-            namespace = json.loads(stdout.strip().splitlines()[-1])
-
-        async with self._parallel_state_lock:
-            latest_job_id = self._parallel_job_by_session.get(session_id)
-            latest_job = self._parallel_jobs.get(latest_job_id or "")
-            running_job = next(
-                (
-                    job
-                    for job in self._parallel_jobs.values()
-                    if job["session_id"] == session_id and job["status"] == "running"
-                ),
-                None,
+            stdout, stderr, success, _displays, _artifacts = await self.session_manager.execute_code_for_session(
+                session_id=session_id,
+                code=inspect_code,
+                timeout=10,
+                working_dir=str(self.working_dir) if self.working_dir else None,
             )
 
-        job = running_job or latest_job
-        return {
+            if success and stdout.strip():
+                namespace = json.loads(stdout.strip().splitlines()[-1])
+            elif not success:
+                namespace_error = stderr.strip() or "Namespace inspection failed"
+                job_id, job_status, busy = await get_job_state()
+
+        payload = {
             "session_id": session_id,
-            "status": "busy" if running_job else "idle",
-            "job_id": job["job_id"] if job else None,
-            "job_status": job["status"] if job else None,
+            "status": "busy" if busy else "idle",
+            "job_id": job_id,
+            "job_status": job_status,
             "namespace": namespace,
         }
+        if namespace_error:
+            payload["namespace_error"] = namespace_error
+        return payload
 
     def _build_parallel_code(self, code: str, input_values: dict[str, Any]) -> str:
         """Inject input values into a code template."""

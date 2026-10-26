@@ -53,6 +53,63 @@ async def test_inspect_session_payload_reports_namespace(test_server):
 
 
 @pytest.mark.asyncio
+async def test_inspect_session_payload_reports_running_background_job(test_server, monkeypatch):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test_user",
+        user_token="test-token",
+        token_claims={},
+    )
+
+    async def unexpected_namespace_probe(*args, **kwargs):
+        pytest.fail("busy sessions must not be probed for their namespace")
+
+    monkeypatch.setattr(test_server.session_manager, "_get_running_job_for_session", lambda _session_id: "j_1")
+    monkeypatch.setattr(test_server.session_manager, "execute_code_for_session", unexpected_namespace_probe)
+
+    try:
+        payload = await test_server._inspect_session_payload(session_id)
+        assert payload == {
+            "session_id": session_id,
+            "status": "busy",
+            "job_id": "j_1",
+            "job_status": "running",
+            "namespace": {},
+            "namespace_error": "Session busy — job j_1 is still running",
+        }
+    finally:
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
+async def test_inspect_session_payload_reports_namespace_probe_error(test_server, monkeypatch):
+    session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity="test_user",
+        user_token="test-token",
+        token_claims={},
+    )
+
+    async def failed_namespace_probe(*args, **kwargs):
+        return "", "Namespace probe failed", False, [], []
+
+    monkeypatch.setattr(test_server.session_manager, "execute_code_for_session", failed_namespace_probe)
+
+    try:
+        payload = await test_server._inspect_session_payload(session_id)
+        assert payload == {
+            "session_id": session_id,
+            "status": "idle",
+            "job_id": None,
+            "job_status": None,
+            "namespace": {},
+            "namespace_error": "Namespace probe failed",
+        }
+    finally:
+        test_server.session_manager.close_session(session_id)
+
+
+@pytest.mark.asyncio
 async def test_parallel_execute_for_session_returns_results(test_server):
     parent_session_id = test_server.session_manager.create_session(
         data={},
