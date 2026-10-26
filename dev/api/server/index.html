@@ -2881,29 +2881,29 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-928">928</a></span>
-<span class="normal"><a href="#__codelineno-0-929">929</a></span>
-<span class="normal"><a href="#__codelineno-0-930">930</a></span>
-<span class="normal"><a href="#__codelineno-0-931">931</a></span>
-<span class="normal"><a href="#__codelineno-0-932">932</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-932">932</a></span>
 <span class="normal"><a href="#__codelineno-0-933">933</a></span>
 <span class="normal"><a href="#__codelineno-0-934">934</a></span>
 <span class="normal"><a href="#__codelineno-0-935">935</a></span>
 <span class="normal"><a href="#__codelineno-0-936">936</a></span>
 <span class="normal"><a href="#__codelineno-0-937">937</a></span>
 <span class="normal"><a href="#__codelineno-0-938">938</a></span>
-<span class="normal"><a href="#__codelineno-0-939">939</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-928" name="__codelineno-0-928"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_data_lake_capabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session</span><span class="p">:</span> <span class="s2">&quot;Session&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
-<a id="__codelineno-0-929" name="__codelineno-0-929"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return caller-effective catalog capabilities for application adapters.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-930" name="__codelineno-0-930"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">catalog</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-931" name="__codelineno-0-931"></a>        <span class="k">return</span> <span class="p">()</span>
-<a id="__codelineno-0-932" name="__codelineno-0-932"></a>    <span class="n">binding</span><span class="p">:</span> <span class="s2">&quot;CatalogSessionBinding | None&quot;</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;catalog&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-933" name="__codelineno-0-933"></a>    <span class="k">if</span> <span class="n">binding</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-934" name="__codelineno-0-934"></a>        <span class="k">return</span> <span class="p">()</span>
-<a id="__codelineno-0-935" name="__codelineno-0-935"></a>    <span class="n">snapshot</span> <span class="o">=</span> <span class="n">binding</span><span class="o">.</span><span class="n">snapshot</span><span class="p">()</span>
-<a id="__codelineno-0-936" name="__codelineno-0-936"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-937" name="__codelineno-0-937"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">catalog</span><span class="o">.</span><span class="n">capabilities</span><span class="p">(</span><span class="n">snapshot</span><span class="p">)</span>
-<a id="__codelineno-0-938" name="__codelineno-0-938"></a>    <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-939" name="__codelineno-0-939"></a>        <span class="n">snapshot</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+<span class="normal"><a href="#__codelineno-0-939">939</a></span>
+<span class="normal"><a href="#__codelineno-0-940">940</a></span>
+<span class="normal"><a href="#__codelineno-0-941">941</a></span>
+<span class="normal"><a href="#__codelineno-0-942">942</a></span>
+<span class="normal"><a href="#__codelineno-0-943">943</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-932" name="__codelineno-0-932"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_data_lake_capabilities</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session</span><span class="p">:</span> <span class="s2">&quot;Session&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">Any</span><span class="p">,</span> <span class="o">...</span><span class="p">]:</span>
+<a id="__codelineno-0-933" name="__codelineno-0-933"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return caller-effective catalog capabilities for application adapters.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-934" name="__codelineno-0-934"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">catalog</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-935" name="__codelineno-0-935"></a>        <span class="k">return</span> <span class="p">()</span>
+<a id="__codelineno-0-936" name="__codelineno-0-936"></a>    <span class="n">binding</span><span class="p">:</span> <span class="s2">&quot;CatalogSessionBinding | None&quot;</span> <span class="o">=</span> <span class="n">session</span><span class="o">.</span><span class="n">extensions</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;catalog&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-937" name="__codelineno-0-937"></a>    <span class="k">if</span> <span class="n">binding</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-938" name="__codelineno-0-938"></a>        <span class="k">return</span> <span class="p">()</span>
+<a id="__codelineno-0-939" name="__codelineno-0-939"></a>    <span class="n">snapshot</span> <span class="o">=</span> <span class="n">binding</span><span class="o">.</span><span class="n">snapshot</span><span class="p">()</span>
+<a id="__codelineno-0-940" name="__codelineno-0-940"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-941" name="__codelineno-0-941"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">catalog</span><span class="o">.</span><span class="n">capabilities</span><span class="p">(</span><span class="n">snapshot</span><span class="p">)</span>
+<a id="__codelineno-0-942" name="__codelineno-0-942"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-943" name="__codelineno-0-943"></a>        <span class="n">snapshot</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -2931,11 +2931,7 @@ argument.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/server.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-1169">1169</a></span>
-<span class="normal"><a href="#__codelineno-0-1170">1170</a></span>
-<span class="normal"><a href="#__codelineno-0-1171">1171</a></span>
-<span class="normal"><a href="#__codelineno-0-1172">1172</a></span>
-<span class="normal"><a href="#__codelineno-0-1173">1173</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-1173">1173</a></span>
 <span class="normal"><a href="#__codelineno-0-1174">1174</a></span>
 <span class="normal"><a href="#__codelineno-0-1175">1175</a></span>
 <span class="normal"><a href="#__codelineno-0-1176">1176</a></span>
@@ -2945,21 +2941,25 @@ argument.</p>
 <span class="normal"><a href="#__codelineno-0-1180">1180</a></span>
 <span class="normal"><a href="#__codelineno-0-1181">1181</a></span>
 <span class="normal"><a href="#__codelineno-0-1182">1182</a></span>
-<span class="normal"><a href="#__codelineno-0-1183">1183</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-1169" name="__codelineno-0-1169"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<a id="__codelineno-0-1170" name="__codelineno-0-1170"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-1171" name="__codelineno-0-1171"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
-<a id="__codelineno-0-1172" name="__codelineno-0-1172"></a>
-<a id="__codelineno-0-1173" name="__codelineno-0-1173"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
-<a id="__codelineno-0-1174" name="__codelineno-0-1174"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-1175" name="__codelineno-0-1175"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
-<a id="__codelineno-0-1176" name="__codelineno-0-1176"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
-<a id="__codelineno-0-1177" name="__codelineno-0-1177"></a>
-<a id="__codelineno-0-1178" name="__codelineno-0-1178"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
-<a id="__codelineno-0-1179" name="__codelineno-0-1179"></a>
-<a id="__codelineno-0-1180" name="__codelineno-0-1180"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
-<a id="__codelineno-0-1181" name="__codelineno-0-1181"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-1182" name="__codelineno-0-1182"></a>
-<a id="__codelineno-0-1183" name="__codelineno-0-1183"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-1183">1183</a></span>
+<span class="normal"><a href="#__codelineno-0-1184">1184</a></span>
+<span class="normal"><a href="#__codelineno-0-1185">1185</a></span>
+<span class="normal"><a href="#__codelineno-0-1186">1186</a></span>
+<span class="normal"><a href="#__codelineno-0-1187">1187</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-1173" name="__codelineno-0-1173"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_python_executable</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-0-1174" name="__codelineno-0-1174"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-1175" name="__codelineno-0-1175"></a><span class="sd">    Return the path to the Python interpreter for this environment.</span>
+<a id="__codelineno-0-1176" name="__codelineno-0-1176"></a>
+<a id="__codelineno-0-1177" name="__codelineno-0-1177"></a><span class="sd">    This will automatically build the environment if needed and build_environment=True.</span>
+<a id="__codelineno-0-1178" name="__codelineno-0-1178"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-1179" name="__codelineno-0-1179"></a>    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">_environment_ready</span><span class="p">:</span>
+<a id="__codelineno-0-1180" name="__codelineno-0-1180"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
+<a id="__codelineno-0-1181" name="__codelineno-0-1181"></a>
+<a id="__codelineno-0-1182" name="__codelineno-0-1182"></a>    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_ensure_environment</span><span class="p">()</span>
+<a id="__codelineno-0-1183" name="__codelineno-0-1183"></a>
+<a id="__codelineno-0-1184" name="__codelineno-0-1184"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">:</span>
+<a id="__codelineno-0-1185" name="__codelineno-0-1185"></a>        <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Failed to determine Python executable path&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-1186" name="__codelineno-0-1186"></a>
+<a id="__codelineno-0-1187" name="__codelineno-0-1187"></a>    <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_python_executable</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
