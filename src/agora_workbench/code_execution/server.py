@@ -2550,6 +2550,30 @@ else:
             batch = self._parallel_batches.get(batch_id)
             return batch["parent_session_id"] if batch else None
 
+    async def _get_parallel_job_batch_id(
+        self,
+        job_id: str,
+        caller_identity: Optional[str] = None,
+    ) -> Optional[str]:
+        """Return an active parallel job's batch when the caller owns it."""
+        async with self._parallel_state_lock:
+            job = self._parallel_jobs.get(job_id)
+            if not job:
+                return None
+            batch_id = job["batch_id"]
+            batch = self._parallel_batches.get(batch_id)
+            if not batch:
+                return None
+            parent_session_id = batch["parent_session_id"]
+
+        try:
+            parent_session = self.session_manager.get_session(parent_session_id)
+        except ValueError:
+            return None
+        if caller_identity and parent_session.user_identity and caller_identity != parent_session.user_identity:
+            return None
+        return batch_id
+
     async def _check_batch_payload(self, batch_id: str) -> dict[str, Any]:
         """Build aggregate status for a parallel batch."""
         async with self._parallel_state_lock:
@@ -2858,7 +2882,9 @@ else:
             name=execute_name,
             description=(
                 "Execute the same code template across multiple input dictionaries in parallel. "
-                "A dedicated child session/kernel is created per input and run in background."
+                "A dedicated child session/kernel is created per input and run in background. "
+                f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
+                f"and are not accepted by {self.server_config.name}_check_job."
             ),
         )(parallel_execute)
         self.mcp.tool(name=check_name, description="Check aggregate status and available results for a parallel batch")(

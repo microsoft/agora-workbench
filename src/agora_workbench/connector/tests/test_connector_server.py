@@ -430,6 +430,10 @@ class TestRouterProxyToolRegistration:
         assert "chemistry_check_batch" in tool_names
         assert "chemistry_cancel_batch" in tool_names
         assert "chemistry_send" in tool_names
+        parallel_execute = next(t for t in tools if t.name == "chemistry_parallel_execute")
+        assert parallel_execute.description is not None
+        assert "chemistry_check_batch" in parallel_execute.description
+        assert "not accepted by chemistry_check_job" in parallel_execute.description
 
     @pytest.mark.asyncio
     async def test_workflow_proxy_only_with_state_annotated_tools(self):

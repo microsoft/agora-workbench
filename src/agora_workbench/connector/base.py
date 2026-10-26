@@ -395,7 +395,9 @@ class ConnectorServer(BaseMCPServer):
             name=execute_name,
             description=(
                 f"Execute the same code template across multiple input dictionaries in parallel on "
-                f"{upstream_name}. A dedicated child session/kernel is created per input."
+                f"{upstream_name}. A dedicated child session/kernel is created per input. "
+                f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
+                f"and are not accepted by {upstream_name}_check_job."
             ),
             func=parallel_execute_proxy,
         )

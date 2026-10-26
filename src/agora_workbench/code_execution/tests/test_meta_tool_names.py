@@ -45,6 +45,15 @@ class TestMetaToolPrefixing:
         )
 
     @pytest.mark.asyncio
+    async def test_parallel_execute_description_identifies_batch_polling_tool(self):
+        tools = await _make_server("alpha").mcp.list_tools()
+        parallel_execute = next(tool for tool in tools if tool.name == "alpha_parallel_execute")
+
+        assert parallel_execute.description is not None
+        assert "alpha_check_batch" in parallel_execute.description
+        assert "not accepted by alpha_check_job" in parallel_execute.description
+
+    @pytest.mark.asyncio
     async def test_no_name_collisions_between_two_servers(self):
         """The tool lists of two servers must be disjoint after prefixing."""
         a = set(await _list_tool_names(_make_server("alpha")))

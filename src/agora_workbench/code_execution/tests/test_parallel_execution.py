@@ -254,6 +254,81 @@ async def test_check_batch_tool_returns_results(test_server):
 
 
 @pytest.mark.asyncio
+async def test_check_job_directs_parallel_jobs_to_check_batch(test_server):
+    """check_job must identify the batch polling tool for an owned parallel job."""
+    _set_tool_auth_context()
+    parent_session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity=TOOL_USER_IDENTITY,
+        user_token=TOOL_USER_TOKEN,
+        token_claims=TOOL_TOKEN_CLAIMS,
+    )
+    parent = test_server.session_manager.get_session(parent_session_id)
+    check_job = (await test_server.mcp.get_tool("test_check_job")).fn
+    batch_id = None
+
+    try:
+        payload = await test_server._parallel_execute_for_session(
+            parent_session=parent,
+            code="import time\ntime.sleep(30)\nresult = value",
+            inputs=[{"value": 1}],
+            timeout=60,
+            result_variable="result",
+        )
+        batch_id = payload["batch_id"]
+        job_id = payload["jobs"][0]["job_id"]
+
+        _set_tool_auth_context()
+        status = json.loads(await check_job(None, job_id))
+
+        assert status["success"] is False
+        assert batch_id in status["error"]
+        assert f"test_check_batch(batch_id='{batch_id}')" in status["error"]
+    finally:
+        if batch_id in test_server._parallel_batches:
+            await test_server._cancel_batch_payload(batch_id)
+        _clear_tool_auth_context()
+        test_server.session_manager.close_session(parent_session_id)
+
+
+@pytest.mark.asyncio
+async def test_check_job_does_not_reveal_parallel_batch_to_other_users(test_server):
+    """Parallel job guidance must preserve the existing no-existence-probing behavior."""
+    _set_tool_auth_context()
+    parent_session_id = test_server.session_manager.create_session(
+        data={},
+        user_identity=TOOL_USER_IDENTITY,
+        user_token=TOOL_USER_TOKEN,
+        token_claims=TOOL_TOKEN_CLAIMS,
+    )
+    parent = test_server.session_manager.get_session(parent_session_id)
+    check_job = (await test_server.mcp.get_tool("test_check_job")).fn
+    batch_id = None
+
+    try:
+        payload = await test_server._parallel_execute_for_session(
+            parent_session=parent,
+            code="import time\ntime.sleep(30)\nresult = value",
+            inputs=[{"value": 1}],
+            timeout=60,
+            result_variable="result",
+        )
+        batch_id = payload["batch_id"]
+        job_id = payload["jobs"][0]["job_id"]
+
+        set_current_user_identity("other-user-oid@other-tenant-id")
+        status = json.loads(await check_job(None, job_id))
+
+        assert status == {"success": False, "error": f"Job {job_id} not found"}
+        assert batch_id not in status["error"]
+    finally:
+        if batch_id in test_server._parallel_batches:
+            await test_server._cancel_batch_payload(batch_id)
+        _clear_tool_auth_context()
+        test_server.session_manager.close_session(parent_session_id)
+
+
+@pytest.mark.asyncio
 async def test_cancel_batch_tool_cancels_running_batch(test_server):
     """The registered cancel_batch MCP tool must cancel a running batch."""
     _set_tool_auth_context()
