@@ -1086,7 +1086,17 @@ def build_check_job_tool(server: "CodeExecutionServer") -> "Callable[..., Awaita
             caller_identity = get_current_user_identity()
             # Pass caller_identity so that missing-job and unauthorized-access both
             # raise ValueError("Job … not found"), preventing job-id existence probing.
-            status = server.session_manager.check_background_job(job_id, caller_identity=caller_identity)
+            try:
+                status = server.session_manager.check_background_job(job_id, caller_identity=caller_identity)
+            except ValueError:
+                batch_id = await server._get_parallel_job_batch_id(job_id, caller_identity=caller_identity)
+                if batch_id:
+                    check_batch_name = f"{server.server_config.name}_check_batch"
+                    raise ValueError(
+                        f"Job {job_id} belongs to parallel batch {batch_id}; "
+                        f"use {check_batch_name}(batch_id='{batch_id}') to poll it"
+                    ) from None
+                raise
             # Drop artifacts from the agent's view, matching the foreground
             # execute_code path: the user — not the agent — downloads files,
             # and the URLs already ride the job_finished activity event.
