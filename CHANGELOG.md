@@ -10,6 +10,20 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Fixed
+
+- Programmatic tool tracing now captures its serialization and timing
+  dependencies independently of the kernel user namespace, so ordinary user
+  variables cannot corrupt traces or turn successful tool calls into failures
+  ([#411](https://github.com/microsoft/agora-workbench/pull/411)).
+- `check_job` now directs owners of parallel jobs to the corresponding
+  `check_batch` call instead of reporting an active job as missing. Parallel
+  execution tool descriptions also document the batch polling contract
+  ([#412](https://github.com/microsoft/agora-workbench/pull/412)).
+- The execute-code timeout parameter schema now resolves the configured maximum
+  instead of exposing an unformatted placeholder
+  ([#413](https://github.com/microsoft/agora-workbench/pull/413)).
+
 ## [0.4.2] - 2026-10-23
 
 ### Added
