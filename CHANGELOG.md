@@ -10,6 +10,8 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-27
+
 ### Fixed
 
 - Programmatic tool tracing now captures its serialization and timing
