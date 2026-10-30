@@ -719,6 +719,13 @@ class TestUserTokenKernelPropagation:
             raise queue.Empty
 
         kc.get_iopub_msg = fake_get_iopub_msg
+        kc.get_shell_msg = AsyncMock(
+            return_value={
+                "msg_type": "execute_reply",
+                "content": {"status": "ok"},
+                "parent_header": {"msg_id": "msg-1"},
+            }
+        )
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
@@ -783,6 +790,13 @@ class TestUserTokenKernelPropagation:
             raise queue.Empty
 
         kc.get_iopub_msg = fake_get_iopub_msg
+        kc.get_shell_msg = AsyncMock(
+            return_value={
+                "msg_type": "execute_reply",
+                "content": {"status": "ok"},
+                "parent_header": {"msg_id": "msg-1"},
+            }
+        )
 
         manager._kernels[session_id] = (km, kc)
         manager._kernel_last_used[session_id] = 0.0
