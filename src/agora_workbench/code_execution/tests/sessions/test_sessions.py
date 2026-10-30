@@ -1,10 +1,12 @@
 """Unit and integration tests for session management infrastructure."""
 
 import asyncio
+import queue
 import threading
 import pytest
 import time
-from typing import Optional, cast
+from typing import Any, Optional, cast
+from unittest.mock import AsyncMock
 
 from ...data_access.manager import DataLakeDataManager
 from ...sessions import (
@@ -950,6 +952,180 @@ class TestKernelExecuteLock:
 
         # Different sessions => different locks => calls overlap.
         assert max_in_flight == 2, f"calls did not overlap (max_in_flight={max_in_flight})"
+
+
+class TestKernelExecutionCompletion:
+    """Execution completion requires an authoritative shell reply."""
+
+    class _KernelManager:
+        def __init__(self):
+            self.interrupt_calls = 0
+
+        async def interrupt_kernel(self):
+            self.interrupt_calls += 1
+
+    class _KernelClient:
+        def __init__(self, reply_status: str):
+            self.reply_status = reply_status
+            self.iopub_messages = [
+                {
+                    "msg_type": "status",
+                    "parent_header": {"msg_id": "msg-1"},
+                    "content": {"execution_state": "idle"},
+                }
+            ]
+
+        def execute(self, _code):
+            return "msg-1"
+
+        async def get_iopub_msg(self, timeout=1.0):
+            if self.iopub_messages:
+                return self.iopub_messages.pop(0)
+            raise queue.Empty
+
+        async def get_shell_msg(self, timeout=1.0):
+            return {
+                "msg_type": "execute_reply",
+                "parent_header": {"msg_id": "msg-1"},
+                "content": {"status": self.reply_status},
+            }
+
+    @staticmethod
+    def _make_manager():
+        manager = SessionManager()
+        session_id = manager.create_session(data={}, user_identity="u", user_token="t", token_claims={})
+        return manager, session_id
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_foreground_aborted_reply_is_failure(self, monkeypatch):
+        manager, session_id = self._make_manager()
+        km = self._KernelManager()
+        kc = self._KernelClient("aborted")
+
+        async def get_kernel(*_args, **_kwargs):
+            return km, kc
+
+        monkeypatch.setattr(manager, "_get_or_create_kernel", get_kernel)
+
+        stdout, stderr, success, displays, artifacts = await manager._execute_code_locked(
+            session_id=session_id,
+            code="value = 1",
+            timeout=5.0,
+            working_dir=None,
+            user_identity="u",
+        )
+
+        assert stdout == ""
+        assert stderr == "Execution was aborted by the kernel."
+        assert success is False
+        assert displays == []
+        assert artifacts == []
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_promoted_execution_aborted_reply_is_failure(self, monkeypatch):
+        manager, session_id = self._make_manager()
+        km = self._KernelManager()
+        kc = self._KernelClient("aborted")
+
+        async def get_kernel(*_args, **_kwargs):
+            return km, kc
+
+        monkeypatch.setattr(manager, "_get_or_create_kernel", get_kernel)
+
+        result = await manager._start_promoted_execution_for_session(
+            session_id,
+            "value = 1",
+            timeout=5.0,
+            promotion_threshold_s=1.0,
+        )
+
+        assert isinstance(result, tuple)
+        assert result[1] == "Execution was aborted by the kernel."
+        assert result[2] is False
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_background_aborted_reply_is_failure(self):
+        from ...sessions.manager import _BackgroundJob
+
+        manager, session_id = self._make_manager()
+        job = _BackgroundJob(
+            job_id="j_test",
+            session_id=session_id,
+            msg_id="msg-1",
+            timeout=5.0,
+            start_time=time.monotonic(),
+        )
+
+        await manager._collect_background_job(
+            job,
+            cast(Any, self._KernelManager()),
+            cast(Any, self._KernelClient("aborted")),
+        )
+
+        assert job.status == "failed"
+        assert job.success is False
+        assert job.error == "Execution was aborted by the kernel."
+        assert job.stderr_parts == ["Execution was aborted by the kernel."]
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_timeout_evicts_kernel_before_returning(self, monkeypatch):
+        manager, session_id = self._make_manager()
+        km = self._KernelManager()
+        kc = self._KernelClient("ok")
+        evict = AsyncMock()
+
+        async def get_kernel(*_args, **_kwargs):
+            return km, kc
+
+        monkeypatch.setattr(manager, "_get_or_create_kernel", get_kernel)
+        monkeypatch.setattr(manager, "_evict_dead_kernel", evict)
+
+        result = await manager._execute_code_locked(
+            session_id=session_id,
+            code="value = 1",
+            timeout=-1.0,
+            working_dir=None,
+            user_identity="u",
+        )
+
+        assert result == ("", "Execution timeout after -1.0s", False, [], [])
+        assert km.interrupt_calls == 1
+        evict.assert_awaited_once_with(session_id, None)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_background_timeout_evicts_kernel_before_finishing(self, monkeypatch):
+        from ...sessions.manager import _BackgroundJob
+
+        manager, session_id = self._make_manager()
+        km = self._KernelManager()
+        job = _BackgroundJob(
+            job_id="j_test",
+            session_id=session_id,
+            msg_id="msg-1",
+            timeout=-1.0,
+            start_time=time.monotonic(),
+            kernel_generation=7,
+        )
+        manager._session_running_jobs[session_id] = job.job_id
+        evict = AsyncMock()
+        monkeypatch.setattr(manager, "_evict_dead_kernel", evict)
+
+        await manager._collect_background_job(
+            job,
+            cast(Any, km),
+            cast(Any, self._KernelClient("ok")),
+        )
+
+        assert job.status == "failed"
+        assert job.error == "Execution timeout after -1.0s"
+        assert km.interrupt_calls == 1
+        assert manager._get_running_job_for_session(session_id) is None
+        evict.assert_awaited_once_with(session_id, 7)
 
 
 class TestArtifactPipeline:

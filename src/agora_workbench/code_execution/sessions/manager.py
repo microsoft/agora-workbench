@@ -89,6 +89,11 @@ _KERNEL_ENV_PASSTHROUGH = (
 # waiting on an empty iopub queue.
 _KERNEL_LIVENESS_CHECK_INTERVAL_S = 1.0
 
+# Shell replies are the authoritative execution outcome.  IOPub ``idle`` only
+# means the kernel stopped processing the request and can accompany an
+# ``aborted`` reply.
+_EXECUTE_REPLY_TIMEOUT_S = 2.0
+
 
 def _describe_kernel_exit(km: Any) -> str:
     """Best-effort description of a dead kernel process's exit status."""
@@ -121,6 +126,48 @@ def _kernel_death_message(session_id: str, km: Any) -> str:
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_SGR_RE.sub("", text)
+
+
+async def _get_execute_reply(
+    kc: "AsyncKernelClient",
+    msg_id: str,
+    timeout: float = _EXECUTE_REPLY_TIMEOUT_S,
+) -> Optional[dict[str, Any]]:
+    """Return the matching shell ``execute_reply``, or ``None`` on timeout."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            msg = await kc.get_shell_msg(timeout=min(remaining, 0.5))
+        except (queue.Empty, asyncio.TimeoutError):
+            continue
+        if msg.get("msg_type") != "execute_reply":
+            continue
+        if msg.get("parent_header", {}).get("msg_id") != msg_id:
+            continue
+        return msg.get("content", {})
+
+
+def _execute_reply_failure(reply: Optional[dict[str, Any]]) -> Optional[str]:
+    """Describe a non-successful shell reply."""
+    if reply is None:
+        return "Kernel did not return an execution result."
+    status = reply.get("status")
+    if status == "ok":
+        return None
+    if status == "aborted":
+        return "Execution was aborted by the kernel."
+    if status == "error":
+        error_name = reply.get("ename")
+        error_value = reply.get("evalue")
+        if error_name and error_value:
+            return f"{error_name}: {error_value}"
+        if error_name:
+            return str(error_name)
+        return "Execution failed in the kernel."
+    return f"Kernel returned an unexpected execution status: {status!r}."
 
 
 def _current_asyncio_task() -> asyncio.Task[Any] | None:
@@ -1484,6 +1531,19 @@ class SessionManager:
         except Exception:
             LOGGER.debug("Dead kernel eviction for session %s failed", session_id, exc_info=True)
 
+    async def _discard_timed_out_kernel(
+        self,
+        session_id: str,
+        km: AsyncKernelManager,
+        kernel_generation: Optional[int],
+    ) -> None:
+        """Interrupt and discard a timed-out kernel before accepting more code."""
+        try:
+            await km.interrupt_kernel()
+        except Exception:
+            LOGGER.warning("Failed to interrupt timed-out kernel for session %s", session_id, exc_info=True)
+        await self._evict_dead_kernel(session_id, kernel_generation)
+
     def get_kernel_generation(self, session_id: str) -> Optional[int]:
         """Return the generation id of the session's current kernel.
 
@@ -1778,14 +1838,13 @@ class SessionManager:
                     last_keepalive = now
 
                 if now - job.start_time > job.timeout:
-                    await km.interrupt_kernel()
-                    await asyncio.sleep(1.0)
                     job.success = False
                     job.error = f"Execution timeout after {job.timeout}s"
                     job.status = "failed"
                     # Capture anything written before the interrupt fired.
                     self._finalize_background_artifacts(job)
                     self._mark_job_finished(job)
+                    await self._discard_timed_out_kernel(job.session_id, km, job.kernel_generation)
                     return
 
                 try:
@@ -1851,6 +1910,12 @@ class SessionManager:
                             t = data.get("text/plain", "")
                             if t:
                                 job.stdout_parts.append(t)
+                    reply_failure = _execute_reply_failure(await _get_execute_reply(kc, job.msg_id))
+                    if reply_failure is not None:
+                        job.success = False
+                        job.error = reply_failure
+                        if not job.stderr_parts:
+                            job.stderr_parts.append(reply_failure)
                     break
 
             job.status = "completed" if job.success else "failed"
@@ -2140,6 +2205,11 @@ class SessionManager:
                             if t:
                                 stdout_parts.append(t)
                             _maybe_capture_display(data, r_content.get("metadata", {}))
+                    reply_failure = _execute_reply_failure(await _get_execute_reply(kc, msg_id))
+                    if reply_failure is not None:
+                        success = False
+                        if not stderr_parts:
+                            stderr_parts.append(reply_failure)
                     completed = True
                     break
 
@@ -2549,8 +2619,7 @@ class SessionManager:
                 last_keepalive = now
 
             if time.monotonic() - start_time > timeout:
-                await km.interrupt_kernel()
-                await asyncio.sleep(1.0)
+                await self._discard_timed_out_kernel(session_id, km, kernel_generation)
                 return "", f"Execution timeout after {timeout}s", False, [], []
 
             try:
@@ -2651,6 +2720,11 @@ class SessionManager:
                             if t:
                                 stdout_parts.append(t)
                             _maybe_capture_display(data, r_content.get("metadata", {}))
+                    reply_failure = _execute_reply_failure(await _get_execute_reply(kc, msg_id))
+                    if reply_failure is not None:
+                        success = False
+                        if not stderr_parts:
+                            stderr_parts.append(reply_failure)
                     break
 
         stdout = "".join(stdout_parts)
