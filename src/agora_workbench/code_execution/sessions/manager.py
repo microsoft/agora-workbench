@@ -170,6 +170,13 @@ def _execute_reply_failure(reply: Optional[dict[str, Any]]) -> Optional[str]:
     return f"Kernel returned an unexpected execution status: {status!r}."
 
 
+def _append_stderr_message(parts: list[str], message: str) -> None:
+    """Append a diagnostic without merging it into preceding stderr text."""
+    if parts and not parts[-1].endswith("\n"):
+        parts.append("\n")
+    parts.append(message)
+
+
 def _current_asyncio_task() -> asyncio.Task[Any] | None:
     try:
         return asyncio.current_task()
@@ -271,6 +278,7 @@ class _BackgroundJob:
     stdout_parts: list[str] = field(default_factory=list)
     stderr_parts: list[str] = field(default_factory=list)
     success: bool = True
+    iopub_error_received: bool = False
     error: Optional[str] = None
     completed_at: Optional[float] = None
     task: Optional[asyncio.Task] = None
@@ -1507,17 +1515,35 @@ class SessionManager:
         must not wait for the session's execution lock to drain (callers may
         hold it).
         """
+        shutdown, joined_existing = self._schedule_kernel_eviction(session_id, kernel_generation)
+        await self._await_kernel_eviction(session_id, shutdown, joined_existing)
+
+    def _schedule_kernel_eviction(
+        self,
+        session_id: str,
+        kernel_generation: Optional[int],
+    ) -> tuple[Optional[asyncio.Task[None]], bool]:
+        """Register generation-specific teardown before any caller can reuse the kernel."""
         with self._session_lifecycle_lock:
             existing_shutdown = self._kernel_shutdown_tasks.get(session_id)
             joined_existing = existing_shutdown is not None and not existing_shutdown.done()
             if kernel_generation is not None and self._kernel_generations.get(session_id) == kernel_generation:
                 shutdown = self._schedule_kernel_shutdown(
                     session_id,
-                    caller="dead kernel eviction",
+                    caller="kernel eviction",
                     cleanup_artifacts=False,
                 )
             else:
-                shutdown = self._kernel_shutdown_tasks.get(session_id)
+                shutdown = existing_shutdown
+        return shutdown, joined_existing
+
+    async def _await_kernel_eviction(
+        self,
+        session_id: str,
+        shutdown: Optional[asyncio.Task[None]],
+        joined_existing: bool,
+    ) -> None:
+        """Wait for teardown unless it may be blocked on the caller's execution lease."""
         if shutdown is None:
             return
         if joined_existing:
@@ -1538,11 +1564,12 @@ class SessionManager:
         kernel_generation: Optional[int],
     ) -> None:
         """Interrupt and discard a timed-out kernel before accepting more code."""
+        shutdown, joined_existing = self._schedule_kernel_eviction(session_id, kernel_generation)
         try:
             await km.interrupt_kernel()
         except Exception:
             LOGGER.warning("Failed to interrupt timed-out kernel for session %s", session_id, exc_info=True)
-        await self._evict_dead_kernel(session_id, kernel_generation)
+        await self._await_kernel_eviction(session_id, shutdown, joined_existing)
 
     def get_kernel_generation(self, session_id: str) -> Optional[int]:
         """Return the generation id of the session's current kernel.
@@ -1883,6 +1910,7 @@ class SessionManager:
                     traceback = "\n".join(content.get("traceback", []))
                     job.stderr_parts.append(_strip_ansi(traceback))
                     job.success = False
+                    job.iopub_error_received = True
                 elif msg_type == "execute_result":
                     data = content.get("data", {})
                     text_result = data.get("text/plain", "")
@@ -1910,12 +1938,17 @@ class SessionManager:
                             t = data.get("text/plain", "")
                             if t:
                                 job.stdout_parts.append(t)
+                        elif r_type == "error":
+                            traceback = "\n".join(r_content.get("traceback", []))
+                            job.stderr_parts.append(_strip_ansi(traceback))
+                            job.success = False
+                            job.iopub_error_received = True
                     reply_failure = _execute_reply_failure(await _get_execute_reply(kc, job.msg_id))
                     if reply_failure is not None:
                         job.success = False
                         job.error = reply_failure
-                        if not job.stderr_parts:
-                            job.stderr_parts.append(reply_failure)
+                        if not job.iopub_error_received:
+                            _append_stderr_message(job.stderr_parts, reply_failure)
                     break
 
             job.status = "completed" if job.success else "failed"
@@ -2107,6 +2140,7 @@ class SessionManager:
             displays: list[dict] = []
             displays_bytes = 0
             success = True
+            iopub_error_received = False
             completed = False
 
             def _maybe_capture_display(content_data: dict, content_meta: dict) -> None:
@@ -2163,6 +2197,7 @@ class SessionManager:
                     traceback = "\n".join(content.get("traceback", []))
                     stderr_parts.append(_strip_ansi(traceback))
                     success = False
+                    iopub_error_received = True
                 elif msg_type == "execute_result":
                     data = content.get("data", {})
                     text_result = data.get("text/plain", "")
@@ -2205,11 +2240,16 @@ class SessionManager:
                             if t:
                                 stdout_parts.append(t)
                             _maybe_capture_display(data, r_content.get("metadata", {}))
+                        elif r_type == "error":
+                            traceback = "\n".join(r_content.get("traceback", []))
+                            stderr_parts.append(_strip_ansi(traceback))
+                            success = False
+                            iopub_error_received = True
                     reply_failure = _execute_reply_failure(await _get_execute_reply(kc, msg_id))
                     if reply_failure is not None:
                         success = False
-                        if not stderr_parts:
-                            stderr_parts.append(reply_failure)
+                        if not iopub_error_received:
+                            _append_stderr_message(stderr_parts, reply_failure)
                     completed = True
                     break
 
@@ -2249,6 +2289,7 @@ class SessionManager:
                 stdout_parts=stdout_parts,
                 stderr_parts=stderr_parts,
                 success=success,
+                iopub_error_received=iopub_error_received,
                 outputs_before=outputs_before,
                 kernel_generation=kernel_generation,
             )
@@ -2577,6 +2618,7 @@ class SessionManager:
         displays: list[dict] = []
         displays_bytes = 0
         success = True
+        iopub_error_received = False
 
         def _maybe_capture_display(content_data: dict, content_meta: dict) -> None:
             """Append a renderable display payload to ``displays`` if room remains."""
@@ -2661,6 +2703,7 @@ class SessionManager:
                 traceback = "\n".join(content.get("traceback", []))
                 stderr_parts.append(_strip_ansi(traceback))
                 success = False
+                iopub_error_received = True
 
             elif msg_type == "execute_result":
                 # Result of expression: capture the text/plain repr to stdout
@@ -2720,11 +2763,16 @@ class SessionManager:
                             if t:
                                 stdout_parts.append(t)
                             _maybe_capture_display(data, r_content.get("metadata", {}))
+                        elif r_type == "error":
+                            traceback = "\n".join(r_content.get("traceback", []))
+                            stderr_parts.append(_strip_ansi(traceback))
+                            success = False
+                            iopub_error_received = True
                     reply_failure = _execute_reply_failure(await _get_execute_reply(kc, msg_id))
                     if reply_failure is not None:
                         success = False
-                        if not stderr_parts:
-                            stderr_parts.append(reply_failure)
+                        if not iopub_error_received:
+                            _append_stderr_message(stderr_parts, reply_failure)
                     break
 
         stdout = "".join(stdout_parts)
