@@ -92,7 +92,7 @@ _KERNEL_LIVENESS_CHECK_INTERVAL_S = 1.0
 # Shell replies are the authoritative execution outcome.  IOPub ``idle`` only
 # means the kernel stopped processing the request and can accompany an
 # ``aborted`` reply.
-_EXECUTE_REPLY_TIMEOUT_S = 2.0
+_EXECUTE_REPLY_TIMEOUT_S = 10.0
 
 
 def _describe_kernel_exit(km: Any) -> str:
