@@ -10,6 +10,36 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-11-04
+
+### Added
+
+- Router-generated `execute_{name}_code` tools now accept an optional
+  `execution_session_id` and forward it to the selected upstream, allowing
+  callers to resume an explicit execution session through a router
+  ([#423](https://github.com/microsoft/agora-workbench/pull/423)).
+
+### Changed
+
+- Updated the locked Authlib, dnspython, and Tornado dependencies
+  ([#417](https://github.com/microsoft/agora-workbench/pull/417),
+  [#418](https://github.com/microsoft/agora-workbench/pull/418),
+  [#419](https://github.com/microsoft/agora-workbench/pull/419)).
+- Component Detection now refreshes the dependency graph whenever dependency
+  manifests change on `main` and explicitly includes `uv.lock`, preventing
+  stale dependency versions from remaining in security reports
+  ([#421](https://github.com/microsoft/agora-workbench/pull/421)).
+
+### Fixed
+
+- Kernel execution now treats the matching shell `execute_reply` as the
+  authoritative outcome, reports aborted or missing replies as failures, and
+  discards timed-out kernels before accepting later execution requests
+  ([#420](https://github.com/microsoft/agora-workbench/pull/420)).
+- Connector catalogs now preserve configured human-readable state descriptions
+  across federation layers, including states referenced only by exported skills
+  ([#422](https://github.com/microsoft/agora-workbench/pull/422)).
+
 ## [0.4.3] - 2026-10-27
 
 ### Fixed
