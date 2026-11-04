@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 from agora_workbench.code_execution import (
     CodeExecutionServer,
     ServerConfig,
+    State,
     ToolDefinition,
     ToolParameter,
     ToolRegistry,
@@ -12,7 +13,7 @@ from agora_workbench.code_execution import (
 from agora_workbench.code_execution.auth import create_noop_auth_config
 
 
-def _make_server(tool_registry=None) -> CodeExecutionServer:
+def _make_server(tool_registry=None, states=None) -> CodeExecutionServer:
     """Create a minimal CodeExecutionServer for testing."""
     config = ServerConfig(
         name="test-server",
@@ -25,6 +26,7 @@ def _make_server(tool_registry=None) -> CodeExecutionServer:
         server_config=config,
         tool_registry=tool_registry,
         auth_config=create_noop_auth_config(),
+        states=states,
     )
 
 
@@ -99,6 +101,21 @@ class TestCatalogEndpoint:
         assert len(descriptors_tool["required_parameters"]) == 1
         assert descriptors_tool["required_parameters"][0]["name"] == "smiles"
         assert descriptors_tool["affordances"] == ["compute descriptors", "molecular properties"]
+
+    def test_catalog_exports_configured_state_descriptions(self):
+        server = _make_server(
+            states=[
+                State(token="alpha.ready", description="Inputs are ready for processing."),
+                State(token="alpha.done"),
+            ]
+        )
+        app = server.mcp.http_app(transport="streamable-http")
+        server._add_custom_endpoints(app)
+
+        response = TestClient(app).get("/catalog")
+
+        assert response.status_code == 200
+        assert response.json()["state_descriptions"] == {"alpha.ready": "Inputs are ready for processing."}
 
     def test_catalog_tools_are_deserializable(self):
         """Catalog output can be round-tripped back to ToolDefinition."""

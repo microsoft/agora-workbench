@@ -91,6 +91,30 @@ defaults are unchanged: the router forwards `timeout` only when explicitly set.
 
 ### Unified state graph and bridge edges
 
+`CodeExecutionServer` exports configured `State` descriptions in the optional
+`state_descriptions` catalog field:
+
+```json
+{
+  "state_descriptions": {
+    "alpha.ready": "Inputs are ready for processing.",
+    "alpha.done": "Processing has finished."
+  }
+}
+```
+
+The router uses these descriptions as labels in its unified workflow overview.
+Descriptions are retained for states referenced by exposed tools or exported
+skills. Catalogs without this field, or with missing or invalid descriptions,
+continue to use labels inferred from their state tokens.
+
+Connectors also re-export the descriptions in their own catalogs, allowing
+labels for tool states to survive additional connector layers. Use namespaced
+tokens for distinct concepts and consistent descriptions for shared tokens.
+If upstreams provide conflicting nonempty descriptions for the same token, the
+first catalog in configured upstream order wins and the connector logs a warning.
+Descriptions remain advisory metadata; they do not gate execution or transfer data.
+
 When upstream tools declare `requires`/`produces` state transitions, the router builds a **unified state graph** spanning all upstreams and exposes a `plan_{router_name}_workflow` tool. By default, each upstream's states form disconnected islands. To enable cross-server path queries, declare **bridge edges** in the router config:
 
 ```python

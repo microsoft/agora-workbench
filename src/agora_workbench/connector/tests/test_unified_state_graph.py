@@ -1,9 +1,12 @@
 """Tests for the unified state graph on RouterServer."""
 
+import asyncio
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from fastmcp import Client
 
 from agora_workbench.code_execution.tools.search.state_graph import StateGraph
 from agora_workbench.code_execution.tools.tool_search import ToolInfo
@@ -377,3 +380,155 @@ class TestRouterUnifiedStateGraph:
         servers_in_path = [step["server"] for step in result["path"]]
         assert "(bridge)" in servers_in_path
         assert "ezbattery" in servers_in_path
+
+
+class TestFederatedStateDescriptions:
+    @staticmethod
+    def _catalog(name):
+        return {
+            "server_name": name,
+            "tools": [
+                {
+                    "name": f"prepare_{name}",
+                    "description": "Prepare inputs.",
+                    "module": "example.tools",
+                    "state_transition": {"requires": [], "produces": [f"{name}.ready"]},
+                },
+                {
+                    "name": f"process_{name}",
+                    "description": "Process inputs.",
+                    "module": "example.tools",
+                    "state_transition": {"requires": [f"{name}.ready"], "produces": [f"{name}.done"]},
+                },
+            ],
+            "skills": [
+                {
+                    "name": f"{name}-workflow",
+                    "description": "Prepare, process, and review inputs.",
+                    "domain": name,
+                    "states": [f"{name}.ready", f"{name}.done", f"{name}.reviewed"],
+                }
+            ],
+            "state_descriptions": {
+                f"{name}.ready": "Inputs are ready for processing.",
+                f"{name}.done": "Processing has finished.",
+                f"{name}.reviewed": "A result has been reviewed.",
+            },
+        }
+
+    async def _router(self, catalogs, expose_tools=None):
+        server = RouterServer(
+            RouterConfig(
+                name="hub",
+                upstreams=[
+                    UpstreamConfig(name=name, url=f"http://{name}:8000", expose_tools=expose_tools) for name in catalogs
+                ],
+            )
+        )
+        await self._sync(server, catalogs)
+        server._setup_tools()
+        return server
+
+    async def _sync(self, server, catalogs):
+        async def mock_get(url, **kwargs):
+            name = httpx.URL(url).host
+            # Finish the first configured catalog last to exercise merge ordering.
+            await asyncio.sleep(0.01 if name == next(iter(catalogs)) else 0)
+            if isinstance(catalogs[name], Exception):
+                raise catalogs[name]
+            return _mock_response(catalogs[name])
+
+        client = AsyncMock()
+        client.get.side_effect = mock_get
+        client.__aenter__.return_value = client
+        with patch("agora_workbench.connector.base.httpx.AsyncClient", return_value=client):
+            await server._sync_upstream_catalogs()
+
+    async def test_unified_planner_preserves_descriptions_and_skill_associations(self):
+        catalogs = {name: self._catalog(name) for name in ("alpha", "beta")}
+        server = await self._router(catalogs)
+
+        async with Client(server.mcp) as client:
+            overview = await client.call_tool("plan_hub_workflow", {"mode": "overview"})
+            next_steps = await client.call_tool(
+                "plan_hub_workflow", {"mode": "next_steps", "current_state": "alpha.ready"}
+            )
+
+        domains = {domain["domain"]: domain for domain in json.loads(overview.content[0].text)["domains"]}
+        for name in catalogs:
+            assert domains[name]["states"] == catalogs[name]["state_descriptions"]
+            assert domains[name]["skills"][0]["states"] == catalogs[name]["skills"][0]["states"]
+        steps = json.loads(next_steps.content[0].text)
+        assert steps["next_states"] == ["alpha.done"]
+        assert [skill["name"] for skill in steps["relevant_skills"]] == ["alpha-workflow"]
+
+    @pytest.mark.parametrize(
+        "replacement",
+        [{}, {"state_descriptions": None}, {"state_descriptions": []}, {"state_descriptions": {"alpha.ready": 42}}],
+        ids=["legacy", "null", "invalid-field", "invalid-description"],
+    )
+    async def test_refresh_drops_missing_or_invalid_descriptions(self, replacement):
+        catalog = self._catalog("alpha")
+        server = await self._router({"alpha": catalog})
+        del catalog["state_descriptions"]
+        catalog.update(replacement)
+        await self._sync(server, {"alpha": catalog})
+        server._setup_unified_state_graph([])
+
+        assert (await server._catalog_payload())["state_descriptions"] == {}
+        async with Client(server.mcp) as client:
+            result = await client.call_tool("plan_hub_workflow", {"mode": "overview"})
+        states = json.loads(result.content[0].text)["domains"][0]["states"]
+        assert states["alpha.ready"] == "READY"
+        assert states["alpha.done"] == "DONE"
+
+    async def test_descriptions_survive_a_connector_catalog_round_trip(self):
+        inner = await self._router({name: self._catalog(name) for name in ("alpha", "beta")})
+        outer = await self._router({"inner": await inner._catalog_payload()})
+
+        async with Client(outer.mcp) as client:
+            result = await client.call_tool("plan_hub_workflow", {"mode": "overview"})
+        domains = {domain["domain"]: domain for domain in json.loads(result.content[0].text)["domains"]}
+        for name in ("alpha", "beta"):
+            assert domains[name]["states"][f"{name}.ready"] == "Inputs are ready for processing."
+            assert domains[name]["states"][f"{name}.done"] == "Processing has finished."
+
+    @pytest.mark.parametrize("retry", [False, True], ids=["out-of-order-fetch", "recovered-upstream"])
+    async def test_conflicts_use_configured_order_not_fetch_completion_order(self, caplog, retry):
+        catalogs = {name: self._catalog(name) for name in ("alpha", "beta")}
+        for name, catalog in catalogs.items():
+            catalog["tools"][0]["state_transition"]["produces"].append("shared.ready")
+            catalog["state_descriptions"]["shared.ready"] = f"Inputs prepared by {name}."
+        initial_catalogs = (
+            {**catalogs, "alpha": httpx.ConnectError("Upstream is temporarily unavailable")} if retry else catalogs
+        )
+        server = await self._router(initial_catalogs)
+        if retry:
+            await self._sync(server, catalogs)
+            server._setup_unified_state_graph([])
+
+        async with Client(server.mcp) as client:
+            result = await client.call_tool("plan_hub_workflow", {"mode": "overview"})
+        domains = {domain["domain"]: domain for domain in json.loads(result.content[0].text)["domains"]}
+        assert domains["shared"]["states"]["shared.ready"] == "Inputs prepared by alpha."
+        assert "Conflicting description for state 'shared.ready' from upstream 'beta'" in caplog.text
+
+    async def test_filtered_and_unreferenced_states_are_not_exported(self):
+        catalog = self._catalog("alpha")
+        catalog["tools"].append(
+            {
+                "name": "hidden_operation",
+                "description": "Run another operation.",
+                "module": "example.tools",
+                "state_transition": {"requires": [], "produces": ["alpha.hidden"]},
+            }
+        )
+        catalog["state_descriptions"].update(
+            {"alpha.hidden": "Another operation has finished.", "alpha.unused": "An unused state."}
+        )
+        server = await self._router({"alpha": catalog}, expose_tools=["prepare_*", "process_*"])
+
+        descriptions = (await server._catalog_payload())["state_descriptions"]
+        assert "alpha.hidden" not in descriptions
+        assert "alpha.unused" not in descriptions
+        assert descriptions["alpha.reviewed"] == "A result has been reviewed."

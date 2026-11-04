@@ -67,6 +67,7 @@ class ConnectorServer(BaseMCPServer):
         # Upstream state
         self._upstream_catalogs: dict[str, list[ToolDefinition]] = {}
         self._upstream_skills: dict[str, list[dict[str, Any]]] = {}
+        self._upstream_state_descriptions: dict[str, dict[str, str]] = {}
         self._upstream_execution_settings: dict[str, dict[str, Any]] = {}
         self._upstream_sessions: dict[str, str] = {}  # upstream_name -> MCP session ID
 
@@ -225,6 +226,24 @@ class ConnectorServer(BaseMCPServer):
                 continue
             skill_data["server_name"] = data.get("server_name", upstream.name)
             skills.append(skill_data)
+
+        state_descriptions = data.get("state_descriptions")
+        descriptions: dict[str, str] = {}
+        if isinstance(state_descriptions, dict):
+            state_tokens: set[str] = set()
+            for tool in tools:
+                state_tokens.update(tool.state_transition.requires)
+                state_tokens.update(tool.state_transition.produces)
+            for skill in skills:
+                skill_states = skill.get("states", [])
+                if isinstance(skill_states, list):
+                    state_tokens.update(state for state in skill_states if isinstance(state, str))
+            descriptions = {
+                token: description
+                for token, description in state_descriptions.items()
+                if token in state_tokens and isinstance(description, str) and description.strip()
+            }
+        self._upstream_state_descriptions[upstream.name] = descriptions
 
         return tools, skills
 
@@ -632,6 +651,22 @@ class ConnectorServer(BaseMCPServer):
     # Unified State Graph
     # ========================================================================
 
+    def _merged_state_descriptions(self) -> dict[str, str]:
+        """Merge descriptions in configured upstream order."""
+        descriptions: dict[str, str] = {}
+        for upstream in self._upstreams:
+            if upstream.name not in self._upstream_catalogs:
+                continue
+            for token, description in self._upstream_state_descriptions.get(upstream.name, {}).items():
+                if descriptions.setdefault(token, description) != description:
+                    LOGGER.warning(
+                        "Conflicting description for state '%s' from upstream '%s'; "
+                        "keeping the first catalog's description.",
+                        token,
+                        upstream.name,
+                    )
+        return descriptions
+
     def _setup_unified_state_graph(self, bridges: list[dict[str, str]]) -> None:
         """Build a unified state graph over all upstream catalogs with bridge edges.
 
@@ -675,8 +710,11 @@ class ConnectorServer(BaseMCPServer):
             )
             return
 
-        # Build the graph (no filesystem domains_dir — state vocab is inferred)
-        graph = StateGraph(tools=all_tool_infos, skills=all_skills)
+        graph = StateGraph(
+            tools=all_tool_infos,
+            skills=all_skills,
+            state_descriptions=self._merged_state_descriptions(),
+        )
 
         # Validate and inject bridges
         produced_states: set[str] = set()
@@ -935,7 +973,11 @@ class ConnectorServer(BaseMCPServer):
         all_tools = []
         for tools in self._upstream_catalogs.values():
             all_tools.extend([t.model_dump(mode="json") for t in tools])
-        return {"server_name": self._server_name, "tools": all_tools}
+        return {
+            "server_name": self._server_name,
+            "tools": all_tools,
+            "state_descriptions": self._merged_state_descriptions(),
+        }
 
     def _extract_user_identity(self, token_data: dict) -> Optional[str]:
         """Extract user identity using the configured identity extractor."""

@@ -2957,6 +2957,7 @@ else:
             "server_name": self.server_config.name,
             "tools": tools_data,
             "skills": skills_data,
+            "state_descriptions": {s.token: s.description for s in self.states if s.description},
             "execution": {
                 "mode": self.server_config.execution_mode,
                 "default_timeout": self.default_timeout,
