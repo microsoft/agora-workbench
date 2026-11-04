@@ -63,6 +63,32 @@ The agent sees:
 - `execute_energy_code`
 - A unified `search_science-hub_tools` that covers all upstreams
 
+### Explicit execution sessions
+
+Router `execute_{name}_code` proxies accept an optional `execution_session_id`.
+To resume an execution session, pass the ID returned by that upstream to its
+own execute tool:
+
+```python
+await client.call_tool(
+    "execute_alpha_code",
+    {
+        "code": "print(value)",
+        "description": "Read a value from the existing session",
+        "execution_session_id": session_id,
+    },
+)
+```
+
+Here `client` is connected to the router and `session_id` came from a previous
+execution on the `alpha` upstream. The router forwards the ID unchanged to
+`alpha`; it does not move the session to another upstream. The child server
+continues to validate session access.
+
+An execution session ID is **not** an MCP transport session ID. Omitting it
+(or passing `None`) preserves the upstream's default session selection. Timeout
+defaults are unchanged: the router forwards `timeout` only when explicitly set.
+
 ### Unified state graph and bridge edges
 
 When upstream tools declare `requires`/`produces` state transitions, the router builds a **unified state graph** spanning all upstreams and exposes a `plan_{router_name}_workflow` tool. By default, each upstream's states form disconnected islands. To enable cross-server path queries, declare **bridge edges** in the router config:
