@@ -360,6 +360,59 @@ class TestGatewayServer:
 class TestRouterProxyToolRegistration:
     """Tests for companion proxy tool registration on RouterServer."""
 
+    @pytest.mark.asyncio
+    async def test_execute_proxy_exposes_optional_execution_session_id(self):
+        server = RouterServer(
+            RouterConfig(name="hub", upstreams=[UpstreamConfig(name="alpha", url="http://alpha:8000")])
+        )
+        server._upstream_catalogs["alpha"] = []
+        server._setup_tools()
+
+        async with Client(server.mcp) as client:
+            tool = next(tool for tool in await client.list_tools() if tool.name == "execute_alpha_code")
+
+        schema = tool.inputSchema
+        session_schema = schema["properties"]["execution_session_id"]
+        assert "execution_session_id" not in schema.get("required", [])
+        assert session_schema["default"] is None
+        assert {"type": "string"} in session_schema["anyOf"]
+        assert {"type": "null"} in session_schema["anyOf"]
+        assert "not an MCP transport session ID" in session_schema["description"]
+
+    @pytest.mark.asyncio
+    async def test_execute_proxy_forwards_sessions_to_the_owning_upstream(self):
+        config = RouterConfig(
+            name="hub",
+            upstreams=[
+                UpstreamConfig(name="alpha", url="http://alpha:8000"),
+                UpstreamConfig(name="beta", url="http://beta:8000"),
+            ],
+        )
+        server = RouterServer(config)
+        server._upstream_catalogs = {"alpha": [], "beta": []}
+        server._setup_tools()
+        calls = [
+            ("alpha", {"code": "value = 1", "execution_session_id": "alpha-session", "timeout": 30}),
+            ("beta", {"code": "value = 2", "execution_session_id": "beta-session"}),
+            ("alpha", {"code": "value = 3"}),
+            ("alpha", {"code": "value = 4", "execution_session_id": None, "timeout": None}),
+        ]
+
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                for name, arguments in calls:
+                    result = await client.call_tool(f"execute_{name}_code", arguments)
+                    assert result.content[0].text == "upstream result"
+
+        assert proxy.await_count == len(calls)
+        for call, (name, arguments) in zip(proxy.await_args_list, calls):
+            assert call.kwargs["upstream"] == next(upstream for upstream in config.upstreams if upstream.name == name)
+            assert call.kwargs["tool_name"] == f"execute_{name}_code"
+            assert call.kwargs["arguments"] == {
+                "description": "",
+                **{key: value for key, value in arguments.items() if value is not None},
+            }
+
     CATALOG_WITH_STATES = {
         "server_name": "chemistry",
         "tools": [
