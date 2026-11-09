@@ -253,6 +253,49 @@ collect({'cost': 1})
         assert ok is False
         assert "not allowed" in msg.lower()
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from glob import os\nos.system('echo example')",
+            "from glob import os as operations\noperations.remove('/tmp/file')",
+            "from pathlib import os as operations\noperations.walk('/tmp')",
+            "from glob import os as source\nwalk = source.walk\nwalk('/tmp')",
+            "from random import _os as os\nos.system('echo example')",
+            "import glob\noperations = glob.os\noperations.system('echo example')",
+        ],
+    )
+    def test_filesystem_module_reexport_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\nsystem = os.system if True else None\nsystem('echo example')",
+            "import os\nwalk = os.walk if enabled else helper\nwalk('/tmp')",
+            "import os\nscan = helper if enabled else os.walk\nscan('/tmp')",
+            "import os\nremove = enabled and os.remove\nremove('/tmp/file')",
+            "import os\nreplace = helper or os.replace\nreplace('/tmp/a', '/tmp/b')",
+            "import os\nscan = (os.walk if enabled else helper) or fallback\nscan('/tmp')",
+        ],
+    )
+    def test_conditional_filesystem_binding_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "walk = (lambda obj: [obj]) if enabled else (lambda obj: obj)\nwalk(1)",
+            "walk = (lambda obj: [obj]) or (lambda obj: obj)\nwalk(1)",
+            "import my_module as os\nos.listdir('/tmp')",
+        ],
+    )
+    def test_conditional_helpers_and_non_system_imports_allowed(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
     @pytest.mark.parametrize("name", ["iterdir", "rglob"])
     def test_pathlib_wildcard_does_not_shadow_local_method_named_helper(self, server, name):
         code = f"def {name}(obj):\n    return [obj]\nfrom pathlib import *\n{name}(1)"

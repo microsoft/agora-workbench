@@ -69,6 +69,11 @@ _DANGEROUS_CONSTRUCTORS: dict[str, str] = {
     "PureWindowsPath": "pathlib",
 }
 
+_STDLIB_MODULE_REEXPORTS: dict[str, str] = {
+    "glob.os": "os",
+    "pathlib.os": "os",
+}
+
 # block calls and modules that can be used to directly circumvent the other blocks
 _BLOCKED_DANGEROUS_CALLS: set[str] = {
     "__import__",
@@ -260,13 +265,17 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
                 local_name = alias.asname or alias.name.split(".")[0]
                 canonical = alias.name if alias.asname else local_name
                 module_aliases.setdefault(local_name, set()).add(canonical)
-        elif isinstance(node, ast.ImportFrom) and node.module:
+        elif (
+            isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in ("os", "glob", "pathlib")
+        ):
             for alias in node.names:
                 if alias.name == "*":
                     for name in wildcard_bindings.get(node.module, set()):
                         module_aliases.setdefault(name, set()).add(f"{node.module}.{name}")
                 else:
-                    module_aliases.setdefault(alias.asname or alias.name, set()).add(f"{node.module}.{alias.name}")
+                    canonical = f"{node.module}.{alias.name}"
+                    canonical = _STDLIB_MODULE_REEXPORTS.get(canonical, canonical)
+                    module_aliases.setdefault(alias.asname or alias.name, set()).add(canonical)
 
     # Lightweight taint pass: trace variables back to dangerous sources
     tainted_vars = _build_taint_set(tree, module_aliases)
@@ -534,7 +543,8 @@ def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str
         if node.id in _DANGEROUS_CONSTRUCTORS:
             return {f"{_DANGEROUS_CONSTRUCTORS[node.id]}.{node.id}"}
     if isinstance(node, ast.Attribute):
-        return {f"{source.split('.')[0]}.{node.attr}" for source in _resolve_rhs_sources(node.value, tainted)}
+        sources = {f"{source.split('.')[0]}.{node.attr}" for source in _resolve_rhs_sources(node.value, tainted)}
+        return {_STDLIB_MODULE_REEXPORTS.get(source, source) for source in sources}
     if isinstance(node, ast.NamedExpr):
         return _resolve_rhs_sources(node.value, tainted)
     if isinstance(node, ast.Call):
@@ -543,6 +553,10 @@ def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str
             for source in _resolve_rhs_sources(node.func, tainted)
             if _DANGEROUS_CONSTRUCTORS.get(source.rsplit(".", 1)[-1]) == source.split(".")[0]
         }
+    if isinstance(node, ast.IfExp):
+        return _resolve_rhs_sources(node.body, tainted) | _resolve_rhs_sources(node.orelse, tainted)
+    if isinstance(node, ast.BoolOp):
+        return {source for value in node.values for source in _resolve_rhs_sources(value, tainted)}
     if isinstance(node, (ast.Tuple, ast.List)):
         return {source for item in node.elts for source in _resolve_rhs_sources(item, tainted)}
     return set()
