@@ -296,6 +296,95 @@ collect({'cost': 1})
     def test_conditional_helpers_and_non_system_imports_allowed(self, server, code):
         assert server.validate_code(code) == (True, None)
 
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from posix import remove\nremove('/tmp/file')",
+            "from nt import remove\nremove('/tmp/file')",
+            "from posix import remove as erase\nerase('/tmp/file')",
+            "import posix as native\nnative.remove('/tmp/file')",
+            "from nt import *\nremove('/tmp/file')",
+        ],
+    )
+    def test_native_filesystem_import_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\nfor remove in [os.remove]:\n    remove('/tmp/file')",
+            "import os\n[remove('/tmp/file') for remove in [os.remove]]",
+            "import os\nlist(remove('/tmp/file') for remove in (os.remove,))",
+            "import os\ndef run(remove=os.remove):\n    remove('/tmp/file')\nrun()",
+            "import os\ndef run(*, erase=os.remove):\n    erase('/tmp/file')\nrun()",
+            "import os\nrun = lambda erase=os.remove: erase('/tmp/file')\nrun()",
+            "import os\nasync def run(remove=os.remove):\n    remove('/tmp/file')",
+            "import os\nasync def run():\n    async for remove in operations:\n        remove('/tmp/file')\noperations = [os.remove]",
+        ],
+    )
+    def test_loop_and_default_callable_binding_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from pathlib import Path\np = Path('/tmp')\nfind = p.glob\nfind('*.csv')",
+            "from pathlib import Path\np = Path('/tmp')\nmove = p.replace\nmove('/tmp/file')",
+            "from pathlib import Path\np = Path('/tmp')\nwalk = p.glob\nwalk('*.csv')",
+        ],
+    )
+    def test_allowed_pathlib_method_alias_accepted(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from pathlib import Path\np = Path('/tmp')\nscan = p.rglob\nscan('*')",
+            "from pathlib import Path\np = Path('/tmp')\nscan = p.iterdir\nscan()",
+            "import glob\nscan = glob.glob\nscan('*')",
+            "import os\nmove = os.replace\nmove('/tmp/a', '/tmp/b')",
+            "import glob\nfrom pathlib import Path\np = Path('/tmp')\nscan = p.glob\nscan = glob.glob\nscan('*')",
+        ],
+    )
+    def test_blocked_method_alias_retains_family(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\ncollect, scan = (lambda obj: [obj]), os.walk\ncollect(1)",
+            "import os\n[collect, scan] = [(lambda obj: [obj]), os.walk]\ncollect(1)",
+            "import os\ncollect, (scan, value) = (lambda obj: [obj]), (os.walk, 1)\ncollect(1)",
+            "import os\ncollect, *scans = (lambda obj: [obj]), os.walk, os.scandir\ncollect(1)",
+            "import os\n*scans, collect = os.walk, os.scandir, (lambda obj: [obj])\ncollect(1)",
+            "import os\nfor collect, scan in [((lambda obj: [obj]), os.walk)]:\n    collect(1)",
+            "def run(remove=lambda obj: [obj]):\n    return remove(1)\nrun()",
+            "def walk(obj):\n    return [obj]\nfrom posix import *\nwalk(1)",
+        ],
+    )
+    def test_unrelated_helpers_do_not_inherit_filesystem_sources(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\ncollect, scan = (lambda obj: [obj]), os.walk\nscan('/tmp')",
+            "import os\ncollect, (scan, value) = (lambda obj: [obj]), (os.walk, 1)\nscan('/tmp')",
+            "import os\nfor collect, scan in [((lambda obj: [obj]), os.walk)]:\n    scan('/tmp')",
+            "import os\noperations = ((lambda obj: [obj]), os.walk)\ncollect, scan = operations\nscan('/tmp')",
+        ],
+    )
+    def test_unpacked_filesystem_binding_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
     @pytest.mark.parametrize("name", ["iterdir", "rglob"])
     def test_pathlib_wildcard_does_not_shadow_local_method_named_helper(self, server, name):
         code = f"def {name}(obj):\n    return [obj]\nfrom pathlib import *\n{name}(1)"
@@ -519,6 +608,12 @@ print(secret)
 
 
 class TestSubclassCustomisation:
+    def test_custom_dangerous_call_not_exempted_by_alias_family(self, server):
+        server._BLOCKED_DANGEROUS_CALLS = server._BLOCKED_DANGEROUS_CALLS | {"glob"}
+        ok, msg = server.validate_code("from pathlib import Path\np = Path('/tmp')\nfind = p.glob\nfind('*.csv')")
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
     def test_subclass_can_extend_blocked_calls(self):
         """Subclass can add more blocked calls."""
 

@@ -58,6 +58,20 @@ _PATHLIB_BLOCKED_FS_CALLS: set[str] = {"iterdir", "rglob"}
 
 _BLOCKED_FS_CALLS: set[str] = _OS_BLOCKED_FS_CALLS | _GLOB_BLOCKED_FS_CALLS | _PATHLIB_BLOCKED_FS_CALLS
 
+_FS_MODULE_FAMILIES: dict[str, str] = {
+    "os": "os",
+    "posix": "os",
+    "nt": "os",
+    "glob": "glob",
+    "pathlib": "pathlib",
+}
+
+_BLOCKED_FS_CALLS_BY_FAMILY: dict[str, set[str]] = {
+    "os": _OS_BLOCKED_FS_CALLS,
+    "glob": _GLOB_BLOCKED_FS_CALLS,
+    "pathlib": _PATHLIB_BLOCKED_FS_CALLS,
+}
+
 # Constructors whose return values belong to a dangerous module family.
 # Used by _build_taint_set to trace e.g. ``p = Path(...)`` back to "pathlib".
 _DANGEROUS_CONSTRUCTORS: dict[str, str] = {
@@ -254,8 +268,11 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     allowed_prefixes = server._ALLOWED_PATH_PREFIXES
 
     module_aliases: dict[str, set[str]] = {}
+    native_calls = _OS_BLOCKED_FS_CALLS - {"walk", "fwalk", "removedirs", "renames"}
     wildcard_bindings = {
         "os": _OS_BLOCKED_FS_CALLS,
+        "posix": native_calls,
+        "nt": native_calls - {"fchdir"},
         "glob": _GLOB_BLOCKED_FS_CALLS,
         "pathlib": set(_DANGEROUS_CONSTRUCTORS),
     }
@@ -264,17 +281,14 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
             for alias in node.names:
                 local_name = alias.asname or alias.name.split(".")[0]
                 canonical = alias.name if alias.asname else local_name
-                module_aliases.setdefault(local_name, set()).add(canonical)
-        elif (
-            isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in ("os", "glob", "pathlib")
-        ):
+                module_aliases.setdefault(local_name, set()).add(_canonical_fs_source(canonical))
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in _FS_MODULE_FAMILIES:
             for alias in node.names:
                 if alias.name == "*":
                     for name in wildcard_bindings.get(node.module, set()):
-                        module_aliases.setdefault(name, set()).add(f"{node.module}.{name}")
+                        module_aliases.setdefault(name, set()).add(_canonical_fs_source(f"{node.module}.{name}"))
                 else:
-                    canonical = f"{node.module}.{alias.name}"
-                    canonical = _STDLIB_MODULE_REEXPORTS.get(canonical, canonical)
+                    canonical = _canonical_fs_source(f"{node.module}.{alias.name}")
                     module_aliases.setdefault(alias.asname or alias.name, set()).add(canonical)
 
     # Lightweight taint pass: trace variables back to dangerous sources
@@ -354,7 +368,7 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
         # --- 2. Blocked function calls ---
         elif isinstance(node, ast.Call):
-            func_names = _resolve_call_names(node, tainted_vars)
+            func_names = _resolve_call_names(node, tainted_vars, blocked_dangerous_calls)
             if isinstance(node.func, ast.Name):
                 bare_name = node.func.id
                 if bare_name in blocked_dangerous_calls or bare_name in blocked_calls - _BLOCKED_FS_CALLS:
@@ -422,13 +436,25 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     return True, None
 
 
-def _resolve_call_names(node: ast.Call, tainted_vars: dict[str, set[str]]) -> set[str]:
-    """Resolve all known filesystem callable names, retaining earlier bindings."""
+def _resolve_call_names(
+    node: ast.Call, tainted_vars: dict[str, set[str]], blocked_dangerous_calls: set[str]
+) -> set[str]:
+    """Resolve callable names without applying another family's filesystem blocks."""
     func = node.func
     if isinstance(func, ast.Name):
         sources = tainted_vars.get(func.id)
         if sources:
-            return {source.rsplit(".", 1)[-1] for source in sources}
+            names = set()
+            for source in sources:
+                family = source.split(".")[0]
+                name = source.rsplit(".", 1)[-1]
+                if (
+                    name not in _BLOCKED_FS_CALLS
+                    or name in blocked_dangerous_calls
+                    or name in _BLOCKED_FS_CALLS_BY_FAMILY.get(family, set())
+                ):
+                    names.add(name)
+            return names
         return {func.id}
     if isinstance(func, ast.Attribute):
         return {func.attr}
@@ -484,8 +510,8 @@ def _is_safe_imported_module_call(
     if not canonical_modules:
         # Even without an explicit import, recognise well-known dangerous
         # module names (the import may have happened in a previous cell).
-        if base_name in ("os", "glob", "pathlib"):
-            canonical_modules = {base_name}
+        if base_name in _FS_MODULE_FAMILIES:
+            canonical_modules = {_FS_MODULE_FAMILIES[base_name]}
         else:
             return True
 
@@ -501,36 +527,78 @@ def _is_safe_imported_module_call(
 
 
 def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict[str, set[str]]:
-    """Retain all filesystem module/member sources across imports and assignments."""
+    """Retain all filesystem module/member sources across imports and local bindings."""
     _DANGEROUS_FAMILIES = {"os", "glob", "pathlib"}
     tainted = {
         local_name: {canonical for canonical in sources if canonical.split(".")[0] in _DANGEROUS_FAMILIES}
         for local_name, sources in module_aliases.items()
     }
-    assignments: list[tuple[list[ast.expr], ast.expr]] = []
+    bindings: list[tuple[str, ast.expr]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
-            assignments.append((node.targets, node.value))
+            for target in node.targets:
+                bindings.extend(_assignment_bindings(target, node.value))
         elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
-            assignments.append(([node.target], node.value))
+            bindings.extend(_assignment_bindings(node.target, node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            values = node.iter.elts if isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)) else [node.iter]
+            for value in values:
+                bindings.extend(_assignment_bindings(node.target, value))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            positional = args.posonlyargs + args.args
+            bindings.extend(
+                (arg.arg, default)
+                for arg, default in zip(positional[len(positional) - len(args.defaults) :], args.defaults)
+            )
+            bindings.extend(
+                (arg.arg, default) for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None
+            )
 
     # Sources only accumulate; rebinding never erases an earlier filesystem call.
     while True:
         changed = False
-        for targets, value in assignments:
+        for name, value in bindings:
             sources = _resolve_rhs_sources(value, tainted)
-            if not sources:
-                continue
-            for target in targets:
-                for name in ast.walk(target):
-                    if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
-                        previous = tainted.setdefault(name.id, set())
-                        if sources - previous:
-                            previous.update(sources)
-                            changed = True
+            previous = tainted.setdefault(name, set())
+            if sources - previous:
+                previous.update(sources)
+                changed = True
         if not changed:
             break
     return tainted
+
+
+def _assignment_bindings(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
+    """Pair literal unpacking elements before conservatively merging unknown shapes."""
+    if isinstance(target, ast.Name):
+        return [(target.id, value)]
+    if isinstance(target, ast.Starred):
+        return _assignment_bindings(target.value, value)
+    if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)):
+        if not any(isinstance(item, ast.Starred) for item in value.elts):
+            values = list(value.elts)
+            starred = [index for index, item in enumerate(target.elts) if isinstance(item, ast.Starred)]
+            if len(starred) == 1 and len(values) >= len(target.elts) - 1:
+                start = starred[0]
+                end = len(values) - (len(target.elts) - start - 1)
+                values[start:end] = [ast.List(elts=values[start:end], ctx=ast.Load())]
+            if len(target.elts) == len(values):
+                return [
+                    binding
+                    for item, source in zip(target.elts, values)
+                    for binding in _assignment_bindings(item, source)
+                ]
+    return [
+        (name.id, value) for name in ast.walk(target) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
+    ]
+
+
+def _canonical_fs_source(source: str) -> str:
+    """Normalize native modules and known re-exports to filesystem policy families."""
+    source = _STDLIB_MODULE_REEXPORTS.get(source, source)
+    module, separator, member = source.partition(".")
+    return _FS_MODULE_FAMILIES.get(module, module) + separator + member
 
 
 def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str]:
@@ -538,14 +606,14 @@ def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str
     if isinstance(node, ast.Name):
         if node.id in tainted:
             return tainted[node.id]
-        if node.id in ("os", "glob", "pathlib"):
-            return {node.id}
+        if node.id in _FS_MODULE_FAMILIES:
+            return {_FS_MODULE_FAMILIES[node.id]}
         if node.id in _DANGEROUS_CONSTRUCTORS:
             return {f"{_DANGEROUS_CONSTRUCTORS[node.id]}.{node.id}"}
     if isinstance(node, ast.Attribute):
         sources = {f"{source.split('.')[0]}.{node.attr}" for source in _resolve_rhs_sources(node.value, tainted)}
-        return {_STDLIB_MODULE_REEXPORTS.get(source, source) for source in sources}
-    if isinstance(node, ast.NamedExpr):
+        return {_canonical_fs_source(source) for source in sources}
+    if isinstance(node, (ast.NamedExpr, ast.Starred)):
         return _resolve_rhs_sources(node.value, tainted)
     if isinstance(node, ast.Call):
         return {
