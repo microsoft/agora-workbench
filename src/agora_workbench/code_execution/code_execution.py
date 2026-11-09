@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -711,17 +712,28 @@ def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict
                 (arg.arg, default) for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None
             )
 
-    # Sources only accumulate; rebinding never erases an earlier filesystem call.
-    while True:
-        changed = False
-        for name, value in bindings:
-            sources = _resolve_rhs_sources(value, tainted)
-            previous = tainted.setdefault(name, set())
-            if sources - previous:
-                previous.update(sources)
-                changed = True
-        if not changed:
-            break
+    dependents: dict[str, list[int]] = {}
+    for index, (_, value) in enumerate(bindings):
+        names = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+        for name in names:
+            dependents.setdefault(name, []).append(index)
+
+    pending = deque(range(len(bindings)))
+    queued = set(pending)
+    # Sources only accumulate; revisit only bindings whose inputs gained sources.
+    while pending:
+        index = pending.popleft()
+        queued.remove(index)
+        name, value = bindings[index]
+        sources = _resolve_rhs_sources(value, tainted)
+        previous = tainted.setdefault(name, set())
+        if not sources - previous:
+            continue
+        previous.update(sources)
+        for dependent in dependents.get(name, []):
+            if dependent not in queued:
+                pending.append(dependent)
+                queued.add(dependent)
     return tainted
 
 
@@ -769,12 +781,13 @@ def _canonical_fs_source(source: str) -> str:
 def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str]:
     """Resolve filesystem sources as a family and optional member, without growing paths."""
     if isinstance(node, ast.Name):
+        if node.id in _DANGEROUS_CONSTRUCTORS:
+            # Cell-wide bindings cannot prove that a known constructor was shadowed.
+            return tainted.get(node.id, set()) | {f"{_DANGEROUS_CONSTRUCTORS[node.id]}.{node.id}"}
         if node.id in tainted:
             return tainted[node.id]
         if node.id in _FS_MODULE_FAMILIES:
             return {_FS_MODULE_FAMILIES[node.id]}
-        if node.id in _DANGEROUS_CONSTRUCTORS:
-            return {f"{_DANGEROUS_CONSTRUCTORS[node.id]}.{node.id}"}
     if isinstance(node, ast.Attribute):
         sources = {f"{source.split('.')[0]}.{node.attr}" for source in _resolve_rhs_sources(node.value, tainted)}
         return {_canonical_fs_source(source) for source in sources}

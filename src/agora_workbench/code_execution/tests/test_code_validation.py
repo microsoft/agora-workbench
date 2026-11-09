@@ -2,7 +2,7 @@
 
 import pytest
 
-from .. import CodeExecutionServer
+from .. import CodeExecutionServer, code_execution
 from ..auth import create_noop_auth_config
 from ..code_execution_models import ServerConfig
 
@@ -480,6 +480,50 @@ collect({'cost': 1})
         assert server.validate_code(
             "import os\nslots = {}\nslots[(collect := lambda value: value)] = os.walk\ncollect(1)"
         ) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def unrelated(Path=None):\n    pass\np = Path('/tmp')\np.iterdir()",
+            "def unrelated(*, Path=None):\n    pass\np = Path('/tmp')\np.rglob('*')",
+            "import os\ndef unrelated(Path=os.getenv):\n    pass\np = Path('/tmp')\np.iterdir()",
+        ],
+    )
+    def test_unrelated_binding_cannot_erase_known_constructor(self, server, code):
+        assert server.validate_code("from pathlib import Path") == (True, None)
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize("blocked_call", [False, True])
+    def test_reverse_alias_propagation_work_is_bounded(self, server, monkeypatch, blocked_call):
+        length = 256
+        code = (
+            "import os\nif False:\n"
+            + "\n".join(f"    alias{i} = alias{i + 1}" for i in range(length))
+            + f"\n    alias{length} = os.path"
+        )
+        if blocked_call:
+            code += "\nalias0.listdir('/tmp')"
+        resolve = code_execution._resolve_rhs_sources
+        resolutions = 0
+
+        def counted_resolve(node, tainted):
+            nonlocal resolutions
+            resolutions += 1
+            return resolve(node, tainted)
+
+        monkeypatch.setattr(code_execution, "_resolve_rhs_sources", counted_resolve)
+        ok, msg = server.validate_code(code)
+        assert ok is not blocked_call, msg
+        assert resolutions <= 4 * (length + 1)
+
+    def test_cyclic_alias_propagation_retains_filesystem_source(self, server):
+        ok, msg = server.validate_code(
+            "import os\nfirst = second\nsecond = first\nsecond = os.path\nfirst.listdir('/tmp')"
+        )
+        assert ok is False
+        assert "not allowed" in msg.lower()
 
     @pytest.mark.parametrize(
         "code",
