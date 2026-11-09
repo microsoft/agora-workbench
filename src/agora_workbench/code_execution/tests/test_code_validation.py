@@ -128,6 +128,7 @@ class TestBlockedFilesystemCalls:
             "result = [x for x in range(10)]",
             "p.iterdir()",
             "p.rglob('*')",
+            "from os.path import join as remove\nremove('a', 'b')",
         ],
     )
     def test_allowed_call_accepted(self, server, code):
@@ -222,6 +223,50 @@ collect({'cost': 1})
         ],
     )
     def test_filesystem_function_binding_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from os import remove\nremove('/tmp/file')\nfrom operator import add as remove",
+            "from os import remove\nremove('/tmp/file')\nfrom os import getenv as remove",
+            "from os import walk as scan\nscan('/tmp')\nfrom glob import escape as scan",
+            "import os\nwalk: object = os.walk\nwalk('/tmp')",
+            "import os\nwalk = scan = os.walk\nwalk('/tmp')",
+            "import os\nwalk = scan = os.walk\nscan('/tmp')",
+            "import os\nwalk, scan = os.walk, os.scandir\nwalk('/tmp')",
+            "import os\nwalk = (scan := os.walk)\nwalk('/tmp')",
+            "import os\n(scan := os.walk)\nscan('/tmp')",
+            "from os.path import join as remove\nimport os\nremove = os.remove\nremove('/tmp/file')",
+            "from os.path import join as scan\nimport os\nscan = os.remove\nscan('/tmp/file')",
+            "import os\nscan = os.walk\nscan = lambda obj: [obj]\nscan('/tmp')",
+            "import os\nscan = os.walk\nscan = os.scandir\nscan('/tmp')",
+            "import os as source\nsource.walk('/tmp')\nimport glob as source",
+            "import os\nimport glob\nsource = os\nsource = glob\nsource.walk('/tmp')",
+            "import os\nfirst = os.walk\nsecond = first\nthird = second\nfourth = third\nfourth('/tmp')",
+        ],
+    )
+    def test_filesystem_binding_provenance_preserved(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize("name", ["iterdir", "rglob"])
+    def test_pathlib_wildcard_does_not_shadow_local_method_named_helper(self, server, name):
+        code = f"def {name}(obj):\n    return [obj]\nfrom pathlib import *\n{name}(1)"
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from pathlib import *\np = Path('/tmp')\np.iterdir()",
+            "from pathlib import *\nConstructor = Path\np = Constructor('/tmp')\np.rglob('*')",
+            "from pathlib import Path as Constructor\np: object = Constructor('/tmp')\np.iterdir()",
+        ],
+    )
+    def test_pathlib_constructor_bindings_traced(self, server, code):
         ok, msg = server.validate_code(code)
         assert ok is False
         assert "not allowed" in msg.lower()
