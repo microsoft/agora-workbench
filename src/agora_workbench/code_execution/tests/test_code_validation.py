@@ -128,7 +128,6 @@ class TestBlockedFilesystemCalls:
             "result = [x for x in range(10)]",
             "p.iterdir()",
             "p.rglob('*')",
-            "from os.path import join as remove\nremove('a', 'b')",
         ],
     )
     def test_allowed_call_accepted(self, server, code):
@@ -332,7 +331,6 @@ collect({'cost': 1})
         [
             "from pathlib import Path\np = Path('/tmp')\nfind = p.glob\nfind('*.csv')",
             "from pathlib import Path\np = Path('/tmp')\nmove = p.replace\nmove('/tmp/file')",
-            "from pathlib import Path\np = Path('/tmp')\nwalk = p.glob\nwalk('*.csv')",
         ],
     )
     def test_allowed_pathlib_method_alias_accepted(self, server, code):
@@ -420,6 +418,68 @@ collect({'cost': 1})
         ok, msg = server.validate_code("system('echo example')")
         assert ok is False
         assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "remove('/tmp/file')\nfrom os.path import join as remove",
+            "from os.path import join as remove\nremove = unknown\nremove('/tmp/file')",
+            "from os.path import join as remove\ndef run(remove):\n    remove('/tmp/file')\nrun(unknown)",
+            "from os.path import join as remove\nremove('a', 'b')",
+            "from pathlib import Path\np = Path('/tmp')\nwalk = p.glob\nwalk('*.csv')",
+        ],
+    )
+    def test_alias_resolution_cannot_remove_bare_name_restriction(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\ndef scan():\n    return 1\ndef unrelated():\n    scan = os.walk\nscan()",
+            "import os\ndef run():\n    scan = lambda: 1\n    return scan()\ndef unrelated():\n    scan = os.walk\nrun()",
+        ],
+    )
+    def test_unrelated_scope_cannot_taint_proven_local_callable(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def remove(value=(lambda: remove('/tmp/file'))()):\n    return value",
+            "remove, result = (lambda value: value), (lambda: remove('/tmp/file'))()",
+            "remove = (lambda value: value) if (lambda: remove('/tmp/file'))() else (lambda value: value)",
+            "remove = lambda value=(lambda: remove('/tmp/file'))(): value",
+        ],
+    )
+    def test_eager_sibling_lambda_does_not_establish_recursion(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    def test_nested_lambda_in_actual_helper_body_can_recurse(self, server):
+        assert server.validate_code(
+            "remove = lambda value: (lambda: remove(value - 1))() if value else 0\nremove(1)"
+        ) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\nslots = {}\nslots[(remove := os.remove)] = lambda value: value\nremove('/tmp/file')",
+            "import os\nslots = {}\nremove, slots[(remove := os.remove)] = (lambda value: value), (lambda value: value)\nremove('/tmp/file')",
+            "import os\n(walk := os.walk).tag = lambda value: value\nwalk('/tmp')",
+        ],
+    )
+    def test_target_expression_does_not_receive_assignment_value(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    def test_subscript_expression_does_not_inherit_rhs_filesystem_source(self, server):
+        assert server.validate_code(
+            "import os\nslots = {}\nslots[(collect := lambda value: value)] = os.walk\ncollect(1)"
+        ) == (True, None)
 
     @pytest.mark.parametrize(
         "code",

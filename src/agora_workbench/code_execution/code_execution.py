@@ -379,7 +379,8 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
             )
             if isinstance(node.func, ast.Name):
                 bare_name = node.func.id
-                if bare_name in blocked_dangerous_calls or bare_name in blocked_calls - _BLOCKED_FS_CALLS:
+                # Alias information cannot erase the original bare-name restriction.
+                if bare_name in blocked_dangerous_calls or bare_name in blocked_calls:
                     func_names.add(bare_name)
                 if local_helper:
                     func_names -= _BLOCKED_FS_CALLS - blocked_dangerous_calls
@@ -482,6 +483,7 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
     functions = (ast.FunctionDef, ast.AsyncFunctionDef)
     comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
     scopes = (ast.Module, *functions, ast.Lambda, ast.ClassDef, *comprehensions)
+    call_names = {node.func.id for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
 
     def enclosing_scope(node: ast.AST) -> ast.AST:
         child = node
@@ -505,21 +507,30 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
             child, parent = parent, parents.get(parent)
         return tree
 
-    def local_lambda(value: ast.expr) -> bool:
+    def local_lambdas(value: ast.expr) -> set[ast.Lambda] | None:
         if isinstance(value, ast.Lambda):
-            return True
+            return {value}
         if isinstance(value, ast.IfExp):
-            return local_lambda(value.body) and local_lambda(value.orelse)
-        if isinstance(value, ast.BoolOp):
-            return all(local_lambda(item) for item in value.values)
-        return False
+            values = [value.body, value.orelse]
+        elif isinstance(value, ast.BoolOp):
+            values = value.values
+        else:
+            return None
+        helpers: set[ast.Lambda] = set()
+        for item in values:
+            group = local_lambdas(item)
+            if group is None:
+                return None
+            helpers.update(group)
+        return helpers
 
     bindings: dict[ast.AST, dict[str, list[ast.stmt | None]]] = {}
     safe_targets: dict[ast.Name, ast.stmt] = {}
+    recursive_lambdas: dict[tuple[ast.stmt, str], set[ast.Lambda]] = {}
     forbidden: set[str] = set()
 
     def bind(scope: ast.AST, name: str, definition: ast.stmt | None = None) -> None:
-        if name in _BLOCKED_FS_CALLS:
+        if name in call_names:
             bindings.setdefault(scope, {}).setdefault(name, []).append(definition)
 
     for node in nodes:
@@ -532,11 +543,13 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
                     pairs = _assignment_bindings(target, node.value)
-                    for name in ast.walk(target):
-                        if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
-                            values = [value for target_name, value in pairs if target_name == name.id]
-                            if values and all(local_lambda(value) for value in values):
-                                safe_targets[name] = node
+                    for name in _assignment_target_names(target):
+                        groups = [local_lambdas(value) for target_name, value in pairs if target_name == name.id]
+                        if groups and all(group is not None for group in groups):
+                            safe_targets[name] = node
+                            recursive_lambdas.setdefault((node, name.id), set()).update(
+                                helper for group in groups if group is not None for helper in group
+                            )
         elif isinstance(node, ast.ClassDef):
             bind(scope, node.name)
         elif isinstance(node, ast.arg):
@@ -545,7 +558,7 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
             for alias in node.names:
                 if alias.name == "*":
                     module = node.module if isinstance(node, ast.ImportFrom) else ""
-                    names = _FS_WILDCARD_BINDINGS.get(module or "", _BLOCKED_FS_CALLS)
+                    names = _FS_WILDCARD_BINDINGS.get(module or "", call_names)
                     for name in names:
                         bind(scope, name)
                 else:
@@ -573,7 +586,7 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
             continue
         name = node.func.id
-        if name not in _BLOCKED_FS_CALLS or name in forbidden:
+        if name in forbidden:
             continue
         scope = enclosing_scope(node)
         seen: set[ast.AST] = set()
@@ -590,11 +603,7 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
                             continue
                         preceding = (definition.lineno, definition.col_offset) < (anchor.lineno, anchor.col_offset)
                         recursive = definition is anchor and (
-                            definition in seen
-                            or any(
-                                isinstance(inner, ast.Lambda) and anchor_in_suite(inner, definition) is definition
-                                for inner in seen
-                            )
+                            definition in seen or bool(recursive_lambdas.get((definition, name), set()) & seen)
                         )
                         if preceding or recursive:
                             allowed.add(id(node))
@@ -736,9 +745,18 @@ def _assignment_bindings(target: ast.expr, value: ast.expr) -> list[tuple[str, a
                     for item, source in zip(target.elts, values)
                     for binding in _assignment_bindings(item, source)
                 ]
-    return [
-        (name.id, value) for name in ast.walk(target) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
-    ]
+    return [(name.id, value) for name in _assignment_target_names(target)]
+
+
+def _assignment_target_names(target: ast.expr) -> list[ast.Name]:
+    """Return only names bound by the target, never names used to evaluate a receiver or key."""
+    if isinstance(target, ast.Name):
+        return [target]
+    if isinstance(target, ast.Starred):
+        return _assignment_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for item in target.elts for name in _assignment_target_names(item)]
+    return []
 
 
 def _canonical_fs_source(source: str) -> str:
