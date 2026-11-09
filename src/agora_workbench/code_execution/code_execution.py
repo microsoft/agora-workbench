@@ -83,6 +83,15 @@ _DANGEROUS_CONSTRUCTORS: dict[str, str] = {
     "PureWindowsPath": "pathlib",
 }
 
+_NATIVE_BLOCKED_FS_CALLS = _OS_BLOCKED_FS_CALLS - {"walk", "fwalk", "removedirs", "renames"}
+_FS_WILDCARD_BINDINGS: dict[str, set[str]] = {
+    "os": _OS_BLOCKED_FS_CALLS,
+    "posix": _NATIVE_BLOCKED_FS_CALLS,
+    "nt": _NATIVE_BLOCKED_FS_CALLS - {"fchdir"},
+    "glob": _GLOB_BLOCKED_FS_CALLS,
+    "pathlib": set(_DANGEROUS_CONSTRUCTORS),
+}
+
 _STDLIB_MODULE_REEXPORTS: dict[str, str] = {
     "glob.os": "os",
     "pathlib.os": "os",
@@ -237,8 +246,9 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
         2. **Blocked function calls** – calls to filesystem-exploration
            or destructive functions listed in ``_BLOCKED_FS_CALLS``
            (e.g. ``os.listdir``, ``Path.iterdir``) are rejected.
-           Bare filesystem names are blocked only when their bindings
-           trace to filesystem modules in this cell.
+           Unresolved bare filesystem names remain blocked unless a
+           same-cell local helper is established in the relevant scope.
+           Helpers defined in earlier cells cannot establish that exception.
         3. **Path restriction** – string literals that look like absolute
            paths (starting with ``/``) are checked against
            ``_ALLOWED_PATH_PREFIXES``.  References to paths outside
@@ -268,14 +278,6 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     allowed_prefixes = server._ALLOWED_PATH_PREFIXES
 
     module_aliases: dict[str, set[str]] = {}
-    native_calls = _OS_BLOCKED_FS_CALLS - {"walk", "fwalk", "removedirs", "renames"}
-    wildcard_bindings = {
-        "os": _OS_BLOCKED_FS_CALLS,
-        "posix": native_calls,
-        "nt": native_calls - {"fchdir"},
-        "glob": _GLOB_BLOCKED_FS_CALLS,
-        "pathlib": set(_DANGEROUS_CONSTRUCTORS),
-    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -285,7 +287,7 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in _FS_MODULE_FAMILIES:
             for alias in node.names:
                 if alias.name == "*":
-                    for name in wildcard_bindings.get(node.module, set()):
+                    for name in _FS_WILDCARD_BINDINGS.get(node.module, set()):
                         module_aliases.setdefault(name, set()).add(_canonical_fs_source(f"{node.module}.{name}"))
                 else:
                     canonical = _canonical_fs_source(f"{node.module}.{alias.name}")
@@ -293,6 +295,7 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
     # Lightweight taint pass: trace variables back to dangerous sources
     tainted_vars = _build_taint_set(tree, module_aliases)
+    local_helper_calls = _local_helper_call_ids(tree)
 
     # Pre-collect "/" constant node IDs that are safely used as string-method
     # separators (e.g. s.split("/", 1) or "/".join(parts)).  These are not
@@ -368,14 +371,17 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
         # --- 2. Blocked function calls ---
         elif isinstance(node, ast.Call):
-            func_names = _resolve_call_names(node, tainted_vars, blocked_dangerous_calls)
+            local_helper = id(node) in local_helper_calls
+            func_names = (
+                {node.func.id}
+                if local_helper and isinstance(node.func, ast.Name)
+                else _resolve_call_names(node, tainted_vars, blocked_dangerous_calls)
+            )
             if isinstance(node.func, ast.Name):
                 bare_name = node.func.id
                 if bare_name in blocked_dangerous_calls or bare_name in blocked_calls - _BLOCKED_FS_CALLS:
                     func_names.add(bare_name)
-                if not tainted_vars.get(bare_name):
-                    # Unknown bare helpers follow the same policy as methods
-                    # on unknown receivers, without exempting custom blocks.
+                if local_helper:
                     func_names -= _BLOCKED_FS_CALLS - blocked_dangerous_calls
             for func_name in sorted(func_names):
                 if _is_safe_imported_module_call(node, func_name, module_aliases, tainted_vars):
@@ -459,6 +465,147 @@ def _resolve_call_names(
     if isinstance(func, ast.Attribute):
         return {func.attr}
     return set()
+
+
+def _local_helper_call_ids(tree: ast.Module) -> set[int]:
+    """Prove only stable, preceding local definitions; unresolved bindings stay blocked."""
+    nodes = list(ast.walk(tree))
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    suites: dict[ast.AST, tuple[ast.AST, str]] = {
+        statement: (node, field)
+        for node in nodes
+        for field, value in ast.iter_fields(node)
+        if isinstance(value, list)
+        for statement in value
+        if isinstance(statement, ast.stmt)
+    }
+    functions = (ast.FunctionDef, ast.AsyncFunctionDef)
+    comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+    scopes = (ast.Module, *functions, ast.Lambda, ast.ClassDef, *comprehensions)
+
+    def enclosing_scope(node: ast.AST) -> ast.AST:
+        child = node
+        parent = parents.get(child)
+        skipped_comprehension = None
+        walrus_target = isinstance(node, ast.Name) and isinstance(parent, ast.NamedExpr)
+        while parent is not None:
+            if isinstance(parent, ast.comprehension) and child is parent.iter:
+                container = parents[parent]
+                if isinstance(container, comprehensions) and parent is container.generators[0]:
+                    skipped_comprehension = container
+            if isinstance(parent, scopes):
+                if isinstance(parent, (*functions, ast.ClassDef)) and child not in parent.body:
+                    pass
+                elif isinstance(parent, ast.Lambda) and child is not parent.body:
+                    pass
+                elif isinstance(parent, comprehensions) and (parent is skipped_comprehension or walrus_target):
+                    pass
+                else:
+                    return parent
+            child, parent = parent, parents.get(parent)
+        return tree
+
+    def local_lambda(value: ast.expr) -> bool:
+        if isinstance(value, ast.Lambda):
+            return True
+        if isinstance(value, ast.IfExp):
+            return local_lambda(value.body) and local_lambda(value.orelse)
+        if isinstance(value, ast.BoolOp):
+            return all(local_lambda(item) for item in value.values)
+        return False
+
+    bindings: dict[ast.AST, dict[str, list[ast.stmt | None]]] = {}
+    safe_targets: dict[ast.Name, ast.stmt] = {}
+    forbidden: set[str] = set()
+
+    def bind(scope: ast.AST, name: str, definition: ast.stmt | None = None) -> None:
+        if name in _BLOCKED_FS_CALLS:
+            bindings.setdefault(scope, {}).setdefault(name, []).append(definition)
+
+    for node in nodes:
+        scope = enclosing_scope(node)
+        if isinstance(node, functions):
+            definition = node if not node.decorator_list else None
+            bind(scope, node.name, definition)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    pairs = _assignment_bindings(target, node.value)
+                    for name in ast.walk(target):
+                        if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store):
+                            values = [value for target_name, value in pairs if target_name == name.id]
+                            if values and all(local_lambda(value) for value in values):
+                                safe_targets[name] = node
+        elif isinstance(node, ast.ClassDef):
+            bind(scope, node.name)
+        elif isinstance(node, ast.arg):
+            bind(parents[parents[node]], node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    module = node.module if isinstance(node, ast.ImportFrom) else ""
+                    names = _FS_WILDCARD_BINDINGS.get(module or "", _BLOCKED_FS_CALLS)
+                    for name in names:
+                        bind(scope, name)
+                else:
+                    bind(scope, alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            forbidden.update(node.names)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            bind(scope, node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bind(scope, node.rest)
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bind(enclosing_scope(node), node.id, safe_targets.get(node))
+
+    def anchor_in_suite(node: ast.AST, definition: ast.stmt) -> ast.AST | None:
+        suite = suites[definition]
+        while suites.get(node) != suite:
+            if node not in parents:
+                return None
+            node = parents[node]
+        return node
+
+    allowed: set[int] = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        name = node.func.id
+        if name not in _BLOCKED_FS_CALLS or name in forbidden:
+            continue
+        scope = enclosing_scope(node)
+        seen: set[ast.AST] = set()
+        while True:
+            seen.add(scope)
+            definitions = bindings.get(scope, {}).get(name)
+            if definitions is not None:
+                if all(definition is not None for definition in definitions):
+                    for definition in definitions:
+                        if definition is None:
+                            continue
+                        anchor = anchor_in_suite(node, definition)
+                        if not isinstance(anchor, ast.stmt):
+                            continue
+                        preceding = (definition.lineno, definition.col_offset) < (anchor.lineno, anchor.col_offset)
+                        recursive = definition is anchor and (
+                            definition in seen
+                            or any(
+                                isinstance(inner, ast.Lambda) and anchor_in_suite(inner, definition) is definition
+                                for inner in seen
+                            )
+                        )
+                        if preceding or recursive:
+                            allowed.add(id(node))
+                            break
+                break
+            if scope is tree:
+                break
+            scope = enclosing_scope(scope)
+            while isinstance(scope, ast.ClassDef):
+                scope = enclosing_scope(scope)
+    return allowed
 
 
 def _contains_parent_traversal(path_literal: str) -> bool:

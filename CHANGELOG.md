@@ -12,9 +12,10 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
-- Code validation now allows local functions and lambdas with filesystem-like
-  names such as `walk`, `remove`, and `replace`, while continuing to reject
-  calls traced to filesystem imports in the submitted code, including aliases
+- Code validation now allows unambiguous same-cell local functions and lambdas
+  with filesystem-like names such as `walk`, `remove`, and `replace`.
+  Unresolved bare filesystem calls remain blocked, and known filesystem
+  aliases retain their existing restrictions
   ([#425](https://github.com/microsoft/agora-workbench/pull/425)).
 
 ## [0.4.4] - 2026-11-04

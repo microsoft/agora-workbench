@@ -199,12 +199,10 @@ collect({'cost': 1})
     @pytest.mark.parametrize(
         "code",
         [
-            "from my_module import walk\nwalk(1)",
-            "walk(1)",  # A helper may have been defined in an earlier cell.
             "'a'.replace('a', 'b')",
         ],
     )
-    def test_untainted_filesystem_named_call_allowed(self, server, code):
+    def test_non_filesystem_method_call_allowed(self, server, code):
         assert server.validate_code(code) == (True, None)
 
     @pytest.mark.parametrize(
@@ -364,12 +362,64 @@ collect({'cost': 1})
             "import os\ncollect, *scans = (lambda obj: [obj]), os.walk, os.scandir\ncollect(1)",
             "import os\n*scans, collect = os.walk, os.scandir, (lambda obj: [obj])\ncollect(1)",
             "import os\nfor collect, scan in [((lambda obj: [obj]), os.walk)]:\n    collect(1)",
-            "def run(remove=lambda obj: [obj]):\n    return remove(1)\nrun()",
             "def walk(obj):\n    return [obj]\nfrom posix import *\nwalk(1)",
         ],
     )
     def test_unrelated_helpers_do_not_inherit_filesystem_sources(self, server, code):
         assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "walk(1)",
+            "system('echo example')",
+            "listdir('.')",
+            "listdir = listdir\nlistdir('.')",
+            "from my_module import walk\nwalk(1)",
+            "walk(1)\ndef walk(obj):\n    return [obj]",
+            "if enabled:\n    def walk(obj):\n        return [obj]\nwalk(1)",
+            "def outer():\n    def walk(obj):\n        return [obj]\n    return walk(1)\nwalk(1)",
+            "class Helpers:\n    def walk(obj):\n        return [obj]\nwalk(1)",
+            "def walk(obj):\n    return [obj]\nwalk = unknown\nwalk(1)",
+            "@unknown\ndef walk(obj):\n    return [obj]\nwalk(1)",
+            "def walk(obj):\n    return [obj]\ndef run():\n    walk(1)\n    walk = lambda obj: [obj]",
+            "def walk(obj):\n    return [obj]\n[walk(1) for walk in helpers]",
+            "def run(remove=lambda obj: [obj]):\n    return remove(1)\nrun()",
+            "import os\ndef run(walk):\n    return walk('/tmp')\nrun(os.walk)",
+            "def walk(obj):\n    return [obj]\ndef mutate():\n    global walk\n    walk = unknown\nmutate()\nwalk(1)",
+            "walk = lambda obj=walk(1): [obj]\nwalk(1)",
+            "def run():\n    return walk(1)\nrun()\ndef walk(obj):\n    return [obj]",
+            "def walk(obj):\n    return [obj]\ndef run():\n    return walk(1)\nwalk = unknown\nrun()",
+            "def walk(obj):\n    return [obj]\n[(walk := unknown) for obj in values]\nwalk(1)",
+            "if enabled:\n    def walk(obj):\n        return [obj]\nelse:\n    walk(1)",
+        ],
+    )
+    def test_unproven_or_ambiguous_helper_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def walk(obj):\n    return [obj]\ndef run():\n    return walk(1)\nrun()",
+            "walk: object = lambda obj: [obj]\nwalk(1)",
+            "walk = lambda obj: walk(obj - 1) if obj else []\nwalk(1)",
+            "def walk(obj):\n    return [obj]\n[walk(obj) for obj in values]",
+            "walk, other = (lambda obj: [obj]), 1\nwalk(1)",
+            "def walk(obj):\n    return [obj]\n[walk for walk in values]\nwalk(1)",
+            "if enabled:\n    def walk(obj):\n        return [obj]\n    walk(1)",
+            "def run():\n    if enabled:\n        walk = lambda obj: [obj]\n        return walk(1)\nrun()",
+        ],
+    )
+    def test_scope_matched_local_helper_allowed(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    def test_prior_cell_filesystem_import_does_not_exempt_bare_call(self, server):
+        assert server.validate_code("from os import system, listdir") == (True, None)
+        ok, msg = server.validate_code("system('echo example')")
+        assert ok is False
+        assert "not allowed" in msg.lower()
 
     @pytest.mark.parametrize(
         "code",
