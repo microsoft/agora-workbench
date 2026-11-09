@@ -515,7 +515,7 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
                 if isinstance(container, comprehensions) and parent is container.generators[0]:
                     skipped_comprehension = container
             if isinstance(parent, scopes):
-                if isinstance(parent, (*functions, ast.ClassDef)) and child not in parent.body:
+                if isinstance(parent, (*functions, ast.ClassDef)) and suites.get(child) != (parent, "body"):
                     pass
                 elif isinstance(parent, ast.Lambda) and child is not parent.body:
                     pass
@@ -721,10 +721,10 @@ def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict
         local_name: {canonical for canonical in sources if canonical.split(".")[0] in _DANGEROUS_FAMILIES}
         for local_name, sources in module_aliases.items()
     }
-    # Unrelated bindings cannot erase module assumptions inherited from earlier cells.
+    # Only exclusively non-system imports suppress implicit module assumptions.
     for name, family in _FS_MODULE_FAMILIES.items():
-        if name not in module_aliases:
-            tainted[name] = {family}
+        if name not in module_aliases or tainted.get(name):
+            tainted.setdefault(name, set()).add(family)
     bindings: list[tuple[str, ast.expr]] = []
     # Loop elements and parameter defaults may be string data rather than modules.
     value_bindings: list[tuple[str, ast.expr]] = []

@@ -627,6 +627,33 @@ collect({'cost': 1})
         assert len(code_execution._local_helper_call_ids(tree)) == length
         assert comparisons <= 32 * length
 
+    @pytest.mark.parametrize("container", ["def run():", "async def run():", "class Helpers:"])
+    def test_scope_body_lookup_work_is_bounded(self, container):
+        length = 128
+        tree = ast.parse(
+            container
+            + "\n    def walk(value):\n        return value\n"
+            + "\n".join("    walk(1)" for _ in range(length))
+        )
+        visits = 0
+
+        class CountedBody(list):
+            def __iter__(self):
+                nonlocal visits
+                for statement in super().__iter__():
+                    visits += 1
+                    yield statement
+
+            def __contains__(self, item):
+                return any(statement is item for statement in self)
+
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                node.body = CountedBody(node.body)
+        visits = 0
+        assert len(code_execution._local_helper_call_ids(tree)) == length
+        assert visits <= 16 * (length + 1)
+
     @pytest.mark.parametrize(
         ("module", "call"),
         [
@@ -640,9 +667,24 @@ collect({'cost': 1})
         assert ok is False
         assert "not allowed" in msg.lower()
 
-    def test_explicit_non_system_import_overrides_implicit_module(self, server):
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "os.listdir('.')\nfrom pathlib import Path as os",
+            "os.listdir('.')\ndef unrelated():\n    from pathlib import Path as os",
+            "def unrelated():\n    from pathlib import Path as os\nos.listdir('.')",
+        ],
+    )
+    def test_filesystem_import_cannot_erase_implicit_module_family(self, server, code):
+        assert server.validate_code("import os") == (True, None)
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "listdir" in msg
+
+    @pytest.mark.parametrize("receiver", ["os", "x"])
+    def test_explicit_non_system_import_overrides_implicit_module(self, server, receiver):
         assert server.validate_code(
-            "import some_library as os\ndef unrelated(os=None):\n    pass\nx = os\nx.replace('a', 'b')"
+            f"import some_library as os\ndef unrelated(os=None):\n    pass\nx = os\n{receiver}.replace('a', 'b')"
         ) == (True, None)
 
     @pytest.mark.parametrize(
