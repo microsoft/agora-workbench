@@ -142,6 +142,7 @@ class TestBlockedFilesystemCalls:
             "exec('print(123)')",
             "compile('print(1)', '<x>', 'exec')",
             "getattr(os, 'system')('ls')",
+            "from os import path as eval\neval('value')",
         ],
     )
     def test_dangerous_metaprogramming_calls_rejected(self, server, code):
@@ -167,6 +168,76 @@ system_ops.listdir('/tmp')
         )
         assert ok is False
         assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize("name", ["walk", "remove", "replace"])
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            "def {name}(obj):\n    return [obj]",
+            "async def {name}(obj):\n    return [obj]",
+            "{name} = lambda obj: [obj]",
+        ],
+    )
+    def test_local_filesystem_named_helper_allowed(self, server, name, definition):
+        code = definition.format(name=name) + f"\n{name}(1)"
+        assert server.validate_code(code) == (True, None)
+
+    def test_nested_recursive_walk_helper_allowed(self, server):
+        assert server.validate_code(
+            """
+def collect(obj):
+    def walk(value, prefix=''):
+        if isinstance(value, dict):
+            return [walk(item, key) for key, item in value.items()]
+        return [(prefix, value)]
+    return walk(obj)
+collect({'cost': 1})
+"""
+        ) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from my_module import walk\nwalk(1)",
+            "walk(1)",  # A helper may have been defined in an earlier cell.
+            "'a'.replace('a', 'b')",
+        ],
+    )
+    def test_untainted_filesystem_named_call_allowed(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "from os import walk\nwalk('/tmp')",
+            "from os import remove\nremove('/tmp/file')",
+            "from os import replace\nreplace('/tmp/a', '/tmp/b')",
+            "from os import walk as scan\nscan('/tmp')",
+            "from glob import glob as find\nfind('*')",
+            "from glob import iglob\niglob('*')",
+            "from os import *\nwalk('/tmp')",
+            "from glob import *\nglob('*')",
+            "import os\nwalk = os.walk\nwalk('/tmp')",
+            "def walk(obj):\n    return [obj]\nfrom os import walk\nwalk('/tmp')",
+        ],
+    )
+    def test_filesystem_function_binding_rejected(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "def walk(obj):\n    return os.walk(obj)\nwalk('/tmp')",
+            "walk = lambda obj: os.walk(obj)\nwalk('/tmp')",
+            "def walk(obj):\n    return [obj]\nwalk('/etc/passwd')",
+        ],
+    )
+    def test_local_helper_does_not_bypass_other_validation(self, server, code):
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert msg is not None
 
 
 # =====================================================================

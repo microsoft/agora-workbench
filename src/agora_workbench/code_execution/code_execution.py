@@ -218,6 +218,8 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
         2. **Blocked function calls** – calls to filesystem-exploration
            or destructive functions listed in ``_BLOCKED_FS_CALLS``
            (e.g. ``os.listdir``, ``Path.iterdir``) are rejected.
+           Bare filesystem names are blocked only when their bindings
+           trace to filesystem modules in this cell.
         3. **Path restriction** – string literals that look like absolute
            paths (starting with ``/``) are checked against
            ``_ALLOWED_PATH_PREFIXES``.  References to paths outside
@@ -247,11 +249,23 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     allowed_prefixes = server._ALLOWED_PATH_PREFIXES
 
     module_aliases: dict[str, str] = {}
+    blocked_fs_families = {
+        "os": _OS_BLOCKED_FS_CALLS,
+        "glob": _GLOB_BLOCKED_FS_CALLS,
+        "pathlib": _PATHLIB_BLOCKED_FS_CALLS,
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local_name = alias.asname or alias.name.split(".")[0]
                 module_aliases[local_name] = alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if alias.name == "*":
+                    for name in blocked_fs_families.get(node.module, set()):
+                        module_aliases[name] = f"{node.module}.{name}"
+                else:
+                    module_aliases[alias.asname or alias.name] = f"{node.module}.{alias.name}"
 
     # Lightweight taint pass: trace variables back to dangerous sources
     tainted_vars: dict[str, str] = _build_taint_set(tree, module_aliases)
@@ -330,7 +344,18 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
         # --- 2. Blocked function calls ---
         elif isinstance(node, ast.Call):
-            func_name = _resolve_call_name(node)
+            func_name = _resolve_call_name(node, module_aliases)
+            if isinstance(node.func, ast.Name) and node.func.id in blocked_dangerous_calls:
+                func_name = node.func.id
+            if (
+                isinstance(node.func, ast.Name)
+                and func_name in _BLOCKED_FS_CALLS
+                and func_name not in blocked_dangerous_calls
+                and node.func.id not in tainted_vars
+            ):
+                # Like unknown method receivers, bare helpers are safe unless
+                # their binding traces back to a filesystem module in this cell.
+                continue
             if _is_safe_imported_module_call(node, func_name, module_aliases, tainted_vars):
                 continue
 
@@ -390,17 +415,21 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     return True, None
 
 
-def _resolve_call_name(node: ast.Call) -> Optional[str]:
-    """
-    Extract the leaf function name from a Call node.
+def _resolve_call_name(node: ast.Call, module_aliases: dict[str, str]) -> Optional[str]:
+    """Extract the leaf function name from a Call node.
 
-        Returns the rightmost name in a dotted call chain, e.g.
-        ``os.path.join(...)`` → ``"join"``, ``listdir(...)`` → ``"listdir"``.
-        Returns ``None`` for calls that cannot be statically resolved
-        (e.g. computed attribute access, subscript calls).
+    Returns the rightmost name in a dotted call chain, e.g.
+    ``os.path.join(...)`` → ``"join"``, ``listdir(...)`` → ``"listdir"``.
+    Resolves aliases imported from filesystem modules, e.g.
+    ``from os import walk as scan`` makes ``scan(...)`` resolve to ``"walk"``.
+    Returns ``None`` for calls that cannot be statically resolved
+    (e.g. computed attribute access, subscript calls).
     """
     func = node.func
     if isinstance(func, ast.Name):
+        canonical = module_aliases.get(func.id)
+        if canonical and canonical.split(".")[0] in ("os", "glob", "pathlib"):
+            return canonical.rsplit(".", 1)[-1]
         return func.id
     if isinstance(func, ast.Attribute):
         return func.attr
