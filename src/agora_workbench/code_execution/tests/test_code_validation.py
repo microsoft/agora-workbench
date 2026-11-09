@@ -1,5 +1,7 @@
 """Tests for code validation / filesystem screening in CodeExecutionServer."""
 
+import ast
+
 import pytest
 
 from .. import CodeExecutionServer, code_execution
@@ -524,6 +526,124 @@ collect({'cost': 1})
         )
         assert ok is False
         assert "not allowed" in msg.lower()
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "import os\nfor key in os.environ:\n    print(key.replace('_', '-'))",
+            "import os\nnames = [key.replace('_', '-') for key in os.environ]",
+            "import os\ndef f(name=os.sep):\n    return name.replace('a', 'b')",
+            "import os\ndef f(*, name=os.pathsep):\n    return name.replace('a', 'b')",
+            "import os\nf = lambda name=os.linesep: name.replace('a', 'b')",
+            "import os\nfor key in os.environ: pass\nfor key in ['a_b']: print(key.replace('_', '-'))",
+            "import os\nseparator = os.sep\ndef f(name=separator):\n    return name.replace('a', 'b')",
+        ],
+    )
+    def test_filesystem_data_attributes_do_not_taint_strings(self, server, code):
+        assert server.validate_code(code) == (True, None)
+
+    @pytest.mark.parametrize(
+        ("expression", "source", "method"),
+        [
+            ("{}", "os", "listdir"),
+            ("({} if enabled else [])", "os", "listdir"),
+            ("({} or [])", "os", "listdir"),
+            ("(*{},)", "os", "listdir"),
+            ("(saved := {})", "os", "listdir"),
+            ("{}.path", "os", "listdir"),
+            ("{}()", "Path", "iterdir"),
+        ],
+    )
+    def test_aggregate_alias_propagation_work_is_bounded(self, server, monkeypatch, expression, source, method):
+        length = 128
+        aggregate = "(" + ",".join(f"a{i}" for i in range(length)) + ",)"
+        code = (
+            f"items = {expression.format(aggregate)}\n"
+            + "\n".join(f"a{i} = a{i - 1}" for i in range(length - 1, 0, -1))
+            + f"\na0 = {source}\nfor item in items:\n    item.{method}('tmp')"
+        )
+        resolve = code_execution._resolve_rhs_sources
+        resolutions = 0
+
+        def counted_resolve(node, tainted):
+            nonlocal resolutions
+            resolutions += 1
+            return resolve(node, tainted)
+
+        monkeypatch.setattr(code_execution, "_resolve_rhs_sources", counted_resolve)
+        ok, msg = server.validate_code(code)
+        assert ok is False
+        assert "not allowed" in msg.lower()
+        assert resolutions <= 24 * (length + 1)
+
+    @pytest.mark.parametrize("assigned_lambda", [False, True])
+    @pytest.mark.parametrize("preceding", [False, True])
+    def test_repeated_helper_definitions_have_bounded_position_checks(self, assigned_lambda, preceding):
+        length = 128
+        definition = "walk = lambda value: value" if assigned_lambda else "def walk(value):\n    return value"
+        call = "def g():\n    walk(1)" if assigned_lambda else "walk(1)"
+        definitions = "\n".join(definition for _ in range(length))
+        calls = "\n".join(call for _ in range(length))
+        tree = ast.parse(f"{definitions}\n{calls}" if preceding else f"{calls}\n{definitions}")
+        comparisons = 0
+
+        class CountedLine(int):
+            def __lt__(self, other):
+                nonlocal comparisons
+                comparisons += 1
+                return super().__lt__(other)
+
+        for statement in tree.body:
+            if isinstance(statement, (ast.FunctionDef, ast.Assign)):
+                statement.lineno = CountedLine(statement.lineno)
+        allowed = code_execution._local_helper_call_ids(tree)
+        assert len(allowed) == (length if preceding else 0)
+        assert comparisons <= 8 * length
+
+    @pytest.mark.parametrize("repeated_name", [False, True])
+    def test_unpacked_helper_bindings_have_bounded_name_checks(self, repeated_name):
+        length = 128
+        names = ["walk" if repeated_name else f"helper{i}" for i in range(length)]
+        tree = ast.parse(
+            ",".join(names)
+            + " = ("
+            + ",".join("lambda value: value" for _ in names)
+            + ")\n"
+            + "\n".join(f"{name}(1)" for name in names)
+        )
+        comparisons = 0
+
+        class CountedName(str):
+            __hash__ = str.__hash__
+
+            def __eq__(self, other):
+                nonlocal comparisons
+                comparisons += 1
+                return super().__eq__(other)
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                node.id = CountedName(node.id)
+        assert len(code_execution._local_helper_call_ids(tree)) == length
+        assert comparisons <= 32 * length
+
+    @pytest.mark.parametrize(
+        ("module", "call"),
+        [
+            ("os", "x.listdir('tmp')"),
+            ("glob", "x.glob('*')"),
+            ("pathlib", "p = x.Path('tmp')\np.iterdir()"),
+        ],
+    )
+    def test_unrelated_binding_cannot_erase_implicit_module(self, server, module, call):
+        ok, msg = server.validate_code(f"def unrelated({module}=None):\n    pass\nx = {module}\n{call}")
+        assert ok is False
+        assert "not allowed" in msg.lower()
+
+    def test_explicit_non_system_import_overrides_implicit_module(self, server):
+        assert server.validate_code(
+            "import some_library as os\ndef unrelated(os=None):\n    pass\nx = os\nx.replace('a', 'b')"
+        ) == (True, None)
 
     @pytest.mark.parametrize(
         "code",

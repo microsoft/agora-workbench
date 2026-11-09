@@ -98,6 +98,24 @@ _STDLIB_MODULE_REEXPORTS: dict[str, str] = {
     "pathlib.os": "os",
 }
 
+_FS_DATA_SOURCES = {
+    f"os.{name}"
+    for name in (
+        "altsep",
+        "curdir",
+        "defpath",
+        "devnull",
+        "environ",
+        "environb",
+        "extsep",
+        "linesep",
+        "name",
+        "pardir",
+        "pathsep",
+        "sep",
+    )
+}
+
 # block calls and modules that can be used to directly circumvent the other blocks
 _BLOCKED_DANGEROUS_CALLS: set[str] = {
     "__import__",
@@ -543,14 +561,20 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
             if node.value is not None:
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
-                    pairs = _assignment_bindings(target, node.value)
-                    for name in _assignment_target_names(target):
-                        groups = [local_lambdas(value) for target_name, value in pairs if target_name == name.id]
-                        if groups and all(group is not None for group in groups):
-                            safe_targets[name] = node
-                            recursive_lambdas.setdefault((node, name.id), set()).update(
+                    groups_by_name: dict[str, list[set[ast.Lambda] | None]] = {}
+                    for name, value in _assignment_bindings(target, node.value):
+                        if name in call_names:
+                            groups_by_name.setdefault(name, []).append(local_lambdas(value))
+                    helper_names = set()
+                    for name, groups in groups_by_name.items():
+                        if all(group is not None for group in groups):
+                            helper_names.add(name)
+                            recursive_lambdas.setdefault((node, name), set()).update(
                                 helper for group in groups if group is not None for helper in group
                             )
+                    for name in _assignment_target_names(target):
+                        if name.id in helper_names:
+                            safe_targets[name] = node
         elif isinstance(node, ast.ClassDef):
             bind(scope, node.name)
         elif isinstance(node, ast.arg):
@@ -574,13 +598,20 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             bind(enclosing_scope(node), node.id, safe_targets.get(node))
 
-    def anchor_in_suite(node: ast.AST, definition: ast.stmt) -> ast.AST | None:
-        suite = suites[definition]
-        while suites.get(node) != suite:
-            if node not in parents:
-                return None
-            node = parents[node]
-        return node
+    helper_definitions: dict[tuple[ast.AST, str], set[ast.stmt]] = {}
+    earliest: dict[tuple[ast.AST, str], dict[tuple[ast.AST, str], tuple[int, int]]] = {}
+    for scope, names in bindings.items():
+        for name, definitions in names.items():
+            if any(definition is None for definition in definitions):
+                continue
+            key = (scope, name)
+            statements = {definition for definition in definitions if definition is not None}
+            helper_definitions[key] = statements
+            positions = earliest[key] = {}
+            for definition in statements:
+                suite = suites[definition]
+                position = (definition.lineno, definition.col_offset)
+                positions[suite] = min(positions.get(suite, position), position)
 
     allowed: set[int] = set()
     for node in nodes:
@@ -595,20 +626,20 @@ def _local_helper_call_ids(tree: ast.Module) -> set[int]:
             seen.add(scope)
             definitions = bindings.get(scope, {}).get(name)
             if definitions is not None:
-                if all(definition is not None for definition in definitions):
-                    for definition in definitions:
-                        if definition is None:
-                            continue
-                        anchor = anchor_in_suite(node, definition)
-                        if not isinstance(anchor, ast.stmt):
-                            continue
-                        preceding = (definition.lineno, definition.col_offset) < (anchor.lineno, anchor.col_offset)
-                        recursive = definition is anchor and (
-                            definition in seen or bool(recursive_lambdas.get((definition, name), set()) & seen)
-                        )
-                        if preceding or recursive:
-                            allowed.add(id(node))
-                            break
+                key = (scope, name)
+                if key in helper_definitions:
+                    anchor = node
+                    while anchor in parents:
+                        if isinstance(anchor, ast.stmt):
+                            position = earliest[key].get(suites[anchor])
+                            preceding = position is not None and position < (anchor.lineno, anchor.col_offset)
+                            recursive = anchor in helper_definitions[key] and (
+                                anchor in seen or bool(recursive_lambdas.get((anchor, name), set()) & seen)
+                            )
+                            if preceding or recursive:
+                                allowed.add(id(node))
+                                break
+                        anchor = parents[anchor]
                 break
             if scope is tree:
                 break
@@ -690,7 +721,13 @@ def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict
         local_name: {canonical for canonical in sources if canonical.split(".")[0] in _DANGEROUS_FAMILIES}
         for local_name, sources in module_aliases.items()
     }
+    # Unrelated bindings cannot erase module assumptions inherited from earlier cells.
+    for name, family in _FS_MODULE_FAMILIES.items():
+        if name not in module_aliases:
+            tainted[name] = {family}
     bindings: list[tuple[str, ast.expr]] = []
+    # Loop elements and parameter defaults may be string data rather than modules.
+    value_bindings: list[tuple[str, ast.expr]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
@@ -700,32 +737,40 @@ def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict
         elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
             values = node.iter.elts if isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)) else [node.iter]
             for value in values:
-                bindings.extend(_assignment_bindings(node.target, value))
+                value_bindings.extend(_assignment_bindings(node.target, value))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
             args = node.args
             positional = args.posonlyargs + args.args
-            bindings.extend(
+            value_bindings.extend(
                 (arg.arg, default)
                 for arg, default in zip(positional[len(positional) - len(args.defaults) :], args.defaults)
             )
-            bindings.extend(
+            value_bindings.extend(
                 (arg.arg, default) for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None
             )
 
+    work_bindings = [
+        (name, part, data_value)
+        for group, data_value in ((bindings, False), (value_bindings, True))
+        for name, value in group
+        for part in _rhs_source_parts(value)
+    ]
     dependents: dict[str, list[int]] = {}
-    for index, (_, value) in enumerate(bindings):
+    for index, (_, value, _) in enumerate(work_bindings):
         names = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
         for name in names:
             dependents.setdefault(name, []).append(index)
 
-    pending = deque(range(len(bindings)))
+    pending = deque(range(len(work_bindings)))
     queued = set(pending)
     # Sources only accumulate; revisit only bindings whose inputs gained sources.
     while pending:
         index = pending.popleft()
         queued.remove(index)
-        name, value = bindings[index]
+        name, value, data_value = work_bindings[index]
         sources = _resolve_rhs_sources(value, tainted)
+        if data_value:
+            sources = sources - _FS_DATA_SOURCES
         previous = tainted.setdefault(name, set())
         if not sources - previous:
             continue
@@ -735,6 +780,23 @@ def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict
                 pending.append(dependent)
                 queued.add(dependent)
     return tainted
+
+
+def _rhs_source_parts(node: ast.expr) -> list[ast.expr]:
+    """Distribute source unions through member/constructor lookups into small work items."""
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return [part for item in node.elts for part in _rhs_source_parts(item)]
+    if isinstance(node, ast.BoolOp):
+        return [part for value in node.values for part in _rhs_source_parts(value)]
+    if isinstance(node, ast.IfExp):
+        return _rhs_source_parts(node.body) + _rhs_source_parts(node.orelse)
+    if isinstance(node, (ast.NamedExpr, ast.Starred)):
+        return _rhs_source_parts(node.value)
+    if isinstance(node, ast.Attribute):
+        return [ast.Attribute(value=part, attr=node.attr, ctx=node.ctx) for part in _rhs_source_parts(node.value)]
+    if isinstance(node, ast.Call):
+        return [ast.Call(func=part, args=[], keywords=[]) for part in _rhs_source_parts(node.func)]
+    return [node]
 
 
 def _assignment_bindings(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
