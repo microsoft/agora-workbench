@@ -5211,12 +5211,14 @@ or <code>"subdir/report.pdf"</code>).</p>
 <span class="normal"><a href="#__codelineno-0-2009">2009</a></span>
 <span class="normal"><a href="#__codelineno-0-2010">2010</a></span>
 <span class="normal"><a href="#__codelineno-0-2011">2011</a></span>
-<span class="normal"><a href="#__codelineno-0-2012">2012</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2007" name="__codelineno-0-2007"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">start_background_execution_for_session</span><span class="p">(</span>
+<span class="normal"><a href="#__codelineno-0-2012">2012</a></span>
+<span class="normal"><a href="#__codelineno-0-2013">2013</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2007" name="__codelineno-0-2007"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">start_background_execution_for_session</span><span class="p">(</span>
 <a id="__codelineno-0-2008" name="__codelineno-0-2008"></a>    <span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
 <a id="__codelineno-0-2009" name="__codelineno-0-2009"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
 <a id="__codelineno-0-2010" name="__codelineno-0-2010"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Start execution and return immediately with a background job id.&quot;&quot;&quot;</span>
 <a id="__codelineno-0-2011" name="__codelineno-0-2011"></a>    <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
-<a id="__codelineno-0-2012" name="__codelineno-0-2012"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_background_execution_for_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">)</span>
+<a id="__codelineno-0-2012" name="__codelineno-0-2012"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_execution_lock</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
+<a id="__codelineno-0-2013" name="__codelineno-0-2013"></a>            <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_background_execution_for_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -5389,8 +5391,7 @@ callers should pass the raw user code — <strong>not</strong> pre-preambled.</p
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2059">2059</a></span>
-<span class="normal"><a href="#__codelineno-0-2060">2060</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2060">2060</a></span>
 <span class="normal"><a href="#__codelineno-0-2061">2061</a></span>
 <span class="normal"><a href="#__codelineno-0-2062">2062</a></span>
 <span class="normal"><a href="#__codelineno-0-2063">2063</a></span>
@@ -5431,49 +5432,50 @@ callers should pass the raw user code — <strong>not</strong> pre-preambled.</p
 <span class="normal"><a href="#__codelineno-0-2098">2098</a></span>
 <span class="normal"><a href="#__codelineno-0-2099">2099</a></span>
 <span class="normal"><a href="#__codelineno-0-2100">2100</a></span>
-<span class="normal"><a href="#__codelineno-0-2101">2101</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2059" name="__codelineno-0-2059"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">start_promoted_execution_for_session</span><span class="p">(</span>
-<a id="__codelineno-0-2060" name="__codelineno-0-2060"></a>    <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-2061" name="__codelineno-0-2061"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-2062" name="__codelineno-0-2062"></a>    <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-2063" name="__codelineno-0-2063"></a>    <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-<a id="__codelineno-0-2064" name="__codelineno-0-2064"></a>    <span class="n">promotion_threshold_s</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
-<a id="__codelineno-0-2065" name="__codelineno-0-2065"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-2066" name="__codelineno-0-2066"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-2067" name="__codelineno-0-2067"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Execute code synchronously, promoting to a background job if it exceeds the threshold.</span>
-<a id="__codelineno-0-2068" name="__codelineno-0-2068"></a>
-<a id="__codelineno-0-2069" name="__codelineno-0-2069"></a><span class="sd">    Starts executing like the normal foreground path. If the kernel reaches</span>
-<a id="__codelineno-0-2070" name="__codelineno-0-2070"></a><span class="sd">    ``idle`` within *promotion_threshold_s* seconds the result is returned</span>
-<a id="__codelineno-0-2071" name="__codelineno-0-2071"></a><span class="sd">    as a ``(stdout, stderr, success, displays, artifacts)`` tuple — identical</span>
-<a id="__codelineno-0-2072" name="__codelineno-0-2072"></a><span class="sd">    to :meth:`execute_code_for_session`.  If the threshold expires while the</span>
-<a id="__codelineno-0-2073" name="__codelineno-0-2073"></a><span class="sd">    kernel is still busy, the in-flight execution is registered as a</span>
-<a id="__codelineno-0-2074" name="__codelineno-0-2074"></a><span class="sd">    :class:`_BackgroundJob` and a job-handle dict is returned instead.</span>
-<a id="__codelineno-0-2075" name="__codelineno-0-2075"></a>
-<a id="__codelineno-0-2076" name="__codelineno-0-2076"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-2077" name="__codelineno-0-2077"></a><span class="sd">        session_id: Session identifier.</span>
-<a id="__codelineno-0-2078" name="__codelineno-0-2078"></a><span class="sd">        code: Python code to execute.  This method applies the outputs and</span>
-<a id="__codelineno-0-2079" name="__codelineno-0-2079"></a><span class="sd">            token preambles internally (same as the foreground path), so</span>
-<a id="__codelineno-0-2080" name="__codelineno-0-2080"></a><span class="sd">            callers should pass the raw user code — **not** pre-preambled.</span>
-<a id="__codelineno-0-2081" name="__codelineno-0-2081"></a><span class="sd">        timeout: Total execution timeout in seconds.</span>
-<a id="__codelineno-0-2082" name="__codelineno-0-2082"></a><span class="sd">        promotion_threshold_s: Seconds to wait before promoting.</span>
-<a id="__codelineno-0-2083" name="__codelineno-0-2083"></a><span class="sd">        working_dir: Optional working directory for the kernel.</span>
-<a id="__codelineno-0-2084" name="__codelineno-0-2084"></a>
-<a id="__codelineno-0-2085" name="__codelineno-0-2085"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-2086" name="__codelineno-0-2086"></a><span class="sd">        Either the 5-tuple ``(stdout, stderr, success, displays, artifacts)``</span>
-<a id="__codelineno-0-2087" name="__codelineno-0-2087"></a><span class="sd">        when the execution completes within the threshold, or a dict with</span>
-<a id="__codelineno-0-2088" name="__codelineno-0-2088"></a><span class="sd">        ``job_id``, ``status``, ``session_id``, and ``promoted=True``.</span>
-<a id="__codelineno-0-2089" name="__codelineno-0-2089"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-2090" name="__codelineno-0-2090"></a>    <span class="k">if</span> <span class="n">timeout</span> <span class="o">&lt;=</span> <span class="n">promotion_threshold_s</span><span class="p">:</span>
-<a id="__codelineno-0-2091" name="__codelineno-0-2091"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
-<a id="__codelineno-0-2092" name="__codelineno-0-2092"></a>            <span class="sa">f</span><span class="s2">&quot;timeout (</span><span class="si">{</span><span class="n">timeout</span><span class="si">}</span><span class="s2">s) must be greater than promotion_threshold_s (</span><span class="si">{</span><span class="n">promotion_threshold_s</span><span class="si">}</span><span class="s2">s)&quot;</span>
-<a id="__codelineno-0-2093" name="__codelineno-0-2093"></a>        <span class="p">)</span>
-<a id="__codelineno-0-2094" name="__codelineno-0-2094"></a>    <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
-<a id="__codelineno-0-2095" name="__codelineno-0-2095"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_promoted_execution_for_session</span><span class="p">(</span>
-<a id="__codelineno-0-2096" name="__codelineno-0-2096"></a>            <span class="n">session_id</span><span class="p">,</span>
-<a id="__codelineno-0-2097" name="__codelineno-0-2097"></a>            <span class="n">code</span><span class="p">,</span>
-<a id="__codelineno-0-2098" name="__codelineno-0-2098"></a>            <span class="n">timeout</span><span class="p">,</span>
-<a id="__codelineno-0-2099" name="__codelineno-0-2099"></a>            <span class="n">promotion_threshold_s</span><span class="p">,</span>
-<a id="__codelineno-0-2100" name="__codelineno-0-2100"></a>            <span class="n">working_dir</span><span class="p">,</span>
-<a id="__codelineno-0-2101" name="__codelineno-0-2101"></a>        <span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-2101">2101</a></span>
+<span class="normal"><a href="#__codelineno-0-2102">2102</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2060" name="__codelineno-0-2060"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">start_promoted_execution_for_session</span><span class="p">(</span>
+<a id="__codelineno-0-2061" name="__codelineno-0-2061"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-2062" name="__codelineno-0-2062"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-2063" name="__codelineno-0-2063"></a>    <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-2064" name="__codelineno-0-2064"></a>    <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+<a id="__codelineno-0-2065" name="__codelineno-0-2065"></a>    <span class="n">promotion_threshold_s</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+<a id="__codelineno-0-2066" name="__codelineno-0-2066"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-2067" name="__codelineno-0-2067"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Tuple[str, str, bool, list[dict], list[dict]] | dict[str, Any]&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-2068" name="__codelineno-0-2068"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Execute code synchronously, promoting to a background job if it exceeds the threshold.</span>
+<a id="__codelineno-0-2069" name="__codelineno-0-2069"></a>
+<a id="__codelineno-0-2070" name="__codelineno-0-2070"></a><span class="sd">    Starts executing like the normal foreground path. If the kernel reaches</span>
+<a id="__codelineno-0-2071" name="__codelineno-0-2071"></a><span class="sd">    ``idle`` within *promotion_threshold_s* seconds the result is returned</span>
+<a id="__codelineno-0-2072" name="__codelineno-0-2072"></a><span class="sd">    as a ``(stdout, stderr, success, displays, artifacts)`` tuple — identical</span>
+<a id="__codelineno-0-2073" name="__codelineno-0-2073"></a><span class="sd">    to :meth:`execute_code_for_session`.  If the threshold expires while the</span>
+<a id="__codelineno-0-2074" name="__codelineno-0-2074"></a><span class="sd">    kernel is still busy, the in-flight execution is registered as a</span>
+<a id="__codelineno-0-2075" name="__codelineno-0-2075"></a><span class="sd">    :class:`_BackgroundJob` and a job-handle dict is returned instead.</span>
+<a id="__codelineno-0-2076" name="__codelineno-0-2076"></a>
+<a id="__codelineno-0-2077" name="__codelineno-0-2077"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-2078" name="__codelineno-0-2078"></a><span class="sd">        session_id: Session identifier.</span>
+<a id="__codelineno-0-2079" name="__codelineno-0-2079"></a><span class="sd">        code: Python code to execute.  This method applies the outputs and</span>
+<a id="__codelineno-0-2080" name="__codelineno-0-2080"></a><span class="sd">            token preambles internally (same as the foreground path), so</span>
+<a id="__codelineno-0-2081" name="__codelineno-0-2081"></a><span class="sd">            callers should pass the raw user code — **not** pre-preambled.</span>
+<a id="__codelineno-0-2082" name="__codelineno-0-2082"></a><span class="sd">        timeout: Total execution timeout in seconds.</span>
+<a id="__codelineno-0-2083" name="__codelineno-0-2083"></a><span class="sd">        promotion_threshold_s: Seconds to wait before promoting.</span>
+<a id="__codelineno-0-2084" name="__codelineno-0-2084"></a><span class="sd">        working_dir: Optional working directory for the kernel.</span>
+<a id="__codelineno-0-2085" name="__codelineno-0-2085"></a>
+<a id="__codelineno-0-2086" name="__codelineno-0-2086"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-2087" name="__codelineno-0-2087"></a><span class="sd">        Either the 5-tuple ``(stdout, stderr, success, displays, artifacts)``</span>
+<a id="__codelineno-0-2088" name="__codelineno-0-2088"></a><span class="sd">        when the execution completes within the threshold, or a dict with</span>
+<a id="__codelineno-0-2089" name="__codelineno-0-2089"></a><span class="sd">        ``job_id``, ``status``, ``session_id``, and ``promoted=True``.</span>
+<a id="__codelineno-0-2090" name="__codelineno-0-2090"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-2091" name="__codelineno-0-2091"></a>    <span class="k">if</span> <span class="n">timeout</span> <span class="o">&lt;=</span> <span class="n">promotion_threshold_s</span><span class="p">:</span>
+<a id="__codelineno-0-2092" name="__codelineno-0-2092"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+<a id="__codelineno-0-2093" name="__codelineno-0-2093"></a>            <span class="sa">f</span><span class="s2">&quot;timeout (</span><span class="si">{</span><span class="n">timeout</span><span class="si">}</span><span class="s2">s) must be greater than promotion_threshold_s (</span><span class="si">{</span><span class="n">promotion_threshold_s</span><span class="si">}</span><span class="s2">s)&quot;</span>
+<a id="__codelineno-0-2094" name="__codelineno-0-2094"></a>        <span class="p">)</span>
+<a id="__codelineno-0-2095" name="__codelineno-0-2095"></a>    <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
+<a id="__codelineno-0-2096" name="__codelineno-0-2096"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_start_promoted_execution_for_session</span><span class="p">(</span>
+<a id="__codelineno-0-2097" name="__codelineno-0-2097"></a>            <span class="n">session_id</span><span class="p">,</span>
+<a id="__codelineno-0-2098" name="__codelineno-0-2098"></a>            <span class="n">code</span><span class="p">,</span>
+<a id="__codelineno-0-2099" name="__codelineno-0-2099"></a>            <span class="n">timeout</span><span class="p">,</span>
+<a id="__codelineno-0-2100" name="__codelineno-0-2100"></a>            <span class="n">promotion_threshold_s</span><span class="p">,</span>
+<a id="__codelineno-0-2101" name="__codelineno-0-2101"></a>            <span class="n">working_dir</span><span class="p">,</span>
+<a id="__codelineno-0-2102" name="__codelineno-0-2102"></a>        <span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -5546,11 +5548,7 @@ cannot use differing error messages to probe whether a job ID exists.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2313">2313</a></span>
-<span class="normal"><a href="#__codelineno-0-2314">2314</a></span>
-<span class="normal"><a href="#__codelineno-0-2315">2315</a></span>
-<span class="normal"><a href="#__codelineno-0-2316">2316</a></span>
-<span class="normal"><a href="#__codelineno-0-2317">2317</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2317">2317</a></span>
 <span class="normal"><a href="#__codelineno-0-2318">2318</a></span>
 <span class="normal"><a href="#__codelineno-0-2319">2319</a></span>
 <span class="normal"><a href="#__codelineno-0-2320">2320</a></span>
@@ -5587,48 +5585,52 @@ cannot use differing error messages to probe whether a job ID exists.</p>
 <span class="normal"><a href="#__codelineno-0-2351">2351</a></span>
 <span class="normal"><a href="#__codelineno-0-2352">2352</a></span>
 <span class="normal"><a href="#__codelineno-0-2353">2353</a></span>
-<span class="normal"><a href="#__codelineno-0-2354">2354</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2313" name="__codelineno-0-2313"></a><span class="k">def</span><span class="w"> </span><span class="nf">check_background_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">caller_identity</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
-<a id="__codelineno-0-2314" name="__codelineno-0-2314"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return current status/output for a background job.</span>
-<a id="__codelineno-0-2315" name="__codelineno-0-2315"></a>
-<a id="__codelineno-0-2316" name="__codelineno-0-2316"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-2317" name="__codelineno-0-2317"></a><span class="sd">        job_id: Background job identifier.</span>
-<a id="__codelineno-0-2318" name="__codelineno-0-2318"></a><span class="sd">        caller_identity: When provided, the caller&#39;s user identity is compared to</span>
-<a id="__codelineno-0-2319" name="__codelineno-0-2319"></a><span class="sd">            the identity that submitted the job. Both a missing job and an identity</span>
-<a id="__codelineno-0-2320" name="__codelineno-0-2320"></a><span class="sd">            mismatch raise ``ValueError(&quot;Job {job_id} not found&quot;)`` so that callers</span>
-<a id="__codelineno-0-2321" name="__codelineno-0-2321"></a><span class="sd">            cannot use differing error messages to probe whether a job ID exists.</span>
-<a id="__codelineno-0-2322" name="__codelineno-0-2322"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-2323" name="__codelineno-0-2323"></a>    <span class="n">job</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background_jobs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
-<a id="__codelineno-0-2324" name="__codelineno-0-2324"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">job</span><span class="p">:</span>
-<a id="__codelineno-0-2325" name="__codelineno-0-2325"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s2"> not found&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-2326" name="__codelineno-0-2326"></a>
-<a id="__codelineno-0-2327" name="__codelineno-0-2327"></a>    <span class="k">if</span> <span class="n">caller_identity</span> <span class="ow">and</span> <span class="n">job</span><span class="o">.</span><span class="n">user_identity</span> <span class="ow">and</span> <span class="n">caller_identity</span> <span class="o">!=</span> <span class="n">job</span><span class="o">.</span><span class="n">user_identity</span><span class="p">:</span>
-<a id="__codelineno-0-2328" name="__codelineno-0-2328"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s2"> not found&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-2329" name="__codelineno-0-2329"></a>
-<a id="__codelineno-0-2330" name="__codelineno-0-2330"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
-<a id="__codelineno-0-2331" name="__codelineno-0-2331"></a>    <span class="n">elapsed_seconds</span> <span class="o">=</span> <span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">completed_at</span> <span class="ow">or</span> <span class="n">now</span><span class="p">)</span> <span class="o">-</span> <span class="n">job</span><span class="o">.</span><span class="n">start_time</span>
-<a id="__codelineno-0-2332" name="__codelineno-0-2332"></a>    <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-0-2333" name="__codelineno-0-2333"></a>        <span class="s2">&quot;job_id&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">job_id</span><span class="p">,</span>
-<a id="__codelineno-0-2334" name="__codelineno-0-2334"></a>        <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">session_id</span><span class="p">,</span>
-<a id="__codelineno-0-2335" name="__codelineno-0-2335"></a>        <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
-<a id="__codelineno-0-2336" name="__codelineno-0-2336"></a>        <span class="s2">&quot;elapsed_seconds&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">elapsed_seconds</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
-<a id="__codelineno-0-2337" name="__codelineno-0-2337"></a>    <span class="p">}</span>
-<a id="__codelineno-0-2338" name="__codelineno-0-2338"></a>
-<a id="__codelineno-0-2339" name="__codelineno-0-2339"></a>    <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;running&quot;</span><span class="p">:</span>
-<a id="__codelineno-0-2340" name="__codelineno-0-2340"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stdout&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stdout_parts</span><span class="p">)</span>
-<a id="__codelineno-0-2341" name="__codelineno-0-2341"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stderr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stderr_parts</span><span class="p">)</span>
-<a id="__codelineno-0-2342" name="__codelineno-0-2342"></a>        <span class="k">return</span> <span class="n">result</span>
-<a id="__codelineno-0-2343" name="__codelineno-0-2343"></a>
-<a id="__codelineno-0-2344" name="__codelineno-0-2344"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stdout&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stdout_parts</span><span class="p">)</span>
-<a id="__codelineno-0-2345" name="__codelineno-0-2345"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stderr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stderr_parts</span><span class="p">)</span>
-<a id="__codelineno-0-2346" name="__codelineno-0-2346"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;success&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">success</span>
-<a id="__codelineno-0-2347" name="__codelineno-0-2347"></a>    <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>
-<a id="__codelineno-0-2348" name="__codelineno-0-2348"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;error&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">error</span>
-<a id="__codelineno-0-2349" name="__codelineno-0-2349"></a>    <span class="c1"># Artifacts are populated by _finalize_background_artifacts when the</span>
-<a id="__codelineno-0-2350" name="__codelineno-0-2350"></a>    <span class="c1"># job reaches a terminal state; carry them here without download URLs</span>
-<a id="__codelineno-0-2351" name="__codelineno-0-2351"></a>    <span class="c1"># — URL composition happens in the MCP server layer where the public</span>
-<a id="__codelineno-0-2352" name="__codelineno-0-2352"></a>    <span class="c1"># base URL is known (matches the foreground path&#39;s contract).</span>
-<a id="__codelineno-0-2353" name="__codelineno-0-2353"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;artifacts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">artifacts</span><span class="p">)</span>
-<a id="__codelineno-0-2354" name="__codelineno-0-2354"></a>    <span class="k">return</span> <span class="n">result</span>
+<span class="normal"><a href="#__codelineno-0-2354">2354</a></span>
+<span class="normal"><a href="#__codelineno-0-2355">2355</a></span>
+<span class="normal"><a href="#__codelineno-0-2356">2356</a></span>
+<span class="normal"><a href="#__codelineno-0-2357">2357</a></span>
+<span class="normal"><a href="#__codelineno-0-2358">2358</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2317" name="__codelineno-0-2317"></a><span class="k">def</span><span class="w"> </span><span class="nf">check_background_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">caller_identity</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<a id="__codelineno-0-2318" name="__codelineno-0-2318"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Return current status/output for a background job.</span>
+<a id="__codelineno-0-2319" name="__codelineno-0-2319"></a>
+<a id="__codelineno-0-2320" name="__codelineno-0-2320"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-2321" name="__codelineno-0-2321"></a><span class="sd">        job_id: Background job identifier.</span>
+<a id="__codelineno-0-2322" name="__codelineno-0-2322"></a><span class="sd">        caller_identity: When provided, the caller&#39;s user identity is compared to</span>
+<a id="__codelineno-0-2323" name="__codelineno-0-2323"></a><span class="sd">            the identity that submitted the job. Both a missing job and an identity</span>
+<a id="__codelineno-0-2324" name="__codelineno-0-2324"></a><span class="sd">            mismatch raise ``ValueError(&quot;Job {job_id} not found&quot;)`` so that callers</span>
+<a id="__codelineno-0-2325" name="__codelineno-0-2325"></a><span class="sd">            cannot use differing error messages to probe whether a job ID exists.</span>
+<a id="__codelineno-0-2326" name="__codelineno-0-2326"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-2327" name="__codelineno-0-2327"></a>    <span class="n">job</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background_jobs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
+<a id="__codelineno-0-2328" name="__codelineno-0-2328"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">job</span><span class="p">:</span>
+<a id="__codelineno-0-2329" name="__codelineno-0-2329"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s2"> not found&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-2330" name="__codelineno-0-2330"></a>
+<a id="__codelineno-0-2331" name="__codelineno-0-2331"></a>    <span class="k">if</span> <span class="n">caller_identity</span> <span class="ow">and</span> <span class="n">job</span><span class="o">.</span><span class="n">user_identity</span> <span class="ow">and</span> <span class="n">caller_identity</span> <span class="o">!=</span> <span class="n">job</span><span class="o">.</span><span class="n">user_identity</span><span class="p">:</span>
+<a id="__codelineno-0-2332" name="__codelineno-0-2332"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Job </span><span class="si">{</span><span class="n">job_id</span><span class="si">}</span><span class="s2"> not found&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-2333" name="__codelineno-0-2333"></a>
+<a id="__codelineno-0-2334" name="__codelineno-0-2334"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">monotonic</span><span class="p">()</span>
+<a id="__codelineno-0-2335" name="__codelineno-0-2335"></a>    <span class="n">elapsed_seconds</span> <span class="o">=</span> <span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">completed_at</span> <span class="ow">or</span> <span class="n">now</span><span class="p">)</span> <span class="o">-</span> <span class="n">job</span><span class="o">.</span><span class="n">start_time</span>
+<a id="__codelineno-0-2336" name="__codelineno-0-2336"></a>    <span class="n">result</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-0-2337" name="__codelineno-0-2337"></a>        <span class="s2">&quot;job_id&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">job_id</span><span class="p">,</span>
+<a id="__codelineno-0-2338" name="__codelineno-0-2338"></a>        <span class="s2">&quot;session_id&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">session_id</span><span class="p">,</span>
+<a id="__codelineno-0-2339" name="__codelineno-0-2339"></a>        <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="n">job</span><span class="o">.</span><span class="n">status</span><span class="p">,</span>
+<a id="__codelineno-0-2340" name="__codelineno-0-2340"></a>        <span class="s2">&quot;elapsed_seconds&quot;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">elapsed_seconds</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+<a id="__codelineno-0-2341" name="__codelineno-0-2341"></a>    <span class="p">}</span>
+<a id="__codelineno-0-2342" name="__codelineno-0-2342"></a>
+<a id="__codelineno-0-2343" name="__codelineno-0-2343"></a>    <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;running&quot;</span><span class="p">:</span>
+<a id="__codelineno-0-2344" name="__codelineno-0-2344"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stdout&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stdout_parts</span><span class="p">)</span>
+<a id="__codelineno-0-2345" name="__codelineno-0-2345"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stderr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stderr_parts</span><span class="p">)</span>
+<a id="__codelineno-0-2346" name="__codelineno-0-2346"></a>        <span class="k">return</span> <span class="n">result</span>
+<a id="__codelineno-0-2347" name="__codelineno-0-2347"></a>
+<a id="__codelineno-0-2348" name="__codelineno-0-2348"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stdout&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stdout_parts</span><span class="p">)</span>
+<a id="__codelineno-0-2349" name="__codelineno-0-2349"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;stderr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">stderr_parts</span><span class="p">)</span>
+<a id="__codelineno-0-2350" name="__codelineno-0-2350"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;success&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">success</span>
+<a id="__codelineno-0-2351" name="__codelineno-0-2351"></a>    <span class="k">if</span> <span class="n">job</span><span class="o">.</span><span class="n">error</span><span class="p">:</span>
+<a id="__codelineno-0-2352" name="__codelineno-0-2352"></a>        <span class="n">result</span><span class="p">[</span><span class="s2">&quot;error&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">error</span>
+<a id="__codelineno-0-2353" name="__codelineno-0-2353"></a>    <span class="c1"># Artifacts are populated by _finalize_background_artifacts when the</span>
+<a id="__codelineno-0-2354" name="__codelineno-0-2354"></a>    <span class="c1"># job reaches a terminal state; carry them here without download URLs</span>
+<a id="__codelineno-0-2355" name="__codelineno-0-2355"></a>    <span class="c1"># — URL composition happens in the MCP server layer where the public</span>
+<a id="__codelineno-0-2356" name="__codelineno-0-2356"></a>    <span class="c1"># base URL is known (matches the foreground path&#39;s contract).</span>
+<a id="__codelineno-0-2357" name="__codelineno-0-2357"></a>    <span class="n">result</span><span class="p">[</span><span class="s2">&quot;artifacts&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">job</span><span class="o">.</span><span class="n">artifacts</span><span class="p">)</span>
+<a id="__codelineno-0-2358" name="__codelineno-0-2358"></a>    <span class="k">return</span> <span class="n">result</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -5660,11 +5662,7 @@ Cancelling this waiter does not cancel the underlying job.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2356">2356</a></span>
-<span class="normal"><a href="#__codelineno-0-2357">2357</a></span>
-<span class="normal"><a href="#__codelineno-0-2358">2358</a></span>
-<span class="normal"><a href="#__codelineno-0-2359">2359</a></span>
-<span class="normal"><a href="#__codelineno-0-2360">2360</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2360">2360</a></span>
 <span class="normal"><a href="#__codelineno-0-2361">2361</a></span>
 <span class="normal"><a href="#__codelineno-0-2362">2362</a></span>
 <span class="normal"><a href="#__codelineno-0-2363">2363</a></span>
@@ -5682,29 +5680,33 @@ Cancelling this waiter does not cancel the underlying job.</p>
 <span class="normal"><a href="#__codelineno-0-2375">2375</a></span>
 <span class="normal"><a href="#__codelineno-0-2376">2376</a></span>
 <span class="normal"><a href="#__codelineno-0-2377">2377</a></span>
-<span class="normal"><a href="#__codelineno-0-2378">2378</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2356" name="__codelineno-0-2356"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">await_background_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-2357" name="__codelineno-0-2357"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Wait for a background job&#39;s task to reach a terminal state, then return its status.</span>
-<a id="__codelineno-0-2358" name="__codelineno-0-2358"></a>
-<a id="__codelineno-0-2359" name="__codelineno-0-2359"></a><span class="sd">    Returns ``None`` if the job was never registered or has already been purged.</span>
-<a id="__codelineno-0-2360" name="__codelineno-0-2360"></a><span class="sd">    Used by the activity publisher to emit ``job_finished`` events. A task that</span>
-<a id="__codelineno-0-2361" name="__codelineno-0-2361"></a><span class="sd">    raised or was cancelled (for example by ``close_session``) is terminal: the</span>
-<a id="__codelineno-0-2362" name="__codelineno-0-2362"></a><span class="sd">    snapshot reflects the status recorded by the collector or by the canceller.</span>
-<a id="__codelineno-0-2363" name="__codelineno-0-2363"></a><span class="sd">    Cancelling this waiter does not cancel the underlying job.</span>
-<a id="__codelineno-0-2364" name="__codelineno-0-2364"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-2365" name="__codelineno-0-2365"></a>    <span class="n">job</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background_jobs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
-<a id="__codelineno-0-2366" name="__codelineno-0-2366"></a>    <span class="k">if</span> <span class="n">job</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">job</span><span class="o">.</span><span class="n">task</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2367" name="__codelineno-0-2367"></a>        <span class="k">return</span> <span class="kc">None</span>
-<a id="__codelineno-0-2368" name="__codelineno-0-2368"></a>    <span class="n">task</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">task</span>
-<a id="__codelineno-0-2369" name="__codelineno-0-2369"></a>    <span class="c1"># asyncio.wait neither re-raises the task&#39;s outcome nor cancels the task</span>
-<a id="__codelineno-0-2370" name="__codelineno-0-2370"></a>    <span class="c1"># when this waiter is cancelled: a job cancelled by close/teardown still</span>
-<a id="__codelineno-0-2371" name="__codelineno-0-2371"></a>    <span class="c1"># reaches a terminal snapshot, and cancelling the waiter leaves the job running.</span>
-<a id="__codelineno-0-2372" name="__codelineno-0-2372"></a>    <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">((</span><span class="n">task</span><span class="p">,))</span>
-<a id="__codelineno-0-2373" name="__codelineno-0-2373"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">task</span><span class="o">.</span><span class="n">cancelled</span><span class="p">()</span> <span class="ow">and</span> <span class="n">task</span><span class="o">.</span><span class="n">exception</span><span class="p">()</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2374" name="__codelineno-0-2374"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Background job task raised for job_id=</span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">job_id</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="n">task</span><span class="o">.</span><span class="n">exception</span><span class="p">())</span>
-<a id="__codelineno-0-2375" name="__codelineno-0-2375"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2376" name="__codelineno-0-2376"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_background_job</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
-<a id="__codelineno-0-2377" name="__codelineno-0-2377"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-<a id="__codelineno-0-2378" name="__codelineno-0-2378"></a>        <span class="k">return</span> <span class="kc">None</span>
+<span class="normal"><a href="#__codelineno-0-2378">2378</a></span>
+<span class="normal"><a href="#__codelineno-0-2379">2379</a></span>
+<span class="normal"><a href="#__codelineno-0-2380">2380</a></span>
+<span class="normal"><a href="#__codelineno-0-2381">2381</a></span>
+<span class="normal"><a href="#__codelineno-0-2382">2382</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2360" name="__codelineno-0-2360"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">await_background_job</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">job_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<a id="__codelineno-0-2361" name="__codelineno-0-2361"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Wait for a background job&#39;s task to reach a terminal state, then return its status.</span>
+<a id="__codelineno-0-2362" name="__codelineno-0-2362"></a>
+<a id="__codelineno-0-2363" name="__codelineno-0-2363"></a><span class="sd">    Returns ``None`` if the job was never registered or has already been purged.</span>
+<a id="__codelineno-0-2364" name="__codelineno-0-2364"></a><span class="sd">    Used by the activity publisher to emit ``job_finished`` events. A task that</span>
+<a id="__codelineno-0-2365" name="__codelineno-0-2365"></a><span class="sd">    raised or was cancelled (for example by ``close_session``) is terminal: the</span>
+<a id="__codelineno-0-2366" name="__codelineno-0-2366"></a><span class="sd">    snapshot reflects the status recorded by the collector or by the canceller.</span>
+<a id="__codelineno-0-2367" name="__codelineno-0-2367"></a><span class="sd">    Cancelling this waiter does not cancel the underlying job.</span>
+<a id="__codelineno-0-2368" name="__codelineno-0-2368"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-2369" name="__codelineno-0-2369"></a>    <span class="n">job</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_background_jobs</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
+<a id="__codelineno-0-2370" name="__codelineno-0-2370"></a>    <span class="k">if</span> <span class="n">job</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">job</span><span class="o">.</span><span class="n">task</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2371" name="__codelineno-0-2371"></a>        <span class="k">return</span> <span class="kc">None</span>
+<a id="__codelineno-0-2372" name="__codelineno-0-2372"></a>    <span class="n">task</span> <span class="o">=</span> <span class="n">job</span><span class="o">.</span><span class="n">task</span>
+<a id="__codelineno-0-2373" name="__codelineno-0-2373"></a>    <span class="c1"># asyncio.wait neither re-raises the task&#39;s outcome nor cancels the task</span>
+<a id="__codelineno-0-2374" name="__codelineno-0-2374"></a>    <span class="c1"># when this waiter is cancelled: a job cancelled by close/teardown still</span>
+<a id="__codelineno-0-2375" name="__codelineno-0-2375"></a>    <span class="c1"># reaches a terminal snapshot, and cancelling the waiter leaves the job running.</span>
+<a id="__codelineno-0-2376" name="__codelineno-0-2376"></a>    <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">wait</span><span class="p">((</span><span class="n">task</span><span class="p">,))</span>
+<a id="__codelineno-0-2377" name="__codelineno-0-2377"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="n">task</span><span class="o">.</span><span class="n">cancelled</span><span class="p">()</span> <span class="ow">and</span> <span class="n">task</span><span class="o">.</span><span class="n">exception</span><span class="p">()</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2378" name="__codelineno-0-2378"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Background job task raised for job_id=</span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">job_id</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="n">task</span><span class="o">.</span><span class="n">exception</span><span class="p">())</span>
+<a id="__codelineno-0-2379" name="__codelineno-0-2379"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2380" name="__codelineno-0-2380"></a>        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">check_background_job</span><span class="p">(</span><span class="n">job_id</span><span class="p">)</span>
+<a id="__codelineno-0-2381" name="__codelineno-0-2381"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+<a id="__codelineno-0-2382" name="__codelineno-0-2382"></a>        <span class="k">return</span> <span class="kc">None</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -5727,11 +5729,7 @@ Cancelling this waiter does not cancel the underlying job.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2434">2434</a></span>
-<span class="normal"><a href="#__codelineno-0-2435">2435</a></span>
-<span class="normal"><a href="#__codelineno-0-2436">2436</a></span>
-<span class="normal"><a href="#__codelineno-0-2437">2437</a></span>
-<span class="normal"><a href="#__codelineno-0-2438">2438</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2438">2438</a></span>
 <span class="normal"><a href="#__codelineno-0-2439">2439</a></span>
 <span class="normal"><a href="#__codelineno-0-2440">2440</a></span>
 <span class="normal"><a href="#__codelineno-0-2441">2441</a></span>
@@ -5772,52 +5770,56 @@ Cancelling this waiter does not cancel the underlying job.</p>
 <span class="normal"><a href="#__codelineno-0-2476">2476</a></span>
 <span class="normal"><a href="#__codelineno-0-2477">2477</a></span>
 <span class="normal"><a href="#__codelineno-0-2478">2478</a></span>
-<span class="normal"><a href="#__codelineno-0-2479">2479</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2434" name="__codelineno-0-2434"></a><span class="k">def</span><span class="w"> </span><span class="nf">session_resource_operation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncContextManager</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span>
-<a id="__codelineno-0-2435" name="__codelineno-0-2435"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Keep session-owned data resources alive for one admitted operation.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-2436" name="__codelineno-0-2436"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
-<a id="__codelineno-0-2437" name="__codelineno-0-2437"></a>        <span class="n">session_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2438" name="__codelineno-0-2438"></a>        <span class="k">if</span> <span class="p">(</span>
-<a id="__codelineno-0-2439" name="__codelineno-0-2439"></a>            <span class="n">session_generation</span> <span class="ow">is</span> <span class="kc">None</span>
-<a id="__codelineno-0-2440" name="__codelineno-0-2440"></a>            <span class="ow">and</span> <span class="n">session_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_closing_session_ids</span>
-<a id="__codelineno-0-2441" name="__codelineno-0-2441"></a>            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">retrieve</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
-<a id="__codelineno-0-2442" name="__codelineno-0-2442"></a>        <span class="p">):</span>
-<a id="__codelineno-0-2443" name="__codelineno-0-2443"></a>            <span class="n">session_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adopt_session_generation_locked</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2444" name="__codelineno-0-2444"></a>
-<a id="__codelineno-0-2445" name="__codelineno-0-2445"></a>    <span class="nd">@asynccontextmanager</span>
-<a id="__codelineno-0-2446" name="__codelineno-0-2446"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">operation</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span>
-<a id="__codelineno-0-2447" name="__codelineno-0-2447"></a>        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
-<a id="__codelineno-0-2448" name="__codelineno-0-2448"></a>            <span class="k">if</span> <span class="p">(</span>
-<a id="__codelineno-0-2449" name="__codelineno-0-2449"></a>                <span class="n">session_generation</span> <span class="ow">is</span> <span class="kc">None</span>
-<a id="__codelineno-0-2450" name="__codelineno-0-2450"></a>                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">session_generation</span>
-<a id="__codelineno-0-2451" name="__codelineno-0-2451"></a>                <span class="ow">or</span> <span class="n">session_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_closing_session_ids</span>
-<a id="__codelineno-0-2452" name="__codelineno-0-2452"></a>                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">retrieve</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span>
-<a id="__codelineno-0-2453" name="__codelineno-0-2453"></a>            <span class="p">):</span>
-<a id="__codelineno-0-2454" name="__codelineno-0-2454"></a>                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> not found or is closing&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-2455" name="__codelineno-0-2455"></a>            <span class="n">event</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2456" name="__codelineno-0-2456"></a>            <span class="k">if</span> <span class="n">event</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2457" name="__codelineno-0-2457"></a>                <span class="n">event</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
-<a id="__codelineno-0-2458" name="__codelineno-0-2458"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">event</span>
-<a id="__codelineno-0-2459" name="__codelineno-0-2459"></a>            <span class="n">event</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
-<a id="__codelineno-0-2460" name="__codelineno-0-2460"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
-<a id="__codelineno-0-2461" name="__codelineno-0-2461"></a>        <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2462" name="__codelineno-0-2462"></a>            <span class="k">yield</span>
-<a id="__codelineno-0-2463" name="__codelineno-0-2463"></a>        <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-2464" name="__codelineno-0-2464"></a>            <span class="n">pending_cleanup</span><span class="p">:</span> <span class="n">Session</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-2465" name="__codelineno-0-2465"></a>            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
-<a id="__codelineno-0-2466" name="__codelineno-0-2466"></a>                <span class="n">remaining</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
-<a id="__codelineno-0-2467" name="__codelineno-0-2467"></a>                <span class="k">if</span> <span class="n">remaining</span><span class="p">:</span>
-<a id="__codelineno-0-2468" name="__codelineno-0-2468"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">remaining</span>
-<a id="__codelineno-0-2469" name="__codelineno-0-2469"></a>                <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-2470" name="__codelineno-0-2470"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-<a id="__codelineno-0-2471" name="__codelineno-0-2471"></a>                    <span class="n">drained</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
-<a id="__codelineno-0-2472" name="__codelineno-0-2472"></a>                    <span class="k">if</span> <span class="n">drained</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2473" name="__codelineno-0-2473"></a>                        <span class="n">drained</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
-<a id="__codelineno-0-2474" name="__codelineno-0-2474"></a>                    <span class="n">pending_cleanup</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending_session_resource_cleanup</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2475" name="__codelineno-0-2475"></a>            <span class="k">if</span> <span class="n">pending_cleanup</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2476" name="__codelineno-0-2476"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_session_cleanup_after_operations</span><span class="p">(</span><span class="n">pending_cleanup</span><span class="p">)</span>
-<a id="__codelineno-0-2477" name="__codelineno-0-2477"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_finalize_closed_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2478" name="__codelineno-0-2478"></a>
-<a id="__codelineno-0-2479" name="__codelineno-0-2479"></a>    <span class="k">return</span> <span class="n">operation</span><span class="p">()</span>
+<span class="normal"><a href="#__codelineno-0-2479">2479</a></span>
+<span class="normal"><a href="#__codelineno-0-2480">2480</a></span>
+<span class="normal"><a href="#__codelineno-0-2481">2481</a></span>
+<span class="normal"><a href="#__codelineno-0-2482">2482</a></span>
+<span class="normal"><a href="#__codelineno-0-2483">2483</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2438" name="__codelineno-0-2438"></a><span class="k">def</span><span class="w"> </span><span class="nf">session_resource_operation</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AsyncContextManager</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span>
+<a id="__codelineno-0-2439" name="__codelineno-0-2439"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Keep session-owned data resources alive for one admitted operation.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-2440" name="__codelineno-0-2440"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
+<a id="__codelineno-0-2441" name="__codelineno-0-2441"></a>        <span class="n">session_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2442" name="__codelineno-0-2442"></a>        <span class="k">if</span> <span class="p">(</span>
+<a id="__codelineno-0-2443" name="__codelineno-0-2443"></a>            <span class="n">session_generation</span> <span class="ow">is</span> <span class="kc">None</span>
+<a id="__codelineno-0-2444" name="__codelineno-0-2444"></a>            <span class="ow">and</span> <span class="n">session_id</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_closing_session_ids</span>
+<a id="__codelineno-0-2445" name="__codelineno-0-2445"></a>            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">retrieve</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+<a id="__codelineno-0-2446" name="__codelineno-0-2446"></a>        <span class="p">):</span>
+<a id="__codelineno-0-2447" name="__codelineno-0-2447"></a>            <span class="n">session_generation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_adopt_session_generation_locked</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2448" name="__codelineno-0-2448"></a>
+<a id="__codelineno-0-2449" name="__codelineno-0-2449"></a>    <span class="nd">@asynccontextmanager</span>
+<a id="__codelineno-0-2450" name="__codelineno-0-2450"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">operation</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">AsyncIterator</span><span class="p">[</span><span class="kc">None</span><span class="p">]:</span>
+<a id="__codelineno-0-2451" name="__codelineno-0-2451"></a>        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
+<a id="__codelineno-0-2452" name="__codelineno-0-2452"></a>            <span class="k">if</span> <span class="p">(</span>
+<a id="__codelineno-0-2453" name="__codelineno-0-2453"></a>                <span class="n">session_generation</span> <span class="ow">is</span> <span class="kc">None</span>
+<a id="__codelineno-0-2454" name="__codelineno-0-2454"></a>                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">session_generation</span>
+<a id="__codelineno-0-2455" name="__codelineno-0-2455"></a>                <span class="ow">or</span> <span class="n">session_id</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_closing_session_ids</span>
+<a id="__codelineno-0-2456" name="__codelineno-0-2456"></a>                <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">retrieve</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="ow">is</span> <span class="kc">None</span>
+<a id="__codelineno-0-2457" name="__codelineno-0-2457"></a>            <span class="p">):</span>
+<a id="__codelineno-0-2458" name="__codelineno-0-2458"></a>                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> not found or is closing&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-2459" name="__codelineno-0-2459"></a>            <span class="n">event</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2460" name="__codelineno-0-2460"></a>            <span class="k">if</span> <span class="n">event</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2461" name="__codelineno-0-2461"></a>                <span class="n">event</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">Event</span><span class="p">()</span>
+<a id="__codelineno-0-2462" name="__codelineno-0-2462"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">event</span>
+<a id="__codelineno-0-2463" name="__codelineno-0-2463"></a>            <span class="n">event</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>
+<a id="__codelineno-0-2464" name="__codelineno-0-2464"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+<a id="__codelineno-0-2465" name="__codelineno-0-2465"></a>        <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2466" name="__codelineno-0-2466"></a>            <span class="k">yield</span>
+<a id="__codelineno-0-2467" name="__codelineno-0-2467"></a>        <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-2468" name="__codelineno-0-2468"></a>            <span class="n">pending_cleanup</span><span class="p">:</span> <span class="n">Session</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-2469" name="__codelineno-0-2469"></a>            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
+<a id="__codelineno-0-2470" name="__codelineno-0-2470"></a>                <span class="n">remaining</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">-</span> <span class="mi">1</span>
+<a id="__codelineno-0-2471" name="__codelineno-0-2471"></a>                <span class="k">if</span> <span class="n">remaining</span><span class="p">:</span>
+<a id="__codelineno-0-2472" name="__codelineno-0-2472"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="p">[</span><span class="n">session_id</span><span class="p">]</span> <span class="o">=</span> <span class="n">remaining</span>
+<a id="__codelineno-0-2473" name="__codelineno-0-2473"></a>                <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-2474" name="__codelineno-0-2474"></a>                    <span class="bp">self</span><span class="o">.</span><span class="n">_session_resource_users</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-2475" name="__codelineno-0-2475"></a>                    <span class="n">drained</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_resources_drained</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-2476" name="__codelineno-0-2476"></a>                    <span class="k">if</span> <span class="n">drained</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2477" name="__codelineno-0-2477"></a>                        <span class="n">drained</span><span class="o">.</span><span class="n">set</span><span class="p">()</span>
+<a id="__codelineno-0-2478" name="__codelineno-0-2478"></a>                    <span class="n">pending_cleanup</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_pending_session_resource_cleanup</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2479" name="__codelineno-0-2479"></a>            <span class="k">if</span> <span class="n">pending_cleanup</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2480" name="__codelineno-0-2480"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_session_cleanup_after_operations</span><span class="p">(</span><span class="n">pending_cleanup</span><span class="p">)</span>
+<a id="__codelineno-0-2481" name="__codelineno-0-2481"></a>            <span class="bp">self</span><span class="o">.</span><span class="n">_finalize_closed_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2482" name="__codelineno-0-2482"></a>
+<a id="__codelineno-0-2483" name="__codelineno-0-2483"></a>    <span class="k">return</span> <span class="n">operation</span><span class="p">()</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -5844,11 +5846,7 @@ Cancelling this waiter does not cancel the underlying job.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2498">2498</a></span>
-<span class="normal"><a href="#__codelineno-0-2499">2499</a></span>
-<span class="normal"><a href="#__codelineno-0-2500">2500</a></span>
-<span class="normal"><a href="#__codelineno-0-2501">2501</a></span>
-<span class="normal"><a href="#__codelineno-0-2502">2502</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2502">2502</a></span>
 <span class="normal"><a href="#__codelineno-0-2503">2503</a></span>
 <span class="normal"><a href="#__codelineno-0-2504">2504</a></span>
 <span class="normal"><a href="#__codelineno-0-2505">2505</a></span>
@@ -5861,24 +5859,28 @@ Cancelling this waiter does not cancel the underlying job.</p>
 <span class="normal"><a href="#__codelineno-0-2512">2512</a></span>
 <span class="normal"><a href="#__codelineno-0-2513">2513</a></span>
 <span class="normal"><a href="#__codelineno-0-2514">2514</a></span>
-<span class="normal"><a href="#__codelineno-0-2515">2515</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2498" name="__codelineno-0-2498"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ensure_kernel_for_session</span><span class="p">(</span>
-<a id="__codelineno-0-2499" name="__codelineno-0-2499"></a>    <span class="bp">self</span><span class="p">,</span>
-<a id="__codelineno-0-2500" name="__codelineno-0-2500"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
-<a id="__codelineno-0-2501" name="__codelineno-0-2501"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<a id="__codelineno-0-2502" name="__codelineno-0-2502"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-2503" name="__codelineno-0-2503"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Ensure the session has a live kernel before checking kernel-local state.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-2504" name="__codelineno-0-2504"></a>    <span class="n">resource_operation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2505" name="__codelineno-0-2505"></a>    <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aenter__</span><span class="p">()</span>
-<a id="__codelineno-0-2506" name="__codelineno-0-2506"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2507" name="__codelineno-0-2507"></a>        <span class="n">session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2508" name="__codelineno-0-2508"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_execution_lock</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
-<a id="__codelineno-0-2509" name="__codelineno-0-2509"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_or_create_kernel</span><span class="p">(</span>
-<a id="__codelineno-0-2510" name="__codelineno-0-2510"></a>                <span class="n">session_id</span><span class="p">,</span>
-<a id="__codelineno-0-2511" name="__codelineno-0-2511"></a>                <span class="n">working_dir</span><span class="p">,</span>
-<a id="__codelineno-0-2512" name="__codelineno-0-2512"></a>                <span class="n">user_identity</span><span class="o">=</span><span class="n">session</span><span class="o">.</span><span class="n">user_identity</span><span class="p">,</span>
-<a id="__codelineno-0-2513" name="__codelineno-0-2513"></a>            <span class="p">)</span>
-<a id="__codelineno-0-2514" name="__codelineno-0-2514"></a>    <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-2515" name="__codelineno-0-2515"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aexit__</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-2515">2515</a></span>
+<span class="normal"><a href="#__codelineno-0-2516">2516</a></span>
+<span class="normal"><a href="#__codelineno-0-2517">2517</a></span>
+<span class="normal"><a href="#__codelineno-0-2518">2518</a></span>
+<span class="normal"><a href="#__codelineno-0-2519">2519</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2502" name="__codelineno-0-2502"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">ensure_kernel_for_session</span><span class="p">(</span>
+<a id="__codelineno-0-2503" name="__codelineno-0-2503"></a>    <span class="bp">self</span><span class="p">,</span>
+<a id="__codelineno-0-2504" name="__codelineno-0-2504"></a>    <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<a id="__codelineno-0-2505" name="__codelineno-0-2505"></a>    <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<a id="__codelineno-0-2506" name="__codelineno-0-2506"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-2507" name="__codelineno-0-2507"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Ensure the session has a live kernel before checking kernel-local state.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-2508" name="__codelineno-0-2508"></a>    <span class="n">resource_operation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2509" name="__codelineno-0-2509"></a>    <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aenter__</span><span class="p">()</span>
+<a id="__codelineno-0-2510" name="__codelineno-0-2510"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2511" name="__codelineno-0-2511"></a>        <span class="n">session</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2512" name="__codelineno-0-2512"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_execution_lock</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
+<a id="__codelineno-0-2513" name="__codelineno-0-2513"></a>            <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_get_or_create_kernel</span><span class="p">(</span>
+<a id="__codelineno-0-2514" name="__codelineno-0-2514"></a>                <span class="n">session_id</span><span class="p">,</span>
+<a id="__codelineno-0-2515" name="__codelineno-0-2515"></a>                <span class="n">working_dir</span><span class="p">,</span>
+<a id="__codelineno-0-2516" name="__codelineno-0-2516"></a>                <span class="n">user_identity</span><span class="o">=</span><span class="n">session</span><span class="o">.</span><span class="n">user_identity</span><span class="p">,</span>
+<a id="__codelineno-0-2517" name="__codelineno-0-2517"></a>            <span class="p">)</span>
+<a id="__codelineno-0-2518" name="__codelineno-0-2518"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-2519" name="__codelineno-0-2519"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aexit__</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6060,11 +6062,7 @@ Jupyter <code>KernelClient</code> iopub stream.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2517">2517</a></span>
-<span class="normal"><a href="#__codelineno-0-2518">2518</a></span>
-<span class="normal"><a href="#__codelineno-0-2519">2519</a></span>
-<span class="normal"><a href="#__codelineno-0-2520">2520</a></span>
-<span class="normal"><a href="#__codelineno-0-2521">2521</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-2521">2521</a></span>
 <span class="normal"><a href="#__codelineno-0-2522">2522</a></span>
 <span class="normal"><a href="#__codelineno-0-2523">2523</a></span>
 <span class="normal"><a href="#__codelineno-0-2524">2524</a></span>
@@ -6101,48 +6099,52 @@ Jupyter <code>KernelClient</code> iopub stream.</p>
 <span class="normal"><a href="#__codelineno-0-2555">2555</a></span>
 <span class="normal"><a href="#__codelineno-0-2556">2556</a></span>
 <span class="normal"><a href="#__codelineno-0-2557">2557</a></span>
-<span class="normal"><a href="#__codelineno-0-2558">2558</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2517" name="__codelineno-0-2517"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute_code_for_session</span><span class="p">(</span>
-<a id="__codelineno-0-2518" name="__codelineno-0-2518"></a>    <span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-2519" name="__codelineno-0-2519"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
-<a id="__codelineno-0-2520" name="__codelineno-0-2520"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-2521" name="__codelineno-0-2521"></a><span class="sd">    Execute code in the session&#39;s Jupyter kernel.</span>
-<a id="__codelineno-0-2522" name="__codelineno-0-2522"></a>
-<a id="__codelineno-0-2523" name="__codelineno-0-2523"></a><span class="sd">    Concurrent calls for the same ``session_id`` are serialized by a</span>
-<a id="__codelineno-0-2524" name="__codelineno-0-2524"></a><span class="sd">    per-session asyncio.Lock so they cannot race on the shared</span>
-<a id="__codelineno-0-2525" name="__codelineno-0-2525"></a><span class="sd">    Jupyter ``KernelClient`` iopub stream.</span>
+<span class="normal"><a href="#__codelineno-0-2558">2558</a></span>
+<span class="normal"><a href="#__codelineno-0-2559">2559</a></span>
+<span class="normal"><a href="#__codelineno-0-2560">2560</a></span>
+<span class="normal"><a href="#__codelineno-0-2561">2561</a></span>
+<span class="normal"><a href="#__codelineno-0-2562">2562</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-2521" name="__codelineno-0-2521"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">execute_code_for_session</span><span class="p">(</span>
+<a id="__codelineno-0-2522" name="__codelineno-0-2522"></a>    <span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">code</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-2523" name="__codelineno-0-2523"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">,</span> <span class="nb">bool</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">],</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]]:</span>
+<a id="__codelineno-0-2524" name="__codelineno-0-2524"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-2525" name="__codelineno-0-2525"></a><span class="sd">    Execute code in the session&#39;s Jupyter kernel.</span>
 <a id="__codelineno-0-2526" name="__codelineno-0-2526"></a>
-<a id="__codelineno-0-2527" name="__codelineno-0-2527"></a><span class="sd">    Args:</span>
-<a id="__codelineno-0-2528" name="__codelineno-0-2528"></a><span class="sd">        session_id: Session identifier</span>
-<a id="__codelineno-0-2529" name="__codelineno-0-2529"></a><span class="sd">        code: Python code to execute</span>
-<a id="__codelineno-0-2530" name="__codelineno-0-2530"></a><span class="sd">        timeout: Execution timeout in seconds</span>
-<a id="__codelineno-0-2531" name="__codelineno-0-2531"></a><span class="sd">        working_dir: Optional working directory for kernel</span>
-<a id="__codelineno-0-2532" name="__codelineno-0-2532"></a>
-<a id="__codelineno-0-2533" name="__codelineno-0-2533"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-2534" name="__codelineno-0-2534"></a><span class="sd">        Tuple of ``(stdout, stderr, success, displays, artifacts)``.</span>
-<a id="__codelineno-0-2535" name="__codelineno-0-2535"></a><span class="sd">        ``displays`` contains rich-output payloads emitted by the kernel,</span>
-<a id="__codelineno-0-2536" name="__codelineno-0-2536"></a><span class="sd">        with MIME type, data, and metadata fields. ``artifacts`` contains</span>
-<a id="__codelineno-0-2537" name="__codelineno-0-2537"></a><span class="sd">        metadata for each new or modified file under the session output</span>
-<a id="__codelineno-0-2538" name="__codelineno-0-2538"></a><span class="sd">        directory, including its name, size, MIME type, modification time,</span>
-<a id="__codelineno-0-2539" name="__codelineno-0-2539"></a><span class="sd">        and download token.</span>
-<a id="__codelineno-0-2540" name="__codelineno-0-2540"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-2541" name="__codelineno-0-2541"></a>    <span class="n">resource_operation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-2542" name="__codelineno-0-2542"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2543" name="__codelineno-0-2543"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aenter__</span><span class="p">()</span>
-<a id="__codelineno-0-2544" name="__codelineno-0-2544"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
-<a id="__codelineno-0-2545" name="__codelineno-0-2545"></a>        <span class="k">return</span> <span class="p">(</span>
-<a id="__codelineno-0-2546" name="__codelineno-0-2546"></a>            <span class="s2">&quot;&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-2547" name="__codelineno-0-2547"></a>            <span class="p">(</span>
-<a id="__codelineno-0-2548" name="__codelineno-0-2548"></a>                <span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> is no longer available (expired or cleaned up). &quot;</span>
-<a id="__codelineno-0-2549" name="__codelineno-0-2549"></a>                <span class="s2">&quot;Please create a new session and retry.&quot;</span>
-<a id="__codelineno-0-2550" name="__codelineno-0-2550"></a>            <span class="p">),</span>
-<a id="__codelineno-0-2551" name="__codelineno-0-2551"></a>            <span class="kc">False</span><span class="p">,</span>
-<a id="__codelineno-0-2552" name="__codelineno-0-2552"></a>            <span class="p">[],</span>
-<a id="__codelineno-0-2553" name="__codelineno-0-2553"></a>            <span class="p">[],</span>
-<a id="__codelineno-0-2554" name="__codelineno-0-2554"></a>        <span class="p">)</span>
-<a id="__codelineno-0-2555" name="__codelineno-0-2555"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-2556" name="__codelineno-0-2556"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_execute_code_for_admitted_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">)</span>
-<a id="__codelineno-0-2557" name="__codelineno-0-2557"></a>    <span class="k">finally</span><span class="p">:</span>
-<a id="__codelineno-0-2558" name="__codelineno-0-2558"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aexit__</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+<a id="__codelineno-0-2527" name="__codelineno-0-2527"></a><span class="sd">    Concurrent calls for the same ``session_id`` are serialized by a</span>
+<a id="__codelineno-0-2528" name="__codelineno-0-2528"></a><span class="sd">    per-session asyncio.Lock so they cannot race on the shared</span>
+<a id="__codelineno-0-2529" name="__codelineno-0-2529"></a><span class="sd">    Jupyter ``KernelClient`` iopub stream.</span>
+<a id="__codelineno-0-2530" name="__codelineno-0-2530"></a>
+<a id="__codelineno-0-2531" name="__codelineno-0-2531"></a><span class="sd">    Args:</span>
+<a id="__codelineno-0-2532" name="__codelineno-0-2532"></a><span class="sd">        session_id: Session identifier</span>
+<a id="__codelineno-0-2533" name="__codelineno-0-2533"></a><span class="sd">        code: Python code to execute</span>
+<a id="__codelineno-0-2534" name="__codelineno-0-2534"></a><span class="sd">        timeout: Execution timeout in seconds</span>
+<a id="__codelineno-0-2535" name="__codelineno-0-2535"></a><span class="sd">        working_dir: Optional working directory for kernel</span>
+<a id="__codelineno-0-2536" name="__codelineno-0-2536"></a>
+<a id="__codelineno-0-2537" name="__codelineno-0-2537"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-2538" name="__codelineno-0-2538"></a><span class="sd">        Tuple of ``(stdout, stderr, success, displays, artifacts)``.</span>
+<a id="__codelineno-0-2539" name="__codelineno-0-2539"></a><span class="sd">        ``displays`` contains rich-output payloads emitted by the kernel,</span>
+<a id="__codelineno-0-2540" name="__codelineno-0-2540"></a><span class="sd">        with MIME type, data, and metadata fields. ``artifacts`` contains</span>
+<a id="__codelineno-0-2541" name="__codelineno-0-2541"></a><span class="sd">        metadata for each new or modified file under the session output</span>
+<a id="__codelineno-0-2542" name="__codelineno-0-2542"></a><span class="sd">        directory, including its name, size, MIME type, modification time,</span>
+<a id="__codelineno-0-2543" name="__codelineno-0-2543"></a><span class="sd">        and download token.</span>
+<a id="__codelineno-0-2544" name="__codelineno-0-2544"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-2545" name="__codelineno-0-2545"></a>    <span class="n">resource_operation</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">session_resource_operation</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-2546" name="__codelineno-0-2546"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2547" name="__codelineno-0-2547"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aenter__</span><span class="p">()</span>
+<a id="__codelineno-0-2548" name="__codelineno-0-2548"></a>    <span class="k">except</span> <span class="ne">ValueError</span><span class="p">:</span>
+<a id="__codelineno-0-2549" name="__codelineno-0-2549"></a>        <span class="k">return</span> <span class="p">(</span>
+<a id="__codelineno-0-2550" name="__codelineno-0-2550"></a>            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-2551" name="__codelineno-0-2551"></a>            <span class="p">(</span>
+<a id="__codelineno-0-2552" name="__codelineno-0-2552"></a>                <span class="sa">f</span><span class="s2">&quot;Session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2"> is no longer available (expired or cleaned up). &quot;</span>
+<a id="__codelineno-0-2553" name="__codelineno-0-2553"></a>                <span class="s2">&quot;Please create a new session and retry.&quot;</span>
+<a id="__codelineno-0-2554" name="__codelineno-0-2554"></a>            <span class="p">),</span>
+<a id="__codelineno-0-2555" name="__codelineno-0-2555"></a>            <span class="kc">False</span><span class="p">,</span>
+<a id="__codelineno-0-2556" name="__codelineno-0-2556"></a>            <span class="p">[],</span>
+<a id="__codelineno-0-2557" name="__codelineno-0-2557"></a>            <span class="p">[],</span>
+<a id="__codelineno-0-2558" name="__codelineno-0-2558"></a>        <span class="p">)</span>
+<a id="__codelineno-0-2559" name="__codelineno-0-2559"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-2560" name="__codelineno-0-2560"></a>        <span class="k">return</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_execute_code_for_admitted_session</span><span class="p">(</span><span class="n">session_id</span><span class="p">,</span> <span class="n">code</span><span class="p">,</span> <span class="n">timeout</span><span class="p">,</span> <span class="n">working_dir</span><span class="p">)</span>
+<a id="__codelineno-0-2561" name="__codelineno-0-2561"></a>    <span class="k">finally</span><span class="p">:</span>
+<a id="__codelineno-0-2562" name="__codelineno-0-2562"></a>        <span class="k">await</span> <span class="n">resource_operation</span><span class="o">.</span><span class="fm">__aexit__</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6172,14 +6174,7 @@ done-callback, so awaiting is purely for sequencing.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3031">3031</a></span>
-<span class="normal"><a href="#__codelineno-0-3032">3032</a></span>
-<span class="normal"><a href="#__codelineno-0-3033">3033</a></span>
-<span class="normal"><a href="#__codelineno-0-3034">3034</a></span>
-<span class="normal"><a href="#__codelineno-0-3035">3035</a></span>
-<span class="normal"><a href="#__codelineno-0-3036">3036</a></span>
-<span class="normal"><a href="#__codelineno-0-3037">3037</a></span>
-<span class="normal"><a href="#__codelineno-0-3038">3038</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3038">3038</a></span>
 <span class="normal"><a href="#__codelineno-0-3039">3039</a></span>
 <span class="normal"><a href="#__codelineno-0-3040">3040</a></span>
 <span class="normal"><a href="#__codelineno-0-3041">3041</a></span>
@@ -6187,22 +6182,29 @@ done-callback, so awaiting is purely for sequencing.</p>
 <span class="normal"><a href="#__codelineno-0-3043">3043</a></span>
 <span class="normal"><a href="#__codelineno-0-3044">3044</a></span>
 <span class="normal"><a href="#__codelineno-0-3045">3045</a></span>
-<span class="normal"><a href="#__codelineno-0-3046">3046</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3031" name="__codelineno-0-3031"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">await_kernel_shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-3032" name="__codelineno-0-3032"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Wait for any in-flight teardown of this session&#39;s kernel to finish.</span>
-<a id="__codelineno-0-3033" name="__codelineno-0-3033"></a>
-<a id="__codelineno-0-3034" name="__codelineno-0-3034"></a><span class="sd">    No-op when none is running. Shielded, so a cancelled caller does not</span>
-<a id="__codelineno-0-3035" name="__codelineno-0-3035"></a><span class="sd">    cancel the teardown itself; failures are already reported by the</span>
-<a id="__codelineno-0-3036" name="__codelineno-0-3036"></a><span class="sd">    done-callback, so awaiting is purely for sequencing.</span>
-<a id="__codelineno-0-3037" name="__codelineno-0-3037"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-3038" name="__codelineno-0-3038"></a>    <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_shutdown_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-3039" name="__codelineno-0-3039"></a>    <span class="k">if</span> <span class="n">task</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">task</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
-<a id="__codelineno-0-3040" name="__codelineno-0-3040"></a>        <span class="k">return</span>
-<a id="__codelineno-0-3041" name="__codelineno-0-3041"></a>    <span class="k">try</span><span class="p">:</span>
-<a id="__codelineno-0-3042" name="__codelineno-0-3042"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
-<a id="__codelineno-0-3043" name="__codelineno-0-3043"></a>    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
-<a id="__codelineno-0-3044" name="__codelineno-0-3044"></a>        <span class="k">raise</span>
-<a id="__codelineno-0-3045" name="__codelineno-0-3045"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
-<a id="__codelineno-0-3046" name="__codelineno-0-3046"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Awaited kernel shutdown for session </span><span class="si">%s</span><span class="s2"> failed&quot;</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-3046">3046</a></span>
+<span class="normal"><a href="#__codelineno-0-3047">3047</a></span>
+<span class="normal"><a href="#__codelineno-0-3048">3048</a></span>
+<span class="normal"><a href="#__codelineno-0-3049">3049</a></span>
+<span class="normal"><a href="#__codelineno-0-3050">3050</a></span>
+<span class="normal"><a href="#__codelineno-0-3051">3051</a></span>
+<span class="normal"><a href="#__codelineno-0-3052">3052</a></span>
+<span class="normal"><a href="#__codelineno-0-3053">3053</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3038" name="__codelineno-0-3038"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">await_kernel_shutdown</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">session_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-3039" name="__codelineno-0-3039"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Wait for any in-flight teardown of this session&#39;s kernel to finish.</span>
+<a id="__codelineno-0-3040" name="__codelineno-0-3040"></a>
+<a id="__codelineno-0-3041" name="__codelineno-0-3041"></a><span class="sd">    No-op when none is running. Shielded, so a cancelled caller does not</span>
+<a id="__codelineno-0-3042" name="__codelineno-0-3042"></a><span class="sd">    cancel the teardown itself; failures are already reported by the</span>
+<a id="__codelineno-0-3043" name="__codelineno-0-3043"></a><span class="sd">    done-callback, so awaiting is purely for sequencing.</span>
+<a id="__codelineno-0-3044" name="__codelineno-0-3044"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-3045" name="__codelineno-0-3045"></a>    <span class="n">task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_shutdown_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-3046" name="__codelineno-0-3046"></a>    <span class="k">if</span> <span class="n">task</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">or</span> <span class="n">task</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+<a id="__codelineno-0-3047" name="__codelineno-0-3047"></a>        <span class="k">return</span>
+<a id="__codelineno-0-3048" name="__codelineno-0-3048"></a>    <span class="k">try</span><span class="p">:</span>
+<a id="__codelineno-0-3049" name="__codelineno-0-3049"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">task</span><span class="p">)</span>
+<a id="__codelineno-0-3050" name="__codelineno-0-3050"></a>    <span class="k">except</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">CancelledError</span><span class="p">:</span>
+<a id="__codelineno-0-3051" name="__codelineno-0-3051"></a>        <span class="k">raise</span>
+<a id="__codelineno-0-3052" name="__codelineno-0-3052"></a>    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+<a id="__codelineno-0-3053" name="__codelineno-0-3053"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Awaited kernel shutdown for session </span><span class="si">%s</span><span class="s2"> failed&quot;</span><span class="p">,</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6229,14 +6231,7 @@ done-callback, so awaiting is purely for sequencing.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3048">3048</a></span>
-<span class="normal"><a href="#__codelineno-0-3049">3049</a></span>
-<span class="normal"><a href="#__codelineno-0-3050">3050</a></span>
-<span class="normal"><a href="#__codelineno-0-3051">3051</a></span>
-<span class="normal"><a href="#__codelineno-0-3052">3052</a></span>
-<span class="normal"><a href="#__codelineno-0-3053">3053</a></span>
-<span class="normal"><a href="#__codelineno-0-3054">3054</a></span>
-<span class="normal"><a href="#__codelineno-0-3055">3055</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3055">3055</a></span>
 <span class="normal"><a href="#__codelineno-0-3056">3056</a></span>
 <span class="normal"><a href="#__codelineno-0-3057">3057</a></span>
 <span class="normal"><a href="#__codelineno-0-3058">3058</a></span>
@@ -6272,50 +6267,57 @@ done-callback, so awaiting is purely for sequencing.</p>
 <span class="normal"><a href="#__codelineno-0-3088">3088</a></span>
 <span class="normal"><a href="#__codelineno-0-3089">3089</a></span>
 <span class="normal"><a href="#__codelineno-0-3090">3090</a></span>
-<span class="normal"><a href="#__codelineno-0-3091">3091</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3048" name="__codelineno-0-3048"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_idle_kernels</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_idle_time</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">3600.0</span><span class="p">):</span>
-<a id="__codelineno-0-3049" name="__codelineno-0-3049"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Cleanup kernels that have been idle for too long.&quot;&quot;&quot;</span>
-<a id="__codelineno-0-3050" name="__codelineno-0-3050"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-<a id="__codelineno-0-3051" name="__codelineno-0-3051"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
-<a id="__codelineno-0-3052" name="__codelineno-0-3052"></a>        <span class="n">idle_sessions</span> <span class="o">=</span> <span class="p">[</span>
-<a id="__codelineno-0-3053" name="__codelineno-0-3053"></a>            <span class="p">(</span>
-<a id="__codelineno-0-3054" name="__codelineno-0-3054"></a>                <span class="n">sid</span><span class="p">,</span>
-<a id="__codelineno-0-3055" name="__codelineno-0-3055"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sid</span><span class="p">),</span>
-<a id="__codelineno-0-3056" name="__codelineno-0-3056"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sid</span><span class="p">),</span>
-<a id="__codelineno-0-3057" name="__codelineno-0-3057"></a>            <span class="p">)</span>
-<a id="__codelineno-0-3058" name="__codelineno-0-3058"></a>            <span class="k">for</span> <span class="n">sid</span><span class="p">,</span> <span class="n">last_used</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_last_used</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
-<a id="__codelineno-0-3059" name="__codelineno-0-3059"></a>            <span class="k">if</span> <span class="n">now</span> <span class="o">-</span> <span class="n">last_used</span> <span class="o">&gt;</span> <span class="n">max_idle_time</span>
-<a id="__codelineno-0-3060" name="__codelineno-0-3060"></a>        <span class="p">]</span>
-<a id="__codelineno-0-3061" name="__codelineno-0-3061"></a>
-<a id="__codelineno-0-3062" name="__codelineno-0-3062"></a>    <span class="k">for</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">session_generation</span><span class="p">,</span> <span class="n">kernel_generation</span> <span class="ow">in</span> <span class="n">idle_sessions</span><span class="p">:</span>
-<a id="__codelineno-0-3063" name="__codelineno-0-3063"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cleaning up idle kernel for session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<a id="__codelineno-0-3064" name="__codelineno-0-3064"></a>        <span class="n">joined_shutdown</span><span class="p">:</span> <span class="s2">&quot;Optional[asyncio.Task[None]]&quot;</span> <span class="o">=</span> <span class="kc">None</span>
-<a id="__codelineno-0-3065" name="__codelineno-0-3065"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_execution_lock</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
-<a id="__codelineno-0-3066" name="__codelineno-0-3066"></a>            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
-<a id="__codelineno-0-3067" name="__codelineno-0-3067"></a>                <span class="n">last_used</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_last_used</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-3068" name="__codelineno-0-3068"></a>                <span class="k">if</span> <span class="p">(</span>
-<a id="__codelineno-0-3069" name="__codelineno-0-3069"></a>                    <span class="n">last_used</span> <span class="ow">is</span> <span class="kc">None</span>
-<a id="__codelineno-0-3070" name="__codelineno-0-3070"></a>                    <span class="ow">or</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">last_used</span> <span class="o">&lt;=</span> <span class="n">max_idle_time</span>
-<a id="__codelineno-0-3071" name="__codelineno-0-3071"></a>                    <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">session_generation</span>
-<a id="__codelineno-0-3072" name="__codelineno-0-3072"></a>                    <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">kernel_generation</span>
-<a id="__codelineno-0-3073" name="__codelineno-0-3073"></a>                <span class="p">):</span>
-<a id="__codelineno-0-3074" name="__codelineno-0-3074"></a>                    <span class="k">continue</span>
-<a id="__codelineno-0-3075" name="__codelineno-0-3075"></a>                <span class="n">existing_shutdown</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_shutdown_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
-<a id="__codelineno-0-3076" name="__codelineno-0-3076"></a>                <span class="n">joined_existing</span> <span class="o">=</span> <span class="n">existing_shutdown</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">existing_shutdown</span><span class="o">.</span><span class="n">done</span><span class="p">()</span>
-<a id="__codelineno-0-3077" name="__codelineno-0-3077"></a>                <span class="n">shutdown_task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_kernel_shutdown</span><span class="p">(</span>
-<a id="__codelineno-0-3078" name="__codelineno-0-3078"></a>                    <span class="n">session_id</span><span class="p">,</span>
-<a id="__codelineno-0-3079" name="__codelineno-0-3079"></a>                    <span class="n">caller</span><span class="o">=</span><span class="s2">&quot;cleanup_idle_kernels()&quot;</span><span class="p">,</span>
-<a id="__codelineno-0-3080" name="__codelineno-0-3080"></a>                <span class="p">)</span>
-<a id="__codelineno-0-3081" name="__codelineno-0-3081"></a>            <span class="k">if</span> <span class="n">shutdown_task</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-3082" name="__codelineno-0-3082"></a>                <span class="k">continue</span>
-<a id="__codelineno-0-3083" name="__codelineno-0-3083"></a>            <span class="k">if</span> <span class="n">joined_existing</span><span class="p">:</span>
-<a id="__codelineno-0-3084" name="__codelineno-0-3084"></a>                <span class="c1"># A teardown started elsewhere may be waiting for executions to</span>
-<a id="__codelineno-0-3085" name="__codelineno-0-3085"></a>                <span class="c1"># drain, and this sweep&#39;s own execute-lock lease keeps that drain</span>
-<a id="__codelineno-0-3086" name="__codelineno-0-3086"></a>                <span class="c1"># from completing. Join it only after releasing the lease.</span>
-<a id="__codelineno-0-3087" name="__codelineno-0-3087"></a>                <span class="n">joined_shutdown</span> <span class="o">=</span> <span class="n">shutdown_task</span>
-<a id="__codelineno-0-3088" name="__codelineno-0-3088"></a>            <span class="k">else</span><span class="p">:</span>
-<a id="__codelineno-0-3089" name="__codelineno-0-3089"></a>                <span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">shutdown_task</span><span class="p">)</span>
-<a id="__codelineno-0-3090" name="__codelineno-0-3090"></a>        <span class="k">if</span> <span class="n">joined_shutdown</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
-<a id="__codelineno-0-3091" name="__codelineno-0-3091"></a>            <span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">joined_shutdown</span><span class="p">)</span>
+<span class="normal"><a href="#__codelineno-0-3091">3091</a></span>
+<span class="normal"><a href="#__codelineno-0-3092">3092</a></span>
+<span class="normal"><a href="#__codelineno-0-3093">3093</a></span>
+<span class="normal"><a href="#__codelineno-0-3094">3094</a></span>
+<span class="normal"><a href="#__codelineno-0-3095">3095</a></span>
+<span class="normal"><a href="#__codelineno-0-3096">3096</a></span>
+<span class="normal"><a href="#__codelineno-0-3097">3097</a></span>
+<span class="normal"><a href="#__codelineno-0-3098">3098</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3055" name="__codelineno-0-3055"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">cleanup_idle_kernels</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_idle_time</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">3600.0</span><span class="p">):</span>
+<a id="__codelineno-0-3056" name="__codelineno-0-3056"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Cleanup kernels that have been idle for too long.&quot;&quot;&quot;</span>
+<a id="__codelineno-0-3057" name="__codelineno-0-3057"></a>    <span class="n">now</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+<a id="__codelineno-0-3058" name="__codelineno-0-3058"></a>    <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
+<a id="__codelineno-0-3059" name="__codelineno-0-3059"></a>        <span class="n">idle_sessions</span> <span class="o">=</span> <span class="p">[</span>
+<a id="__codelineno-0-3060" name="__codelineno-0-3060"></a>            <span class="p">(</span>
+<a id="__codelineno-0-3061" name="__codelineno-0-3061"></a>                <span class="n">sid</span><span class="p">,</span>
+<a id="__codelineno-0-3062" name="__codelineno-0-3062"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sid</span><span class="p">),</span>
+<a id="__codelineno-0-3063" name="__codelineno-0-3063"></a>                <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">sid</span><span class="p">),</span>
+<a id="__codelineno-0-3064" name="__codelineno-0-3064"></a>            <span class="p">)</span>
+<a id="__codelineno-0-3065" name="__codelineno-0-3065"></a>            <span class="k">for</span> <span class="n">sid</span><span class="p">,</span> <span class="n">last_used</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_last_used</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+<a id="__codelineno-0-3066" name="__codelineno-0-3066"></a>            <span class="k">if</span> <span class="n">now</span> <span class="o">-</span> <span class="n">last_used</span> <span class="o">&gt;</span> <span class="n">max_idle_time</span>
+<a id="__codelineno-0-3067" name="__codelineno-0-3067"></a>        <span class="p">]</span>
+<a id="__codelineno-0-3068" name="__codelineno-0-3068"></a>
+<a id="__codelineno-0-3069" name="__codelineno-0-3069"></a>    <span class="k">for</span> <span class="n">session_id</span><span class="p">,</span> <span class="n">session_generation</span><span class="p">,</span> <span class="n">kernel_generation</span> <span class="ow">in</span> <span class="n">idle_sessions</span><span class="p">:</span>
+<a id="__codelineno-0-3070" name="__codelineno-0-3070"></a>        <span class="n">LOGGER</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cleaning up idle kernel for session </span><span class="si">{</span><span class="n">session_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-3071" name="__codelineno-0-3071"></a>        <span class="n">joined_shutdown</span><span class="p">:</span> <span class="s2">&quot;Optional[asyncio.Task[None]]&quot;</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-0-3072" name="__codelineno-0-3072"></a>        <span class="k">async</span> <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_execution_lock</span><span class="p">(</span><span class="n">session_id</span><span class="p">):</span>
+<a id="__codelineno-0-3073" name="__codelineno-0-3073"></a>            <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">_session_lifecycle_lock</span><span class="p">:</span>
+<a id="__codelineno-0-3074" name="__codelineno-0-3074"></a>                <span class="n">last_used</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_last_used</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-3075" name="__codelineno-0-3075"></a>                <span class="k">if</span> <span class="p">(</span>
+<a id="__codelineno-0-3076" name="__codelineno-0-3076"></a>                    <span class="n">last_used</span> <span class="ow">is</span> <span class="kc">None</span>
+<a id="__codelineno-0-3077" name="__codelineno-0-3077"></a>                    <span class="ow">or</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">last_used</span> <span class="o">&lt;=</span> <span class="n">max_idle_time</span>
+<a id="__codelineno-0-3078" name="__codelineno-0-3078"></a>                    <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_session_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">session_generation</span>
+<a id="__codelineno-0-3079" name="__codelineno-0-3079"></a>                    <span class="ow">or</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_generations</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span> <span class="o">!=</span> <span class="n">kernel_generation</span>
+<a id="__codelineno-0-3080" name="__codelineno-0-3080"></a>                <span class="p">):</span>
+<a id="__codelineno-0-3081" name="__codelineno-0-3081"></a>                    <span class="k">continue</span>
+<a id="__codelineno-0-3082" name="__codelineno-0-3082"></a>                <span class="n">existing_shutdown</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_kernel_shutdown_tasks</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">session_id</span><span class="p">)</span>
+<a id="__codelineno-0-3083" name="__codelineno-0-3083"></a>                <span class="n">joined_existing</span> <span class="o">=</span> <span class="n">existing_shutdown</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">existing_shutdown</span><span class="o">.</span><span class="n">done</span><span class="p">()</span>
+<a id="__codelineno-0-3084" name="__codelineno-0-3084"></a>                <span class="n">shutdown_task</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_schedule_kernel_shutdown</span><span class="p">(</span>
+<a id="__codelineno-0-3085" name="__codelineno-0-3085"></a>                    <span class="n">session_id</span><span class="p">,</span>
+<a id="__codelineno-0-3086" name="__codelineno-0-3086"></a>                    <span class="n">caller</span><span class="o">=</span><span class="s2">&quot;cleanup_idle_kernels()&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-3087" name="__codelineno-0-3087"></a>                <span class="p">)</span>
+<a id="__codelineno-0-3088" name="__codelineno-0-3088"></a>            <span class="k">if</span> <span class="n">shutdown_task</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-3089" name="__codelineno-0-3089"></a>                <span class="k">continue</span>
+<a id="__codelineno-0-3090" name="__codelineno-0-3090"></a>            <span class="k">if</span> <span class="n">joined_existing</span><span class="p">:</span>
+<a id="__codelineno-0-3091" name="__codelineno-0-3091"></a>                <span class="c1"># A teardown started elsewhere may be waiting for executions to</span>
+<a id="__codelineno-0-3092" name="__codelineno-0-3092"></a>                <span class="c1"># drain, and this sweep&#39;s own execute-lock lease keeps that drain</span>
+<a id="__codelineno-0-3093" name="__codelineno-0-3093"></a>                <span class="c1"># from completing. Join it only after releasing the lease.</span>
+<a id="__codelineno-0-3094" name="__codelineno-0-3094"></a>                <span class="n">joined_shutdown</span> <span class="o">=</span> <span class="n">shutdown_task</span>
+<a id="__codelineno-0-3095" name="__codelineno-0-3095"></a>            <span class="k">else</span><span class="p">:</span>
+<a id="__codelineno-0-3096" name="__codelineno-0-3096"></a>                <span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">shutdown_task</span><span class="p">)</span>
+<a id="__codelineno-0-3097" name="__codelineno-0-3097"></a>        <span class="k">if</span> <span class="n">joined_shutdown</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+<a id="__codelineno-0-3098" name="__codelineno-0-3098"></a>            <span class="n">_</span> <span class="o">=</span> <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">shield</span><span class="p">(</span><span class="n">joined_shutdown</span><span class="p">)</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>
@@ -6361,14 +6363,7 @@ done-callback, so awaiting is purely for sequencing.</p>
 
             <details class="mkdocstrings-source">
               <summary>Source code in <code>src/agora_workbench/code_execution/sessions/manager.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3097">3097</a></span>
-<span class="normal"><a href="#__codelineno-0-3098">3098</a></span>
-<span class="normal"><a href="#__codelineno-0-3099">3099</a></span>
-<span class="normal"><a href="#__codelineno-0-3100">3100</a></span>
-<span class="normal"><a href="#__codelineno-0-3101">3101</a></span>
-<span class="normal"><a href="#__codelineno-0-3102">3102</a></span>
-<span class="normal"><a href="#__codelineno-0-3103">3103</a></span>
-<span class="normal"><a href="#__codelineno-0-3104">3104</a></span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"><a href="#__codelineno-0-3104">3104</a></span>
 <span class="normal"><a href="#__codelineno-0-3105">3105</a></span>
 <span class="normal"><a href="#__codelineno-0-3106">3106</a></span>
 <span class="normal"><a href="#__codelineno-0-3107">3107</a></span>
@@ -6376,22 +6371,29 @@ done-callback, so awaiting is purely for sequencing.</p>
 <span class="normal"><a href="#__codelineno-0-3109">3109</a></span>
 <span class="normal"><a href="#__codelineno-0-3110">3110</a></span>
 <span class="normal"><a href="#__codelineno-0-3111">3111</a></span>
-<span class="normal"><a href="#__codelineno-0-3112">3112</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3097" name="__codelineno-0-3097"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_sessions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
-<a id="__codelineno-0-3098" name="__codelineno-0-3098"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<a id="__codelineno-0-3099" name="__codelineno-0-3099"></a><span class="sd">    List all active sessions with metadata.</span>
-<a id="__codelineno-0-3100" name="__codelineno-0-3100"></a>
-<a id="__codelineno-0-3101" name="__codelineno-0-3101"></a><span class="sd">    Returns:</span>
-<a id="__codelineno-0-3102" name="__codelineno-0-3102"></a><span class="sd">        List of session info dicts</span>
-<a id="__codelineno-0-3103" name="__codelineno-0-3103"></a><span class="sd">    &quot;&quot;&quot;</span>
-<a id="__codelineno-0-3104" name="__codelineno-0-3104"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_maybe_cleanup</span><span class="p">()</span>
-<a id="__codelineno-0-3105" name="__codelineno-0-3105"></a>
-<a id="__codelineno-0-3106" name="__codelineno-0-3106"></a>    <span class="n">sessions</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">list_all</span><span class="p">()</span>
+<span class="normal"><a href="#__codelineno-0-3112">3112</a></span>
+<span class="normal"><a href="#__codelineno-0-3113">3113</a></span>
+<span class="normal"><a href="#__codelineno-0-3114">3114</a></span>
+<span class="normal"><a href="#__codelineno-0-3115">3115</a></span>
+<span class="normal"><a href="#__codelineno-0-3116">3116</a></span>
+<span class="normal"><a href="#__codelineno-0-3117">3117</a></span>
+<span class="normal"><a href="#__codelineno-0-3118">3118</a></span>
+<span class="normal"><a href="#__codelineno-0-3119">3119</a></span></pre></div></td><td class="code"><div><pre><span></span><code><a id="__codelineno-0-3104" name="__codelineno-0-3104"></a><span class="k">def</span><span class="w"> </span><span class="nf">list_sessions</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<a id="__codelineno-0-3105" name="__codelineno-0-3105"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<a id="__codelineno-0-3106" name="__codelineno-0-3106"></a><span class="sd">    List all active sessions with metadata.</span>
 <a id="__codelineno-0-3107" name="__codelineno-0-3107"></a>
-<a id="__codelineno-0-3108" name="__codelineno-0-3108"></a>    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
-<a id="__codelineno-0-3109" name="__codelineno-0-3109"></a>    <span class="k">for</span> <span class="n">session</span> <span class="ow">in</span> <span class="n">sessions</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
-<a id="__codelineno-0-3110" name="__codelineno-0-3110"></a>        <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">get_info</span><span class="p">())</span>
-<a id="__codelineno-0-3111" name="__codelineno-0-3111"></a>
-<a id="__codelineno-0-3112" name="__codelineno-0-3112"></a>    <span class="k">return</span> <span class="n">result</span>
+<a id="__codelineno-0-3108" name="__codelineno-0-3108"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-0-3109" name="__codelineno-0-3109"></a><span class="sd">        List of session info dicts</span>
+<a id="__codelineno-0-3110" name="__codelineno-0-3110"></a><span class="sd">    &quot;&quot;&quot;</span>
+<a id="__codelineno-0-3111" name="__codelineno-0-3111"></a>    <span class="bp">self</span><span class="o">.</span><span class="n">_maybe_cleanup</span><span class="p">()</span>
+<a id="__codelineno-0-3112" name="__codelineno-0-3112"></a>
+<a id="__codelineno-0-3113" name="__codelineno-0-3113"></a>    <span class="n">sessions</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">storage</span><span class="o">.</span><span class="n">list_all</span><span class="p">()</span>
+<a id="__codelineno-0-3114" name="__codelineno-0-3114"></a>
+<a id="__codelineno-0-3115" name="__codelineno-0-3115"></a>    <span class="n">result</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-0-3116" name="__codelineno-0-3116"></a>    <span class="k">for</span> <span class="n">session</span> <span class="ow">in</span> <span class="n">sessions</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+<a id="__codelineno-0-3117" name="__codelineno-0-3117"></a>        <span class="n">result</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">session</span><span class="o">.</span><span class="n">get_info</span><span class="p">())</span>
+<a id="__codelineno-0-3118" name="__codelineno-0-3118"></a>
+<a id="__codelineno-0-3119" name="__codelineno-0-3119"></a>    <span class="k">return</span> <span class="n">result</span>
 </code></pre></div></td></tr></table></div>
             </details>
     </div>

@@ -447,6 +447,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sessions and state">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#collecting-batch-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collecting batch objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1577,6 +1594,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Sessions and state">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#collecting-batch-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Collecting batch objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1760,8 +1794,8 @@ prefixed with the server name, e.g. <code>chemistry</code>):</p>
 <td>Inspect, list, or close sessions</td>
 </tr>
 <tr>
-<td><code>{name}_parallel_execute</code>, <code>{name}_check_batch</code></td>
-<td>Fan code out across many inputs</td>
+<td><code>{name}_parallel_execute</code>, <code>{name}_check_batch</code>, <code>{name}_collect_batch</code>, <code>{name}_cancel_batch</code></td>
+<td>Fan code out, inspect summaries, collect declared objects, or discard a batch</td>
 </tr>
 <tr>
 <td><code>{name}_send</code></td>
@@ -1785,16 +1819,86 @@ session</strong> reserved for that batch. Child session IDs cannot be used for
 additional execution or nested batches, even after their individual jobs
 finish. Continue independent work in the parent session or a new session.
 Retrieving a terminal status with <code>{name}_check_batch</code> closes the children
-and retires the batch; cancellation or closing the parent also cleans them up.
-Save the terminal response, since subsequent polls cannot retrieve it again.</p>
+and, unless exports were declared, retires the batch. Cancellation or closing
+the parent also cleans them up. Save an ordinary batch's terminal response,
+since subsequent polls cannot retrieve it again.</p>
 <p>To keep batch results, assign each child's return value to <code>result_variable</code>
 (<code>result</code> by default). It is captured in <code>jobs[].result</code> as JSON when
 serializable, otherwise as a <code>repr</code> string, but is not automatically injected
-into the parent kernel. Child output files and live Python objects are not
-transferred to the parent. Files in child <code>AGORA_OUTPUT_DIR</code> directories are
+into the parent kernel. Files in child <code>AGORA_OUTPUT_DIR</code> directories are
 deleted during cleanup, so persist needed files to durable storage inside the
-batch code and return their references.</p>
+batch code and return their references. Object collection is opt-in, as
+described below; it does not automatically copy files referenced by objects.</p>
 <p>→ See the <a href="../../api/sessions/">Sessions API</a>.</p>
+<h3 id="collecting-batch-objects">Collecting batch objects<a class="headerlink" href="#collecting-batch-objects" title="Permanent link">&para;</a></h3>
+<p>Declare <code>export_variable</code> on <code>{name}_parallel_execute</code> to keep a serialized
+snapshot of one top-level variable from each successful child. Keep
+<code>result_variable</code> for small summaries used to choose which objects to collect.
+An optional <code>execution_session_id</code> selects an existing owned <strong>parent</strong>
+execution session; omission uses the current MCP session. Launch always
+returns <code>parent_session_id</code>, so parent targeting is explicit in the response.</p>
+<p>For example, the following illustrates an agent's tool-call sequence:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="n">batch</span> <span class="o">=</span> <span class="n">chemistry_parallel_execute</span><span class="p">(</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>    <span class="n">code</span><span class="o">=</span><span class="s2">&quot;candidate = {value, value + 1}</span><span class="se">\n</span><span class="s2">summary = {&#39;score&#39;: value}&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="n">inputs</span><span class="o">=</span><span class="p">[{</span><span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">},</span> <span class="p">{</span><span class="s2">&quot;value&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">}],</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">result_variable</span><span class="o">=</span><span class="s2">&quot;summary&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">export_variable</span><span class="o">=</span><span class="s2">&quot;candidate&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">execution_session_id</span><span class="o">=</span><span class="n">parent_id</span><span class="p">,</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">)</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Poll until execution is terminal, then choose from collection.staged_indices.</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="n">status</span> <span class="o">=</span> <span class="n">chemistry_check_batch</span><span class="p">(</span><span class="n">batch_id</span><span class="o">=</span><span class="n">batch</span><span class="p">[</span><span class="s2">&quot;batch_id&quot;</span><span class="p">])</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="n">collected</span> <span class="o">=</span> <span class="n">chemistry_collect_batch</span><span class="p">(</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="n">batch_id</span><span class="o">=</span><span class="n">batch</span><span class="p">[</span><span class="s2">&quot;batch_id&quot;</span><span class="p">],</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="n">import_as</span><span class="o">=</span><span class="s2">&quot;candidates&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>    <span class="n">indices</span><span class="o">=</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="p">)</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="n">execute_chemistry_code</span><span class="p">(</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>    <span class="n">code</span><span class="o">=</span><span class="s2">&quot;print(candidates[1])&quot;</span><span class="p">,</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">execution_session_id</span><span class="o">=</span><span class="n">collected</span><span class="p">[</span><span class="s2">&quot;execution_session_id&quot;</span><span class="p">],</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="p">)</span>
+</code></pre></div>
+<p>The server snapshots each export before marking its job complete. Execution
+and export outcomes are independent: a job can finish successfully but report
+<code>export.status</code> of <code>missing</code>, <code>failed</code>, or <code>too_large</code>. A real <code>None</code> value is
+a valid staged object, not a missing export. Child sessions cannot run repair
+code, so fix variable-name mistakes or convert unsupported objects to portable
+data in the original batch code and relaunch.</p>
+<p>For export-enabled batches, terminal polls still close the children, but
+<strong>repeated polls do not consume the staged exports</strong>. They report the staged
+input indices, <code>collection.expires_at</code> (Unix timestamp in seconds), and the
+next tool to call. Snapshots expire 15 minutes after all jobs finish, even if
+the batch is never polled. Collection is supported only after all jobs finish.</p>
+<p><code>collect_batch(batch_id, import_as, indices=None, overwrite=False)</code> loads the
+selected snapshots into the recorded parent's kernel as a dictionary with
+integer <code>input_index</code> keys. Omit <code>indices</code> to select all staged exports.
+Success reports <code>imported_indices</code>, skipped members, and <code>execution_session_id</code>
+for parent follow-up. Unselected exports are discarded on success. Existing
+destination names are rejected unless <code>overwrite=True</code>.</p>
+<p>A running background job in the parent returns <code>parent_busy</code>, its job ID,
+and polling guidance. Retry collection after that job finishes; ordinary batch
+polls in between are safe. <code>destination_exists</code> can be recovered by choosing
+another name or explicitly allowing overwrite. <code>load_failed</code> identifies an
+input index to exclude on retry; <code>parent_execution_failed</code> means the kernel
+invocation did not produce a collection outcome. Failures do not consume snapshots, but
+<strong>do not extend their expiry</strong>. The destination name is assigned only after
+all selected loads succeed; deserialization side effects are not rolled back.</p>
+<p>Identical successful collection retries return the same receipt without
+re-importing. Receipts last at most five minutes and are capped at 128 per
+server, so retries are not available forever. A different request cannot
+recollect an already consumed batch. <code>cancel_batch</code> discards pending snapshots
+or a receipt; it does not remove a value already loaded into the parent.</p>
+<p>Serialized exports are limited to 256 MiB per object and per batch, with a
+shared 1 GiB / 256-object budget and at most 128 pending export batches per
+server. Collect or cancel batches to release capacity. Snapshots are private
+temporary files outside child output directories, not durable storage.
+Parent closure or expiry discards them, and snapshots and receipts are not
+recovered after a server restart.</p>
+<p>Exports use <code>dill</code> snapshots, not shared live identity. Compatible Python
+values such as sets and DataFrames can be copied, but live solver handles,
+sockets, process or GPU state, and external file contents are not migrated.
+Use a portable representation and reconstruct domain state in the parent
+when necessary.</p>
 <h2 id="three-layers-of-guidance-for-the-agent">Three layers of guidance for the agent<a class="headerlink" href="#three-layers-of-guidance-for-the-agent" title="Permanent link">&para;</a></h2>
 <ol>
 <li><strong>Tools</strong> — typed <code>ToolDefinition</code> functions, found via <code>search_{name}_tools</code>.</li>
