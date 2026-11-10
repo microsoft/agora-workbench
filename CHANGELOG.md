@@ -10,6 +10,15 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Fixed
+
+- Parallel execution tool descriptions, parameter schemas, and documentation
+  now explain that input keys become top-level variables, must be valid Python
+  identifiers rather than keywords, and do not create an automatic input
+  mapping. They also clarify result-variable assignment and capture behavior
+  for direct and connector-proxied tools
+  ([#426](https://github.com/microsoft/agora-workbench/pull/426)).
+
 ## [0.4.4] - 2026-11-04
 
 ### Added
