@@ -75,8 +75,9 @@ class ExportStage:
 
 def parse_export_result(stdout: str) -> dict[str, Any]:
     for line in reversed(stdout.splitlines()):
-        if line.startswith(RESULT_MARKER):
-            payload = json.loads(line[len(RESULT_MARKER) :])
+        _output, marker, encoded = line.rpartition(RESULT_MARKER)
+        if marker:
+            payload = json.loads(encoded)
             if isinstance(payload, dict) and isinstance(payload.get("status"), str):
                 return payload
     raise ValueError("Kernel did not return a batch export result.")
@@ -86,6 +87,7 @@ def build_export_code(variable: str, stage: ExportStage, max_bytes: int) -> str:
     function_name = f"__agora_export_{uuid.uuid4().hex}"
     return f"""
 def {function_name}():
+    from builtins import Exception, OverflowError, RuntimeError, getattr, globals, len, print
     import dill, json, os, stat
     namespace = globals()
     if {variable!r} not in namespace:
@@ -135,6 +137,7 @@ def build_collection_code(stages: dict[int, ExportStage], import_as: str, overwr
         loads += f"values[{index}] = __agora_value__\n"
     return f"""
 def {function_name}():
+    from builtins import Exception, RuntimeError, getattr, globals, print
     import json
     namespace = globals()
     if {not overwrite!r} and {import_as!r} in namespace:

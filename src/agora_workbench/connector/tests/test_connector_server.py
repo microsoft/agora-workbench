@@ -286,6 +286,62 @@ class TestRouterServer:
 class TestGatewayServer:
     """Tests for GatewayServer."""
 
+    @pytest.mark.asyncio
+    async def test_execute_forwards_explicit_parent_and_omits_unspecified_arguments(self):
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+        )
+        server = GatewayServer(config)
+        server._upstream_catalogs["chemistry"] = []
+        server._setup_tools()
+        calls = [
+            {"code": "value = 1", "execution_session_id": "parent", "timeout": 30},
+            {"code": "value = 2"},
+            {"code": "value = 3", "execution_session_id": None, "timeout": None},
+        ]
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                tool = next(tool for tool in await client.list_tools() if tool.name == "execute_chemistry_code")
+                schema = tool.inputSchema
+                assert schema["properties"]["execution_session_id"]["default"] is None
+                assert "execution_session_id" not in schema.get("required", [])
+                for arguments in calls:
+                    await client.call_tool("execute_chemistry_code", arguments)
+        for call, arguments in zip(proxy.await_args_list, calls):
+            assert call.kwargs["upstream"] == config.upstream
+            assert call.kwargs["tool_name"] == "execute_chemistry_code"
+            assert call.kwargs["arguments"] == {
+                "description": "",
+                **{name: value for name, value in arguments.items() if value is not None},
+            }
+        assert proxy.await_count == len(calls)
+
+    @pytest.mark.asyncio
+    async def test_explicit_parent_does_not_bypass_gateway_policies(self):
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(blocked_tools=["blocked"], allowed_tools=["allowed"], max_calls_per_minute=1),
+        )
+        server = GatewayServer(config)
+        server._upstream_catalogs["chemistry"] = []
+        server._setup_tools()
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                for code, expected in [
+                    ("blocked()", "blocked by gateway policy"),
+                    ("value = 1", "does not use any allowed tools"),
+                    ("allowed()", "upstream result"),
+                    ("allowed()", "Rate limit exceeded"),
+                ]:
+                    result = await client.call_tool(
+                        "execute_chemistry_code", {"code": code, "execution_session_id": "parent"}
+                    )
+                    assert expected in result.content[0].text
+        proxy.assert_awaited_once()
+        assert proxy.await_args.kwargs["arguments"]["execution_session_id"] == "parent"
+
     @pytest.fixture
     def gateway_config(self):
         return GatewayConfig(

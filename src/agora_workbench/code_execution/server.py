@@ -2847,82 +2847,101 @@ else:
 
         batch_id = f"b_{uuid.uuid4().hex[:12]}"
         jobs_out: list[dict[str, Any]] = []
-        async with self._parallel_state_lock:
-            if self.session_manager.get_session(parent_session.session_id) is not parent_session:
-                raise ValueError(f"Session {parent_session.session_id} was replaced or is closing")
-            if export_variable:
-                pending = sum(
-                    bool(batch.get("export_variable")) and not batch.get("receipt")
-                    for batch in self._parallel_batches.values()
-                )
-                if pending >= batch_exports.MAX_PENDING_EXPORT_BATCHES:
-                    raise ValueError("Too many pending export batches. Collect or cancel an existing batch first.")
-            resources = parent_session.extensions.setdefault("_agora_parallel_batches", _ParallelBatchResources(self))
-            resources.batch_ids.add(batch_id)
-            self._parallel_batches[batch_id] = {
-                "batch_id": batch_id,
-                "parent_session_id": parent_session.session_id,
-                "resources": resources,
-                "created_at": time.monotonic(),
-                "job_ids": [],
-                "result_variable": result_variable,
-                "cleanup_done": False,
-                "export_variable": export_variable,
-                "stages": {},
-                "export_bytes": 0,
-                "lifecycle_lock": asyncio.Lock(),
-            }
-
-            for input_index, full_code in enumerate(built_codes):
-                child_session_id = self.session_manager.create_session(
-                    data={},
-                    user_identity=parent_session.user_identity,
-                    user_token=parent_session.user_token,
-                    token_claims=parent_session.token_claims,
-                    metadata={
-                        "type": "parallel_child",
-                        "parent_session_id": parent_session.session_id,
-                        "batch_id": batch_id,
-                        "input_index": input_index,
-                    },
-                )
-                job_id = f"j_{uuid.uuid4().hex[:12]}"
-                job_state = {
-                    "job_id": job_id,
-                    "batch_id": batch_id,
-                    "session_id": child_session_id,
-                    "input_index": input_index,
-                    "status": "running",
-                    "started_at": time.monotonic(),
-                    "completed_at": None,
-                    "result": None,
-                    "result_payload": None,
-                    "task": None,
-                }
-                self._parallel_jobs[job_id] = job_state
-                self._parallel_job_by_session[child_session_id] = job_id
-                self._parallel_batches[batch_id]["job_ids"].append(job_id)
-                jobs_out.append(
-                    {
-                        "job_id": job_id,
-                        "session_id": child_session_id,
-                        "status": "running",
-                        "input_index": input_index,
-                    }
-                )
-
-                task = asyncio.create_task(
-                    self._run_parallel_job(
-                        job_id=job_id,
-                        session_id=child_session_id,
-                        code=full_code,
-                        timeout=timeout,
-                        result_variable=result_variable,
-                        batch_id=batch_id,
-                        semaphore=self._parallel_semaphore,
+        try:
+            async with self._parallel_state_lock:
+                if self.session_manager.get_session(parent_session.session_id) is not parent_session:
+                    raise ValueError(f"Session {parent_session.session_id} was replaced or is closing")
+                if export_variable:
+                    pending = sum(
+                        bool(batch.get("export_variable")) and not batch.get("receipt")
+                        for batch in self._parallel_batches.values()
                     )
+                    if pending >= batch_exports.MAX_PENDING_EXPORT_BATCHES:
+                        raise ValueError("Too many pending export batches. Collect or cancel an existing batch first.")
+                resources = parent_session.extensions.setdefault(
+                    "_agora_parallel_batches", _ParallelBatchResources(self)
                 )
-                job_state["task"] = task
+                resources.batch_ids.add(batch_id)
+                self._parallel_batches[batch_id] = {
+                    "batch_id": batch_id,
+                    "parent_session_id": parent_session.session_id,
+                    "resources": resources,
+                    "created_at": time.monotonic(),
+                    "job_ids": [],
+                    "result_variable": result_variable,
+                    "cleanup_done": False,
+                    "export_variable": export_variable,
+                    "stages": {},
+                    "export_bytes": 0,
+                    "lifecycle_lock": asyncio.Lock(),
+                }
+
+                for input_index, full_code in enumerate(built_codes):
+                    child_session_id = self.session_manager.create_session(
+                        data={},
+                        user_identity=parent_session.user_identity,
+                        user_token=parent_session.user_token,
+                        token_claims=parent_session.token_claims,
+                        metadata={
+                            "type": "parallel_child",
+                            "parent_session_id": parent_session.session_id,
+                            "batch_id": batch_id,
+                            "input_index": input_index,
+                        },
+                    )
+                    job_id = f"j_{uuid.uuid4().hex[:12]}"
+                    job_state = {
+                        "job_id": job_id,
+                        "batch_id": batch_id,
+                        "session_id": child_session_id,
+                        "input_index": input_index,
+                        "status": "running",
+                        "started_at": time.monotonic(),
+                        "completed_at": None,
+                        "result": None,
+                        "result_payload": None,
+                        "task": None,
+                    }
+                    self._parallel_jobs[job_id] = job_state
+                    self._parallel_job_by_session[child_session_id] = job_id
+                    self._parallel_batches[batch_id]["job_ids"].append(job_id)
+                    jobs_out.append(
+                        {
+                            "job_id": job_id,
+                            "session_id": child_session_id,
+                            "status": "running",
+                            "input_index": input_index,
+                        }
+                    )
+
+                    task = asyncio.create_task(
+                        self._run_parallel_job(
+                            job_id=job_id,
+                            session_id=child_session_id,
+                            code=full_code,
+                            timeout=timeout,
+                            result_variable=result_variable,
+                            batch_id=batch_id,
+                            semaphore=self._parallel_semaphore,
+                        )
+                    )
+                    job_state["task"] = task
+        except BaseException:
+            batch = self._parallel_batches.get(batch_id)
+            if batch:
+                # Prevent queued workers from executing before rollback can acquire its locks.
+                for job_id in batch["job_ids"]:
+                    task = self._parallel_jobs[job_id].get("task")
+                    if task is not None:
+                        task.cancel()
+                cleanup = asyncio.create_task(self._cancel_batch_payload(batch_id))
+                batch["launch_cleanup_task"] = cleanup
+                try:
+                    await asyncio.shield(cleanup)
+                except ValueError:
+                    if batch_id in self._parallel_batches:
+                        raise
+            raise
         payload = {"batch_id": batch_id, "parent_session_id": parent_session.session_id, "jobs": jobs_out}
         if export_variable:
             payload["export"] = {

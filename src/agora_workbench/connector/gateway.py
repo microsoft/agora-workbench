@@ -9,9 +9,10 @@ import json
 import logging
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastmcp import Context
+from pydantic import Field
 
 from agora_workbench.code_execution.auth.base import AuthConfig
 
@@ -91,6 +92,15 @@ class GatewayServer(ConnectorServer):
             code: str,
             description: str = "",
             timeout: int | None = None,
+            execution_session_id: Annotated[
+                str | None,
+                Field(
+                    description=(
+                        "Execution session ID returned by this upstream (not an MCP transport session ID). "
+                        "Omit for the upstream's default session selection."
+                    )
+                ),
+            ] = None,
         ) -> str:
             """Execute Python code (proxied through gateway with policy enforcement)."""
             # Tool allow/deny policy enforcement
@@ -131,6 +141,8 @@ class GatewayServer(ConnectorServer):
             }
             if timeout is not None:
                 arguments["timeout"] = timeout
+            if execution_session_id is not None:
+                arguments["execution_session_id"] = execution_session_id
             return await server._proxy_mcp_tool_call(
                 upstream=upstream,
                 tool_name=tool_name,

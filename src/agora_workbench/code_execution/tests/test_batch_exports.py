@@ -12,6 +12,7 @@ from .. import batch_exports
 from ..auth import create_noop_auth_config
 from ..code_execution_models import CodeExecutionResult
 from ..sessions import (
+    MaxSessionsReachedError,
     get_current_session,
     set_current_request_token,
     set_current_token_claims,
@@ -117,6 +118,126 @@ async def test_poll_then_select_collect_and_retry_without_reimport(export_server
     assert conflict["reason"] == "already_collected"
     await server._cancel_batch_payload(batch_id)
     assert batch_id not in server._parallel_batches
+
+
+@pytest.mark.parametrize("created_children", [0, 1])
+@pytest.mark.parametrize("export_variable", ["", "candidate"])
+async def test_failed_launch_rolls_back_children_jobs_and_export_slots(
+    export_server, monkeypatch, created_children, export_variable
+):
+    server, parent, _ = export_server
+    manager = server.session_manager
+    monkeypatch.setattr(manager.config, "max_sessions", 1 + created_children)
+    monkeypatch.setattr(batch_exports, "MAX_PENDING_EXPORT_BATCHES", 1)
+    original_execute = server._execute_code_with_tracing
+    execute = AsyncMock()
+    monkeypatch.setattr(server, "_execute_code_with_tracing", execute)
+    for _ in range(3):
+        with pytest.raises(MaxSessionsReachedError):
+            await server._parallel_execute_for_session(
+                parent_session=parent,
+                code="candidate = value",
+                inputs=[{"value": 1}, {"value": 2}],
+                timeout=30,
+                result_variable="",
+                export_variable=export_variable,
+            )
+        assert manager.storage.count() == 1
+        assert not server._parallel_batches
+        assert not server._parallel_jobs
+        assert not server._parallel_job_by_session
+        assert not parent.extensions["_agora_parallel_batches"].batch_ids
+        assert server._parallel_export_bytes == 0
+    execute.assert_not_awaited()
+    monkeypatch.setattr(manager.config, "max_sessions", 100)
+    monkeypatch.setattr(server, "_execute_code_with_tracing", original_execute)
+    launched = await finish_batch(server, parent, count=1)
+    assert (await server._check_batch_payload(launched["batch_id"]))["collection"]["staged_indices"] == [0]
+
+
+async def test_failed_launch_rollback_survives_caller_cancellation(export_server, monkeypatch):
+    server, parent, _ = export_server
+    manager = server.session_manager
+    monkeypatch.setattr(manager.config, "max_sessions", 2)
+    original_close = manager.aclose_session
+    closing, release = asyncio.Event(), asyncio.Event()
+
+    async def blocked_close(session_id, **kwargs):
+        if session_id != parent.session_id:
+            closing.set()
+            await release.wait()
+        await original_close(session_id, **kwargs)
+
+    monkeypatch.setattr(manager, "aclose_session", blocked_close)
+    launch = asyncio.create_task(
+        server._parallel_execute_for_session(
+            parent_session=parent,
+            code="candidate = value",
+            inputs=[{"value": 1}, {"value": 2}],
+            timeout=30,
+            result_variable="",
+            export_variable="candidate",
+        )
+    )
+    await closing.wait()
+    cleanup = next(iter(server._parallel_batches.values()))["launch_cleanup_task"]
+    launch.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await launch
+    assert not cleanup.done()
+    release.set()
+    await cleanup
+    assert not server._parallel_batches
+    assert not server._parallel_jobs
+    assert manager.storage.count() == 1
+    assert not parent.extensions["_agora_parallel_batches"].batch_ids
+
+
+async def test_hook_output_without_newlines_preserves_export_and_collection_receipt(export_server):
+    server, parent, namespaces = export_server
+    launched = await finish_batch(
+        server,
+        parent,
+        code=(
+            "class Noisy:\n"
+            "    def __reduce__(self):\n"
+            "        print('serializing', end='')\n"
+            "        return (eval, (\"(print('loading', end=''), 7)[1]\",))\n"
+            "candidate = Noisy()\n"
+        ),
+        count=1,
+    )
+    status = await server._check_batch_payload(launched["batch_id"])
+    assert status["jobs"][0]["export"]["status"] == "staged"
+    collected = await server._collect_batch_payload(launched["batch_id"], "candidates")
+    assert collected["success"]
+    assert namespaces[parent.session_id]["candidates"] == {0: 7}
+    assert await server._collect_batch_payload(launched["batch_id"], "candidates") == collected
+
+
+@pytest.mark.parametrize("variable", ["print", "globals", "len", "getattr"])
+async def test_export_and_collection_allow_builtin_variable_names(export_server, variable):
+    server, parent, namespaces = export_server
+    launched = await server._parallel_execute_for_session(
+        parent_session=parent,
+        code=f"{variable} = {{value}}",
+        inputs=[{"value": 7}],
+        timeout=30,
+        result_variable="",
+        export_variable=variable,
+    )
+    await asyncio.gather(*(server._parallel_jobs[job["job_id"]]["task"] for job in launched["jobs"]))
+    status = await server._check_batch_payload(launched["batch_id"])
+    assert status["jobs"][0]["export"]["status"] == "staged"
+    namespaces[parent.session_id] = {
+        name: "user variable"
+        for name in ["print", "globals", "Exception", "RuntimeError", "getattr"]
+        if name != variable
+    }
+    collected = await server._collect_batch_payload(launched["batch_id"], variable)
+    assert collected["success"]
+    assert namespaces[parent.session_id][variable] == {0: {7}}
+    assert await server._collect_batch_payload(launched["batch_id"], variable) == collected
 
 
 async def test_export_status_is_independent_and_none_is_a_valid_snapshot(export_server):
