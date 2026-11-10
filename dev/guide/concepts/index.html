@@ -1780,6 +1780,20 @@ active session from another agent or a new MCP connection, pass that value as
 <code>execution_session_id</code> to <code>execute_{name}_code</code>. This is distinct from the MCP
 transport session ID; the server resumes only an existing session owned by the
 caller, and rejects unknown or expired IDs rather than creating a new kernel.</p>
+<p>Parallel batches are an exception: each input runs in a <strong>temporary child
+session</strong> reserved for that batch. Child session IDs cannot be used for
+additional execution or nested batches, even after their individual jobs
+finish. Continue independent work in the parent session or a new session.
+Retrieving a terminal status with <code>{name}_check_batch</code> closes the children
+and retires the batch; cancellation or closing the parent also cleans them up.
+Save the terminal response, since subsequent polls cannot retrieve it again.</p>
+<p>To keep batch results, assign each child's return value to <code>result_variable</code>
+(<code>result</code> by default). It is captured in <code>jobs[].result</code> as JSON when
+serializable, otherwise as a <code>repr</code> string, but is not automatically injected
+into the parent kernel. Child output files and live Python objects are not
+transferred to the parent. Files in child <code>AGORA_OUTPUT_DIR</code> directories are
+deleted during cleanup, so persist needed files to durable storage inside the
+batch code and return their references.</p>
 <p>→ See the <a href="../../api/sessions/">Sessions API</a>.</p>
 <h2 id="three-layers-of-guidance-for-the-agent">Three layers of guidance for the agent<a class="headerlink" href="#three-layers-of-guidance-for-the-agent" title="Permanent link">&para;</a></h2>
 <ol>
