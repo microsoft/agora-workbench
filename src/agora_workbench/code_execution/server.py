@@ -15,11 +15,12 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Annotated, Any, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
 from fastmcp import Context, FastMCP
 from jupyter_client.kernelspec import KernelSpecManager
+from pydantic import Field
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
@@ -2805,10 +2806,36 @@ else:
 
         async def parallel_execute(
             ctx: Context,
-            code: str,
-            inputs: list[dict[str, Any]],
+            code: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Python template run once per input, e.g. 'result = value * 2' for inputs=[{'value': 2}]."
+                    )
+                ),
+            ],
+            inputs: Annotated[
+                list[dict[str, Any]],
+                Field(
+                    description=(
+                        "Non-empty list of dictionaries. Each dictionary's keys become top-level variables "
+                        "before code runs; keys must be valid Python identifiers, not keywords. "
+                        "Read them directly (e.g. value), not through an inputs or input mapping; "
+                        "no such mapping is created automatically."
+                    )
+                ),
+            ],
             timeout: int = 3600,
-            result_variable: str = "result",
+            result_variable: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Name of the top-level variable code must assign to capture each job's result "
+                        "(default: result). Must be a valid Python identifier, not a keyword. "
+                        "If the variable is missing, the job's result is null. An empty string disables capture."
+                    )
+                ),
+            ] = "result",
         ) -> str:
             transport_session_id = None
             if ctx:
@@ -2909,6 +2936,11 @@ else:
             name=execute_name,
             description=(
                 "Execute the same code template across multiple input dictionaries in parallel. "
+                "Each dictionary's keys become top-level variables; use bare names, not inputs['key']. "
+                "Keys must be valid Python identifiers, not keywords; no inputs or input mapping is created "
+                "automatically. Code must assign the top-level variable named by result_variable (default: result) "
+                "to capture each job's result; a missing variable yields null, and an empty result_variable "
+                "disables capture. "
                 "A dedicated child session/kernel is created per input and run in background. "
                 f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
                 f"and are not accepted by {self.server_config.name}_check_job."

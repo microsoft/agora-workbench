@@ -361,6 +361,35 @@ class TestRouterProxyToolRegistration:
     """Tests for companion proxy tool registration on RouterServer."""
 
     @pytest.mark.asyncio
+    async def test_parallel_execute_proxy_exposes_template_contract(self):
+        server = RouterServer(
+            RouterConfig(name="hub", upstreams=[UpstreamConfig(name="alpha", url="http://alpha:8000")])
+        )
+        server._upstream_catalogs["alpha"] = []
+        server._setup_tools()
+
+        async with Client(server.mcp) as client:
+            tool = next(tool for tool in await client.list_tools() if tool.name == "alpha_parallel_execute")
+
+        assert tool.description is not None
+        assert "top-level variables" in tool.description
+        assert "not inputs['key']" in tool.description
+        assert "no inputs or input mapping is created automatically" in tool.description
+        assert "valid Python identifiers, not keywords" in tool.description
+        assert "Code must assign" in tool.description
+        assert "result_variable (default: result)" in tool.description
+
+        properties = tool.inputSchema["properties"]
+        assert "result = value * 2" in properties["code"]["description"]
+        assert "top-level variables" in properties["inputs"]["description"]
+        assert "valid Python identifiers, not keywords" in properties["inputs"]["description"]
+        assert "no such mapping is created automatically" in properties["inputs"]["description"]
+        assert "code must assign" in properties["result_variable"]["description"]
+        assert "missing" in properties["result_variable"]["description"]
+        assert "empty string disables capture" in properties["result_variable"]["description"]
+        assert properties["result_variable"]["default"] == "result"
+
+    @pytest.mark.asyncio
     async def test_execute_proxy_exposes_optional_execution_session_id(self):
         server = RouterServer(
             RouterConfig(name="hub", upstreams=[UpstreamConfig(name="alpha", url="http://alpha:8000")])
