@@ -286,6 +286,62 @@ class TestRouterServer:
 class TestGatewayServer:
     """Tests for GatewayServer."""
 
+    @pytest.mark.asyncio
+    async def test_execute_forwards_explicit_parent_and_omits_unspecified_arguments(self):
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+        )
+        server = GatewayServer(config)
+        server._upstream_catalogs["chemistry"] = []
+        server._setup_tools()
+        calls = [
+            {"code": "value = 1", "execution_session_id": "parent", "timeout": 30},
+            {"code": "value = 2"},
+            {"code": "value = 3", "execution_session_id": None, "timeout": None},
+        ]
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                tool = next(tool for tool in await client.list_tools() if tool.name == "execute_chemistry_code")
+                schema = tool.inputSchema
+                assert schema["properties"]["execution_session_id"]["default"] is None
+                assert "execution_session_id" not in schema.get("required", [])
+                for arguments in calls:
+                    await client.call_tool("execute_chemistry_code", arguments)
+        for call, arguments in zip(proxy.await_args_list, calls):
+            assert call.kwargs["upstream"] == config.upstream
+            assert call.kwargs["tool_name"] == "execute_chemistry_code"
+            assert call.kwargs["arguments"] == {
+                "description": "",
+                **{name: value for name, value in arguments.items() if value is not None},
+            }
+        assert proxy.await_count == len(calls)
+
+    @pytest.mark.asyncio
+    async def test_explicit_parent_does_not_bypass_gateway_policies(self):
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(blocked_tools=["blocked"], allowed_tools=["allowed"], max_calls_per_minute=1),
+        )
+        server = GatewayServer(config)
+        server._upstream_catalogs["chemistry"] = []
+        server._setup_tools()
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                for code, expected in [
+                    ("blocked()", "blocked by gateway policy"),
+                    ("value = 1", "does not use any allowed tools"),
+                    ("allowed()", "upstream result"),
+                    ("allowed()", "Rate limit exceeded"),
+                ]:
+                    result = await client.call_tool(
+                        "execute_chemistry_code", {"code": code, "execution_session_id": "parent"}
+                    )
+                    assert expected in result.content[0].text
+        proxy.assert_awaited_once()
+        assert proxy.await_args.kwargs["arguments"]["execution_session_id"] == "parent"
+
     @pytest.fixture
     def gateway_config(self):
         return GatewayConfig(
@@ -388,6 +444,49 @@ class TestRouterProxyToolRegistration:
         assert "missing" in properties["result_variable"]["description"]
         assert "empty string disables capture" in properties["result_variable"]["description"]
         assert properties["result_variable"]["default"] == "result"
+        assert "snapshot" in properties["export_variable"]["description"]
+        assert "parent execution session" in properties["execution_session_id"]["description"]
+
+    @pytest.mark.asyncio
+    async def test_parallel_export_and_collection_proxies_forward_new_contract(self):
+        config = RouterConfig(name="hub", upstreams=[UpstreamConfig(name="alpha", url="http://alpha:8000")])
+        server = RouterServer(config)
+        server._upstream_catalogs["alpha"] = []
+        server._setup_tools()
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                await client.call_tool(
+                    "alpha_parallel_execute",
+                    {
+                        "code": "candidate = value",
+                        "inputs": [{"value": 1}],
+                        "execution_session_id": "parent",
+                        "export_variable": "candidate",
+                    },
+                )
+                await client.call_tool(
+                    "alpha_collect_batch",
+                    {"batch_id": "batch", "import_as": "candidates", "indices": [0], "overwrite": True},
+                )
+                await client.call_tool("alpha_parallel_execute", {"code": "result = value", "inputs": [{"value": 2}]})
+        launch, collect, ordinary = proxy.await_args_list
+        assert launch.kwargs["arguments"] == {
+            "code": "candidate = value",
+            "inputs": [{"value": 1}],
+            "timeout": 3600,
+            "result_variable": "result",
+            "execution_session_id": "parent",
+            "export_variable": "candidate",
+        }
+        assert collect.kwargs["tool_name"] == "alpha_collect_batch"
+        assert collect.kwargs["arguments"] == {
+            "batch_id": "batch",
+            "import_as": "candidates",
+            "indices": [0],
+            "overwrite": True,
+        }
+        assert "export_variable" not in ordinary.kwargs["arguments"]
+        assert "execution_session_id" not in ordinary.kwargs["arguments"]
 
     @pytest.mark.asyncio
     async def test_execute_proxy_exposes_optional_execution_session_id(self):
@@ -511,6 +610,7 @@ class TestRouterProxyToolRegistration:
         assert "chemistry_parallel_execute" in tool_names
         assert "chemistry_check_batch" in tool_names
         assert "chemistry_cancel_batch" in tool_names
+        assert "chemistry_collect_batch" in tool_names
         assert "chemistry_send" in tool_names
         parallel_execute = next(t for t in tools if t.name == "chemistry_parallel_execute")
         assert parallel_execute.description is not None
@@ -624,6 +724,34 @@ class TestGatewayPolicyEnforcement:
     CATALOG_WITH_STATES = TestRouterProxyToolRegistration.CATALOG_WITH_STATES
 
     @pytest.mark.asyncio
+    async def test_blocking_collection_rejects_exports_but_preserves_ordinary_batches(self):
+        config = GatewayConfig(
+            name="chem-gateway",
+            upstream=UpstreamConfig(name="chemistry", url="http://chemistry:8000"),
+            policy=GatewayPolicy(blocked_tools=["collect_batch"]),
+        )
+        server = GatewayServer(config)
+        server._upstream_catalogs["chemistry"] = []
+        server._setup_tools()
+        tools = {tool.name: tool for tool in await server.mcp.list_tools()}
+        assert "chemistry_collect_batch" not in tools
+        description = tools["chemistry_parallel_execute"].description
+        assert description is not None
+        assert "chemistry_collect_batch" not in description
+        with patch.object(server, "_proxy_mcp_tool_call", new=AsyncMock(return_value="upstream result")) as proxy:
+            async with Client(server.mcp) as client:
+                denied = await client.call_tool(
+                    "chemistry_parallel_execute",
+                    {"code": "candidate = value", "inputs": [{"value": 1}], "export_variable": "candidate"},
+                )
+                assert "disabled by gateway policy" in denied.content[0].text
+                proxy.assert_not_awaited()
+                await client.call_tool(
+                    "chemistry_parallel_execute", {"code": "result = value", "inputs": [{"value": 1}]}
+                )
+                proxy.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_blocked_tools_suppresses_proxy_registration(self):
         """Gateway does not register proxy tools that are in blocked_tools."""
         config = GatewayConfig(
@@ -654,6 +782,7 @@ class TestGatewayPolicyEnforcement:
         assert "chemistry_parallel_execute" not in tool_names
         assert "chemistry_check_batch" not in tool_names
         assert "chemistry_cancel_batch" not in tool_names
+        assert "chemistry_collect_batch" not in tool_names
         assert "chemistry_send" not in tool_names
 
         # Non-blocked tools should still be registered
@@ -690,6 +819,7 @@ class TestGatewayPolicyEnforcement:
         assert "chemistry_parallel_execute" in tool_names
         assert "chemistry_check_batch" in tool_names
         assert "chemistry_cancel_batch" in tool_names
+        assert "chemistry_collect_batch" in tool_names
         assert "chemistry_send" in tool_names
         assert "plan_chemistry_workflow" in tool_names
         assert "load_chemistry_skill" in tool_names

@@ -9,9 +9,10 @@ import json
 import logging
 import time
 from collections import defaultdict
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastmcp import Context
+from pydantic import Field
 
 from agora_workbench.code_execution.auth.base import AuthConfig
 
@@ -60,7 +61,7 @@ class GatewayServer(ConnectorServer):
         self._register_session_proxies(upstream)
 
         # Register companion proxy tools, respecting blocked_tools policy.
-        # Blocking "parallel_execute" also suppresses check_batch/cancel_batch
+        # Blocking "parallel_execute" also suppresses its poll, collect, and cancel tools
         # since those are only meaningful alongside parallel execution.
         blocked = set(self.config.policy.blocked_tools)
 
@@ -68,7 +69,7 @@ class GatewayServer(ConnectorServer):
             self._register_check_job_proxy(upstream)
 
         if "parallel_execute" not in blocked:
-            self._register_parallel_execution_proxies(upstream)
+            self._register_parallel_execution_proxies(upstream, include_collection="collect_batch" not in blocked)
 
         if "send" not in blocked:
             self._register_send_proxy(upstream)
@@ -91,6 +92,15 @@ class GatewayServer(ConnectorServer):
             code: str,
             description: str = "",
             timeout: int | None = None,
+            execution_session_id: Annotated[
+                str | None,
+                Field(
+                    description=(
+                        "Execution session ID returned by this upstream (not an MCP transport session ID). "
+                        "Omit for the upstream's default session selection."
+                    )
+                ),
+            ] = None,
         ) -> str:
             """Execute Python code (proxied through gateway with policy enforcement)."""
             # Tool allow/deny policy enforcement
@@ -131,6 +141,8 @@ class GatewayServer(ConnectorServer):
             }
             if timeout is not None:
                 arguments["timeout"] = timeout
+            if execution_session_id is not None:
+                arguments["execution_session_id"] = execution_session_id
             return await server._proxy_mcp_tool_call(
                 upstream=upstream,
                 tool_name=tool_name,

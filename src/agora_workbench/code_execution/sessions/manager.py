@@ -2009,7 +2009,8 @@ class SessionManager:
     ) -> dict[str, str]:
         """Start execution and return immediately with a background job id."""
         async with self.session_resource_operation(session_id):
-            return await self._start_background_execution_for_session(session_id, code, timeout, working_dir)
+            async with self._kernel_execution_lock(session_id):
+                return await self._start_background_execution_for_session(session_id, code, timeout, working_dir)
 
     async def _start_background_execution_for_session(
         self, session_id: str, code: str, timeout: float, working_dir: Optional[str] = None
@@ -2128,6 +2129,9 @@ class SessionManager:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
         async with self._kernel_execution_lock(session_id):
+            running_job_id = self._get_running_job_for_session(session_id)
+            if running_job_id:
+                return "", f"Session busy — job {running_job_id} is still running", False, [], []
             km, kc = await self._get_or_create_kernel(session_id, working_dir, user_identity=user_identity)
             kernel_generation = self.get_kernel_generation(session_id)
             code = self._prepare_outputs_preamble(session_id) + code
@@ -2583,6 +2587,9 @@ class SessionManager:
             return "", f"Session busy — job {running_job_id} is still running", False, [], []
 
         async with self._kernel_execution_lock(session_id):
+            running_job_id = self._get_running_job_for_session(session_id)
+            if running_job_id:
+                return "", f"Session busy — job {running_job_id} is still running", False, [], []
             return await self._execute_code_locked(
                 session_id=session_id,
                 code=code,

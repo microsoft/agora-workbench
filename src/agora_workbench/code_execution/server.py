@@ -29,6 +29,7 @@ from . import agent_guidance
 from . import environment_builders
 from . import asset_provisioner
 from . import code_execution as execution_defaults
+from . import batch_exports
 from .sidecar import SidecarManager
 from .code_execution_models import (
     CodeExecutionResult,
@@ -245,6 +246,8 @@ class CodeExecutionServer(BaseMCPServer):
         self._parallel_batches: dict[str, dict[str, Any]] = {}
         self._parallel_job_by_session: dict[str, str] = {}
         self._parallel_state_lock = asyncio.Lock()
+        self._parallel_export_lock = asyncio.Lock()
+        self._parallel_export_bytes = 0
 
         # GuiPublisher is always available so agents can use <gui>name</gui>
         # to make outputs downloadable without requiring external storage.
@@ -2465,6 +2468,14 @@ else:
                 self.session_manager.update_session(session_id, session)
 
                 payload = await self._capture_result_variable(session_id, result_variable) if result.success else None
+                export = None
+                batch = self._parallel_batches[batch_id]
+                if batch.get("export_variable"):
+                    export = (
+                        await self._stage_parallel_export(batch, session_id, job_id)
+                        if result.success
+                        else {"status": "skipped", "reason": "execution_failed"}
+                    )
                 status = "completed" if result.success else "failed"
                 async with self._parallel_state_lock:
                     self._parallel_jobs[job_id].update(
@@ -2473,6 +2484,7 @@ else:
                             "completed_at": time.monotonic(),
                             "result": result.model_dump(),
                             "result_payload": payload,
+                            "export": export,
                         }
                     )
                 self.activity_publisher.publish_nowait(
@@ -2535,6 +2547,94 @@ else:
                 }
             )
 
+        finally:
+            batch = self._parallel_batches.get(batch_id)
+            if batch and batch.get("export_variable") and not batch.get("expiry_task"):
+                if all(self._parallel_jobs[jid]["status"] != "running" for jid in batch["job_ids"]):
+                    self._schedule_parallel_batch_expiry(batch, batch_exports.EXPORT_RETENTION_SECONDS)
+
+    async def _stage_parallel_export(self, batch: dict[str, Any], session_id: str, job_id: str) -> dict[str, Any]:
+        # Serialize snapshots sequentially so concurrent writers cannot exceed the shared disk budget.
+        async with self._parallel_export_lock:
+            count = sum(len(item.get("stages", {})) for item in self._parallel_batches.values())
+            limit = min(
+                batch_exports.MAX_TRANSFER_SIZE_BYTES,
+                batch_exports.MAX_BATCH_EXPORT_BYTES - batch["export_bytes"],
+                batch_exports.MAX_STAGED_EXPORT_BYTES - self._parallel_export_bytes,
+            )
+            if limit <= 0 or count >= batch_exports.MAX_STAGED_EXPORTS:
+                return {"status": "too_large", "error": "Batch export storage capacity exhausted."}
+            try:
+                stage = batch_exports.ExportStage()
+            except OSError:
+                LOGGER.warning("Could not allocate a parallel export stage.", exc_info=True)
+                return {"status": "failed", "error": "Could not allocate export storage."}
+            index = self._parallel_jobs[job_id]["input_index"]
+            batch["stages"][index] = stage
+            batch["export_bytes"] += limit
+            self._parallel_export_bytes += limit
+            try:
+                stdout, _stderr, success, _, _ = await self.session_manager.execute_code_for_session(
+                    session_id=session_id,
+                    code=batch_exports.build_export_code(batch["export_variable"], stage, limit),
+                    timeout=min(60, self.max_timeout),
+                    working_dir=str(self.working_dir) if self.working_dir else None,
+                )
+                outcome = batch_exports.parse_export_result(stdout) if success else {"status": "failed"}
+                if outcome["status"] == "staged":
+                    size = stage.size()
+                    if size > limit:
+                        outcome = {"status": "too_large"}
+                    else:
+                        batch["export_bytes"] -= limit - size
+                        self._parallel_export_bytes -= limit - size
+                        return {"status": "staged", "bytes": size}
+            except asyncio.CancelledError:
+                # The child may still be writing; retain its reservation until kernel teardown.
+                raise
+            except Exception:
+                LOGGER.warning("Could not stage export for parallel job %s", job_id, exc_info=True)
+                outcome = {"status": "failed"}
+            try:
+                stage.close()
+            except OSError:
+                LOGGER.warning("Could not remove a failed parallel export stage.", exc_info=True)
+            finally:
+                batch["stages"].pop(index, None)
+                batch["export_bytes"] -= limit
+                self._parallel_export_bytes -= limit
+            outcome.setdefault(
+                "error",
+                "Export could not be staged. Fix the export variable, reduce its size, or export portable data "
+                "inside the batch code and relaunch; child sessions cannot run repair code.",
+            )
+            return outcome
+
+    def _schedule_parallel_batch_expiry(self, batch: dict[str, Any], seconds: float) -> None:
+        previous = batch.get("expiry_task")
+        if previous is not None and previous is not asyncio.current_task():
+            previous.cancel()
+        batch["expires_at"] = time.time() + seconds
+
+        async def expire() -> None:
+            await asyncio.sleep(seconds)
+            try:
+                await self._cancel_batch_payload(batch["batch_id"])
+            except ValueError:
+                pass
+
+        batch["expiry_task"] = asyncio.create_task(expire())
+
+    def _discard_parallel_exports(self, batch: dict[str, Any]) -> None:
+        for stage in batch.get("stages", {}).values():
+            try:
+                stage.close()
+            except OSError:
+                LOGGER.warning("Could not remove a parallel export stage.", exc_info=True)
+        batch.get("stages", {}).clear()
+        self._parallel_export_bytes -= batch.get("export_bytes", 0)
+        batch["export_bytes"] = 0
+
     async def _cleanup_parallel_batch_sessions(self, batch_id: str) -> None:
         """Close child sessions for a completed/cancelled batch once.
 
@@ -2571,6 +2671,10 @@ else:
         async with self._parallel_state_lock:
             batch = self._parallel_batches.pop(batch_id, None)
             if batch:
+                expiry = batch.get("expiry_task")
+                if expiry is not None and expiry is not asyncio.current_task():
+                    expiry.cancel()
+                self._discard_parallel_exports(batch)
                 batch["resources"].batch_ids.discard(batch_id)
                 for job_id in batch["job_ids"]:
                     job = self._parallel_jobs.pop(job_id, None)
@@ -2614,11 +2718,20 @@ else:
         return batch_id
 
     async def _check_batch_payload(self, batch_id: str) -> dict[str, Any]:
+        batch = self._parallel_batches.get(batch_id)
+        if batch and batch.get("export_variable"):
+            async with batch["lifecycle_lock"]:
+                return await self._build_parallel_batch_payload(batch_id)
+        return await self._build_parallel_batch_payload(batch_id)
+
+    async def _build_parallel_batch_payload(self, batch_id: str) -> dict[str, Any]:
         """Build aggregate status for a parallel batch."""
         async with self._parallel_state_lock:
             batch = self._parallel_batches.get(batch_id)
             if not batch:
                 raise ValueError(f"Batch {batch_id} not found")
+            if batch.get("receipt"):
+                return batch["receipt"].copy()
             jobs = [self._parallel_jobs[job_id].copy() for job_id in batch["job_ids"]]
             parent_session_id = batch["parent_session_id"]
 
@@ -2642,6 +2755,11 @@ else:
                 "status": status,
                 "input_index": job["input_index"],
             }
+            if batch.get("export_variable"):
+                item["export"] = job.get("export") or {
+                    "status": "pending" if status == "running" else "skipped",
+                    "reason": status,
+                }
             if status == "running":
                 item["elapsed_seconds"] = now - job["started_at"]
             if status in {"completed", "failed", "cancelled"}:
@@ -2669,7 +2787,24 @@ else:
         }
         if running == 0:
             await self._cleanup_parallel_batch_sessions(batch_id)
-            await self._prune_parallel_batch(batch_id)
+            if not batch.get("export_variable"):
+                await self._prune_parallel_batch(batch_id)
+        if batch.get("export_variable"):
+            payload["retired"] = False
+            payload["collection"] = {
+                "status": "pending" if running == 0 else "waiting",
+                "export_variable": batch["export_variable"],
+                "staged_indices": sorted(batch["stages"]),
+                "expires_at": batch.get("expires_at"),
+                "collect_tool": f"{self.server_config.name}_collect_batch",
+                "next_action": (
+                    f"Choose staged input indices and call {self.server_config.name}_collect_batch"
+                    "(batch_id=..., import_as=..., indices=...), "
+                    f"or {self.server_config.name}_cancel_batch to discard."
+                    if running == 0
+                    else f"Poll {self.server_config.name}_check_batch until execution finishes."
+                ),
+            }
         return payload
 
     async def _parallel_execute_for_session(
@@ -2680,6 +2815,7 @@ else:
         inputs: list[dict[str, Any]],
         timeout: int,
         result_variable: str,
+        export_variable: str = "",
     ) -> dict[str, Any]:
         """Start a parallel batch for a parent session."""
         self._validate_execution_session(parent_session)
@@ -2695,6 +2831,10 @@ else:
             result_variable and (not result_variable.isidentifier() or keyword.iskeyword(result_variable))
         ):
             raise ValueError("'result_variable' must be a valid Python identifier")
+        if not isinstance(export_variable, str) or (
+            export_variable and (not export_variable.isidentifier() or keyword.iskeyword(export_variable))
+        ):
+            raise ValueError("'export_variable' must be a valid Python identifier")
 
         # Pre-validate all inputs before creating any sessions/tasks to avoid
         # orphaned child sessions and partial batch state on validation failure.
@@ -2707,74 +2847,120 @@ else:
 
         batch_id = f"b_{uuid.uuid4().hex[:12]}"
         jobs_out: list[dict[str, Any]] = []
-        async with self._parallel_state_lock:
-            if self.session_manager.get_session(parent_session.session_id) is not parent_session:
-                raise ValueError(f"Session {parent_session.session_id} was replaced or is closing")
-            resources = parent_session.extensions.setdefault("_agora_parallel_batches", _ParallelBatchResources(self))
-            resources.batch_ids.add(batch_id)
-            self._parallel_batches[batch_id] = {
-                "batch_id": batch_id,
-                "parent_session_id": parent_session.session_id,
-                "resources": resources,
-                "created_at": time.monotonic(),
-                "job_ids": [],
-                "result_variable": result_variable,
-                "cleanup_done": False,
-            }
-
-            for input_index, full_code in enumerate(built_codes):
-                child_session_id = self.session_manager.create_session(
-                    data={},
-                    user_identity=parent_session.user_identity,
-                    user_token=parent_session.user_token,
-                    token_claims=parent_session.token_claims,
-                    metadata={
-                        "type": "parallel_child",
-                        "parent_session_id": parent_session.session_id,
-                        "batch_id": batch_id,
-                        "input_index": input_index,
-                    },
-                )
-                job_id = f"j_{uuid.uuid4().hex[:12]}"
-                job_state = {
-                    "job_id": job_id,
-                    "batch_id": batch_id,
-                    "session_id": child_session_id,
-                    "input_index": input_index,
-                    "status": "running",
-                    "started_at": time.monotonic(),
-                    "completed_at": None,
-                    "result": None,
-                    "result_payload": None,
-                    "task": None,
-                }
-                self._parallel_jobs[job_id] = job_state
-                self._parallel_job_by_session[child_session_id] = job_id
-                self._parallel_batches[batch_id]["job_ids"].append(job_id)
-                jobs_out.append(
-                    {
-                        "job_id": job_id,
-                        "session_id": child_session_id,
-                        "status": "running",
-                        "input_index": input_index,
-                    }
-                )
-
-                task = asyncio.create_task(
-                    self._run_parallel_job(
-                        job_id=job_id,
-                        session_id=child_session_id,
-                        code=full_code,
-                        timeout=timeout,
-                        result_variable=result_variable,
-                        batch_id=batch_id,
-                        semaphore=self._parallel_semaphore,
+        try:
+            async with self._parallel_state_lock:
+                if self.session_manager.get_session(parent_session.session_id) is not parent_session:
+                    raise ValueError(f"Session {parent_session.session_id} was replaced or is closing")
+                if export_variable:
+                    pending = sum(
+                        bool(batch.get("export_variable")) and not batch.get("receipt")
+                        for batch in self._parallel_batches.values()
                     )
+                    if pending >= batch_exports.MAX_PENDING_EXPORT_BATCHES:
+                        raise ValueError("Too many pending export batches. Collect or cancel an existing batch first.")
+                resources = parent_session.extensions.setdefault(
+                    "_agora_parallel_batches", _ParallelBatchResources(self)
                 )
-                job_state["task"] = task
-        return {"batch_id": batch_id, "jobs": jobs_out}
+                resources.batch_ids.add(batch_id)
+                self._parallel_batches[batch_id] = {
+                    "batch_id": batch_id,
+                    "parent_session_id": parent_session.session_id,
+                    "resources": resources,
+                    "created_at": time.monotonic(),
+                    "job_ids": [],
+                    "result_variable": result_variable,
+                    "cleanup_done": False,
+                    "export_variable": export_variable,
+                    "stages": {},
+                    "export_bytes": 0,
+                    "lifecycle_lock": asyncio.Lock(),
+                }
+
+                for input_index, full_code in enumerate(built_codes):
+                    child_session_id = self.session_manager.create_session(
+                        data={},
+                        user_identity=parent_session.user_identity,
+                        user_token=parent_session.user_token,
+                        token_claims=parent_session.token_claims,
+                        metadata={
+                            "type": "parallel_child",
+                            "parent_session_id": parent_session.session_id,
+                            "batch_id": batch_id,
+                            "input_index": input_index,
+                        },
+                    )
+                    job_id = f"j_{uuid.uuid4().hex[:12]}"
+                    job_state = {
+                        "job_id": job_id,
+                        "batch_id": batch_id,
+                        "session_id": child_session_id,
+                        "input_index": input_index,
+                        "status": "running",
+                        "started_at": time.monotonic(),
+                        "completed_at": None,
+                        "result": None,
+                        "result_payload": None,
+                        "task": None,
+                    }
+                    self._parallel_jobs[job_id] = job_state
+                    self._parallel_job_by_session[child_session_id] = job_id
+                    self._parallel_batches[batch_id]["job_ids"].append(job_id)
+                    jobs_out.append(
+                        {
+                            "job_id": job_id,
+                            "session_id": child_session_id,
+                            "status": "running",
+                            "input_index": input_index,
+                        }
+                    )
+
+                    task = asyncio.create_task(
+                        self._run_parallel_job(
+                            job_id=job_id,
+                            session_id=child_session_id,
+                            code=full_code,
+                            timeout=timeout,
+                            result_variable=result_variable,
+                            batch_id=batch_id,
+                            semaphore=self._parallel_semaphore,
+                        )
+                    )
+                    job_state["task"] = task
+        except BaseException:
+            batch = self._parallel_batches.get(batch_id)
+            if batch:
+                # Prevent queued workers from executing before rollback can acquire its locks.
+                for job_id in batch["job_ids"]:
+                    task = self._parallel_jobs[job_id].get("task")
+                    if task is not None:
+                        task.cancel()
+                cleanup = asyncio.create_task(self._cancel_batch_payload(batch_id))
+                batch["launch_cleanup_task"] = cleanup
+                try:
+                    await asyncio.shield(cleanup)
+                except ValueError:
+                    if batch_id in self._parallel_batches:
+                        raise
+            raise
+        payload = {"batch_id": batch_id, "parent_session_id": parent_session.session_id, "jobs": jobs_out}
+        if export_variable:
+            payload["export"] = {
+                "variable": export_variable,
+                "collect_tool": f"{self.server_config.name}_collect_batch",
+                "retention_seconds": batch_exports.EXPORT_RETENTION_SECONDS,
+                "max_object_bytes": batch_exports.MAX_TRANSFER_SIZE_BYTES,
+                "max_batch_bytes": batch_exports.MAX_BATCH_EXPORT_BYTES,
+            }
+        return payload
 
     async def _cancel_batch_payload(self, batch_id: str) -> dict[str, Any]:
+        batch = self._parallel_batches.get(batch_id)
+        if batch and batch.get("export_variable"):
+            async with batch["lifecycle_lock"]:
+                return await self._cancel_parallel_batch(batch_id)
+        return await self._cancel_parallel_batch(batch_id)
+
+    async def _cancel_parallel_batch(self, batch_id: str) -> dict[str, Any]:
         """Cancel a parallel batch."""
         async with self._parallel_state_lock:
             batch = self._parallel_batches.get(batch_id)
@@ -2789,7 +2975,9 @@ else:
             if kernel:
                 km, _kc = kernel
                 try:
-                    km.interrupt_kernel()
+                    interrupted = km.interrupt_kernel()
+                    if inspect.isawaitable(interrupted):
+                        await interrupted
                 except Exception:
                     LOGGER.debug("Failed to interrupt kernel for session %s", session_id, exc_info=True)
 
@@ -2806,15 +2994,206 @@ else:
                 if job is not None and job["status"] == "running":
                     job.update({"status": "cancelled", "completed_at": time.monotonic()})
         await self._cleanup_parallel_batch_sessions(batch_id)
-        payload = await self._check_batch_payload(batch_id)
-        payload["status"] = "partial_failure" if payload["failed"] else payload["status"]
+        payload = await self._build_parallel_batch_payload(batch_id)
+        await self._prune_parallel_batch(batch_id)
+        if batch.get("export_variable"):
+            payload["collection"] = {"status": "discarded"}
+            payload["retired"] = True
+        payload["status"] = "partial_failure" if payload.get("failed") else payload["status"]
         return payload
+
+    async def _collect_batch_payload(
+        self, batch_id: str, import_as: str, indices: list[int] | None = None, overwrite: bool = False
+    ) -> dict[str, Any]:
+        if not import_as.isidentifier() or keyword.iskeyword(import_as):
+            raise ValueError("'import_as' must be a valid Python identifier")
+        if indices is not None and (
+            not indices
+            or any(isinstance(index, bool) or not isinstance(index, int) or index < 0 for index in indices)
+            or len(set(indices)) != len(indices)
+        ):
+            raise ValueError("'indices' must contain distinct non-negative input indices")
+        request = (import_as, tuple(sorted(indices)) if indices is not None else None, overwrite)
+        async with self._parallel_state_lock:
+            batch = self._parallel_batches.get(batch_id)
+            if not batch:
+                raise ValueError(f"Batch {batch_id} not found (expired, discarded, or server restarted)")
+            if not batch.get("export_variable"):
+                raise ValueError("This batch did not declare export_variable. Relaunch with an export variable.")
+            if batch.get("receipt"):
+                if batch["collection_request"] == request:
+                    return batch["receipt"].copy()
+                return self._collection_error(batch, "already_collected", False, "Use the recorded collection receipt.")
+            task = batch.get("collection_task")
+            if task is not None and not task.done():
+                if batch["collection_request"] != request:
+                    return self._collection_error(
+                        batch, "collection_in_progress", True, "Retry after the current collection finishes."
+                    )
+            else:
+                batch["collection_request"] = request
+                task = asyncio.create_task(self._collect_parallel_exports(batch, import_as, indices, overwrite))
+                batch["collection_task"] = task
+        # A disconnected caller must not lose the outcome or cause the same objects to be imported twice.
+        return await asyncio.shield(task)
+
+    @staticmethod
+    def _collection_error(
+        batch: dict[str, Any], reason: str, retryable: bool, next_action: str, **details: Any
+    ) -> dict[str, Any]:
+        return {
+            "success": False,
+            "status": "collection_failed",
+            "batch_id": batch["batch_id"],
+            "execution_session_id": batch["parent_session_id"],
+            "reason": reason,
+            "retryable": retryable,
+            "retired": bool(batch.get("receipt")),
+            "expires_at": batch.get("expires_at"),
+            "next_action": next_action,
+            **details,
+        }
+
+    async def _collect_parallel_exports(
+        self, batch: dict[str, Any], import_as: str, indices: list[int] | None, overwrite: bool
+    ) -> dict[str, Any]:
+        async with batch["lifecycle_lock"]:
+            if self._parallel_batches.get(batch["batch_id"]) is not batch:
+                return self._collection_error(batch, "unavailable", False, "Relaunch the batch.")
+            if any(self._parallel_jobs[jid]["status"] == "running" for jid in batch["job_ids"]):
+                return self._collection_error(
+                    batch,
+                    "batch_running",
+                    True,
+                    f"Poll {self.server_config.name}_check_batch until execution finishes.",
+                )
+            payload = await self._build_parallel_batch_payload(batch["batch_id"])
+            selected = sorted(batch["stages"]) if indices is None else sorted(indices)
+            unavailable = [index for index in selected if index not in batch["stages"]]
+            if unavailable or not selected:
+                return self._collection_error(
+                    batch,
+                    "exports_unavailable",
+                    False,
+                    "Choose staged_indices from check_batch, or cancel and relaunch with portable export data.",
+                    unavailable_indices=unavailable,
+                    staged_indices=sorted(batch["stages"]),
+                )
+            parent_id = batch["parent_session_id"]
+            busy_job = self.session_manager._get_running_job_for_session(parent_id)
+            if busy_job:
+                return self._collection_error(
+                    batch,
+                    "parent_busy",
+                    True,
+                    f"Poll {self.server_config.name}_check_job(job_id='{busy_job}'), then retry collect_batch.",
+                    job_id=busy_job,
+                    poll_tool=f"{self.server_config.name}_check_job",
+                )
+            try:
+                code = batch_exports.build_collection_code(
+                    {index: batch["stages"][index] for index in selected}, import_as, overwrite
+                )
+                stdout, stderr, success, _, _ = await self.session_manager.execute_code_for_session(
+                    session_id=parent_id,
+                    code=code,
+                    timeout=min(60, self.max_timeout),
+                    working_dir=str(self.working_dir) if self.working_dir else None,
+                )
+                if not success:
+                    if "Session busy" in stderr:
+                        busy_job = self.session_manager._get_running_job_for_session(parent_id)
+                        return self._collection_error(
+                            batch,
+                            "parent_busy",
+                            True,
+                            (
+                                f"Poll {self.server_config.name}_check_job(job_id='{busy_job}'), then retry collect_batch."
+                                if busy_job
+                                else "The background job has finished; retry collection."
+                            ),
+                            job_id=busy_job,
+                            poll_tool=f"{self.server_config.name}_check_job",
+                        )
+                    return self._collection_error(
+                        batch,
+                        "parent_execution_failed",
+                        True,
+                        "Check the parent session, then retry collection or cancel the batch.",
+                    )
+                outcome = batch_exports.parse_export_result(stdout)
+            except Exception:
+                LOGGER.warning("Could not collect parallel batch %s", batch["batch_id"], exc_info=True)
+                try:
+                    self.session_manager.get_session(parent_id)
+                except ValueError:
+                    return self._collection_error(
+                        batch, "parent_unavailable", False, "Create a new parent session and relaunch the batch."
+                    )
+                return self._collection_error(
+                    batch,
+                    "parent_execution_failed",
+                    True,
+                    "Check the parent session or cancel and relaunch with portable data.",
+                )
+            if outcome["status"] != "collected":
+                reason = outcome["status"]
+                guidance = (
+                    "Choose another import_as, or explicitly set overwrite=True."
+                    if reason == "destination_exists"
+                    else "Retry with the failing input_index excluded, or cancel and relaunch with portable data."
+                )
+                return self._collection_error(batch, reason, True, guidance, input_index=outcome.get("input_index"))
+            receipt = {
+                "success": True,
+                "status": "collected",
+                "batch_id": batch["batch_id"],
+                "parent_session_id": parent_id,
+                "execution_session_id": parent_id,
+                "variable": import_as,
+                "imported_indices": selected,
+                "skipped": [
+                    {"input_index": job["input_index"], "status": job["status"], "export": job["export"]}
+                    for job in payload["jobs"]
+                    if job["input_index"] not in selected
+                ],
+                "retired": True,
+                "next_action": (
+                    f"Use {self.get_tool_name()}(execution_session_id='{parent_id}', code=...) "
+                    f"to work with {import_as}[input_index]."
+                ),
+            }
+            self._discard_parallel_exports(batch)
+            for job_id in batch["job_ids"]:
+                job = self._parallel_jobs.pop(job_id, None)
+                if job:
+                    self._parallel_job_by_session.pop(job["session_id"], None)
+            batch["job_ids"] = []
+            batch["cleanup_task"] = None
+            batch["receipt"] = receipt
+            self._schedule_parallel_batch_expiry(batch, batch_exports.RECEIPT_RETENTION_SECONDS)
+            receipt["receipt_expires_at"] = batch["expires_at"]
+            receipts = [item for item in self._parallel_batches.values() if item.get("receipt")]
+            for old in receipts[: max(0, len(receipts) - batch_exports.MAX_COLLECTION_RECEIPTS)]:
+                await self._prune_parallel_batch(old["batch_id"])
+            self.activity_publisher.publish_nowait(
+                {
+                    "type": "object_received",
+                    "description": f"Collected parallel batch exports into '{import_as}'",
+                    "batch_id": batch["batch_id"],
+                    "session_id": parent_id,
+                    "variable_name": import_as,
+                    "success": True,
+                }
+            )
+            return receipt.copy()
 
     def _setup_parallel_execution_tools(self) -> None:
         """Register map-style parallel execution tools."""
         execute_name = f"{self.server_config.name}_parallel_execute"
         check_name = f"{self.server_config.name}_check_batch"
         cancel_name = f"{self.server_config.name}_cancel_batch"
+        collect_name = f"{self.server_config.name}_collect_batch"
 
         async def parallel_execute(
             ctx: Context,
@@ -2848,6 +3227,27 @@ else:
                     )
                 ),
             ] = "result",
+            export_variable: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Optional top-level variable to snapshot with dill as each successful child finishes. "
+                        "Use result_variable for small summaries and export_variable for objects to collect later. "
+                        "Missing, failed, and too-large exports are reported separately from execution status. "
+                        "Convert live handles to portable data inside code; children cannot run repair code later. "
+                        "Empty disables exports and preserves one-time terminal polling."
+                    )
+                ),
+            ] = "",
+            execution_session_id: Annotated[
+                Optional[str],
+                Field(
+                    description=(
+                        "Existing owned parent execution session; unknown, expired, or batch-child IDs fail. "
+                        "Omit to use the current MCP session. Launch always returns parent_session_id."
+                    )
+                ),
+            ] = None,
         ) -> str:
             transport_session_id = None
             if ctx:
@@ -2858,13 +3258,19 @@ else:
 
             try:
                 self._restore_auth_context_for_mcp_session(transport_session_id)
-                parent_session = await self._get_or_create_session(execute_name, session_id=transport_session_id)
+                if execution_session_id is not None:
+                    if not execution_session_id:
+                        raise ValueError("execution_session_id must be a non-empty session id.")
+                    parent_session = await self._get_existing_session(execution_session_id)
+                else:
+                    parent_session = await self._get_or_create_session(execute_name, session_id=transport_session_id)
                 payload = await self._parallel_execute_for_session(
                     parent_session=parent_session,
                     code=code,
                     inputs=inputs,
                     timeout=timeout,
                     result_variable=result_variable,
+                    export_variable=export_variable,
                 )
                 return json.dumps(payload, indent=2)
             except HTTPException as e:
@@ -2944,6 +3350,31 @@ else:
             finally:
                 self._clear_auth_context()
 
+        async def collect_batch(
+            ctx: Context,
+            batch_id: str,
+            import_as: str,
+            indices: Optional[list[int]] = None,
+            overwrite: bool = False,
+        ) -> str:
+            """Load staged snapshots into the batch's recorded parent kernel.
+
+            Args:
+                batch_id: Export-enabled batch whose execution has finished.
+                import_as: New parent variable name for a dictionary keyed by input_index.
+                indices: Selected staged input indices; omit to collect all staged exports.
+                    Other members are reported as skipped and discarded on success.
+                overwrite: Explicitly allow replacing an existing parent variable.
+            """
+            try:
+                await _restore_auth_and_verify_batch_access(ctx, batch_id)
+                return json.dumps(await self._collect_batch_payload(batch_id, import_as, indices, overwrite), indent=2)
+            except Exception as exc:
+                LOGGER.error("collect_batch failed for %s: %s", batch_id, exc, exc_info=True)
+                return json.dumps({"success": False, "error": str(exc)}, indent=2)
+            finally:
+                self._clear_auth_context()
+
         self.mcp.tool(
             name=execute_name,
             description=(
@@ -2961,6 +3392,12 @@ else:
                 "(JSON when serializable, otherwise a repr string); results are not injected into the parent kernel. "
                 "Files in child AGORA_OUTPUT_DIR directories are deleted during cleanup; "
                 "persist needed files to durable storage within the batch code and return their references. "
+                f"To collect Python object snapshots in the parent, declare export_variable at launch, "
+                f"then read check_batch summaries and call {collect_name}. "
+                "Export-enabled terminal polls close children but retain staged data for 15 minutes after execution "
+                "finishes; repeated polls are safe. Per-object and per-batch limits are 256 MiB, with a shared "
+                "1 GiB / 256-object server budget. Data is temporary, not durable, and is lost on server restart "
+                "or parent closure. Collection copies objects; it does not migrate live runtime state. "
                 f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
                 f"and are not accepted by {self.server_config.name}_check_job."
             ),
@@ -2970,13 +3407,32 @@ else:
             description=(
                 "Check aggregate status and available results for a parallel batch. "
                 "Retrieving a terminal status closes all temporary child sessions, deletes their output files, "
-                "and retires the batch; save the returned results, as later polls cannot retrieve them again."
+                "and retires batches without exports; save those results, as later polls cannot retrieve them again. "
+                f"With export_variable, repeated terminal polls retain snapshots until expires_at; call {collect_name} "
+                f"to load selected staged_indices into the parent, or {cancel_name} to discard. "
+                "Execution status and each job's export status are independent."
             ),
         )(check_batch)
         self.mcp.tool(
             name=cancel_name,
-            description="Cancel all running jobs in a parallel batch and clean up child sessions",
+            description="Cancel running batch jobs, close child sessions, and discard any staged exports or receipt.",
         )(cancel_batch)
+        self.mcp.tool(
+            name=collect_name,
+            description=(
+                "Collect snapshots declared by parallel_execute(export_variable=...) after batch execution finishes. "
+                "The recorded parent receives import_as[input_index]; target sessions cannot be redirected. "
+                "Omitted indices selects all staged exports; successful collection discards unselected exports. "
+                "Existing destination names fail unless overwrite=True. Errors preserve snapshots until expires_at; "
+                "parent_busy supplies check_job guidance, and load_failed identifies an index to exclude. "
+                "The destination name is assigned only after all selected loads succeed, but deserialization "
+                "side effects are not rolled back. Success returns execution_session_id for parent follow-up. "
+                "Identical retries return a receipt without importing again (five minutes, at most 128 receipts "
+                "per server); other requests after success cannot recollect consumed data. "
+                "Closing the parent, cancel_batch, expiry, or server restart discards pending data."
+            ),
+            output_schema=None,
+        )(collect_batch)
 
     # ========================================================================
     # Authentication
@@ -3305,6 +3761,7 @@ else:
                 parse_transfer_correlation_metadata,
                 receive_legacy_streaming_transfer,
                 receive_streaming_transfer,
+                build_kernel_object_load_code,
             )
 
             transfer_version = request.headers.get(STREAMING_TRANSFER_VERSION_HEADER)
@@ -3640,21 +4097,7 @@ else:
                 # Deserialize and assign in the kernel
                 if stage_file_identity is None:
                     raise RuntimeError("Object transfer staging file identity is unavailable.")
-                expected_device, expected_inode = stage_file_identity
-                deserialize_code = (
-                    "import dill as __pkl__, os as __os__, stat as __stat__\n"
-                    f"__fd__ = __os__.open({temp_path!r}, __os__.O_RDONLY | getattr(__os__, 'O_NOFOLLOW', 0))\n"
-                    "try:\n"
-                    "    __st__ = __os__.fstat(__fd__)\n"
-                    f"    if not __stat__.S_ISREG(__st__.st_mode) or "
-                    f"(__st__.st_dev, __st__.st_ino) != ({expected_device}, {expected_inode}):\n"
-                    "        raise RuntimeError('Object transfer staging file identity changed.')\n"
-                    "    with __os__.fdopen(__fd__, 'rb', closefd=False) as __f__:\n"
-                    f"        {variable_name} = __pkl__.load(__f__)\n"
-                    "finally:\n"
-                    "    __os__.close(__fd__)\n"
-                    "del __pkl__, __os__, __stat__, __fd__, __st__, __f__\n"
-                )
+                deserialize_code = build_kernel_object_load_code(variable_name, temp_path, stage_file_identity)
                 working_dir_str = str(self.working_dir) if self.working_dir else None
                 stdout, stderr, success, _displays, _artifacts = await self.session_manager.execute_code_for_session(
                     session_id=session.session_id, code=deserialize_code, timeout=60, working_dir=working_dir_str

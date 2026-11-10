@@ -364,13 +364,14 @@ class ConnectorServer(BaseMCPServer):
             func=check_job_proxy,
         )
 
-    def _register_parallel_execution_proxies(self, upstream: UpstreamConfig) -> None:
+    def _register_parallel_execution_proxies(self, upstream: UpstreamConfig, include_collection: bool = True) -> None:
         """Register parallel execution proxy tools for an upstream."""
         server = self
         upstream_name = upstream.name
         execute_name = f"{upstream_name}_parallel_execute"
         check_name = f"{upstream_name}_check_batch"
         cancel_name = f"{upstream_name}_cancel_batch"
+        collect_name = f"{upstream_name}_collect_batch"
 
         async def parallel_execute_proxy(
             ctx: Context,
@@ -404,17 +405,49 @@ class ConnectorServer(BaseMCPServer):
                     )
                 ),
             ] = "result",
+            export_variable: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Optional top-level variable to snapshot with dill as each successful child finishes. "
+                        "Use result_variable for small summaries and export_variable for objects to collect later. "
+                        "Convert live handles to portable data inside code; children cannot run repair code later. "
+                        "Empty disables exports and preserves one-time terminal polling."
+                    )
+                ),
+            ] = "",
+            execution_session_id: Annotated[
+                Optional[str],
+                Field(
+                    description=(
+                        "Existing owned parent execution session, not an MCP transport session ID. "
+                        "Unknown, expired, or batch-child IDs fail. Launch returns parent_session_id."
+                    )
+                ),
+            ] = None,
         ) -> str:
             """Execute the same code template across multiple inputs in parallel (proxied)."""
+            if export_variable and not include_collection:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": "Batch object collection is disabled by gateway policy. Omit export_variable.",
+                    }
+                )
+            arguments: dict[str, Any] = {
+                "code": code,
+                "inputs": inputs,
+                "timeout": timeout,
+                "result_variable": result_variable,
+            }
+            if export_variable:
+                arguments["export_variable"] = export_variable
+            if execution_session_id is not None:
+                arguments["execution_session_id"] = execution_session_id
             return await server._proxy_mcp_tool_call(
                 upstream=upstream,
                 tool_name=execute_name,
-                arguments={
-                    "code": code,
-                    "inputs": inputs,
-                    "timeout": timeout,
-                    "result_variable": result_variable,
-                },
+                arguments=arguments,
                 ctx=ctx,
             )
 
@@ -436,6 +469,20 @@ class ConnectorServer(BaseMCPServer):
                 ctx=ctx,
             )
 
+        async def collect_batch_proxy(
+            ctx: Context,
+            batch_id: str,
+            import_as: str,
+            indices: Optional[list[int]] = None,
+            overwrite: bool = False,
+        ) -> str:
+            arguments: dict[str, Any] = {"batch_id": batch_id, "import_as": import_as, "overwrite": overwrite}
+            if indices is not None:
+                arguments["indices"] = indices
+            return await server._proxy_mcp_tool_call(
+                upstream=upstream, tool_name=collect_name, arguments=arguments, ctx=ctx
+            )
+
         self._register_text_tool(
             name=execute_name,
             description=(
@@ -446,6 +493,17 @@ class ConnectorServer(BaseMCPServer):
                 "automatically. Code must assign the top-level variable named by result_variable (default: result) "
                 "to capture each job's result; a missing variable yields null, and an empty result_variable "
                 "disables capture. "
+                "Child sessions cannot accept follow-up execution or nested batches. "
+                + (
+                    "Declare export_variable at launch to stage a Python object snapshot per successful child. "
+                    "Execution and export status are separate; convert live handles to portable data inside code. "
+                    f"Read summaries with {check_name}, then call {collect_name} with selected input indices. "
+                    "Export-enabled terminal polls close children but retain snapshots until expires_at. "
+                    if include_collection
+                    else "Object collection is disabled by gateway policy; leave export_variable empty. "
+                )
+                + "Ordinary batches are retired by their first terminal poll. "
+                "Launch returns parent_session_id; use execution_session_id to select an existing parent. "
                 f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
                 f"and are not accepted by {upstream_name}_check_job."
             ),
@@ -453,14 +511,37 @@ class ConnectorServer(BaseMCPServer):
         )
         self._register_text_tool(
             name=check_name,
-            description=f"Check aggregate status and available results for a parallel batch on {upstream_name}.",
+            description=(
+                f"Check execution and per-job export status on {upstream_name}. Terminal polling closes children "
+                "and retires ordinary batches. With export_variable, repeated terminal polls retain staged objects "
+                "until expires_at. "
+                + (
+                    f"Use {collect_name} to collect staged_indices or {cancel_name} to discard."
+                    if include_collection
+                    else f"Collection is disabled here; use {cancel_name} to discard."
+                )
+            ),
             func=check_batch_proxy,
         )
         self._register_text_tool(
             name=cancel_name,
-            description=f"Cancel all running jobs in a parallel batch and clean up child sessions on {upstream_name}.",
+            description=f"Cancel jobs, close child sessions, and discard staged exports or receipts on {upstream_name}.",
             func=cancel_batch_proxy,
         )
+        if include_collection:
+            self._register_text_tool(
+                name=collect_name,
+                description=(
+                    f"Collect completed batch exports into the recorded parent on {upstream_name}. "
+                    "import_as becomes a dictionary keyed by input_index. Omit indices to select all staged exports; "
+                    "success discards unselected exports. Existing names fail unless overwrite=True. "
+                    "Errors preserve snapshots until expires_at; parent_busy supplies check_job guidance. "
+                    "Assignment happens only after selected loads succeed, but loading side effects are not rolled back. "
+                    "Success returns execution_session_id for parent follow-up. Identical retries return a bounded "
+                    "receipt rather than importing twice. Parent closure, cancellation, expiry, or restart discards data."
+                ),
+                func=collect_batch_proxy,
+            )
 
     def _register_send_proxy(self, upstream: UpstreamConfig) -> None:
         """Register a send proxy tool for an upstream."""

@@ -57,7 +57,7 @@ prefixed with the server name, e.g. `chemistry`):
 | `load_{name}_skill` | Load a skill's markdown instructions |
 | `plan_{name}_workflow` | Navigate the state graph (only when tools declare state) |
 | `{name}_list_sessions`, `{name}_inspect_session`, `{name}_close_session` | Inspect, list, or close sessions |
-| `{name}_parallel_execute`, `{name}_check_batch` | Fan code out across many inputs |
+| `{name}_parallel_execute`, `{name}_check_batch`, `{name}_collect_batch`, `{name}_cancel_batch` | Fan code out, inspect summaries, collect declared objects, or discard a batch |
 | `{name}_send` | Send data to a destination — a peer server's kernel, blob storage, the user (browser download), or the local filesystem |
 
 ## Sessions and state
@@ -79,18 +79,100 @@ session** reserved for that batch. Child session IDs cannot be used for
 additional execution or nested batches, even after their individual jobs
 finish. Continue independent work in the parent session or a new session.
 Retrieving a terminal status with `{name}_check_batch` closes the children
-and retires the batch; cancellation or closing the parent also cleans them up.
-Save the terminal response, since subsequent polls cannot retrieve it again.
+and, unless exports were declared, retires the batch. Cancellation or closing
+the parent also cleans them up. Save an ordinary batch's terminal response,
+since subsequent polls cannot retrieve it again.
 
 To keep batch results, assign each child's return value to `result_variable`
 (`result` by default). It is captured in `jobs[].result` as JSON when
 serializable, otherwise as a `repr` string, but is not automatically injected
-into the parent kernel. Child output files and live Python objects are not
-transferred to the parent. Files in child `AGORA_OUTPUT_DIR` directories are
+into the parent kernel. Files in child `AGORA_OUTPUT_DIR` directories are
 deleted during cleanup, so persist needed files to durable storage inside the
-batch code and return their references.
+batch code and return their references. Object collection is opt-in, as
+described below; it does not automatically copy files referenced by objects.
 
 → See the [Sessions API](../api/sessions.md).
+
+### Collecting batch objects
+
+Declare `export_variable` on `{name}_parallel_execute` to keep a serialized
+snapshot of one top-level variable from each successful child. Keep
+`result_variable` for small summaries used to choose which objects to collect.
+An optional `execution_session_id` selects an existing owned **parent**
+execution session; omission uses the current MCP session. Launch always
+returns `parent_session_id`, so parent targeting is explicit in the response.
+
+For example, the following illustrates an agent's tool-call sequence:
+
+```python
+batch = chemistry_parallel_execute(
+    code="candidate = {value, value + 1}\nsummary = {'score': value}",
+    inputs=[{"value": 2}, {"value": 5}],
+    result_variable="summary",
+    export_variable="candidate",
+    execution_session_id=parent_id,
+)
+
+# Poll until execution is terminal, then choose from collection.staged_indices.
+status = chemistry_check_batch(batch_id=batch["batch_id"])
+collected = chemistry_collect_batch(
+    batch_id=batch["batch_id"],
+    import_as="candidates",
+    indices=[1],
+)
+execute_chemistry_code(
+    code="print(candidates[1])",
+    execution_session_id=collected["execution_session_id"],
+)
+```
+
+The server snapshots each export before marking its job complete. Execution
+and export outcomes are independent: a job can finish successfully but report
+`export.status` of `missing`, `failed`, or `too_large`. A real `None` value is
+a valid staged object, not a missing export. Child sessions cannot run repair
+code, so fix variable-name mistakes or convert unsupported objects to portable
+data in the original batch code and relaunch.
+
+For export-enabled batches, terminal polls still close the children, but
+**repeated polls do not consume the staged exports**. They report the staged
+input indices, `collection.expires_at` (Unix timestamp in seconds), and the
+next tool to call. Snapshots expire 15 minutes after all jobs finish, even if
+the batch is never polled. Collection is supported only after all jobs finish.
+
+`collect_batch(batch_id, import_as, indices=None, overwrite=False)` loads the
+selected snapshots into the recorded parent's kernel as a dictionary with
+integer `input_index` keys. Omit `indices` to select all staged exports.
+Success reports `imported_indices`, skipped members, and `execution_session_id`
+for parent follow-up. Unselected exports are discarded on success. Existing
+destination names are rejected unless `overwrite=True`.
+
+A running background job in the parent returns `parent_busy`, its job ID,
+and polling guidance. Retry collection after that job finishes; ordinary batch
+polls in between are safe. `destination_exists` can be recovered by choosing
+another name or explicitly allowing overwrite. `load_failed` identifies an
+input index to exclude on retry; `parent_execution_failed` means the kernel
+invocation did not produce a collection outcome. Failures do not consume snapshots, but
+**do not extend their expiry**. The destination name is assigned only after
+all selected loads succeed; deserialization side effects are not rolled back.
+
+Identical successful collection retries return the same receipt without
+re-importing. Receipts last at most five minutes and are capped at 128 per
+server, so retries are not available forever. A different request cannot
+recollect an already consumed batch. `cancel_batch` discards pending snapshots
+or a receipt; it does not remove a value already loaded into the parent.
+
+Serialized exports are limited to 256 MiB per object and per batch, with a
+shared 1 GiB / 256-object budget and at most 128 pending export batches per
+server. Collect or cancel batches to release capacity. Snapshots are private
+temporary files outside child output directories, not durable storage.
+Parent closure or expiry discards them, and snapshots and receipts are not
+recovered after a server restart.
+
+Exports use `dill` snapshots, not shared live identity. Compatible Python
+values such as sets and DataFrames can be copied, but live solver handles,
+sockets, process or GPU state, and external file contents are not migrated.
+Use a portable representation and reconstruct domain state in the parent
+when necessary.
 
 ## Three layers of guidance for the agent
 
