@@ -753,7 +753,10 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
             execution_session_id: Existing execution session to resume. Use the
                 ``session_id`` returned by an earlier execution or session
                 management tool. The caller must own the session. Unknown or
-                expired IDs fail; they never create a new session.
+                expired IDs fail; they never create a new session. Temporary
+                child sessions returned by parallel_execute are reserved for
+                their batch and cannot be resumed; use the parent session or
+                a new session for follow-up work.
 
         Returns:
             JSON string with either an inline execution result (stdout, stderr,
@@ -800,6 +803,7 @@ def build_tool(server: "CodeExecutionServer") -> "Callable[..., Awaitable[str]]"
                 session = await server._get_existing_session(execution_session_id)
             else:
                 session = await server._get_or_create_session(server.get_tool_name(), session_id=session_id)
+            server._validate_execution_session(session)
             session_resource_operation = server.session_manager.session_resource_operation(session.session_id)
             await session_resource_operation.__aenter__()
             session_resource_operation_entered = True

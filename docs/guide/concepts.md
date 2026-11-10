@@ -74,6 +74,22 @@ active session from another agent or a new MCP connection, pass that value as
 transport session ID; the server resumes only an existing session owned by the
 caller, and rejects unknown or expired IDs rather than creating a new kernel.
 
+Parallel batches are an exception: each input runs in a **temporary child
+session** reserved for that batch. Child session IDs cannot be used for
+additional execution or nested batches, even after their individual jobs
+finish. Continue independent work in the parent session or a new session.
+Retrieving a terminal status with `{name}_check_batch` closes the children
+and retires the batch; cancellation or closing the parent also cleans them up.
+Save the terminal response, since subsequent polls cannot retrieve it again.
+
+To keep batch results, assign each child's return value to `result_variable`
+(`result` by default). It is captured in `jobs[].result` as JSON when
+serializable, otherwise as a `repr` string, but is not automatically injected
+into the parent kernel. Child output files and live Python objects are not
+transferred to the parent. Files in child `AGORA_OUTPUT_DIR` directories are
+deleted during cleanup, so persist needed files to durable storage inside the
+batch code and return their references.
+
 → See the [Sessions API](../api/sessions.md).
 
 ## Three layers of guidance for the agent
