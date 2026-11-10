@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
@@ -53,6 +54,90 @@ async def test_parallel_execute_exposes_template_contract(test_server):
     assert "missing" in properties["result_variable"]["description"]
     assert "empty string disables capture" in properties["result_variable"]["description"]
     assert properties["result_variable"]["default"] == "result"
+    assert "snapshot" in properties["export_variable"]["description"]
+    assert "Existing owned parent" in properties["execution_session_id"]["description"]
+
+
+async def test_batch_object_collection_round_trips_between_real_kernels(test_server, monkeypatch):
+    import dill
+
+    def forbidden_server_deserialization(*_args, **_kwargs):
+        pytest.fail("Object deserialization must happen in the destination kernel, not the server.")
+
+    monkeypatch.setattr(dill, "load", forbidden_server_deserialization)
+    parent_id = test_server.session_manager.create_session(
+        data={},
+        user_identity=TOOL_USER_IDENTITY,
+        user_token=TOOL_USER_TOKEN,
+        token_claims=TOOL_TOKEN_CLAIMS,
+    )
+    parent = test_server.session_manager.get_session(parent_id)
+    try:
+        launched = await test_server._parallel_execute_for_session(
+            parent_session=parent,
+            code="import pandas as pd\ncandidate = pd.DataFrame({'value': [value]})\nresult = {'score': value}",
+            inputs=[{"value": 2}, {"value": 5}],
+            timeout=30,
+            result_variable="result",
+            export_variable="candidate",
+        )
+        await asyncio.gather(*(test_server._parallel_jobs[job["job_id"]]["task"] for job in launched["jobs"]))
+        for _ in range(2):
+            payload = await test_server._check_batch_payload(launched["batch_id"])
+            assert payload["status"] == "completed"
+            assert payload["collection"]["staged_indices"] == [0, 1]
+        for job in launched["jobs"]:
+            with pytest.raises(ValueError):
+                test_server.session_manager.get_session(job["session_id"])
+
+        collected = await test_server._collect_batch_payload(launched["batch_id"], "candidates", indices=[1])
+        assert collected["success"]
+        _set_tool_auth_context()
+        execute = (await test_server.mcp.get_tool("execute_test_code")).fn
+        result = json.loads(
+            await execute(
+                ctx=SimpleNamespace(session_id=None),
+                execution_session_id=collected["execution_session_id"],
+                code="assert list(candidates) == [1]\nassert candidates[1]['value'].tolist() == [5]\nprint('usable')",
+            )
+        )
+        assert result["success"]
+        assert result["stdout"].strip() == "usable"
+    finally:
+        _clear_tool_auth_context()
+        await test_server.session_manager.aclose_session(parent_id)
+
+
+async def test_batch_collection_can_retry_after_real_parent_background_job(test_server):
+    parent_id = test_server.session_manager.create_session(
+        data={}, user_identity=TOOL_USER_IDENTITY, user_token=TOOL_USER_TOKEN, token_claims=TOOL_TOKEN_CLAIMS
+    )
+    parent = test_server.session_manager.get_session(parent_id)
+    try:
+        launched = await test_server._parallel_execute_for_session(
+            parent_session=parent,
+            code="candidate = {value}\nresult = value",
+            inputs=[{"value": 9}],
+            timeout=30,
+            result_variable="result",
+            export_variable="candidate",
+        )
+        await asyncio.gather(*(test_server._parallel_jobs[job["job_id"]]["task"] for job in launched["jobs"]))
+        background = await test_server.session_manager.start_background_execution_for_session(
+            session_id=parent_id, code="import time\ntime.sleep(0.5)", timeout=10
+        )
+        busy = await test_server._collect_batch_payload(launched["batch_id"], "candidates")
+        assert busy["reason"] == "parent_busy"
+        assert busy["job_id"] == background["job_id"]
+        assert (await test_server._check_batch_payload(launched["batch_id"]))["collection"]["staged_indices"] == [0]
+        final_job = await test_server.session_manager.await_background_job(background["job_id"])
+        assert final_job is not None and final_job["status"] == "completed"
+        collected = await test_server._collect_batch_payload(launched["batch_id"], "candidates")
+        assert collected["success"]
+        result = await test_server.execute_code_with_session("assert candidates == {0: {9}}", 10, parent_id)
+        assert result.success
+    finally:
+        await test_server.session_manager.aclose_session(parent_id)
 
 
 @pytest.mark.asyncio

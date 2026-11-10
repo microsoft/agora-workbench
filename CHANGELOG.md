@@ -10,8 +10,22 @@ changes that require action from existing users. Each entry there states who is 
 
 ## [Unreleased]
 
+### Added
+
+- Parallel batches can declare `export_variable` to stage bounded Python-object
+  snapshots and collect selected inputs into their recorded parent with the
+  new `{name}_collect_batch` tool. Export-enabled terminal polls are repeatable,
+  snapshots expire automatically, and identical collection retries return a
+  bounded receipt. Parallel launch also accepts `execution_session_id` for
+  explicit parent targeting. Router and gateway proxies expose the same contract.
+
 ### Fixed
 
+- Temporary parallel-batch child sessions now reject independent execution
+  and nested batches, preventing terminal polling from silently destroying
+  unrelated work accepted in a child. Tool descriptions document the lifetime
+  and supported result persistence
+  ([#427](https://github.com/microsoft/agora-workbench/pull/427)).
 - Parallel execution tool descriptions, parameter schemas, and documentation
   now explain that input keys become top-level variables, must be valid Python
   identifiers rather than keywords, and do not create an automatic input

@@ -576,6 +576,25 @@ def _host_matches_any(host: str, patterns: list[str]) -> bool:
     return False
 
 
+def build_kernel_object_load_code(variable_name: str, path: str, identity: tuple[int, int]) -> str:
+    """Build an identity-pinned load to execute only inside a destination kernel."""
+    expected_device, expected_inode = identity
+    return (
+        "import dill as __pkl__, os as __os__, stat as __stat__\n"
+        f"__fd__ = __os__.open({path!r}, __os__.O_RDONLY | getattr(__os__, 'O_NOFOLLOW', 0))\n"
+        "try:\n"
+        "    __st__ = __os__.fstat(__fd__)\n"
+        f"    if not __stat__.S_ISREG(__st__.st_mode) or "
+        f"(__st__.st_dev, __st__.st_ino) != ({expected_device}, {expected_inode}):\n"
+        "        raise RuntimeError('Object transfer staging file identity changed.')\n"
+        "    with __os__.fdopen(__fd__, 'rb', closefd=False) as __f__:\n"
+        f"        {variable_name} = __pkl__.load(__f__)\n"
+        "finally:\n"
+        "    __os__.close(__fd__)\n"
+        "del __pkl__, __os__, __stat__, __fd__, __st__, __f__\n"
+    )
+
+
 class ObjectSerializer:
     """Serialize Python objects for cross-server transfer.
 
