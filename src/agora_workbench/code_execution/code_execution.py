@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import sys
+from collections import deque
 from typing import Any, Awaitable, Callable, Optional, TYPE_CHECKING
 
 from fastapi import HTTPException
@@ -58,6 +59,20 @@ _PATHLIB_BLOCKED_FS_CALLS: set[str] = {"iterdir", "rglob"}
 
 _BLOCKED_FS_CALLS: set[str] = _OS_BLOCKED_FS_CALLS | _GLOB_BLOCKED_FS_CALLS | _PATHLIB_BLOCKED_FS_CALLS
 
+_FS_MODULE_FAMILIES: dict[str, str] = {
+    "os": "os",
+    "posix": "os",
+    "nt": "os",
+    "glob": "glob",
+    "pathlib": "pathlib",
+}
+
+_BLOCKED_FS_CALLS_BY_FAMILY: dict[str, set[str]] = {
+    "os": _OS_BLOCKED_FS_CALLS,
+    "glob": _GLOB_BLOCKED_FS_CALLS,
+    "pathlib": _PATHLIB_BLOCKED_FS_CALLS,
+}
+
 # Constructors whose return values belong to a dangerous module family.
 # Used by _build_taint_set to trace e.g. ``p = Path(...)`` back to "pathlib".
 _DANGEROUS_CONSTRUCTORS: dict[str, str] = {
@@ -67,6 +82,38 @@ _DANGEROUS_CONSTRUCTORS: dict[str, str] = {
     "WindowsPath": "pathlib",
     "PurePosixPath": "pathlib",
     "PureWindowsPath": "pathlib",
+}
+
+_NATIVE_BLOCKED_FS_CALLS = _OS_BLOCKED_FS_CALLS - {"walk", "fwalk", "removedirs", "renames"}
+_FS_WILDCARD_BINDINGS: dict[str, set[str]] = {
+    "os": _OS_BLOCKED_FS_CALLS,
+    "posix": _NATIVE_BLOCKED_FS_CALLS,
+    "nt": _NATIVE_BLOCKED_FS_CALLS - {"fchdir"},
+    "glob": _GLOB_BLOCKED_FS_CALLS,
+    "pathlib": set(_DANGEROUS_CONSTRUCTORS),
+}
+
+_STDLIB_MODULE_REEXPORTS: dict[str, str] = {
+    "glob.os": "os",
+    "pathlib.os": "os",
+}
+
+_FS_DATA_SOURCES = {
+    f"os.{name}"
+    for name in (
+        "altsep",
+        "curdir",
+        "defpath",
+        "devnull",
+        "environ",
+        "environb",
+        "extsep",
+        "linesep",
+        "name",
+        "pardir",
+        "pathsep",
+        "sep",
+    )
 }
 
 # block calls and modules that can be used to directly circumvent the other blocks
@@ -218,6 +265,9 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
         2. **Blocked function calls** – calls to filesystem-exploration
            or destructive functions listed in ``_BLOCKED_FS_CALLS``
            (e.g. ``os.listdir``, ``Path.iterdir``) are rejected.
+           Unresolved bare filesystem names remain blocked unless a
+           same-cell local helper is established in the relevant scope.
+           Helpers defined in earlier cells cannot establish that exception.
         3. **Path restriction** – string literals that look like absolute
            paths (starting with ``/``) are checked against
            ``_ALLOWED_PATH_PREFIXES``.  References to paths outside
@@ -246,15 +296,25 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     blocked_modules = server._BLOCKED_MODULES
     allowed_prefixes = server._ALLOWED_PATH_PREFIXES
 
-    module_aliases: dict[str, str] = {}
+    module_aliases: dict[str, set[str]] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local_name = alias.asname or alias.name.split(".")[0]
-                module_aliases[local_name] = alias.name
+                canonical = alias.name if alias.asname else local_name
+                module_aliases.setdefault(local_name, set()).add(_canonical_fs_source(canonical))
+        elif isinstance(node, ast.ImportFrom) and node.module and node.module.split(".")[0] in _FS_MODULE_FAMILIES:
+            for alias in node.names:
+                if alias.name == "*":
+                    for name in _FS_WILDCARD_BINDINGS.get(node.module, set()):
+                        module_aliases.setdefault(name, set()).add(_canonical_fs_source(f"{node.module}.{name}"))
+                else:
+                    canonical = _canonical_fs_source(f"{node.module}.{alias.name}")
+                    module_aliases.setdefault(alias.asname or alias.name, set()).add(canonical)
 
     # Lightweight taint pass: trace variables back to dangerous sources
-    tainted_vars: dict[str, str] = _build_taint_set(tree, module_aliases)
+    tainted_vars = _build_taint_set(tree, module_aliases)
+    local_helper_calls = _local_helper_call_ids(tree)
 
     # Pre-collect "/" constant node IDs that are safely used as string-method
     # separators (e.g. s.split("/", 1) or "/".join(parts)).  These are not
@@ -330,20 +390,32 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
 
         # --- 2. Blocked function calls ---
         elif isinstance(node, ast.Call):
-            func_name = _resolve_call_name(node)
-            if _is_safe_imported_module_call(node, func_name, module_aliases, tainted_vars):
-                continue
-
-            if func_name and (func_name in blocked_calls or func_name in blocked_dangerous_calls):
-                return False, agent_guidance.redirect(
-                    f"Call to '{func_name}' is not allowed — filesystem exploration/manipulation "
-                    f"and dangerous metaprogramming functions are blocked in the code execution environment.",
-                    intents=[
-                        agent_guidance.DISCOVER_DATA,
-                        agent_guidance.LOAD_ASSET,
-                        agent_guidance.SAVE_OUTPUT,
-                    ],
-                )
+            local_helper = id(node) in local_helper_calls
+            func_names = (
+                {node.func.id}
+                if local_helper and isinstance(node.func, ast.Name)
+                else _resolve_call_names(node, tainted_vars, blocked_dangerous_calls)
+            )
+            if isinstance(node.func, ast.Name):
+                bare_name = node.func.id
+                # Alias information cannot erase the original bare-name restriction.
+                if bare_name in blocked_dangerous_calls or bare_name in blocked_calls:
+                    func_names.add(bare_name)
+                if local_helper:
+                    func_names -= _BLOCKED_FS_CALLS - blocked_dangerous_calls
+            for func_name in sorted(func_names):
+                if _is_safe_imported_module_call(node, func_name, module_aliases, tainted_vars):
+                    continue
+                if func_name in blocked_calls or func_name in blocked_dangerous_calls:
+                    return False, agent_guidance.redirect(
+                        f"Call to '{func_name}' is not allowed — filesystem exploration/manipulation "
+                        f"and dangerous metaprogramming functions are blocked in the code execution environment.",
+                        intents=[
+                            agent_guidance.DISCOVER_DATA,
+                            agent_guidance.LOAD_ASSET,
+                            agent_guidance.SAVE_OUTPUT,
+                        ],
+                    )
 
         # --- 3. Absolute-path restriction ---
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -390,21 +462,191 @@ def validate_code(server: "CodeExecutionServer", code: str) -> tuple[bool, Optio
     return True, None
 
 
-def _resolve_call_name(node: ast.Call) -> Optional[str]:
-    """
-    Extract the leaf function name from a Call node.
-
-        Returns the rightmost name in a dotted call chain, e.g.
-        ``os.path.join(...)`` → ``"join"``, ``listdir(...)`` → ``"listdir"``.
-        Returns ``None`` for calls that cannot be statically resolved
-        (e.g. computed attribute access, subscript calls).
-    """
+def _resolve_call_names(
+    node: ast.Call, tainted_vars: dict[str, set[str]], blocked_dangerous_calls: set[str]
+) -> set[str]:
+    """Resolve callable names without applying another family's filesystem blocks."""
     func = node.func
     if isinstance(func, ast.Name):
-        return func.id
+        sources = tainted_vars.get(func.id)
+        if sources:
+            names = set()
+            for source in sources:
+                family = source.split(".")[0]
+                name = source.rsplit(".", 1)[-1]
+                if (
+                    name not in _BLOCKED_FS_CALLS
+                    or name in blocked_dangerous_calls
+                    or name in _BLOCKED_FS_CALLS_BY_FAMILY.get(family, set())
+                ):
+                    names.add(name)
+            return names
+        return {func.id}
     if isinstance(func, ast.Attribute):
-        return func.attr
-    return None
+        return {func.attr}
+    return set()
+
+
+def _local_helper_call_ids(tree: ast.Module) -> set[int]:
+    """Prove only stable, preceding local definitions; unresolved bindings stay blocked."""
+    nodes = list(ast.walk(tree))
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    suites: dict[ast.AST, tuple[ast.AST, str]] = {
+        statement: (node, field)
+        for node in nodes
+        for field, value in ast.iter_fields(node)
+        if isinstance(value, list)
+        for statement in value
+        if isinstance(statement, ast.stmt)
+    }
+    functions = (ast.FunctionDef, ast.AsyncFunctionDef)
+    comprehensions = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+    scopes = (ast.Module, *functions, ast.Lambda, ast.ClassDef, *comprehensions)
+    call_names = {node.func.id for node in nodes if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+
+    def enclosing_scope(node: ast.AST) -> ast.AST:
+        child = node
+        parent = parents.get(child)
+        skipped_comprehension = None
+        walrus_target = isinstance(node, ast.Name) and isinstance(parent, ast.NamedExpr)
+        while parent is not None:
+            if isinstance(parent, ast.comprehension) and child is parent.iter:
+                container = parents[parent]
+                if isinstance(container, comprehensions) and parent is container.generators[0]:
+                    skipped_comprehension = container
+            if isinstance(parent, scopes):
+                if isinstance(parent, (*functions, ast.ClassDef)) and suites.get(child) != (parent, "body"):
+                    pass
+                elif isinstance(parent, ast.Lambda) and child is not parent.body:
+                    pass
+                elif isinstance(parent, comprehensions) and (parent is skipped_comprehension or walrus_target):
+                    pass
+                else:
+                    return parent
+            child, parent = parent, parents.get(parent)
+        return tree
+
+    def local_lambdas(value: ast.expr) -> set[ast.Lambda] | None:
+        if isinstance(value, ast.Lambda):
+            return {value}
+        if isinstance(value, ast.IfExp):
+            values = [value.body, value.orelse]
+        elif isinstance(value, ast.BoolOp):
+            values = value.values
+        else:
+            return None
+        helpers: set[ast.Lambda] = set()
+        for item in values:
+            group = local_lambdas(item)
+            if group is None:
+                return None
+            helpers.update(group)
+        return helpers
+
+    bindings: dict[ast.AST, dict[str, list[ast.stmt | None]]] = {}
+    safe_targets: dict[ast.Name, ast.stmt] = {}
+    recursive_lambdas: dict[tuple[ast.stmt, str], set[ast.Lambda]] = {}
+    forbidden: set[str] = set()
+
+    def bind(scope: ast.AST, name: str, definition: ast.stmt | None = None) -> None:
+        if name in call_names:
+            bindings.setdefault(scope, {}).setdefault(name, []).append(definition)
+
+    for node in nodes:
+        scope = enclosing_scope(node)
+        if isinstance(node, functions):
+            definition = node if not node.decorator_list else None
+            bind(scope, node.name, definition)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            if node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    groups_by_name: dict[str, list[set[ast.Lambda] | None]] = {}
+                    for name, value in _assignment_bindings(target, node.value):
+                        if name in call_names:
+                            groups_by_name.setdefault(name, []).append(local_lambdas(value))
+                    helper_names = set()
+                    for name, groups in groups_by_name.items():
+                        if all(group is not None for group in groups):
+                            helper_names.add(name)
+                            recursive_lambdas.setdefault((node, name), set()).update(
+                                helper for group in groups if group is not None for helper in group
+                            )
+                    for name in _assignment_target_names(target):
+                        if name.id in helper_names:
+                            safe_targets[name] = node
+        elif isinstance(node, ast.ClassDef):
+            bind(scope, node.name)
+        elif isinstance(node, ast.arg):
+            bind(parents[parents[node]], node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    module = node.module if isinstance(node, ast.ImportFrom) else ""
+                    names = _FS_WILDCARD_BINDINGS.get(module or "", call_names)
+                    for name in names:
+                        bind(scope, name)
+                else:
+                    bind(scope, alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            forbidden.update(node.names)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            bind(scope, node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bind(scope, node.rest)
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bind(enclosing_scope(node), node.id, safe_targets.get(node))
+
+    helper_definitions: dict[tuple[ast.AST, str], set[ast.stmt]] = {}
+    earliest: dict[tuple[ast.AST, str], dict[tuple[ast.AST, str], tuple[int, int]]] = {}
+    for scope, names in bindings.items():
+        for name, definitions in names.items():
+            if any(definition is None for definition in definitions):
+                continue
+            key = (scope, name)
+            statements = {definition for definition in definitions if definition is not None}
+            helper_definitions[key] = statements
+            positions = earliest[key] = {}
+            for definition in statements:
+                suite = suites[definition]
+                position = (definition.lineno, definition.col_offset)
+                positions[suite] = min(positions.get(suite, position), position)
+
+    allowed: set[int] = set()
+    for node in nodes:
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            continue
+        name = node.func.id
+        if name in forbidden:
+            continue
+        scope = enclosing_scope(node)
+        seen: set[ast.AST] = set()
+        while True:
+            seen.add(scope)
+            definitions = bindings.get(scope, {}).get(name)
+            if definitions is not None:
+                key = (scope, name)
+                if key in helper_definitions:
+                    anchor = node
+                    while anchor in parents:
+                        if isinstance(anchor, ast.stmt):
+                            position = earliest[key].get(suites[anchor])
+                            preceding = position is not None and position < (anchor.lineno, anchor.col_offset)
+                            recursive = anchor in helper_definitions[key] and (
+                                anchor in seen or bool(recursive_lambdas.get((anchor, name), set()) & seen)
+                            )
+                            if preceding or recursive:
+                                allowed.add(id(node))
+                                break
+                        anchor = parents[anchor]
+                break
+            if scope is tree:
+                break
+            scope = enclosing_scope(scope)
+            while isinstance(scope, ast.ClassDef):
+                scope = enclosing_scope(scope)
+    return allowed
 
 
 def _contains_parent_traversal(path_literal: str) -> bool:
@@ -422,8 +664,8 @@ def _contains_parent_traversal(path_literal: str) -> bool:
 def _is_safe_imported_module_call(
     node: ast.Call,
     func_name: Optional[str],
-    module_aliases: dict[str, str],
-    tainted_vars: dict[str, str],
+    module_aliases: dict[str, set[str]],
+    tainted_vars: dict[str, set[str]],
 ) -> bool:
     """Return True when an attribute call is safe (receiver does not trace back to a dangerous module).
 
@@ -440,100 +682,192 @@ def _is_safe_imported_module_call(
     base_name = node.func.value.id
 
     # Check taint: did this variable trace back to a dangerous library?
-    taint_family = tainted_vars.get(base_name)
-    if taint_family is not None:
-        if taint_family == "os" and func_name in _OS_BLOCKED_FS_CALLS:
+    taint_sources = tainted_vars.get(base_name)
+    if taint_sources:
+        taint_families = {source.split(".")[0] for source in taint_sources}
+        if "os" in taint_families and func_name in _OS_BLOCKED_FS_CALLS:
             return False
-        if taint_family == "glob" and func_name in _GLOB_BLOCKED_FS_CALLS:
+        if "glob" in taint_families and func_name in _GLOB_BLOCKED_FS_CALLS:
             return False
-        if taint_family == "pathlib" and func_name in _PATHLIB_BLOCKED_FS_CALLS:
+        if "pathlib" in taint_families and func_name in _PATHLIB_BLOCKED_FS_CALLS:
             return False
         return True
 
     # Check import aliases
-    canonical_module = module_aliases.get(base_name)
-    if not canonical_module:
+    canonical_modules = module_aliases.get(base_name)
+    if not canonical_modules:
         # Even without an explicit import, recognise well-known dangerous
         # module names (the import may have happened in a previous cell).
-        if base_name in ("os", "glob", "pathlib"):
-            canonical_module = base_name
+        if base_name in _FS_MODULE_FAMILIES:
+            canonical_modules = {_FS_MODULE_FAMILIES[base_name]}
         else:
             return True
 
     # Only block if the import traces to a dangerous stdlib family.
+    module_families = {canonical.split(".")[0] for canonical in canonical_modules}
     if func_name in _OS_BLOCKED_FS_CALLS:
-        return not canonical_module.startswith("os")
+        return "os" not in module_families
     if func_name in _GLOB_BLOCKED_FS_CALLS:
-        return not canonical_module.startswith("glob")
+        return "glob" not in module_families
     if func_name in _PATHLIB_BLOCKED_FS_CALLS:
-        return not canonical_module.startswith("pathlib")
+        return "pathlib" not in module_families
     return False
 
 
-def _build_taint_set(tree: ast.AST, module_aliases: dict[str, str]) -> dict[str, str]:
-    """Trace variables back to their original library.
-
-    Returns a dict mapping variable names to their "family" (e.g. "os",
-    "pathlib").  A variable is tainted when assigned from:
-      - A dangerous constructor:  ``p = Path(...)``  → "pathlib"
-      - Another tainted variable: ``q = p``           → inherits p's family
-      - A tainted attribute:      ``pp = os.path``    → "os"
-    """
+def _build_taint_set(tree: ast.AST, module_aliases: dict[str, set[str]]) -> dict[str, set[str]]:
+    """Retain all filesystem module/member sources across imports and local bindings."""
     _DANGEROUS_FAMILIES = {"os", "glob", "pathlib"}
-    tainted: dict[str, str] = {}
+    tainted = {
+        local_name: {canonical for canonical in sources if canonical.split(".")[0] in _DANGEROUS_FAMILIES}
+        for local_name, sources in module_aliases.items()
+    }
+    # Only exclusively non-system imports suppress implicit module assumptions.
+    for name, family in _FS_MODULE_FAMILIES.items():
+        if name not in module_aliases or tainted.get(name):
+            tainted.setdefault(name, set()).add(family)
+    bindings: list[tuple[str, ast.expr]] = []
+    # Loop elements and parameter defaults may be string data rather than modules.
+    value_bindings: list[tuple[str, ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bindings.extend(_assignment_bindings(target, node.value))
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            bindings.extend(_assignment_bindings(node.target, node.value))
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            values = node.iter.elts if isinstance(node.iter, (ast.Tuple, ast.List, ast.Set)) else [node.iter]
+            for value in values:
+                value_bindings.extend(_assignment_bindings(node.target, value))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            positional = args.posonlyargs + args.args
+            value_bindings.extend(
+                (arg.arg, default)
+                for arg, default in zip(positional[len(positional) - len(args.defaults) :], args.defaults)
+            )
+            value_bindings.extend(
+                (arg.arg, default) for arg, default in zip(args.kwonlyargs, args.kw_defaults) if default is not None
+            )
 
-    # Seed from imports
-    for local_name, canonical in module_aliases.items():
-        root = canonical.split(".")[0]
-        if root in _DANGEROUS_FAMILIES:
-            tainted[local_name] = root
+    work_bindings = [
+        (name, part, data_value)
+        for group, data_value in ((bindings, False), (value_bindings, True))
+        for name, value in group
+        for part in _rhs_source_parts(value)
+    ]
+    dependents: dict[str, list[int]] = {}
+    for index, (_, value, _) in enumerate(work_bindings):
+        names = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
+        for name in names:
+            dependents.setdefault(name, []).append(index)
 
-    # Propagate through assignments (fixed-point, max 3 passes)
-    for _ in range(3):
-        changed = False
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign):
-                continue
-            if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-                continue
-            target = node.targets[0].id
-            family = _resolve_rhs_family(node.value, tainted)
-            if family and tainted.get(target) != family:
-                tainted[target] = family
-                changed = True
-        if not changed:
-            break
-
+    pending = deque(range(len(work_bindings)))
+    queued = set(pending)
+    # Sources only accumulate; revisit only bindings whose inputs gained sources.
+    while pending:
+        index = pending.popleft()
+        queued.remove(index)
+        name, value, data_value = work_bindings[index]
+        sources = _resolve_rhs_sources(value, tainted)
+        if data_value:
+            sources = sources - _FS_DATA_SOURCES
+        previous = tainted.setdefault(name, set())
+        if not sources - previous:
+            continue
+        previous.update(sources)
+        for dependent in dependents.get(name, []):
+            if dependent not in queued:
+                pending.append(dependent)
+                queued.add(dependent)
     return tainted
 
 
-def _resolve_rhs_family(node: ast.AST, tainted: dict[str, str]) -> Optional[str]:
-    """Determine which dangerous library family an assignment RHS traces back to."""
-    # ``p = Path(...)`` or ``p = pathlib.Path(...)``
-    if isinstance(node, ast.Call):
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in _DANGEROUS_CONSTRUCTORS:
-            return _DANGEROUS_CONSTRUCTORS[func.id]
-        if isinstance(func, ast.Attribute) and func.attr in _DANGEROUS_CONSTRUCTORS:
-            root = func.value
-            while isinstance(root, ast.Attribute):
-                root = root.value
-            if isinstance(root, ast.Name) and root.id in tainted:
-                return tainted[root.id]
-
-    # ``q = p``
-    if isinstance(node, ast.Name) and node.id in tainted:
-        return tainted[node.id]
-
-    # ``pp = os.path``
+def _rhs_source_parts(node: ast.expr) -> list[ast.expr]:
+    """Distribute source unions through member/constructor lookups into small work items."""
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return [part for item in node.elts for part in _rhs_source_parts(item)]
+    if isinstance(node, ast.BoolOp):
+        return [part for value in node.values for part in _rhs_source_parts(value)]
+    if isinstance(node, ast.IfExp):
+        return _rhs_source_parts(node.body) + _rhs_source_parts(node.orelse)
+    if isinstance(node, (ast.NamedExpr, ast.Starred)):
+        return _rhs_source_parts(node.value)
     if isinstance(node, ast.Attribute):
-        root = node.value
-        while isinstance(root, ast.Attribute):
-            root = root.value
-        if isinstance(root, ast.Name) and root.id in tainted:
-            return tainted[root.id]
+        return [ast.Attribute(value=part, attr=node.attr, ctx=node.ctx) for part in _rhs_source_parts(node.value)]
+    if isinstance(node, ast.Call):
+        return [ast.Call(func=part, args=[], keywords=[]) for part in _rhs_source_parts(node.func)]
+    return [node]
 
-    return None
+
+def _assignment_bindings(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
+    """Pair literal unpacking elements before conservatively merging unknown shapes."""
+    if isinstance(target, ast.Name):
+        return [(target.id, value)]
+    if isinstance(target, ast.Starred):
+        return _assignment_bindings(target.value, value)
+    if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)):
+        if not any(isinstance(item, ast.Starred) for item in value.elts):
+            values = list(value.elts)
+            starred = [index for index, item in enumerate(target.elts) if isinstance(item, ast.Starred)]
+            if len(starred) == 1 and len(values) >= len(target.elts) - 1:
+                start = starred[0]
+                end = len(values) - (len(target.elts) - start - 1)
+                values[start:end] = [ast.List(elts=values[start:end], ctx=ast.Load())]
+            if len(target.elts) == len(values):
+                return [
+                    binding
+                    for item, source in zip(target.elts, values)
+                    for binding in _assignment_bindings(item, source)
+                ]
+    return [(name.id, value) for name in _assignment_target_names(target)]
+
+
+def _assignment_target_names(target: ast.expr) -> list[ast.Name]:
+    """Return only names bound by the target, never names used to evaluate a receiver or key."""
+    if isinstance(target, ast.Name):
+        return [target]
+    if isinstance(target, ast.Starred):
+        return _assignment_target_names(target.value)
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for item in target.elts for name in _assignment_target_names(item)]
+    return []
+
+
+def _canonical_fs_source(source: str) -> str:
+    """Normalize native modules and known re-exports to filesystem policy families."""
+    source = _STDLIB_MODULE_REEXPORTS.get(source, source)
+    module, separator, member = source.partition(".")
+    return _FS_MODULE_FAMILIES.get(module, module) + separator + member
+
+
+def _resolve_rhs_sources(node: ast.AST, tainted: dict[str, set[str]]) -> set[str]:
+    """Resolve filesystem sources as a family and optional member, without growing paths."""
+    if isinstance(node, ast.Name):
+        if node.id in _DANGEROUS_CONSTRUCTORS:
+            # Cell-wide bindings cannot prove that a known constructor was shadowed.
+            return tainted.get(node.id, set()) | {f"{_DANGEROUS_CONSTRUCTORS[node.id]}.{node.id}"}
+        if node.id in tainted:
+            return tainted[node.id]
+        if node.id in _FS_MODULE_FAMILIES:
+            return {_FS_MODULE_FAMILIES[node.id]}
+    if isinstance(node, ast.Attribute):
+        sources = {f"{source.split('.')[0]}.{node.attr}" for source in _resolve_rhs_sources(node.value, tainted)}
+        return {_canonical_fs_source(source) for source in sources}
+    if isinstance(node, (ast.NamedExpr, ast.Starred)):
+        return _resolve_rhs_sources(node.value, tainted)
+    if isinstance(node, ast.Call):
+        return {
+            source
+            for source in _resolve_rhs_sources(node.func, tainted)
+            if _DANGEROUS_CONSTRUCTORS.get(source.rsplit(".", 1)[-1]) == source.split(".")[0]
+        }
+    if isinstance(node, ast.IfExp):
+        return _resolve_rhs_sources(node.body, tainted) | _resolve_rhs_sources(node.orelse, tainted)
+    if isinstance(node, ast.BoolOp):
+        return {source for value in node.values for source in _resolve_rhs_sources(value, tainted)}
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return {source for item in node.elts for source in _resolve_rhs_sources(item, tainted)}
+    return set()
 
 
 def _resolve_static_string(node: ast.AST) -> Optional[str]:
@@ -574,7 +908,7 @@ def _resolve_static_string(node: ast.AST) -> Optional[str]:
     return None
 
 
-def _extract_dynamic_path_candidates(node: ast.AST, module_aliases: dict[str, str]) -> list[str]:
+def _extract_dynamic_path_candidates(node: ast.AST, module_aliases: dict[str, set[str]]) -> list[str]:
     """Extract path-like string candidates from dynamic expressions."""
     candidates: list[str] = []
 
@@ -587,8 +921,8 @@ def _extract_dynamic_path_candidates(node: ast.AST, module_aliases: dict[str, st
         if isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "path":
             base_obj = node.func.value.value
             if isinstance(base_obj, ast.Name):
-                canonical = module_aliases.get(base_obj.id, base_obj.id)
-                if canonical == "os":
+                canonical = module_aliases.get(base_obj.id, {base_obj.id})
+                if "os" in canonical:
                     part_values = [_resolve_static_string(arg) for arg in node.args]
                     if part_values and part_values[0] is not None:
                         joined = part_values[0]
