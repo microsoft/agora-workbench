@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -8,6 +9,12 @@ import pytest_asyncio
 from .. import CodeExecutionServer, ServerConfig
 from ..auth import create_noop_auth_config
 from ..code_execution_models import CodeExecutionResult
+from ..sessions import (
+    set_current_request_token,
+    set_current_session,
+    set_current_token_claims,
+    set_current_user_identity,
+)
 
 
 @pytest_asyncio.fixture(loop_scope="function")
@@ -43,7 +50,11 @@ async def parallel_server(tmp_path, monkeypatch):
 def create_parent(server, session_id=None):
     manager = server.session_manager
     sid = manager.create_session(
-        data={}, user_identity="test-user", user_token="test-token", token_claims={}, session_id=session_id
+        data={},
+        user_identity="test-user@test-tenant",
+        user_token="test-token",
+        token_claims={"oid": "test-user", "tid": "test-tenant"},
+        session_id=session_id,
     )
     return manager.get_session(sid)
 
@@ -56,6 +67,88 @@ async def start_batch(server, parent):
         timeout=30,
         result_variable="result",
     )
+
+
+@pytest.mark.parametrize("session_source", ["explicit", "transport", "context"])
+@pytest.mark.parametrize("batch_status", ["running", "completed"])
+@pytest.mark.parametrize("execution_mode", ["sync", "async_only", "adaptive"])
+async def test_batch_children_reject_additional_execution(
+    parallel_server, monkeypatch, session_source, batch_status, execution_mode
+):
+    server, started = parallel_server
+    parent = create_parent(server)
+    if batch_status == "completed":
+        monkeypatch.setattr(
+            server, "_execute_code_with_tracing", AsyncMock(return_value=CodeExecutionResult(success=True))
+        )
+        monkeypatch.setattr(server, "_capture_result_variable", AsyncMock(return_value=1))
+    batch = await start_batch(server, parent)
+    tasks = [server._parallel_jobs[job["job_id"]]["task"] for job in batch["jobs"]]
+    if batch_status == "completed":
+        await asyncio.gather(*tasks)
+    else:
+        await started.wait()
+    child = server.session_manager.get_session(batch["jobs"][0]["session_id"])
+    execution_methods = [
+        "_inject_tool_proxies",
+        "_execute_code_with_tracing",
+        "_execute_code_background",
+        "_execute_code_with_promotion",
+    ]
+    for method in execution_methods:
+        monkeypatch.setattr(server, method, AsyncMock())
+    server._execute_code_with_tracing.return_value = CodeExecutionResult(success=True)
+    server.server_config.execution_mode = execution_mode
+    execute = (await server.mcp.get_tool("execute_cleanup_code")).fn
+    set_current_user_identity(parent.user_identity)
+    set_current_request_token(parent.user_token)
+    set_current_token_claims(parent.token_claims)
+    if session_source == "context":
+        set_current_session(child)
+    try:
+        result = json.loads(
+            await execute(
+                ctx=SimpleNamespace(session_id=child.session_id if session_source == "transport" else None),
+                code="print('must not run')",
+                execution_session_id=child.session_id if session_source == "explicit" else None,
+            )
+        )
+    finally:
+        set_current_session(None)
+        set_current_user_identity(None)
+        set_current_request_token(None)
+        set_current_token_claims(None)
+
+    assert result["success"] is False
+    assert "reserved" in result["error"]
+    assert batch["batch_id"] in result["error"]
+    assert parent.session_id in result["error"]
+    assert "cleanup_check_batch" in result["error"]
+    for method in execution_methods:
+        getattr(server, method).assert_not_awaited()
+    assert server.session_manager.get_session(child.session_id) is child
+    status = await server._check_batch_payload(batch["batch_id"])
+    assert status["status"] == batch_status
+    if batch_status == "completed":
+        assert [job["result"] for job in status["jobs"]] == [1, 1]
+        assert server.session_manager.storage.count() == 1
+    else:
+        assert all(not task.done() for task in tasks)
+
+
+async def test_batch_child_cannot_own_another_batch(parallel_server):
+    server, started = parallel_server
+    parent = create_parent(server)
+    batch = await start_batch(server, parent)
+    await started.wait()
+    child = server.session_manager.get_session(batch["jobs"][0]["session_id"])
+    sessions_before = server.session_manager.storage.count()
+
+    with pytest.raises(ValueError, match="reserved"):
+        await start_batch(server, child)
+
+    assert server.session_manager.storage.count() == sessions_before
+    assert list(server._parallel_batches) == [batch["batch_id"]]
 
 
 @pytest.mark.parametrize("close_path", ["async", "sync", "thread", "foreign_loop", "tool"])

@@ -61,6 +61,7 @@ async def test_execute_tool_has_no_duplicate_structured_content():
 
     session = SimpleNamespace(
         session_id="test-session",
+        metadata={},
         extensions={},
         data_manager=MagicMock(),
     )
@@ -109,6 +110,7 @@ async def test_execute_tool_returns_bounded_failed_internal_tool_calls():
     tool_name = server.get_tool_name()
     session = SimpleNamespace(
         session_id="test-session",
+        metadata={},
         extensions={},
         data_manager=MagicMock(),
     )
@@ -195,6 +197,7 @@ async def test_execute_tool_bounds_and_deduplicates_failed_internal_tool_calls()
     tool_name = server.get_tool_name()
     session = SimpleNamespace(
         session_id="test-session",
+        metadata={},
         extensions={},
         data_manager=MagicMock(),
     )
@@ -255,6 +258,7 @@ async def test_execute_tool_does_not_deduplicate_distinct_private_errors():
     tool_name = server.get_tool_name()
     session = SimpleNamespace(
         session_id="test-session",
+        metadata={},
         extensions={},
         data_manager=MagicMock(),
     )

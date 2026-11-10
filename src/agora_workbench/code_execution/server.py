@@ -1171,6 +1171,17 @@ class CodeExecutionServer(BaseMCPServer):
     # Code Execution
     # ========================================================================
 
+    def _validate_execution_session(self, session: "Session") -> None:
+        """Keep temporary batch workers out of independent execution paths."""
+        if session.metadata.get("type") == "parallel_child":
+            raise ValueError(
+                f"Session {session.session_id} is reserved for parallel batch {session.metadata['batch_id']} "
+                "and cannot accept additional execution or nested batches. "
+                f"Use parent session {session.metadata['parent_session_id']} or a new session for follow-up work. "
+                f"Retrieve batch results with {self.server_config.name}_check_batch; "
+                "child sessions are closed when the terminal batch status is retrieved or the batch is cancelled."
+            )
+
     async def get_python_executable(self) -> str:
         """
         Return the path to the Python interpreter for this environment.
@@ -2671,6 +2682,7 @@ else:
         result_variable: str,
     ) -> dict[str, Any]:
         """Start a parallel batch for a parent session."""
+        self._validate_execution_session(parent_session)
         if timeout <= 0:
             raise ValueError("Timeout must be greater than 0 seconds.")
         timeout = min(timeout, self.max_timeout)
@@ -2942,13 +2954,25 @@ else:
                 "to capture each job's result; a missing variable yields null, and an empty result_variable "
                 "disables capture. "
                 "A dedicated child session/kernel is created per input and run in background. "
+                "Child sessions are temporary batch workers and cannot accept additional execution or nested batches. "
+                "They are closed when a terminal batch status is retrieved, the batch is cancelled, "
+                "or the parent session is closed. "
+                "Set result_variable to return each child's value in jobs[].result "
+                "(JSON when serializable, otherwise a repr string); results are not injected into the parent kernel. "
+                "Files in child AGORA_OUTPUT_DIR directories are deleted during cleanup; "
+                "persist needed files to durable storage within the batch code and return their references. "
                 f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
                 f"and are not accepted by {self.server_config.name}_check_job."
             ),
         )(parallel_execute)
-        self.mcp.tool(name=check_name, description="Check aggregate status and available results for a parallel batch")(
-            check_batch
-        )
+        self.mcp.tool(
+            name=check_name,
+            description=(
+                "Check aggregate status and available results for a parallel batch. "
+                "Retrieving a terminal status closes all temporary child sessions, deletes their output files, "
+                "and retires the batch; save the returned results, as later polls cannot retrieve them again."
+            ),
+        )(check_batch)
         self.mcp.tool(
             name=cancel_name,
             description="Cancel all running jobs in a parallel batch and clean up child sessions",
