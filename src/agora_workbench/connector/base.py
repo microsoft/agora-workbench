@@ -374,10 +374,36 @@ class ConnectorServer(BaseMCPServer):
 
         async def parallel_execute_proxy(
             ctx: Context,
-            code: str,
-            inputs: list[dict[str, Any]],
+            code: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Python template run once per input, e.g. 'result = value * 2' for inputs=[{'value': 2}]."
+                    )
+                ),
+            ],
+            inputs: Annotated[
+                list[dict[str, Any]],
+                Field(
+                    description=(
+                        "Non-empty list of dictionaries. Each dictionary's keys become top-level variables "
+                        "before code runs; keys must be valid Python identifiers, not keywords. "
+                        "Read them directly (e.g. value), not through an inputs or input mapping; "
+                        "no such mapping is created automatically."
+                    )
+                ),
+            ],
             timeout: int = 3600,
-            result_variable: str = "result",
+            result_variable: Annotated[
+                str,
+                Field(
+                    description=(
+                        "Name of the top-level variable code must assign to capture each job's result "
+                        "(default: result). Must be a valid Python identifier, not a keyword. "
+                        "If the variable is missing, the job's result is null. An empty string disables capture."
+                    )
+                ),
+            ] = "result",
         ) -> str:
             """Execute the same code template across multiple inputs in parallel (proxied)."""
             return await server._proxy_mcp_tool_call(
@@ -415,6 +441,11 @@ class ConnectorServer(BaseMCPServer):
             description=(
                 f"Execute the same code template across multiple input dictionaries in parallel on "
                 f"{upstream_name}. A dedicated child session/kernel is created per input. "
+                "Each dictionary's keys become top-level variables; use bare names, not inputs['key']. "
+                "Keys must be valid Python identifiers, not keywords; no inputs or input mapping is created "
+                "automatically. Code must assign the top-level variable named by result_variable (default: result) "
+                "to capture each job's result; a missing variable yields null, and an empty result_variable "
+                "disables capture. "
                 f"Poll the returned batch_id with {check_name}; jobs[].job_id values are batch members "
                 f"and are not accepted by {upstream_name}_check_job."
             ),

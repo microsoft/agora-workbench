@@ -12,6 +12,12 @@ changes that require action from existing users. Each entry there states who is 
 
 ### Fixed
 
+- Parallel execution tool descriptions, parameter schemas, and documentation
+  now explain that input keys become top-level variables, must be valid Python
+  identifiers rather than keywords, and do not create an automatic input
+  mapping. They also clarify result-variable assignment and capture behavior
+  for direct and connector-proxied tools
+  ([#426](https://github.com/microsoft/agora-workbench/pull/426)).
 - Code validation now allows unambiguous same-cell local functions and lambdas
   with filesystem-like names such as `walk`, `remove`, and `replace`.
   Unresolved bare filesystem calls remain blocked, and known filesystem

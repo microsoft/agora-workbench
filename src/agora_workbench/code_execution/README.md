@@ -201,6 +201,24 @@ Each server also registers map-style parallel tools:
 
 Runs one code template across a list of input dictionaries. A dedicated child session/kernel is created per input.
 
+Each input dictionary's keys are injected as top-level variables before the template runs. Keys must be valid
+Python identifiers and must not be reserved keywords. Refer to them directly by name; no `inputs` or `input`
+mapping is created automatically.
+
+The template must assign the top-level variable named by `result_variable` (default: `result`) for its value to
+be captured in each job's `result` field. A missing variable produces `null`; setting `result_variable=""`
+disables result capture.
+
+For example, these arguments capture `4` and `6` for the two inputs:
+
+```json
+{
+  "code": "result = value * 2",
+  "inputs": [{"value": 2}, {"value": 3}],
+  "result_variable": "result"
+}
+```
+
 Returns:
 
 ```json
