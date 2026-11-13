@@ -1,0 +1,8 @@
+.md-copyright {
+  color: var(--md-footer-fg-color--light);
+}
+
+.md-typeset a:not(.md-button):not(.headerlink) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
